@@ -7,6 +7,7 @@
 //!      layers, precedence rules and cycle-guarded structural collection while
 //!      `TirView` remains the production read authority.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::{HashSet, hash_map::Entry};
 
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
@@ -25,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::view::{TirView, TirViewIdenti
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateViewContext,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Collects committed structural expression IDs reachable from a template.
@@ -42,7 +43,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) fn collect_tir_expression_overlay_payloads<'store>(
     store: &'store TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<Vec<(ExpressionSiteId, ExprId)>, CompilerError> {
+) -> Result<Vec<(ExpressionSiteId, ExprId)>, InfrastructureFailure> {
     let mut collector = ExpressionOverlayPayloadCollector::<'store>::new(None, None);
     collector.collect_template(store, template_id)?;
     Ok(collector.into_payloads())
@@ -55,7 +56,7 @@ pub(crate) fn collect_tir_expression_overlay_payloads<'store>(
 pub(crate) fn collect_effective_tir_expression_overlay_payloads<'store>(
     root_view: &TirView<'store>,
     expressions: &'store AstExpressionBuilder,
-) -> Result<Vec<(ExpressionSiteId, ExprId)>, CompilerError> {
+) -> Result<Vec<(ExpressionSiteId, ExprId)>, InfrastructureFailure> {
     let mut collector =
         ExpressionOverlayPayloadCollector::new(Some(root_view.clone()), Some(expressions));
     collector.collect_template(root_view.store(), root_view.root_ref())?;
@@ -68,14 +69,17 @@ pub(crate) fn replace_expression_overlay_entries(
     store: &mut TemplateIrStore,
     base: TemplateViewContext,
     replacements: impl IntoIterator<Item = (ExpressionSiteId, ExprId)>,
-) -> Result<TemplateViewContext, CompilerError> {
+) -> Result<TemplateViewContext, InfrastructureFailure> {
     let mut replacement_entries = Vec::new();
     let mut replacement_site_ids = FxHashSet::default();
     for (site_id, expression) in replacements {
         if !replacement_site_ids.insert(site_id) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR expression overlay replacement received duplicate expression site {site_id}"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR expression overlay replacement received duplicate expression site {site_id}"
+                ),
+            ));
         }
         replacement_entries.push((site_id, expression));
     }
@@ -84,7 +88,7 @@ pub(crate) fn replace_expression_overlay_entries(
         store
             .expression_overlay(overlay_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "TIR expression overlay replacement referenced missing expression overlay {overlay_id}"
                 ))
             })?
@@ -125,15 +129,18 @@ impl ExpressionOverlayAuthority {
         &mut self,
         store: &TemplateIrStore,
         context: TemplateViewContext,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         let Some(overlay_id) = context.expression_overlay else {
             return Ok(false);
         };
 
         if store.expression_overlay(overlay_id).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR expression overlay collection referenced missing expression overlay {overlay_id}"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR expression overlay collection referenced missing expression overlay {overlay_id}"
+                ),
+            ));
         }
 
         self.layers.push(overlay_id);
@@ -148,10 +155,10 @@ impl ExpressionOverlayAuthority {
         &self,
         store: &TemplateIrStore,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<(ExprId, usize)>, CompilerError> {
+    ) -> Result<Option<(ExprId, usize)>, InfrastructureFailure> {
         for (layer_index, overlay_id) in self.layers.iter().copied().enumerate() {
             let overlay = store.expression_overlay(overlay_id).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "TIR expression overlay collection referenced missing expression overlay {overlay_id}"
                 ))
             })?;
@@ -220,7 +227,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         store: &'store TemplateIrStore,
         site_id: ExpressionSiteId,
         structural_expression: ExprId,
-    ) -> Result<(ExprId, Option<usize>), CompilerError> {
+    ) -> Result<(ExprId, Option<usize>), InfrastructureFailure> {
         if let Some(view) = &self.effective_view
             && let Some(expressions) = self.expressions
             && let Some(expression) = view.effective_expression_for_site(expressions, site_id)?
@@ -266,7 +273,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         &mut self,
         store: &'store TemplateIrStore,
         template_id: TemplateIrId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let traversal_key = ExpressionOverlayTemplateTraversalKey {
             template_id,
             view: self.current_view_identity(),
@@ -276,7 +283,8 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         }
 
         if !self.active_templates.insert(traversal_key) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression overlay collection found a recursive child-template reference.",
             ));
         }
@@ -285,7 +293,8 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             .get_template(template_id)
             .map(|template| (template.root, template.runtime_slot_plan))
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR expression overlay collection referenced a missing child template.",
                 )
             })?;
@@ -308,14 +317,15 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         store: &'store TemplateIrStore,
         wrapper_root: TemplateIrNodeId,
         slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let traversal_key = (slot_plan_id, self.current_view_identity());
         if self.effective_view.is_none() && self.completed_slot_plans.contains(&traversal_key) {
             return self.collect_node(store, wrapper_root);
         }
 
         if !self.active_slot_plans.insert(traversal_key) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression overlay collection found a recursive runtime slot plan.",
             ));
         }
@@ -342,14 +352,15 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         &mut self,
         store: &'store TemplateIrStore,
         node_id: TemplateIrNodeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let traversal_key = (node_id, self.current_view_identity());
         if self.effective_view.is_none() && self.completed_nodes.contains(&traversal_key) {
             return Ok(());
         }
 
         if !self.active_nodes.insert(traversal_key) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression overlay collection found a recursive node reference.",
             ));
         }
@@ -368,9 +379,10 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         &mut self,
         store: &'store TemplateIrStore,
         node_id: TemplateIrNodeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let node = store.get_node(node_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression overlay collection referenced a missing node.",
             )
         })?;
@@ -452,7 +464,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         store: &'store TemplateIrStore,
         header: &TemplateLoopHeader,
         header_sites: &TemplateLoopHeaderExpressionSites,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match (header, header_sites) {
             (
                 TemplateLoopHeader::Conditional { condition },
@@ -482,7 +494,8 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                     }
                     (None, None) => {}
                     _ => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "TIR expression overlay collection found mismatched range loop step site.",
                         ));
                     }
@@ -499,7 +512,8 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             }
 
             _ => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR expression overlay collection found mismatched loop-header expression sites.",
                 ));
             }
@@ -512,7 +526,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         &mut self,
         store: &'store TemplateIrStore,
         reference: TemplateTirChildReference,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let added_layer = if self.effective_view.is_some() {
             self.authority.push_context(store, reference.context)?
         } else {
@@ -540,8 +554,10 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         &mut self,
         store: &'store TemplateIrStore,
         template_id: TemplateIrId,
-        transition: Option<impl FnOnce(&TirView<'store>) -> Result<TirView<'store>, CompilerError>>,
-    ) -> Result<(), CompilerError> {
+        transition: Option<
+            impl FnOnce(&TirView<'store>) -> Result<TirView<'store>, InfrastructureFailure>,
+        >,
+    ) -> Result<(), InfrastructureFailure> {
         let parent_view = self.effective_view.take();
         let child_view = match (parent_view.as_ref(), transition) {
             (Some(parent_view), Some(transition)) => match transition(parent_view) {

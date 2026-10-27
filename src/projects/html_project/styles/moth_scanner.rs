@@ -9,6 +9,7 @@ use super::{
     CodeHighlightRole, CodeLanguage, CodeScanner, language_profiles::NON_MOTH_OPERATOR_BYTES,
 };
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::IO_NAMESPACE_NAME;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -203,7 +204,10 @@ impl<'source> CodeScanner<'source> {
                 }
                 "and" if matches!(self.contract_state, ContractState::AfterName(_)) => {
                     let ContractState::AfterName(kind) = self.contract_state else {
-                        unreachable!("guarded by the match arm above");
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
+                            "\"and\" arm guard matched AfterName; contract_state unchanged since"
+                        );
                     };
                     self.contract_state = ContractState::ExpectName {
                         kind,

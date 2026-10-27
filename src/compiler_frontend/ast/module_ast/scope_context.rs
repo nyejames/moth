@@ -54,8 +54,10 @@ use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
@@ -73,8 +75,8 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::file_references::{
-    PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
-    ResolvedFileReferenceTarget, ResourceSourceId,
+    PreparedFileReferenceClass, ResolvedFileReferenceFailure, ResolvedFileReferenceOutcome,
+    ResolvedFileReferenceTable, ResolvedFileReferenceTarget, ResourceSourceId,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -176,7 +178,7 @@ pub(crate) enum FrozenResolvedFileReferenceOutcome {
 ///
 /// Ordinary and frozen generic backings both project into this vocabulary. Ordinary content rows
 /// expose an ephemeral logical path for declaration lookup, while frozen rows expose the captured
-/// value and no longer retain a donor declaration path.
+/// value and do not retain a donor declaration path.
 pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
     pub(crate) class: PreparedFileReferenceClass,
     pub(crate) outcome: Stage0ResolvedFileReferenceOutcome<'a>,
@@ -193,7 +195,7 @@ pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
         owner_relative_path: &'a PortableResourcePath,
     },
     IdentifiedSourceKind,
-    Diagnostic(&'a CompilerDiagnostic),
+    Diagnostic(ResolvedFileReferenceFailure),
 }
 
 impl Stage0ResolutionFacts {
@@ -212,17 +214,19 @@ impl Stage0ResolutionFacts {
     pub(crate) fn frozen_generic(
         owner: SourceId,
         references: Vec<FrozenResolvedFileReference>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut indexed = FxHashMap::with_capacity_and_hasher(references.len(), Default::default());
         for reference in references {
             if reference.path_syntax.is_none() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "frozen generic resolved-reference row has an absent PathSyntaxId marker",
                 ));
             }
             validate_frozen_reference(&reference)?;
             if indexed.insert(reference.path_syntax, reference).is_some() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "frozen generic resolved-reference table contains duplicate path handles",
                 ));
             }
@@ -239,7 +243,7 @@ impl Stage0ResolutionFacts {
         &self,
         source_file: SourceId,
         path_syntax: PathSyntaxId,
-    ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, CompilerError> {
+    ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, InfrastructureFailure> {
         match &self.backing {
             Stage0ResolutionFactsBacking::Ordinary {
                 resolved_file_references,
@@ -252,7 +256,8 @@ impl Stage0ResolutionFacts {
             }
             Stage0ResolutionFactsBacking::FrozenGeneric { owner, references } => {
                 if source_file != *owner {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "frozen generic Stage 0 lookup used a non-owning SourceId; donor and requester handles stay distinct",
                     ));
                 }
@@ -265,7 +270,7 @@ impl Stage0ResolutionFacts {
 fn ordinary_reference_view<'a>(
     reference: &'a crate::compiler_frontend::paths::file_references::ResolvedFileReference,
     source_files: &'a SourceDatabase,
-) -> Result<Stage0ResolvedFileReferenceView<'a>, CompilerError> {
+) -> Result<Stage0ResolvedFileReferenceView<'a>, InfrastructureFailure> {
     let outcome = match &reference.outcome {
         ResolvedFileReferenceOutcome::NoPhysicalTarget => {
             Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget
@@ -274,7 +279,8 @@ fn ordinary_reference_view<'a>(
             source,
         }) => {
             let source_identity = source_files.get(*source).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "content file reference target was absent from the source identity table",
                 )
             })?;
@@ -295,7 +301,7 @@ fn ordinary_reference_view<'a>(
             Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind
         }
         ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-            Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
+            Stage0ResolvedFileReferenceOutcome::Diagnostic(*diagnostic)
         }
     };
     Ok(Stage0ResolvedFileReferenceView {
@@ -333,7 +339,9 @@ fn frozen_reference_view(
     }
 }
 
-fn validate_frozen_reference(reference: &FrozenResolvedFileReference) -> Result<(), CompilerError> {
+fn validate_frozen_reference(
+    reference: &FrozenResolvedFileReference,
+) -> Result<(), InfrastructureFailure> {
     let valid = match reference.class {
         PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
             matches!(
@@ -357,7 +365,8 @@ fn validate_frozen_reference(reference: &FrozenResolvedFileReference) -> Result<
     if valid {
         Ok(())
     } else {
-        Err(CompilerError::compiler_error(
+        Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "frozen generic resolved-reference class does not match its outcome",
         ))
     }
@@ -417,7 +426,7 @@ pub struct ScopeShared {
     pub(crate) choice_variant_shells_by_path: Option<Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>>,
     pub(crate) resolved_module_constants_override: Option<Rc<ResolvedConstantSet>>,
     pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
-    pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
+    pub(crate) emitted_warnings: Rc<RefCell<Vec<DiagnosticDraft>>>,
 
     pub(crate) generic_function_instantiation_requests: Rc<RefCell<Vec<GenericRequestSlot>>>,
     /// Emission-owned proof that a completed no-slot body has no pending failure contributors.
@@ -732,13 +741,14 @@ impl ScopeContext {
         &self,
         ticket: GenericRequestTicket,
         request: GenericFunctionInstantiationRequest,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut slots = self
             .shared
             .generic_function_instantiation_requests
             .borrow_mut();
         let Some(slot) = slots.get_mut(ticket.index()) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "generic request ticket is outside the ordered request ledger",
             ));
         };
@@ -752,9 +762,12 @@ impl ScopeContext {
                 Ok(())
             }
             GenericRequestSlot::Dropped => Ok(()),
-            GenericRequestSlot::Concrete(_) | GenericRequestSlot::AssertionValidation(_) => Err(
-                CompilerError::compiler_error("generic request ticket was published twice"),
-            ),
+            GenericRequestSlot::Concrete(_) | GenericRequestSlot::AssertionValidation(_) => {
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "generic request ticket was published twice",
+                ))
+            }
         }
     }
 
@@ -767,13 +780,14 @@ impl ScopeContext {
     pub(crate) fn abandon_pending_generic_request(
         &self,
         ticket: GenericRequestTicket,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut slots = self
             .shared
             .generic_function_instantiation_requests
             .borrow_mut();
         let Some(slot) = slots.get_mut(ticket.index()) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "generic request ticket is outside the ordered request ledger",
             ));
         };
@@ -784,7 +798,8 @@ impl ScopeContext {
             }
             GenericRequestSlot::Dropped => Ok(()),
             GenericRequestSlot::Concrete(_) | GenericRequestSlot::AssertionValidation(_) => {
-                Err(CompilerError::compiler_error(
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "generic request ticket was abandoned after it was published",
                 ))
             }
@@ -925,7 +940,7 @@ impl ScopeContext {
         kind: ContextKind,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> ScopeContext {
+    ) -> Result<ScopeContext, DiagnosticDraft> {
         let child_frame_id = self
             .arena
             .borrow_mut()
@@ -942,7 +957,7 @@ impl ScopeContext {
         let scope_component = string_table.get_or_intern(format!("__scope_{scope_id}"));
         let scope = path_fork
             .try_intern_child(self.scope, scope_component)
-            .expect("path table exhausted while creating child scope");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
         let active_value_target = if matches!(kind, ContextKind::Branch | ContextKind::MatchArm) {
             self.active_value_target.clone()
         } else {
@@ -958,7 +973,7 @@ impl ScopeContext {
         };
         let match_arm_boundary = self.match_arm_boundary || matches!(&kind, ContextKind::MatchArm);
 
-        ScopeContext {
+        Ok(ScopeContext {
             kind,
             match_arm_boundary,
             defer_typed_error_validation: false,
@@ -984,7 +999,7 @@ impl ScopeContext {
             numeric_construction: Rc::clone(&self.numeric_construction),
             numeric_body_root: false,
             loop_depth,
-        }
+        })
     }
 
     pub fn new_child_expression(&self, expected_result_type_ids: Vec<TypeId>) -> ScopeContext {
@@ -1191,7 +1206,7 @@ impl ScopeContext {
     pub(crate) fn register_numeric_continuation(
         &self,
         continuation: NumericContinuation,
-    ) -> Result<NumericContinuationId, CompilerError> {
+    ) -> Result<NumericContinuationId, InfrastructureFailure> {
         self.numeric_construction
             .borrow_mut()
             .register_continuation(continuation)
@@ -1245,7 +1260,7 @@ impl ScopeContext {
         &self,
         facts: AuthoredBindingFacts,
         recipe: NumericRecipe,
-    ) -> Result<NumericBindingId, CompilerError> {
+    ) -> Result<NumericBindingId, InfrastructureFailure> {
         // A raw literal's authored family is its origin family, except when the fragment's result
         // is independently fixed (a comparison or real whole division): those resolve their type
         // from the operator, so their origin keeps no family and cannot be pinned.
@@ -1374,7 +1389,7 @@ impl ScopeContext {
         facts: AuthoredBindingFacts,
         class: NumericClassId,
         recipe: NumericRecipe,
-    ) -> Result<NumericBindingId, CompilerError> {
+    ) -> Result<NumericBindingId, InfrastructureFailure> {
         let name = facts.name;
         let binding_span = facts.binding_span;
         let binding = state.register_binding(PendingBindingRow {

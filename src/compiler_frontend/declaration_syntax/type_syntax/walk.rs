@@ -7,6 +7,7 @@
 use super::*;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 
 /// One named type reference preserved from parsed type syntax.
@@ -17,8 +18,14 @@ use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 /// file's visibility records instead of collapsing them to a terminal component.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ParsedNamedTypeReference<'a> {
-    Bare(StringId),
-    Qualified(&'a [StringId]),
+    Bare {
+        name: StringId,
+        span: Option<SourceSpan>,
+    },
+    Qualified {
+        path: &'a [StringId],
+        span: Option<SourceSpan>,
+    },
 }
 
 /// Visit every named type reference inside a `ParsedTypeRef`.
@@ -27,9 +34,15 @@ pub(crate) fn for_each_named_type_in_parsed_ref<'a>(
     visitor: &mut impl FnMut(ParsedNamedTypeReference<'a>),
 ) {
     match parsed {
-        ParsedTypeRef::Named { name, .. } => visitor(ParsedNamedTypeReference::Bare(*name)),
-        ParsedTypeRef::Qualified { path, .. } => {
-            visitor(ParsedNamedTypeReference::Qualified(path.as_slice()));
+        ParsedTypeRef::Named { name, span } => visitor(ParsedNamedTypeReference::Bare {
+            name: *name,
+            span: *span,
+        }),
+        ParsedTypeRef::Qualified { path, span } => {
+            visitor(ParsedNamedTypeReference::Qualified {
+                path: path.as_slice(),
+                span: *span,
+            });
         }
         ParsedTypeRef::Applied {
             base, arguments, ..

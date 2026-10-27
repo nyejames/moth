@@ -1,6 +1,5 @@
 //! Statement lowering for HIR -> Wasm LIR.
 
-use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
 use crate::backends::wasm::hir_to_lir::expr::{expression_type, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::resolve_host_call_import;
@@ -9,7 +8,8 @@ use crate::backends::wasm::lir::instructions::{
     WasmIntegerPowerScratch, WasmIntegerScratch, WasmLirStmt, WasmNumericOperationOperands,
 };
 use crate::backends::wasm::lir::types::WasmAbiType;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -26,7 +26,7 @@ pub(crate) fn lower_statement(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     statement: &HirStatement,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // Statement lowering is explicitly side-effecting: expressions append LIR
     // statements directly to preserve HIR evaluation order.
     match &statement.kind {
@@ -59,27 +59,28 @@ pub(crate) fn lower_statement(
                         .get(function_id)
                         .copied()
                         .ok_or_else(|| {
-                            lir_transformation_error(format!(
+                            InfrastructureFailure::lir_transformation(format!(
                                 "Wasm lowering missing function id mapping for {function_id:?}"
                             ))
                         })?;
                     WasmCalleeRef::Function(function_id)
                 }
-                CallTarget::CrossModule(origin) => {
-                    return Err(lir_transformation_error(format!(
-                        "Wasm lowering received unresolved cross-module function target {origin:?}"
-                    )));
-                }
-                CallTarget::ModulePrivate(identity) => {
-                    return Err(lir_transformation_error(format!(
-                        "Wasm lowering received unresolved module-private function target {identity:?}"
-                    )));
-                }
-                CallTarget::Generated(identity) => {
-                    return Err(lir_transformation_error(format!(
-                        "Wasm lowering received unresolved generated function target {identity:?}"
-                    )));
-                }
+                // Unreachable: `validate_wasm_cross_module_calls` rejects every reachable
+                // cross-module call (`CrossModuleCalls`) before lowering.
+                CallTarget::CrossModule(origin) => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm lowering received unresolved cross-module function target {origin:?}"
+                ),
+                // Unreachable: `validate_hir_linked_function_targets` rejects module-private and
+                // generated call targets (`LinkedFunctionTargets`) before lowering.
+                CallTarget::ModulePrivate(identity) => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm lowering received unresolved module-private function target {identity:?}"
+                ),
+                CallTarget::Generated(identity) => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm lowering received unresolved generated function target {identity:?}"
+                ),
                 CallTarget::External(_) => {
                     // Host calls lower to deterministic import ids.
                     let import_id = resolve_host_call_import(context.module_context, target)?;
@@ -94,7 +95,7 @@ pub(crate) fn lower_statement(
                     .get(&destination.local())
                     .copied()
                     .ok_or_else(|| {
-                        lir_transformation_error(format!(
+                        InfrastructureFailure::lir_transformation(format!(
                             "Wasm lowering missing call result local {:?}",
                             destination.local()
                         ))
@@ -110,9 +111,14 @@ pub(crate) fn lower_statement(
 
             Ok(())
         }
-        HirStatementKind::MapOp { .. } => Err(lir_transformation_error(
-            "Wasm hashmap operation reached lowering before backend feature validation",
-        )),
+        HirStatementKind::MapOp { .. } => {
+            // Unreachable: `validate_wasm_maps` rejects every reachable map use recorded in
+            // `reachable_map_uses` (one per MapOp statement) before lowering.
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Wasm hashmap operation reached lowering before backend feature validation"
+            )
+        }
         HirStatementKind::NumericOp {
             op,
             failure_mode,
@@ -120,9 +126,12 @@ pub(crate) fn lower_statement(
             result,
         } => {
             if matches!(op.domain, NumericScalar::Number(_)) {
-                return Err(lir_transformation_error(
-                    "Wasm lowering does not support Dec arithmetic",
-                ));
+                // Unreachable: `validate_wasm_number_values` rejects every reachable Dec-typed
+                // NumericOp operand or result before lowering.
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm lowering does not support Dec arithmetic"
+                );
             }
 
             if op.domain.is_integer() {
@@ -146,9 +155,13 @@ pub(crate) fn lower_statement(
                 )
             }
         }
-        HirStatementKind::RangeStepFailure { .. } => Err(lir_transformation_error(
-            "Range-step failure must be lowered as a block terminator",
-        )),
+        // Trap-mode statement guards reach here: `validate_wasm_range_step_failures` rejects only
+        // recoverable `Invoke` guards, so this stays infrastructure.
+        HirStatementKind::RangeStepFailure { .. } => {
+            Err(InfrastructureFailure::lir_transformation(
+                "Range-step failure must be lowered as a block terminator",
+            ))
+        }
         HirStatementKind::FloatRangeCandidate {
             current,
             step,
@@ -197,15 +210,16 @@ fn lower_checked_integer_operation(
     operands: &HirNumericOperands,
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if !matches!(
         failure_mode,
         NumericFailureMode::Trap | NumericFailureMode::Infallible
     ) || !op.domain.is_integer()
     {
-        return Err(lir_transformation_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm lowering does not support checked numeric operation {op} in {failure_mode:?} mode"
-        )));
+        );
     }
 
     let kind = integer_operation_kind(op.domain)?;
@@ -243,22 +257,21 @@ fn lower_checked_integer_operation(
                 right: lowered_right.value,
             }
         }
-        _ => {
-            return Err(lir_transformation_error(format!(
-                "Wasm lowering received invalid integer numeric operands for {op}"
-            )));
-        }
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering received invalid integer numeric operands for {op}"
+        ),
     };
 
     let Some(destination) = context.local_map.get(&result).copied() else {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve numeric result local {result:?}"
         )));
     };
     let expected_carrier = kind.carrier();
     let destination_carrier = context.local_type_by_id.get(&destination).copied();
     if destination_carrier != Some(expected_carrier) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering expected numeric result carrier {expected_carrier:?}, found {destination_carrier:?}"
         )));
     }
@@ -339,11 +352,12 @@ fn lower_validate_float(
     failure_mode: NumericFailureMode,
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if failure_mode != NumericFailureMode::Trap {
-        return Err(lir_transformation_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm lowering does not support binary-float validation in {failure_mode:?} mode"
-        )));
+        );
     }
 
     let type_environment = context.module_context.type_environment;
@@ -354,11 +368,12 @@ fn lower_validate_float(
     //      and F16 stays an explicit unsupported route instead of being lowered as F32.
     let source_scalar = NumericScalar::from_type_id(source_type, type_environment)
         .filter(|scalar| scalar.is_binary_float())
-        .ok_or_else(|| {
-            lir_transformation_error(format!(
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "Wasm binary-float validation source has type {source_type:?}, which is not a binary float"
-            ))
-        })?;
+            )
+        });
     let precision = source_scalar
         .binary_float_precision()
         .filter(|precision| {
@@ -368,23 +383,26 @@ fn lower_validate_float(
             )
         })
         .ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm binary-float validation requires an F32 or F64 source, found {source_scalar}"
             ))
         })?;
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "binary-float validation already filtered Binary16 out of precision before this carrier match"
+        ),
     };
 
     let destination = context.local_map.get(&result).copied().ok_or_else(|| {
-        lir_transformation_error(format!(
+        InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve binary-float validation result local {result:?}"
         ))
     })?;
     if context.local_type_by_id.get(&destination).copied() != Some(expected_carrier) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm binary-float validation destination does not use the {expected_carrier:?} carrier of the source precision"
         )));
     }
@@ -393,7 +411,7 @@ fn lower_validate_float(
     // so an in-place result can reuse the source local without a copy.
     let lowered_source = lower_expression(context, source, statements)?;
     if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm binary-float validation source does not use the {expected_carrier:?} carrier of its own precision"
         )));
     }
@@ -412,11 +430,12 @@ fn lower_format_float(
     failure_mode: NumericFailureMode,
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if failure_mode != NumericFailureMode::Trap {
-        return Err(lir_transformation_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm lowering does not support binary-float formatting in {failure_mode:?} mode"
-        )));
+        );
     }
 
     let type_environment = context.module_context.type_environment;
@@ -426,11 +445,12 @@ fn lower_format_float(
     // WHY: each binary-float type owns its exact precision.
     let source_scalar = NumericScalar::from_type_id(source_type, type_environment)
         .filter(|scalar| scalar.is_binary_float())
-        .ok_or_else(|| {
-            lir_transformation_error(format!(
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "Wasm binary-float formatting source has type {source_type:?}, which is not a binary float"
-            ))
-        })?;
+            )
+        });
     let precision = source_scalar
         .binary_float_precision()
         .filter(|precision| {
@@ -442,7 +462,7 @@ fn lower_format_float(
             )
         })
         .ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm binary-float formatting requires a binary float source, found {source_scalar}"
             ))
         })?;
@@ -452,12 +472,12 @@ fn lower_format_float(
     };
 
     let destination = context.local_map.get(&result).copied().ok_or_else(|| {
-        lir_transformation_error(format!(
+        InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve binary-float formatting result local {result:?}"
         ))
     })?;
     if context.local_type_by_id.get(&destination).copied() != Some(WasmAbiType::Handle) {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm binary-float formatting result does not use the String handle carrier",
         ));
     }
@@ -465,7 +485,7 @@ fn lower_format_float(
     // Evaluate the source once; its exact float precision remains explicit in LIR.
     let lowered_source = lower_expression(context, source, statements)?;
     if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm binary-float formatting source does not use the carrier {expected_carrier:?} of its own precision"
         )));
     }
@@ -485,11 +505,12 @@ fn lower_checked_float_operation(
     operands: &HirNumericOperands,
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if failure_mode != NumericFailureMode::Trap || !op.domain.is_binary_float() {
-        return Err(lir_transformation_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm lowering does not support checked float operation {op} in {failure_mode:?} mode"
-        )));
+        );
     }
 
     let precision = op
@@ -501,22 +522,25 @@ fn lower_checked_float_operation(
                 BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
             )
         })
-        .ok_or_else(|| {
-            lir_transformation_error(format!(
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "Wasm checked float lowering does not support {} precision",
                 op.domain
-            ))
-        })?;
+            )
+        });
     let expected_type = op.domain.type_id(context.module_context.type_environment);
 
     let lir_operands = match (op.operator, operands) {
         (NumericOperator::Negate, HirNumericOperands::Unary { operand }) => {
             let operand_type = expression_type(context, *operand);
             if operand_type != expected_type {
-                return Err(lir_transformation_error(format!(
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm checked float operand has type {:?}, expected {}",
-                    operand_type, op.domain
-                )));
+                    operand_type,
+                    op.domain
+                );
             }
             let lowered = lower_expression(context, *operand, statements)?;
             WasmNumericOperationOperands::Unary {
@@ -535,10 +559,11 @@ fn lower_checked_float_operation(
             if expression_type(context, *left) != expected_type
                 || expression_type(context, *right) != expected_type
             {
-                return Err(lir_transformation_error(format!(
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm checked float operands do not match {}",
                     op.domain
-                )));
+                );
             }
 
             // Linearise both operands in source order before emitting the checked operation.
@@ -549,25 +574,27 @@ fn lower_checked_float_operation(
                 right: lowered_right.value,
             }
         }
-        _ => {
-            return Err(lir_transformation_error(format!(
-                "Wasm lowering received invalid float numeric operands for {op}"
-            )));
-        }
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering received invalid float numeric operands for {op}"
+        ),
     };
 
     let Some(destination) = context.local_map.get(&result).copied() else {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve float numeric result local {result:?}"
         )));
     };
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "checked float lowering already rejected Binary16 before this carrier match"
+        ),
     };
     if context.local_type_by_id.get(&destination).copied() != Some(expected_carrier) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering expected float result carrier {expected_carrier:?}"
         )));
     }
@@ -591,45 +618,56 @@ fn lower_float_range_candidate(
     domain: NumericScalar,
     output_ids: [LocalId; 2],
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let [current, step, end, ascending] = inputs;
     let [candidate_result, in_range_result] = output_ids;
-    let precision = domain
-        .binary_float_precision()
-        .filter(|precision| {
-            matches!(
-                precision,
-                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
-            )
-        })
-        .ok_or_else(|| {
-            lir_transformation_error(format!(
-                "Wasm float range candidates do not support {} precision",
-                domain
-            ))
-        })?;
+    // Binary16 is unreachable here: every range loop emits a checked subtraction over its
+    // domain (loop_lowering.rs emit_range_loop_step_magnitude_normalization). The Wasm walker
+    // validate_wasm_checked_numeric_ops (backend_feature_validation.rs) rejects a reachable
+    // Binary16 operation before lowering. Non-binary-float domains are rejected by HIR
+    // validation (hir/validation/blocks.rs, FloatRangeCandidate binary-float check).
+    let precision = match domain.binary_float_precision() {
+        Some(BinaryFloatPrecision::Binary16) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm float range candidates do not support {} precision",
+            domain
+        ),
+        Some(precision @ (BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)) => {
+            precision
+        }
+        None => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm float range candidates do not support {} precision",
+            domain
+        ),
+    };
     let expected_type = domain.type_id(context.module_context.type_environment);
     if expression_type(context, current) != expected_type
         || expression_type(context, step) != expected_type
         || expression_type(context, end) != expected_type
     {
-        return Err(lir_transformation_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm float range candidate operands do not match {}",
             domain
-        )));
+        );
     }
     if expression_type(context, ascending)
         != context.module_context.type_environment.builtins().bool
     {
-        return Err(lir_transformation_error(
-            "Wasm float range candidate direction must be Bool",
-        ));
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm float range candidate direction must be Bool"
+        );
     }
 
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "float range candidate precision match already rejected Binary16 before this carrier match"
+        ),
     };
     let lowered_current = lower_expression(context, current, statements)?;
     let lowered_step = lower_expression(context, step, statements)?;
@@ -641,7 +679,7 @@ fn lower_float_range_candidate(
         (lowered_end.value, "end"),
     ] {
         if context.local_type_by_id.get(&operand).copied() != Some(expected_carrier) {
-            return Err(lir_transformation_error(format!(
+            return Err(InfrastructureFailure::lir_transformation(format!(
                 "Wasm float range candidate {label} does not use carrier {expected_carrier:?}"
             )));
         }
@@ -652,7 +690,7 @@ fn lower_float_range_candidate(
         .copied()
         != Some(WasmAbiType::I32)
     {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm float range candidate direction does not use the I32 Bool carrier",
         ));
     }
@@ -662,7 +700,7 @@ fn lower_float_range_candidate(
         .get(&candidate_result)
         .copied()
         .ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm lowering could not resolve float range candidate local {candidate_result:?}"
             ))
         })?;
@@ -671,17 +709,17 @@ fn lower_float_range_candidate(
         .get(&in_range_result)
         .copied()
         .ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm lowering could not resolve float range Bool local {in_range_result:?}"
             ))
         })?;
     if context.local_type_by_id.get(&candidate_dst).copied() != Some(expected_carrier) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm float range candidate destination does not use carrier {expected_carrier:?}"
         )));
     }
     if context.local_type_by_id.get(&in_range_dst).copied() != Some(WasmAbiType::I32) {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm float range Bool result does not use the I32 carrier",
         ));
     }
@@ -708,15 +746,16 @@ fn lower_float_range_candidate(
 /// backend capability gate.
 fn integer_operation_kind(
     domain: NumericScalar,
-) -> Result<WasmIntegerOperationKind, CompilerError> {
+) -> Result<WasmIntegerOperationKind, InfrastructureFailure> {
     match domain {
         NumericScalar::Fixed(FixedScalar::I32) => Ok(WasmIntegerOperationKind::Signed32),
         NumericScalar::Fixed(FixedScalar::U32) => Ok(WasmIntegerOperationKind::Unsigned32),
         NumericScalar::Fixed(FixedScalar::I64) => Ok(WasmIntegerOperationKind::Signed64),
         NumericScalar::Fixed(FixedScalar::U64) => Ok(WasmIntegerOperationKind::Unsigned64),
-        _ => Err(lir_transformation_error(format!(
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm checked integer lowering does not implement the exact domain {domain}"
-        ))),
+        ),
     }
 }
 
@@ -733,10 +772,10 @@ fn lower_assignment(
     target: HirPlace,
     value: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // WHAT: preserve explicit move/copy distinction in LIR.
-    // WHY: the current emitter keeps the ownership hook representable while transitional
-    // collected scaffolding remains. Final lowering consumes `ValidatedMemoryPlan`.
+    // WHY: LIR keeps the move/copy choice explicit for ownership hooks; lowering does not
+    // consume `ValidatedMemoryPlan`.
     if !context
         .module_context
         .hir_module
@@ -744,9 +783,12 @@ fn lower_assignment(
         .projections(target.projections)
         .is_empty()
     {
-        return Err(lir_transformation_error(
-            "Wasm lowering currently supports assignments only to direct locals",
-        ));
+        // Unreachable: `validate_wasm_unsupported_shapes` rejects projected assignment targets
+        // (`ProjectedAssignmentTargets`) before lowering.
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering currently supports assignments only to direct locals"
+        );
     }
 
     let dst = context
@@ -754,7 +796,7 @@ fn lower_assignment(
         .get(&target.root)
         .copied()
         .ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm lowering could not resolve assignment target local {:?}",
                 target.root
             ))
@@ -785,22 +827,22 @@ fn lower_push_runtime_fragment(
     vec_local: &LocalId,
     value: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let vec_handle = context.local_map.get(vec_local).copied().ok_or_else(|| {
-        lir_transformation_error(format!(
+        InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve runtime fragment vec local {vec_local:?}",
         ))
     })?;
 
     if !context.is_handle_local(vec_handle) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering expected runtime fragment vec local {vec_local:?} to lower as a handle",
         )));
     }
 
     let lowered_value = lower_expression(context, value, statements)?;
     if !context.is_handle_local(lowered_value.value) {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm lowering expected runtime fragment values to lower as string handles",
         ));
     }

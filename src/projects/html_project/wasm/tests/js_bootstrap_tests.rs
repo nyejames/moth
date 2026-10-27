@@ -86,8 +86,7 @@ process.once("unhandledRejection", error => {{
         } else {
             vec![]
         };
-        let bootstrap = generate_wasm_bootstrap_js(&setup, &slots, "instance.exports.moth_start()")
-            .expect("Wasm bootstrap generation succeeds");
+        let bootstrap = generate_wasm_bootstrap_js(&setup, &slots, "instance.exports.moth_start()");
         assert!(!bootstrap.contains("onerror"));
         assert!(!bootstrap.contains("unhandledrejection"));
         let output = std::process::Command::new("node")
@@ -158,8 +157,7 @@ setImmediate(() => {
     console.log(JSON.stringify(events));
 });
 "#;
-    let bootstrap = generate_wasm_bootstrap_js(setup, &[], "instance.exports.moth_start()")
-        .expect("Wasm bootstrap generation succeeds");
+    let bootstrap = generate_wasm_bootstrap_js(setup, &[], "instance.exports.moth_start()");
     let output = std::process::Command::new("node")
         .args(["--eval", &bootstrap])
         .output()

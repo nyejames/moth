@@ -8,7 +8,8 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolutionOverlay,
     TirSlotResolutionOverlayId, TirWrapperContextOverlay, TirWrapperContextOverlayId,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use rustc_hash::FxHashSet;
 use std::fmt::Display;
 use std::hash::Hash;
@@ -17,7 +18,7 @@ impl TemplateIrStore {
     pub(crate) fn allocate_expression_overlay(
         &mut self,
         overlay: TirExpressionOverlay,
-    ) -> Result<TirExpressionOverlayId, CompilerError> {
+    ) -> Result<TirExpressionOverlayId, InfrastructureFailure> {
         reject_duplicate_or_out_of_range_overlay_keys(
             overlay.overrides.iter().map(|(site_id, _)| *site_id),
             self.allocated_expression_site_count(),
@@ -37,7 +38,7 @@ impl TemplateIrStore {
     pub(crate) fn allocate_slot_resolution_overlay(
         &mut self,
         overlay: TirSlotResolutionOverlay,
-    ) -> Result<TirSlotResolutionOverlayId, CompilerError> {
+    ) -> Result<TirSlotResolutionOverlayId, InfrastructureFailure> {
         reject_duplicate_or_out_of_range_overlay_keys(
             overlay
                 .resolutions
@@ -56,7 +57,7 @@ impl TemplateIrStore {
     pub(crate) fn allocate_wrapper_context_overlay(
         &mut self,
         overlay: TirWrapperContextOverlay,
-    ) -> Result<TirWrapperContextOverlayId, CompilerError> {
+    ) -> Result<TirWrapperContextOverlayId, InfrastructureFailure> {
         reject_duplicate_or_out_of_range_overlay_keys(
             overlay
                 .contexts
@@ -99,7 +100,7 @@ fn reject_duplicate_or_out_of_range_overlay_keys<K>(
     allocated_count: usize,
     index_of: impl Fn(K) -> usize,
     label: &str,
-) -> Result<(), CompilerError>
+) -> Result<(), InfrastructureFailure>
 where
     K: Copy + Eq + Hash + Display,
 {
@@ -107,15 +108,17 @@ where
 
     for key in keys {
         if !seen.insert(key) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store rejected a duplicate {label} overlay key {key}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store rejected a duplicate {label} overlay key {key}."),
+            ));
         }
 
         if index_of(key) >= allocated_count {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store rejected out-of-range {label} overlay key {key}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store rejected out-of-range {label} overlay key {key}."),
+            ));
         }
     }
 

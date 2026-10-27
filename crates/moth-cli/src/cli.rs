@@ -7,10 +7,8 @@ use crate::command_status::{CommandStatus, emit_benchmark_status};
 use crate::scaffold::{self, NewHtmlProjectOptions};
 #[cfg(feature = "boracle")]
 use moth::projects::boracle::run_boracle;
-use moth::projects::build_command::{
-    BuildCommandOutcome, BuildCommandReport, run_build_command as run_build_service,
-};
-use moth::projects::check::{CheckCommandReport, run_check_command};
+use moth::projects::build_command::{BuildCommandReport, run_build_command as run_build_service};
+use moth::projects::check::{CheckCommandReport, run_check_command as run_check_service};
 use moth::projects::dev_server::{self, DevServerOptions};
 use moth::projects::integration_tests::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
@@ -19,18 +17,58 @@ use moth::projects::integration_tests::{
 use moth::projects::{BoracleDump, BoracleExperiment, BoracleRuleSelection};
 use moth::projects::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError, Flag,
-    HtmlProjectBuilder, ProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus,
-    print_compiler_messages, print_terse_compiler_messages,
+    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError,
+    CompilationOutcome, CompilationResult, Flag, HtmlProjectBuilder, InfrastructureFailure,
+    ProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus, print_compilation_result,
+    print_diagnostic_reports, print_infrastructure_errors, print_terse_compilation_result,
 };
 use saying::say;
-use std::{env, process};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+#[cfg(feature = "test_compiler_bug")]
+use std::path::Path;
+use std::path::PathBuf;
+use std::{env, ffi::OsString, process};
 
 /// Build-profile flags accepted by both `build` and `dev`.
 const BUILD_FLAGS: &[&str] = &["--release", "--html-wasm"];
 
 /// The error text used when an `--input` flag carries no `name=value` argument.
 const MISSING_COMMAND_INPUT_VALUE: &str = "Missing value for --input.";
+struct CliBuildRequest {
+    entry_path: PathBuf,
+    flags: Vec<Flag>,
+    build_config_inputs: BuildConfigInputSet,
+    output_root: PathBuf,
+}
+
+struct CliCheckRequest {
+    entry_path: PathBuf,
+    build_config_inputs: BuildConfigInputSet,
+}
+
+fn absolute_command_paths(path: String) -> Result<(PathBuf, PathBuf), String> {
+    let output_root = env::current_dir()
+        .map_err(|error| format!("Could not resolve the current directory: {error}"))?;
+    let entry_path = PathBuf::from(path);
+    let absolute_entry_path = if entry_path.is_absolute() {
+        entry_path
+    } else {
+        output_root.join(entry_path)
+    };
+
+    Ok((absolute_entry_path, output_root))
+}
+
+fn absolute_entry_path(path: String) -> Result<PathBuf, String> {
+    let entry_path = PathBuf::from(path);
+    if entry_path.is_absolute() {
+        return Ok(entry_path);
+    }
+
+    env::current_dir()
+        .map(|current_directory| current_directory.join(entry_path))
+        .map_err(|error| format!("Could not resolve the current directory: {error}"))
+}
 
 /// One `--input name=value` argument whose value is not yet classified.
 ///
@@ -67,7 +105,7 @@ fn command_input_set(arguments: &[CommandInputArgument]) -> Result<BuildConfigIn
                         format!(
                             "Failed to process --input '{}': {}.",
                             argument.name.as_str(),
-                            error.msg
+                            error.message()
                         )
                     }
                     error => format!(
@@ -171,7 +209,7 @@ enum Command {
     }, // Runs the internal, unstable reference-solver source service
 
     // Runs a hot reloading dev server that can be accessed in the browser
-    // Will only support HTML projects for now
+    // Dev supports HTML projects only.
     Dev {
         path: String,
         options: DevServerOptions,
@@ -185,10 +223,31 @@ enum Command {
     }, // Runs or lists compiler integration tests with composable selection filters
 }
 
-pub fn start_cli() -> process::ExitCode {
-    let compiler_args: Vec<String> = env::args().collect();
-    let cli_args = &compiler_args[1..];
+fn convert_cli_args(args: impl IntoIterator<Item = OsString>) -> Result<Vec<String>, String> {
+    args.into_iter()
+        .skip(1)
+        .enumerate()
+        .map(|(position, argument)| {
+            argument.into_string().map_err(|argument| {
+                format!(
+                    "Argument position {} ('{}') is not valid UTF-8. Moth arguments must be valid UTF-8.",
+                    position,
+                    argument.to_string_lossy()
+                )
+            })
+        })
+        .collect()
+}
 
+pub fn start_cli() -> process::ExitCode {
+    let compiler_args = match convert_cli_args(env::args_os()) {
+        Ok(args) => args,
+        Err(error) => {
+            say!(error);
+            return CommandStatus::Failure.into();
+        }
+    };
+    let cli_args = &compiler_args;
     let status = if cli_args.is_empty() {
         print_help();
         CommandStatus::Success
@@ -230,90 +289,95 @@ pub fn start_cli() -> process::ExitCode {
                     path,
                     flags,
                     inputs,
-                } => {
-                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-                    match command_input_set(&inputs) {
-                        Ok(inputs) => run_build_command(&project_builder, &path, &flags, &inputs),
+                } => match command_input_set(&inputs) {
+                    Ok(inputs) => match absolute_command_paths(path) {
+                        Ok((entry_path, output_root)) => run_build_command(CliBuildRequest {
+                            entry_path,
+                            flags,
+                            build_config_inputs: inputs,
+                            output_root,
+                        }),
                         Err(message) => {
                             say!(message);
-                            print_help();
                             CommandStatus::Failure
                         }
+                    },
+                    Err(message) => {
+                        say!(message);
+                        print_help();
+                        CommandStatus::Failure
                     }
-                }
+                },
 
                 Command::Check {
                     path,
                     terse,
                     inputs,
-                } => {
-                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-                    match command_input_set(&inputs) {
-                        Ok(inputs) => {
-                            let completion =
-                                run_check_command(&path, &inputs, &project_builder, |report| {
-                                    render_check_outcome(report, terse)
-                                });
-                            if let Some(counts) = completion.diagnostic_counts {
-                                emit_benchmark_status(counts.errors, counts.warnings);
-                            }
-                            command_status_from_completion(completion)
-                        }
+                } => match command_input_set(&inputs) {
+                    Ok(inputs) => match absolute_entry_path(path) {
+                        Ok(entry_path) => run_check_command(
+                            CliCheckRequest {
+                                entry_path,
+                                build_config_inputs: inputs,
+                            },
+                            terse,
+                        ),
                         Err(message) => {
                             say!(message);
-                            print_help();
                             CommandStatus::Failure
                         }
+                    },
+                    Err(message) => {
+                        say!(message);
+                        print_help();
+                        CommandStatus::Failure
                     }
-                }
+                },
 
                 #[cfg(feature = "boracle")]
                 Command::Boracle {
                     path,
                     dump,
                     rule_selection,
-                } => match run_boracle(&path, dump, rule_selection) {
-                    Ok(report) => {
-                        print!("{report}");
-                        CommandStatus::Success
-                    }
-                    Err(messages) => {
-                        print_compiler_messages(messages);
-                        CommandStatus::Failure
-                    }
-                },
+                } => run_boracle_command(path, dump, rule_selection),
 
                 Command::Dev {
                     path,
                     options,
                     flags,
                     inputs,
-                } => {
-                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-                    match command_input_set(&inputs) {
-                        Ok(inputs) => {
-                            say!("\nStarting dev server...");
-                            let options = options.with_inputs(inputs);
-                            match dev_server::run_dev_server(
-                                project_builder,
-                                &path,
-                                &flags,
-                                options,
-                            ) {
-                                Ok(_) => CommandStatus::Success,
-                                Err(messages) => {
-                                    print_compiler_messages(messages);
-                                    CommandStatus::Failure
+                } => match command_input_set(&inputs) {
+                    Ok(inputs) => {
+                        say!("\nStarting dev server...");
+                        let options = options.with_inputs(inputs);
+                        match dev_server::run_dev_server(
+                            || ProjectBuilder::new(HtmlProjectBuilder::new()),
+                            &path,
+                            &flags,
+                            options,
+                        ) {
+                            Ok(CompilationOutcome::Success { warnings, .. }) => {
+                                if let Some(warnings) = warnings {
+                                    print_diagnostic_reports(&warnings);
                                 }
+                                CommandStatus::Success
+                            }
+                            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                                print_diagnostic_reports(&reports);
+                                CommandStatus::Failure
+                            }
+                            Err(errors) => {
+                                print_infrastructure_errors(&errors);
+                                CommandStatus::Failure
                             }
                         }
-                        Err(message) => {
-                            say!(message);
-                            print_help();
-                            CommandStatus::Failure
-                        }
                     }
-                }
+                    Err(message) => {
+                        say!(message);
+                        print_help();
+                        CommandStatus::Failure
+                    }
+                },
 
                 Command::CompilerTests { options } => {
                     let terse = options.terse;
@@ -345,44 +409,174 @@ pub fn start_cli() -> process::ExitCode {
     status.into()
 }
 
-fn run_build_command(
-    project_builder: &ProjectBuilder,
-    path: &str,
-    flags: &[Flag],
-    build_config_inputs: &BuildConfigInputSet,
-) -> CommandStatus {
-    let completion = run_build_service(
-        project_builder,
-        path,
-        flags,
-        build_config_inputs,
-        render_build_outcome,
-    );
-    if let Some(counts) = completion.diagnostic_counts {
-        emit_benchmark_status(counts.errors, counts.warnings);
+fn run_build_command(request: CliBuildRequest) -> CommandStatus {
+    // The owned request and its worker are discarded together if unwinding reaches this host boundary.
+    let execution = catch_unwind(AssertUnwindSafe(move || {
+        #[cfg(feature = "test_compiler_bug")]
+        trigger_test_panic(&request.entry_path);
+
+        let Some(entry_path) = request.entry_path.to_str() else {
+            return Err(
+                InfrastructureFailure::non_utf8_entry_path(&request.entry_path, "build").into(),
+            );
+        };
+        let (completion, report) = {
+            let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+            let mut report = None;
+            let completion = run_build_service(
+                &project_builder,
+                entry_path,
+                &request.flags,
+                &request.build_config_inputs,
+                &request.output_root,
+                |final_report| report = Some(final_report),
+            );
+            (
+                completion,
+                report.expect("build command must present its frozen report exactly once"),
+            )
+        };
+        Ok((completion, report))
+    }));
+
+    match execution {
+        Ok(Ok((completion, report))) => {
+            render_build_outcome(report);
+            if let Some(counts) = completion.diagnostic_counts {
+                emit_benchmark_status(counts.errors, counts.warnings);
+            }
+            command_status_from_completion(completion)
+        }
+        Ok(Err(errors)) => {
+            print_infrastructure_errors(&errors);
+            CommandStatus::Failure
+        }
+        Err(payload) => compiler_bug_status(payload),
     }
-    command_status_from_completion(completion)
+}
+
+fn run_check_command(request: CliCheckRequest, terse: bool) -> CommandStatus {
+    // The owned request and its worker are discarded together if unwinding reaches this host boundary.
+    let execution = catch_unwind(AssertUnwindSafe(move || {
+        #[cfg(feature = "test_compiler_bug")]
+        trigger_test_panic(&request.entry_path);
+
+        let Some(path) = request.entry_path.to_str() else {
+            return Err(
+                InfrastructureFailure::non_utf8_entry_path(&request.entry_path, "check").into(),
+            );
+        };
+        let (completion, report) = {
+            let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+            let mut report = None;
+            let completion = run_check_service(
+                path,
+                &request.build_config_inputs,
+                &project_builder,
+                |final_report| report = Some(final_report),
+            );
+            (
+                completion,
+                report.expect("check command must present its frozen report exactly once"),
+            )
+        };
+        Ok((completion, report))
+    }));
+
+    match execution {
+        Ok(Ok((completion, report))) => {
+            render_check_outcome(report, terse);
+            if let Some(counts) = completion.diagnostic_counts {
+                emit_benchmark_status(counts.errors, counts.warnings);
+            }
+            command_status_from_completion(completion)
+        }
+        Ok(Err(errors)) => {
+            if terse {
+                let messages: CompilationResult<()> = Err(errors);
+                print_terse_compilation_result(&messages);
+            } else {
+                print_infrastructure_errors(&errors);
+            }
+            CommandStatus::Failure
+        }
+        Err(payload) => compiler_bug_status(payload),
+    }
+}
+
+#[cfg(feature = "boracle")]
+fn run_boracle_command(
+    path: String,
+    dump: BoracleDump,
+    rule_selection: BoracleRuleSelection,
+) -> CommandStatus {
+    // The owned request is consumed; Boracle's builder and compiler state are discarded on unwind.
+    let execution = catch_unwind(AssertUnwindSafe(move || {
+        #[cfg(feature = "test_compiler_bug")]
+        trigger_test_panic(Path::new(&path));
+
+        run_boracle(&path, dump, rule_selection)
+    }));
+
+    match execution {
+        Ok(Ok(CompilationOutcome::Success { value, warnings })) => {
+            print!("{value}");
+            if let Some(warnings) = warnings {
+                print_diagnostic_reports(&warnings);
+            }
+            CommandStatus::Success
+        }
+        Ok(Ok(CompilationOutcome::Diagnosed(reports))) => {
+            print_diagnostic_reports(&reports);
+            CommandStatus::Failure
+        }
+        Ok(Err(errors)) => {
+            print_infrastructure_errors(&errors);
+            CommandStatus::Failure
+        }
+        Err(payload) => compiler_bug_status(payload),
+    }
+}
+
+fn compiler_bug_status(payload: Box<dyn std::any::Any + Send>) -> CommandStatus {
+    if let Some(report) = moth::render_compiler_bug_payload(payload.as_ref()) {
+        eprintln!("{report}");
+    } else {
+        eprintln!(
+            "COMPILER BUG: an unknown panic interrupted this command; see the panic-hook output above."
+        );
+    }
+    CommandStatus::CompilerBug
+}
+
+#[cfg(feature = "test_compiler_bug")]
+fn trigger_test_panic(path: &Path) {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("__moth_test_compiler_bug__") => moth::trigger_compiler_bug_for_test(),
+        Some("__moth_test_unknown_panic__") => panic!("test-only unknown panic hook detail"),
+        _ => {}
+    }
 }
 
 fn render_build_outcome(report: BuildCommandReport) {
     match report.outcome {
-        BuildCommandOutcome::Success {
-            output_file_count,
-            warnings,
-            ..
-        } => {
-            print_build_success_message(output_file_count, report.duration);
-            if let Some(messages) = warnings {
-                print_compiler_messages(messages);
+        Ok(CompilationOutcome::Success { value, warnings }) => {
+            print_build_success_message(value.output_file_count, report.duration);
+            for warning in value.output_warnings {
+                say!(Yellow warning);
+            }
+            if let Some(warnings) = warnings {
+                print_diagnostic_reports(&warnings);
             }
         }
-        BuildCommandOutcome::Failure { messages, .. } => print_compiler_messages(messages),
+        Ok(CompilationOutcome::Diagnosed(reports)) => print_diagnostic_reports(&reports),
+        Err(errors) => print_infrastructure_errors(&errors),
     }
 }
 
 fn render_check_outcome(report: CheckCommandReport, terse: bool) {
     if terse {
-        print_terse_compiler_messages(&report.messages);
+        print_terse_compilation_result(&report.messages);
         println!(
             "{}",
             format_terse_summary_line(report.duration, report.error_count, report.warning_count)
@@ -392,7 +586,7 @@ fn render_check_outcome(report: CheckCommandReport, terse: bool) {
         say!(success_message(report.duration));
         say!(Bold Green "No errors or warnings");
     } else {
-        print_compiler_messages(report.messages);
+        print_compilation_result(&report.messages);
     }
 }
 

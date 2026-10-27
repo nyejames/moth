@@ -8,16 +8,17 @@
 use crate::build_system::build_profile::BuildProfile;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::build_system::utils::{
-    file_error_messages, file_error_with_rejection_reason, should_skip_unchanged_write,
+    file_error, file_error_with_rejection_reason, should_skip_unchanged_write,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason,
+    DiagnosticBag, InvalidConfigReason, InvalidOutputFolderReason, PreparedFailure,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-
-use saying::say;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -72,7 +73,6 @@ pub(crate) struct OutputCleanupFinalization<'a> {
     pub(crate) owner: OutputOwner,
     pub(crate) cleanup_policy: &'a CleanupPolicy,
     pub(crate) write_mode: WriteMode,
-    pub(crate) string_table: &'a StringTable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +137,7 @@ pub(crate) struct ManifestCleanupReport {
     pub(crate) removed_paths: Vec<PathBuf>,
     pub(crate) retained_paths: Vec<PathBuf>,
     pub(crate) ignored_paths: Vec<PathBuf>,
+    pub(crate) warning_messages: Vec<String>,
 }
 
 // -------------------------
@@ -154,10 +155,10 @@ pub(crate) fn prepare_output_cleanup(
     owner: OutputOwner,
     setting_span: Option<SourceSpan>,
     cleanup_policy: &CleanupPolicy,
-    string_table: &StringTable,
-) -> Result<PreparedOutputCleanup, CompilerMessages> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<PreparedOutputCleanup, PreparedFailure> {
     let manifest_read_result = if let Some(project_root) = project_root {
-        validate_output_root_is_safe(output_root, project_root, entry_root, string_table)?;
+        validate_output_root_is_safe(output_root, project_root, entry_root)?;
         let manifest_read_result = read_build_manifest(output_root, cleanup_policy);
         let existing_owner = match &manifest_read_result {
             ManifestReadResult::Valid(manifest) => Some((
@@ -171,13 +172,13 @@ pub(crate) fn prepare_output_cleanup(
             ManifestReadResult::ForeignOwner {
                 builder, profile, ..
             } => {
-                return Err(manifest_owner_conflict_messages(
+                return Err(manifest_owner_conflict_failure(
                     output_root,
                     builder,
                     profile,
                     owner,
                     setting_span,
-                    string_table,
+                    diagnostic_strings,
                 ));
             }
             ManifestReadResult::Uninitialised | ManifestReadResult::Recoverable { .. } => None,
@@ -186,13 +187,13 @@ pub(crate) fn prepare_output_cleanup(
             && (existing_builder != owner.builder.manifest_name()
                 || existing_profile != build_profile_manifest_name(owner.profile))
         {
-            return Err(manifest_owner_conflict_messages(
+            return Err(manifest_owner_conflict_failure(
                 output_root,
                 existing_builder,
                 existing_profile,
                 owner,
                 setting_span,
-                string_table,
+                diagnostic_strings,
             ));
         }
         Some(manifest_read_result)
@@ -213,12 +214,13 @@ pub(crate) fn prepare_output_cleanup(
 pub(crate) fn finalize_output_cleanup(
     cleanup_state: &PreparedOutputCleanup,
     finalization: &OutputCleanupFinalization<'_>,
-) -> Result<(), CompilerMessages> {
+) -> Result<Vec<String>, InfrastructureFailure> {
     let Some(manifest_read_result) = cleanup_state.manifest_read_result.as_ref() else {
-        return Ok(());
+        return Ok(Vec::new());
     };
 
     let mut manifest_paths_to_write = finalization.current_managed_artifact_paths.clone();
+    let mut warning_messages = Vec::new();
     match manifest_read_result {
         ManifestReadResult::Uninitialised => {}
         ManifestReadResult::Valid(manifest) => {
@@ -229,14 +231,18 @@ pub(crate) fn finalize_output_cleanup(
                 &manifest.paths,
             );
             manifest_paths_to_write.extend(cleanup_report.retained_paths);
+            warning_messages.extend(cleanup_report.warning_messages);
         }
 
         ManifestReadResult::Recoverable { reason }
         | ManifestReadResult::RecoverableWithOwner { reason, .. } => {
-            emit_recoverable_manifest_warning(reason)
+            warning_messages.push(recoverable_manifest_warning(reason));
         }
         ManifestReadResult::ForeignOwner { .. } => {
-            unreachable!("foreign manifest owners fail during cleanup preparation")
+            crate::compiler_bug!(
+                CompilerStage::Output,
+                "foreign manifest owners fail during cleanup preparation"
+            )
         }
     }
 
@@ -246,8 +252,9 @@ pub(crate) fn finalize_output_cleanup(
         finalization.owner,
         finalization.cleanup_policy,
         finalization.write_mode,
-        finalization.string_table,
-    )
+    )?;
+
+    Ok(warning_messages)
 }
 
 // -------------------------
@@ -257,8 +264,7 @@ pub(crate) fn finalize_output_cleanup(
 /// Validate an output path before writing or deleting under the output root.
 pub(crate) fn validate_relative_output_path(
     relative_output_path: &Path,
-    string_table: &StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+) -> Result<PathBuf, InfrastructureFailure> {
     if relative_output_path
         .to_str()
         .is_some_and(|path| path.contains(['\r', '\n']))
@@ -267,7 +273,6 @@ pub(crate) fn validate_relative_output_path(
             relative_output_path,
             "Output paths cannot contain line-break characters.",
             super::writer::OutputRejectionReason::InvalidRelativeOutputPath,
-            string_table,
         ));
     }
 
@@ -295,7 +300,6 @@ pub(crate) fn validate_relative_output_path(
             relative_output_path,
             message,
             super::writer::OutputRejectionReason::InvalidRelativeOutputPath,
-            string_table,
         )
     })
 }
@@ -308,8 +312,7 @@ pub(crate) fn validate_output_root_is_safe(
     output_root: &Path,
     project_root: &Path,
     entry_root: Option<&Path>,
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), InfrastructureFailure> {
     // WHAT: Canonicalize the output root, falling back to the nearest existing ancestor.
     // WHY: Symlinks or relative segments could disguise a dangerous target path.
     let canonical_root = canonicalize_output_path(output_root).map_err(|_| {
@@ -317,7 +320,6 @@ pub(crate) fn validate_output_root_is_safe(
             output_root,
             "Build output root contains a dangling symlink component and cannot be used safely.",
             super::writer::OutputRejectionReason::OutputRootDanglingSymlink,
-            string_table,
         )
     })?;
 
@@ -330,7 +332,6 @@ pub(crate) fn validate_output_root_is_safe(
                 output_root.display()
             ),
             super::writer::OutputRejectionReason::OutputRootDangerousSystemPath,
-            string_table,
         ));
     }
 
@@ -361,7 +362,6 @@ pub(crate) fn validate_output_root_is_safe(
                 output_root,
                 message,
                 super::writer::OutputRejectionReason::OutputRootNotInsideProject,
-                string_table,
             ));
         }
 
@@ -375,7 +375,6 @@ pub(crate) fn validate_output_root_is_safe(
             project_root,
             "Project root contains a dangling symlink component and cannot validate output safety.",
             super::writer::OutputRejectionReason::OutputRootInspectionFailed,
-            string_table,
         )
     })?;
     let project_parent = canonical_project.parent().unwrap_or(&canonical_project);
@@ -394,7 +393,6 @@ pub(crate) fn validate_output_root_is_safe(
                 project_root.display()
             ),
             super::writer::OutputRejectionReason::OutputRootNotAdjacentToProject,
-            string_table,
         ));
     }
 
@@ -481,7 +479,7 @@ pub(crate) fn read_build_manifest(
 
 /// Write the build manifest listing all current managed artifact paths.
 ///
-/// The v4 manifest records builder identity, build profile and managed extensions so future
+/// The v4 manifest records builder identity, build profile and managed extensions so
 /// cleanup can reject mismatched builder, profile or extension ownership safely.
 pub(crate) fn write_build_manifest(
     manifest_destination: &Path,
@@ -489,19 +487,17 @@ pub(crate) fn write_build_manifest(
     owner: OutputOwner,
     cleanup_policy: &CleanupPolicy,
     write_mode: WriteMode,
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), InfrastructureFailure> {
     if let Some(path) = current_paths
         .iter()
         .find(|path| !is_lossless_portable_relative_path(path))
     {
-        return Err(file_error_messages(
+        return Err(file_error(
             path,
             format!(
                 "Managed output path '{}' cannot be represented safely in the build manifest.",
                 path.display()
             ),
-            string_table,
         ));
     }
 
@@ -534,13 +530,12 @@ pub(crate) fn write_build_manifest(
     }
 
     fs::write(manifest_destination, content).map_err(|error| {
-        file_error_messages(
+        file_error(
             manifest_destination,
             format!(
                 "Failed to write build manifest '{}': {error}",
                 manifest_destination.display()
             ),
-            string_table,
         )
     })
 }
@@ -638,12 +633,10 @@ pub(crate) fn remove_manifest_tracked_stale_artifacts(
         }
 
         if let Err(error) = fs::remove_file(&absolute_path) {
-            say!(
-                Yellow "Warning: failed to remove stale artifact '",
-                Yellow absolute_path.display(),
-                Yellow "': ",
-                Yellow error.to_string()
-            );
+            report.warning_messages.push(format!(
+                "Warning: failed to remove stale artifact '{}': {error}",
+                absolute_path.display()
+            ));
             report
                 .retained_paths
                 .push(normalized_stale_relative.clone());
@@ -855,31 +848,38 @@ fn describe_extension_set(extensions: &BTreeSet<String>) -> String {
     }
 }
 
-fn manifest_owner_conflict_messages(
+fn manifest_owner_conflict_failure(
     output_root: &Path,
     existing_builder: &str,
     existing_profile: &str,
     active_owner: OutputOwner,
     setting_span: Option<SourceSpan>,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let mut diagnostic_table = string_table.clone();
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> PreparedFailure {
     let reason = InvalidConfigReason::OutputManifestOwnerConflict {
-        output_root: diagnostic_table.intern(&output_root.to_string_lossy()),
-        existing_builder: diagnostic_table.intern(existing_builder),
-        existing_profile: diagnostic_table.intern(existing_profile),
-        active_builder: diagnostic_table.intern(active_owner.builder.manifest_name()),
-        active_profile: diagnostic_table.intern(build_profile_manifest_name(active_owner.profile)),
+        output_root: diagnostic_strings.intern(&output_root.to_string_lossy()),
+        existing_builder: diagnostic_strings.intern(existing_builder),
+        existing_profile: diagnostic_strings.intern(existing_profile),
+        active_builder: diagnostic_strings.intern(active_owner.builder.manifest_name()),
+        active_profile: diagnostic_strings
+            .intern(build_profile_manifest_name(active_owner.profile)),
     };
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, setting_span);
-    CompilerMessages::from_diagnostic(diagnostic, diagnostic_table)
+    let diagnostic = project_config::invalid_config_reason(None, reason, setting_span);
+    PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from(diagnostic),
+        diagnostic_strings.strings(),
+        None,
+        || None,
+    )
+    .map(PreparedFailure::Diagnosed)
+    .unwrap_or_else(PreparedFailure::from)
 }
 
-fn emit_recoverable_manifest_warning(reason: &ManifestRecoveryReason) {
-    say!(Yellow format!(
+fn recoverable_manifest_warning(reason: &ManifestRecoveryReason) -> String {
+    format!(
         "Warning: full manifest-based stale cleanup was unavailable because {}. Cleanup entered recoverable mode; stale artifacts were preserved intentionally until a valid manifest is available.",
         reason.describe()
-    ));
+    )
 }
 
 /// Walk from a removed file's parent directory upward toward the output root, removing each

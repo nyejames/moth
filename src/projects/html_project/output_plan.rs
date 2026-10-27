@@ -7,7 +7,8 @@
 //! This module owns path derivation only. Artifact emission (lowering JS, Wasm, generating HTML)
 //! lives in the respective `js_path` and `wasm/artifacts` modules.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -72,6 +73,18 @@ pub(crate) fn plan_wasm_output_from_route(route: &CanonicalPageRoute) -> HtmlRou
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum LogicalHtmlPathError {
+    EmptyRouteName(PathBuf),
+    Infrastructure(InfrastructureFailure),
+}
+
+impl From<InfrastructureFailure> for LogicalHtmlPathError {
+    fn from(error: InfrastructureFailure) -> Self {
+        Self::Infrastructure(error)
+    }
+}
+
 /// Derive the canonical HTML page route from an entry file.
 ///
 /// WHAT: maps Moth entry conventions to one route value:
@@ -85,7 +98,7 @@ pub(crate) fn plan_wasm_output_from_route(route: &CanonicalPageRoute) -> HtmlRou
 pub(crate) fn derive_logical_html_path(
     entry_point: &Path,
     entry_root: Option<&Path>,
-) -> Result<CanonicalPageRoute, CompilerError> {
+) -> Result<CanonicalPageRoute, LogicalHtmlPathError> {
     if let Some(entry_root) = entry_root {
         return derive_logical_html_path_from_entry_root(entry_point, entry_root);
     }
@@ -96,10 +109,11 @@ pub(crate) fn derive_logical_html_path(
 fn derive_logical_html_path_from_entry_root(
     entry_point: &Path,
     entry_root: &Path,
-) -> Result<CanonicalPageRoute, CompilerError> {
+) -> Result<CanonicalPageRoute, LogicalHtmlPathError> {
     // Route derivation is deterministic: discovery order never affects output paths.
     let relative_entry = entry_point.strip_prefix(entry_root).map_err(|_| {
-        CompilerError::file_error(
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
             entry_point,
             format!(
                 "HTML entry '{}' is not inside the configured entry root '{}'.",
@@ -132,14 +146,16 @@ fn derive_logical_html_path_from_entry_root(
 ///
 /// WHAT: converts the entry stem to an exact UTF-8 route name, then maps `@page` to the
 /// homepage and strips a cosmetic leading `@` from any other stem.
-/// WHY: the stem is filesystem-authored, so an empty or non-UTF-8 stem is a File
-///      infrastructure error. It must never collapse to a generic `main` fallback, which
-///      would alias distinct source identities to one route.
+/// WHY: the stem comes from the host or builder entry path, so an absent, empty or non-UTF-8
+///      stem is a File infrastructure error. Stripping `@` can make an authored stem empty,
+///      which is a typed diagnostic. It must never collapse to a generic `main` fallback,
+///      which would alias distinct source identities to one route.
 fn derive_single_file_logical_html_path(
     entry_point: &Path,
-) -> Result<CanonicalPageRoute, CompilerError> {
+) -> Result<CanonicalPageRoute, LogicalHtmlPathError> {
     let raw_stem = entry_point.file_stem().ok_or_else(|| {
-        CompilerError::file_error(
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
             entry_point,
             format!(
                 "HTML single-file entry {entry_point:?} has no file stem; Moth routes need a non-empty UTF-8 stem."
@@ -148,7 +164,8 @@ fn derive_single_file_logical_html_path(
     })?;
 
     let file_stem = raw_stem.to_str().ok_or_else(|| {
-        CompilerError::file_error(
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
             entry_point,
             "HTML single-file entry stem is not valid UTF-8; Moth routes require UTF-8 stems."
                 .to_string(),
@@ -156,11 +173,13 @@ fn derive_single_file_logical_html_path(
     })?;
 
     if file_stem.is_empty() {
-        return Err(CompilerError::file_error(
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
             entry_point,
             "HTML single-file entry has an empty stem; Moth routes require a non-empty UTF-8 stem."
                 .to_string(),
-        ));
+        )
+        .into());
     }
 
     if file_stem == "@page" {
@@ -174,9 +193,8 @@ fn derive_single_file_logical_html_path(
     let route_name = file_stem.strip_prefix('@').unwrap_or(file_stem);
 
     if route_name.is_empty() {
-        return Err(CompilerError::file_error(
-            entry_point,
-            "HTML single-file entry stem is empty after stripping the cosmetic '@' prefix; Moth routes require a non-empty route name.".to_string(),
+        return Err(LogicalHtmlPathError::EmptyRouteName(
+            entry_point.to_path_buf(),
         ));
     }
 

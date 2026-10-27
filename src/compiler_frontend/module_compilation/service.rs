@@ -2,7 +2,7 @@
 //!
 //! WHAT: one entry point that takes a ready module — prepared source plus completed provider
 //!       interfaces — and returns a complete semantic result, a diagnosed result or a
-//!       `CompilerError`.
+//!       `InfrastructureFailure`.
 //! WHY: the compiler owns local semantic compilation. Sequencing interface binding, declaration
 //!      ordering, AST semantics, public-interface projection, HIR lowering and validation, borrow
 //!      validation and generated completion is compiler work, so it lives behind one call rather
@@ -14,9 +14,11 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -60,9 +62,10 @@ use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::public_interface::{
-    PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicSemanticInterface,
-    SourceProviderDependencySet, build_direct_export_seed,
-    build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
+    PublicInterfaceDraftBuildFailure, PublicInterfaceDraftBuilder,
+    PublicInterfaceDraftBuilderInput, PublicSemanticInterface, SourceProviderDependencySet,
+    build_direct_export_seed, build_public_source_nominal_origin_index,
+    build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::SourceId;
@@ -101,6 +104,7 @@ pub(crate) struct BoracleModuleInput {
 pub(crate) fn compile_module(
     context: &ModuleCompilationContext<'_>,
     prepared: PreparedModuleInput,
+    preparation_warnings: Vec<DiagnosticDraft>,
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<ModuleCompilationOutcome, Box<InfrastructureErrors>> {
@@ -119,7 +123,6 @@ pub(crate) fn compile_module(
         resolved_file_references,
         string_table,
         path_fork,
-        warnings,
         source_file_count,
         source_byte_count,
     } = prepared;
@@ -131,12 +134,13 @@ pub(crate) fn compile_module(
     // public header against it.
     let active_module_origin = source_module_origins
         .origin_for(active_root_file_id)?
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "semantic module compilation: active root file id {} has no module origin",
                 active_root_file_id.index()
-            ))
-        })?
+            )
+        })
         .clone();
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
@@ -152,7 +156,7 @@ pub(crate) fn compile_module(
         &mut compiler,
         context,
         known_generated,
-        warnings,
+        preparation_warnings,
         SemanticStageInputs {
             candidate_source_ids,
             prepared_header_syntax,
@@ -169,50 +173,43 @@ pub(crate) fn compile_module(
         timing_context,
     );
 
-    // Normalize the deeper stages' classified premerge lane once at this semantic boundary.
-    // A successful compilation becomes `Success`. A diagnosed batch becomes `Diagnosed`
-    // (user-facing diagnostics the renderer surfaces) or an infrastructure aggregate when the batch
-    // fails diagnosed validation. An infrastructure failure propagates unchanged. This is the
-    // single lossless ownership transfer; graph and render consumers never re-classify.
+    // Normalize premerge and prepared semantic failures once at this boundary. A successful
+    // compilation becomes `Success`; a diagnosed failure becomes `Diagnosed` after boundary
+    // validation, while infrastructure failures propagate unchanged.
     match compile_result {
-        Ok(SemanticStageOutput::Complete(output)) => {
+        Ok(SemanticStageOutput::Complete(output, sidecar_warnings)) => {
             let CompleteSemanticStage {
                 module,
+                warnings,
                 public_interface,
                 generated_delta,
                 resource_source_associations,
             } = *output;
             let string_table = compiler.string_table;
             let path_fork = compiler.path_fork;
-            Ok(ModuleCompilationOutcome::Success(Box::new(
-                ModuleSemanticResult {
+            Ok(ModuleCompilationOutcome::Success {
+                compiled: Box::new(ModuleSemanticResult {
                     module,
                     generated_delta,
                     resource_source_associations,
                     string_table,
                     path_fork,
                     public_interface,
-                },
-            )))
+                }),
+                warnings,
+                sidecar_warnings,
+            })
         }
         #[cfg(feature = "boracle")]
-        Ok(SemanticStageOutput::Boracle(_)) => Err(CompilerError::compiler_error(
-            "normal module compilation unexpectedly stopped at the Boracle prefix",
-        )
-        .into()),
-        Err(mut failure) => {
-            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
-            match failure {
-                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
-                    Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
-                    Err(error) => Err(error.into()),
-                },
-                PremergeFailure::Infrastructure(error) => Err(error),
-                // Mixed double-failures only arise at source-finalization tails and never reach
-                // module compilation; abort through the typed lane if one ever does.
-                PremergeFailure::Mixed { error, .. } => Err(error),
-            }
-        }
+        Ok(SemanticStageOutput::Boracle(_)) => crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
+            "normal module compilation unexpectedly stopped at the Boracle prefix"
+        ),
+        Err(PreparedFailure::Diagnosed(batch)) => match batch.classify_premerge() {
+            Ok(prepared) => Ok(ModuleCompilationOutcome::Diagnosed(prepared)),
+            Err(error) => Err(error.into()),
+        },
+        Err(PreparedFailure::Infrastructure(error)) => Err(error),
     }
 }
 
@@ -225,12 +222,13 @@ pub(crate) fn compile_module(
 pub(crate) fn compile_module_for_boracle(
     context: &ModuleCompilationContext<'_>,
     prepared: PreparedModuleInput,
+    preparation_warnings: Vec<DiagnosticDraft>,
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BoracleModuleInput, PremergeFailure> {
-    // Intermediate failures stay in the premerge lane; the final build boundary owns the
-    // single vessel conversion. Infrastructure errors propagate typed without building a
-    // second vessel or cloning the local table.
+) -> Result<BoracleModuleInput, PreparedFailure> {
+    // Both typed lanes stay intact until the final build boundary performs the one vessel
+    // conversion. Infrastructure errors propagate without building a second vessel or cloning
+    // the local table.
     let entry_file_path = prepared
         .entry_file_path(context.source_files)?
         .to_path_buf();
@@ -243,19 +241,19 @@ pub(crate) fn compile_module_for_boracle(
         resolved_file_references,
         string_table,
         path_fork,
-        warnings,
         source_file_count,
         source_byte_count,
     } = prepared;
     resolved_file_references.validate()?;
     let active_module_origin = source_module_origins
         .origin_for(active_root_file_id)?
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "semantic Boracle compilation: active root file id {} has no module origin",
                 active_root_file_id.index()
-            ))
-        })?
+            )
+        })
         .clone();
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
@@ -270,7 +268,7 @@ pub(crate) fn compile_module_for_boracle(
         &mut compiler,
         context,
         known_generated,
-        warnings,
+        preparation_warnings,
         SemanticStageInputs {
             prepared_header_syntax,
             candidate_source_ids,
@@ -287,19 +285,11 @@ pub(crate) fn compile_module_for_boracle(
         timing_context,
     ) {
         Ok(SemanticStageOutput::Boracle(input)) => Ok(*input),
-        Ok(SemanticStageOutput::Complete(_)) => {
-            Err(PremergeFailure::from(CompilerError::compiler_error(
-                "Boracle compiler service unexpectedly completed the normal semantic pipeline",
-            )))
-        }
-        Err(mut failure) => {
-            if let Err(error) =
-                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
-            {
-                return Err(PremergeFailure::from(error));
-            }
-            Err(failure)
-        }
+        Ok(SemanticStageOutput::Complete(..)) => crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
+            "Boracle compiler service unexpectedly completed the normal semantic pipeline"
+        ),
+        Err(failure) => Err(failure),
     }
 }
 
@@ -327,7 +317,7 @@ struct SemanticStageInputs<'a> {
 }
 
 enum SemanticStageOutput {
-    Complete(Box<CompleteSemanticStage>),
+    Complete(Box<CompleteSemanticStage>, Vec<DiagnosticBag>),
     #[cfg(feature = "boracle")]
     Boracle(Box<BoracleModuleInput>),
 }
@@ -342,6 +332,7 @@ enum SemanticStageRequest {
 
 struct CompleteSemanticStage {
     module: Module,
+    warnings: DiagnosticBag,
     public_interface: PublicSemanticInterface,
     generated_delta: GeneratedFunctionDelta,
     resource_source_associations: Vec<ResourceSourceAssociation>,
@@ -352,20 +343,18 @@ struct CompleteSemanticStage {
 /// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
 ///       generated completion, returning the complete module, public interface, generated delta
 ///       and resource-source associations a success is made of.
-/// WHY: every stage in here fails with a classified [`PremergeFailure`]: binding/order stages
-///      move the local table into a diagnosed batch, while deeper AST/HIR vessels classify
-///      through the single premerge conversion at each `?` boundary. Infrastructure failures
-///      propagate directly without building a second vessel. Keeping the sequence in its own
-///      means `compile_module` reads as three steps rather than wrapping four hundred lines.
+/// WHY: binding/order retain premerge failures, while AST/HIR/borrow diagnostics cross as captured
+///       prepared batches. The module boundary classifies each lane as it completes and keeps
+///       this sequence readable as one semantic pipeline.
 fn run_semantic_stages(
     compiler: &mut CompilerFrontend<'_>,
     context: &ModuleCompilationContext<'_>,
     known_generated: KnownGeneratedFunctions<'_>,
-    mut warnings: Vec<CompilerDiagnostic>,
+    mut warnings: Vec<DiagnosticDraft>,
     inputs: SemanticStageInputs<'_>,
     request: SemanticStageRequest,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<SemanticStageOutput, PremergeFailure> {
+) -> Result<SemanticStageOutput, PreparedFailure> {
     #[cfg(not(feature = "boracle"))]
     let _ = request;
     let SemanticStageInputs {
@@ -381,8 +370,8 @@ fn run_semantic_stages(
     } = inputs;
 
     // Resolve the ordered candidate source IDs before header syntax is consumed. These are the
-    // module's complete owned candidates, including sources not reached by the header walk, and
-    // therefore preserve the pre-slice per-module source-table scope for external imports.
+    // module's complete owned candidates, including sources not reached by the header walk, so
+    // external-import resolution stays scoped to this module's source table.
     let source_logical_paths = if context.project_path_resolver.is_some() {
         let path_table = compiler.source_files.paths();
         let mut path_scratch = Vec::new();
@@ -400,13 +389,14 @@ fn run_semantic_stages(
                         )
                     })
                     .ok_or_else(|| {
-                        PremergeFailure::from(CompilerError::compiler_error(format!(
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
                             "semantic module compilation: candidate source ID {} is not in the boundary source file table",
                             source_id.index()
-                        )))
+                        )
                     })
             })
-            .collect::<Result<Vec<_>, PremergeFailure>>()?
+            .collect::<Result<Vec<_>, PreparedFailure>>()?
     } else {
         Vec::new()
     };
@@ -427,7 +417,6 @@ fn run_semantic_stages(
                 prepared_header_syntax,
                 external_dependency_resolution_table,
                 context.source_provider_dependencies,
-                &mut warnings,
             )
         }
     )?;
@@ -439,12 +428,7 @@ fn run_semantic_stages(
     let sorted = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendOrderDeclarations,
         timing_context,
-        sort_headers(
-            compiler,
-            module_headers,
-            &resolved_file_references,
-            &mut warnings,
-        )
+        sort_headers(compiler, module_headers, &resolved_file_references,)
     )?;
 
     let root_activity = ModuleRootActivity {
@@ -514,7 +498,7 @@ fn run_semantic_stages(
     // consumed before HIR: the public-interface projection input and the validated
     // donor-local generic-template map. HIR receives the executable `Ast` only. The
     // projection input carries the resolved receiver-method catalog and public type-root
-    // table that step 4 joins with the pre-AST `DirectExportSeed` to build the post-AST
+    // table that joins with the pre-AST `DirectExportSeed` to build the post-AST
     // `CallableSeed` table, the one receiver and callable identity owner.
     let module_ast_build = build_ast_with_registered_types(
         context,
@@ -541,37 +525,37 @@ fn run_semantic_stages(
         assertion_validation_generic_requests,
     } = module_ast_build;
 
-    let module_resources = module_resources.ok_or_else(|| {
-        CompilerError::compiler_error(
-            "module AST finalization did not retain its module resource table",
+    let module_resources = module_resources.unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
+            "module AST finalization did not retain its module resource table"
         )
-    })?;
-    let mut materialisation_context_builder = materialisation_context_builder.ok_or_else(|| {
-        CompilerError::compiler_error(
-            "module AST finalization did not retain its materialisation context",
-        )
-    })?;
-    // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
-    //    draft is the sole pre-HIR public-semantic handoff: the export-origin
-    //    finalization, the canonical type-surface projection and the corrected
-    //    trait-requirement projection are internal builder steps. They run from
-    //    already-resolved facts (the receiver catalog, the resolved public type-root
-    //    table, the resolved public trait-root vector, the `DirectExportSeed` and the
-    //    module TypeEnvironment) without a second source scan or HIR scan, and are
-    //    retained only on overall semantic success. The builder also produces the
-    //    transient post-AST `CallableSeed` table, the one receiver and callable
-    //    identity owner consumed by direct projection, declaration-record projection,
-    //    HIR origin seeding and generic-template extraction. No donor-local TypeId,
-    //    NominalTypeId, GenericParameterId, TraitId, CoreTraitKind or PathId
-    //    crosses the module result boundary. It is not the final
-    //    PublicSemanticInterface: reusable evidence is now an internal builder step
-    //    and draft collection, generic template body extraction is already completed in
-    //    step 4b, and concrete call-summary finalization is already completed after
-    //    borrow validation, while provenance, re-export interfaces, cross-module call
-    //    lowering and future generated-generic summaries remain for later phases.
-    //    Folded constant values are owned by the AST module store and projected by value ID.
+    });
+    let mut materialisation_context_builder =
+        materialisation_context_builder.unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "module AST finalization did not retain its materialisation context"
+            )
+        });
+    // Build the one aggregate public-interface draft before HIR consumes the AST. The draft is
+    // the sole pre-HIR public-semantic handoff: the export-origin finalization, the canonical
+    // type-surface projection and the corrected trait-requirement projection are internal
+    // builder steps. They run from already-resolved facts (the receiver catalog, the resolved
+    // public type-root table, the resolved public trait-root vector, the `DirectExportSeed` and
+    // the module TypeEnvironment) without a second source scan or HIR scan, and are retained
+    // only on overall semantic success. The builder also produces the transient post-AST
+    // `CallableSeed` table, the one receiver and callable identity owner consumed by direct
+    // projection, declaration-record projection, HIR origin seeding and generic-template extraction.
+    // The public-interface draft carries stable declaration identities, not donor-local TypeId,
+    // NominalTypeId, GenericParameterId, TraitId, CoreTraitKind or PathId. Folded constant values
+    // are owned by the AST module store and projected by value ID.
+    //
+    // The draft is not the final `PublicSemanticInterface`. Concrete call-summary finalization runs
+    // after borrow validation, and provider closure assembles the completed public surface.
+    // Export-diagnostic and synthetic-interface provenance are already retained in the draft.
     let module_resource_table = module_resources.borrow();
-    let public_interface_build = timed_stage_attributed!(
+    let public_interface_build_result = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendPublicInterfaceProject,
         timing_context,
         PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
@@ -590,7 +574,27 @@ fn run_semantic_stages(
             module_resources: Some(&module_resource_table),
         })
         .build(),
-    )?;
+    );
+    let public_interface_build = match public_interface_build_result {
+        Ok(result) => result,
+        Err(PublicInterfaceDraftBuildFailure::Infrastructure(error)) => {
+            return Err(error.into());
+        }
+        Err(PublicInterfaceDraftBuildFailure::Diagnostic(diagnostic)) => {
+            let mut diagnostic_drafts = std::mem::take(&mut warnings);
+            diagnostic_drafts.push(diagnostic);
+            let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from_diagnostics(diagnostic_drafts),
+                compiler.string_table.take_for_handoff(),
+                Some(&module_ast.type_environment),
+                || Some(Arc::new(compiler.path_fork.shared_table())),
+            ) {
+                Ok(batch) => batch,
+                Err(error) => return Err(PreparedFailure::from(error)),
+            };
+            return Err(PreparedFailure::Diagnosed(batch));
+        }
+    };
     let public_interface_draft = public_interface_build.draft;
 
     // Release the shared-table borrow before HIR: lowering re-interns handoff origins with
@@ -688,9 +692,10 @@ fn run_semantic_stages(
                     value,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?
     };
 
+    let mut warning_bag = DiagnosticBag::from_diagnostics(std::mem::take(&mut warnings));
     // 6. Lower AST to Higher-level Intermediate Representation (HIR).
     let hir_lowering = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendHir,
@@ -698,7 +703,7 @@ fn run_semantic_stages(
         lower_hir(
             compiler,
             module_ast,
-            &warnings,
+            &mut warning_bag,
             function_origin_lookup,
             Some(Rc::clone(&module_resources)),
             None,
@@ -733,7 +738,13 @@ fn run_semantic_stages(
     let bootstrap_borrow_analysis = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendBorrowInitial,
         timing_context,
-        check_borrows(compiler, &hir_module, &warnings, None)
+        check_borrows(
+            compiler,
+            &hir_module,
+            &type_environment,
+            &mut warning_bag,
+            None
+        )
     )?;
     let generated_materialisation = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendGeneratedMaterialise,
@@ -758,12 +769,12 @@ fn run_semantic_stages(
         &mut generated_transaction,
         bootstrap_borrow_analysis,
         &mut type_environment,
-        &warnings,
+        &mut warning_bag,
         #[cfg(feature = "timers")]
         timing_context,
     )?;
-    // Private failure lanes and their final link facts are complete. Publication may
-    // still rebase interned scalar identities, but expression topology is now fixed.
+    // Private failure lanes and final link facts are complete. Publication may still
+    // rebase interned scalar identities, but expression topology is fixed.
     hir_module.expressions.freeze();
     // Reinstall after convergence: the fixed point may have widened a callee summary the
     // pre-materialisation pass recorded, and the frozen context must carry the final one.
@@ -772,7 +783,7 @@ fn run_semantic_stages(
         &hir_module,
         &borrow_analysis,
     )?;
-    let generated_delta = generated_transaction.finish()?;
+    let (generated_delta, sidecar_warnings) = generated_transaction.finish();
     record_borrow_counters(&borrow_analysis);
 
     // Concrete call-summary finalization runs exactly once after HIR and borrow
@@ -801,11 +812,12 @@ fn run_semantic_stages(
         .map(Arc::new);
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
-        .map_err(|_| {
-            PremergeFailure::from(CompilerError::compiler_error(
-                "ordinary module resource table still has a live shared handle after HIR lowering",
-            ))
-        })?;
+        .unwrap_or_else(|_| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "ordinary module resource table still has a live shared handle after HIR lowering"
+            )
+        });
     let resource_source_associations = resource_table.resource_source_associations().to_vec();
 
     // -------------------------
@@ -837,8 +849,8 @@ fn run_semantic_stages(
 
     let numeric_proofs = analyse_numeric_proofs(&hir_module, &type_environment);
 
-    Ok(SemanticStageOutput::Complete(Box::new(
-        CompleteSemanticStage {
+    Ok(SemanticStageOutput::Complete(
+        Box::new(CompleteSemanticStage {
             module: Module {
                 executable: ModuleExecutable {
                     hir: hir_module,
@@ -859,18 +871,19 @@ fn run_semantic_stages(
                 },
                 metadata: ModuleCompilerMetadata::from_hir_lowering(
                     entry_file_path.to_path_buf(),
-                    warnings,
                     lowering_metadata,
                     const_top_level_fragments,
                     root_activity,
                     materialisation_context,
                 ),
             },
+            warnings: warning_bag,
             public_interface,
             generated_delta,
             resource_source_associations,
-        },
-    )))
+        }),
+        sidecar_warnings,
+    ))
 }
 
 /// Bind retained `PreparedHeaderSyntax` against provider interfaces.
@@ -885,8 +898,7 @@ fn bind_retained_headers(
     prepared_header_syntax: PreparedHeaderSyntax,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<BoundModuleHeaders, PremergeFailure> {
+) -> Result<BoundModuleHeaders, PreparedFailure> {
     let headers = bind_module_headers(
         prepared_header_syntax,
         compiler.external_package_registry.as_ref(),
@@ -897,22 +909,21 @@ fn bind_retained_headers(
         &mut compiler.string_table,
         &mut compiler.path_fork,
     )
-    .map_err(|failure| {
-        // Move the compiler table into the batch; binding failed, so the compiler owner
-        // hands its table to the diagnosed lane instead of cloning it for a vessel.
-        // Infrastructure failures stay typed and discard warning companions, matching the
-        // module classifier contract.
-        match failure {
-            HeaderPreparationFailure::Diagnosed(bag) => {
-                let table = std::mem::take(&mut compiler.string_table);
-                let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
-                batch.prepend_diagnostics(std::mem::take(warnings));
-                PremergeFailure::Diagnosed(batch)
-            }
-            HeaderPreparationFailure::Infrastructure(error) => {
-                PremergeFailure::Infrastructure(error)
+    .map_err(|failure| match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => {
+            let string_table = compiler.string_table.take_for_handoff();
+            let path_fork = &compiler.path_fork;
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                bag,
+                string_table,
+                None,
+                || Some(Arc::new(path_fork.shared_table())),
+            ) {
+                Ok(batch) => PreparedFailure::Diagnosed(batch),
+                Err(error) => PreparedFailure::from(error),
             }
         }
+        HeaderPreparationFailure::Infrastructure(error) => PreparedFailure::Infrastructure(error),
     })?;
 
     record_header_counters(&headers);
@@ -923,21 +934,8 @@ fn sort_headers(
     compiler: &mut CompilerFrontend<'_>,
     module_headers: BoundModuleHeaders,
     resolved_file_references: &ResolvedFileReferenceTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<SortedHeaders, PremergeFailure> {
-    compiler
-        .sort_headers(module_headers, resolved_file_references)
-        .map_err(|failure| match failure {
-            PremergeFailure::Diagnosed(mut batch) => {
-                batch.prepend_diagnostics(std::mem::take(warnings));
-                PremergeFailure::Diagnosed(batch)
-            }
-            PremergeFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
-            PremergeFailure::Mixed { mut batch, error } => {
-                batch.prepend_diagnostics(std::mem::take(warnings));
-                PremergeFailure::Mixed { batch, error }
-            }
-        })
+) -> Result<SortedHeaders, PreparedFailure> {
+    compiler.sort_headers(module_headers, resolved_file_references)
 }
 
 // The timing context is a cfg-gated parameter that disappears from
@@ -953,11 +951,11 @@ fn build_ast_with_registered_types(
     entry_file_path: &Path,
     root_role: ModuleRootRole,
     capacity_estimate: FrontendArenaCapacityEstimate,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut Vec<DiagnosticDraft>,
     resolved_file_references: ResolvedFileReferenceTable,
     module_origin: Option<StableModuleOriginIdentity>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<AstBuildResult, PremergeFailure> {
+) -> Result<AstBuildResult, PreparedFailure> {
     match compiler.headers_to_ast(
         AstBuildRequest {
             sorted,
@@ -972,20 +970,11 @@ fn build_ast_with_registered_types(
         #[cfg(feature = "timers")]
         timing_context,
     ) {
-        Ok(build_result) => {
-            warnings.extend(build_result.ast.warnings.clone());
+        Ok(mut build_result) => {
+            warnings.extend(std::mem::take(&mut build_result.ast.warnings));
             Ok(build_result)
         }
-        Err(messages) => {
-            // Classify the mixed vessel once into the premerge lane, then prepend prior
-            // warnings to the diagnosed batch. Infrastructure failures propagate typed and
-            // drop their warning companions, matching the `ModuleDiagnostics` contract.
-            let mut failure = PremergeFailure::from(messages);
-            if let PremergeFailure::Diagnosed(batch) = &mut failure {
-                batch.prepend_diagnostics(std::mem::take(warnings));
-            }
-            Err(failure)
-        }
+        Err(failure) => Err(failure),
     }
 }
 
@@ -1027,9 +1016,8 @@ fn record_frontend_capacity_estimate(
         headers.entry_runtime_fragment_count,
     );
 
-    // Phase 1 wires the scope-frame estimate because scope-frame arenas are the first typed arena
-    // target. Phase 4 records actual frame allocation and arena capacity growth from the scope
-    // arena owner; this site records only the policy estimate.
+    // Scope-frame estimates are recorded here; actual frame allocations and arena capacity growth
+    // are recorded by the scope arena owner. This site records only the policy estimate.
     add_frontend_counter(FrontendCounter::EstimatedScopeFrames, capacity.scope_frames);
     add_frontend_counter(
         FrontendCounter::CappedCapacityEstimates,

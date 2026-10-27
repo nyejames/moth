@@ -106,7 +106,7 @@ fn clean_cli_execution_rejects_warning_status() {
         execute_case(&context, &manifest.cases[0]).expect_err("warnings must fail clean preflight");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::CleanExpectationWarnings {
             warning_count: 2,
             ..
@@ -114,6 +114,8 @@ fn clean_cli_execution_rejects_warning_status() {
     ));
     assert_eq!(
         failure
+            .details
+            .evidence
             .benchmark_status
             .expect("status should be retained")
             .warning_count,
@@ -149,7 +151,7 @@ fn warned_cli_expectation_requires_success_and_a_warning() {
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("warned errors should fail");
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::WarnedExpectationErrors { error_count: 2 }
     ));
 
@@ -164,7 +166,7 @@ fn warned_cli_expectation_requires_success_and_a_warning() {
     let failure = execute_case(&context, &manifest.cases[0])
         .expect_err("warned without warnings should fail");
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::WarnedExpectationWarnings {
             warning_count: 0,
             ..
@@ -204,7 +206,7 @@ fn diagnosed_cli_expectation_accepts_user_errors_and_rejects_other_outcomes() {
     let failure =
         execute_case(&context, &manifest.cases[0]).expect_err("diagnosed clean output should fail");
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::DiagnosedExpectationNoErrors {
             warning_count: 2,
             ..
@@ -222,7 +224,7 @@ fn diagnosed_cli_expectation_accepts_user_errors_and_rejects_other_outcomes() {
     let failure = execute_case(&context, &manifest.cases[0])
         .expect_err("diagnosed successful process should fail");
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::DiagnosedExpectationSucceeded { error_count: 2 }
     ));
 }
@@ -241,7 +243,7 @@ fn successful_cli_process_rejects_reported_errors() {
         execute_case(&context, &manifest.cases[0]).expect_err("reported errors must fail closed");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::CleanExpectationErrors { error_count: 3 }
     ));
 }
@@ -273,7 +275,7 @@ fn successful_cli_process_rejects_missing_malformed_and_duplicate_status() {
 
         assert!(
             matches!(
-                failure.kind,
+                &failure.details.kind,
                 BenchmarkFailureKind::InvalidMachineStatus { .. }
             ),
             "{name} should be classified as invalid machine status"
@@ -306,14 +308,16 @@ fn successful_cli_process_rejects_invalid_live_observations_with_bounded_evidenc
 
         assert!(
             matches!(
-                failure.kind,
+                &failure.details.kind,
                 BenchmarkFailureKind::ObservationInfrastructureFailure { .. }
             ),
             "{name} should use the observation failure lane"
         );
         assert!(
             failure
-                .stdout_evidence
+                .details
+                .evidence
+                .stdout
                 .as_deref()
                 .is_some_and(|evidence| normalize_newlines(evidence).contains(observation_output)),
             "{name} should retain bounded stdout evidence"
@@ -340,19 +344,21 @@ fn nonzero_process_status_fails_even_when_machine_status_is_clean() {
         execute_case(&context, &manifest.cases[0]).expect_err("nonzero process must fail");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::NonZeroProcessStatus
     ));
-    assert_eq!(failure.exit_code, Some(7));
+    assert_eq!(failure.details.evidence.exit_code, Some(7));
     assert_eq!(
         failure
+            .details
+            .evidence
             .benchmark_status
             .expect("clean status evidence should be retained")
             .error_count,
         0
     );
     assert_eq!(
-        failure.stderr_evidence.as_deref(),
+        failure.details.evidence.stderr.as_deref(),
         Some("compiler infrastructure failed")
     );
 }
@@ -370,7 +376,7 @@ fn missing_compiler_binary_is_a_process_spawn_failure() {
         execute_case(&context, &manifest.cases[0]).expect_err("spawn failure must be retained");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::ProcessSpawnFailure { .. }
     ));
 }
@@ -400,7 +406,7 @@ fn cli_and_frontend_total_durations_must_be_positive_and_finite() {
                 .expect_err("invalid duration must fail");
 
             assert!(matches!(
-                failure.kind,
+                &failure.details.kind,
                 BenchmarkFailureKind::InvalidTotalDuration { .. }
             ));
         }
@@ -438,7 +444,7 @@ fn inconsistent_measured_metric_sets_use_typed_observation_failure() {
         .expect_err("timing metric drift must fail through the typed lane");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::ObservationInfrastructureFailure { .. }
     ));
     assert!(failure.to_string().contains("missing: command.check.total"));
@@ -511,11 +517,15 @@ fn failure_evidence_keeps_stdout_and_stderr_separate_and_bounded() {
         None,
     );
     let stdout_evidence = failure
-        .stdout_evidence
+        .details
+        .evidence
+        .stdout
         .as_deref()
         .expect("stdout evidence should exist");
     let stderr_evidence = failure
-        .stderr_evidence
+        .details
+        .evidence
+        .stderr
         .as_deref()
         .expect("stderr evidence should exist");
     let rendered = failure.to_string();
@@ -604,7 +614,7 @@ if value is:
         .expect_err("frontend warnings must fail clean preflight");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::CleanExpectationWarnings {
             warning_count: 3,
             ..
@@ -612,6 +622,8 @@ if value is:
     ));
     assert_eq!(
         failure
+            .details
+            .evidence
             .benchmark_status
             .expect("frontend warning status should be retained")
             .warning_count,
@@ -640,11 +652,13 @@ fn frontend_compilation_failure_is_typed_and_bounded() {
         .expect_err("frontend compiler failure must fail preflight");
 
     assert!(matches!(
-        failure.kind,
+        &failure.details.kind,
         BenchmarkFailureKind::CleanExpectationErrors { error_count: 1 }
     ));
     assert_eq!(
         failure
+            .details
+            .evidence
             .benchmark_status
             .expect("frontend diagnostic status should be retained")
             .error_count,

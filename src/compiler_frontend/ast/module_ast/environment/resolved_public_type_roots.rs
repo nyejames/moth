@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -110,7 +111,7 @@ impl ResolvedTraitSourceFact {
     /// WHAT: a core trait maps to `Core(kind)`; a trait that already carries a `Source` identity
     /// maps to `Imported(origin)`; every other trait maps to `Source(canonical_path)`, which
     /// projection resolves through the public source-trait origin index. A `TraitId` with no
-    /// resolved definition is a `CompilerError`.
+    /// resolved definition is an `InfrastructureFailure`.
     /// WHY: this is the one classifier for both generic-bound projection and evidence projection.
     /// Both run on the environment that exists before public-interface freezing, where only an
     /// imported trait carries a `Source` identity. Freezing registers local identities on a fork
@@ -119,7 +120,7 @@ impl ResolvedTraitSourceFact {
     pub(crate) fn classify(
         trait_id: TraitId,
         trait_environment: &TraitEnvironment,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         if let Some(kind) = trait_environment.core_trait_kind(trait_id) {
             return Ok(Self::Core(kind));
         }
@@ -131,10 +132,13 @@ impl ResolvedTraitSourceFact {
         }
 
         let Some(definition) = trait_environment.get(trait_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "trait source classification: TraitId({}) has no resolved trait definition and is not a core trait; a missing definition is an internal invariant violation",
-                trait_id.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "trait source classification: TraitId({}) has no resolved trait definition and is not a core trait; a missing definition is an internal invariant violation",
+                    trait_id.0
+                ),
+            ));
         };
 
         Ok(Self::Source(definition.canonical_path))
@@ -196,7 +200,7 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
 /// aliases and constants) and the complete public nominal path set. Pass 2 selects receiver
 /// methods by nominal receiver ownership, independent of the method's own export binding.
 /// Trait-source facts for exported generic bounds are resolved from the `TraitEnvironment`.
-/// A missing, wrong-category or unresolvable fact is an internal `CompilerError` rather than
+/// A missing, wrong-category or unresolvable fact is an internal `InfrastructureFailure` rather than
 /// silent omission.
 /// WHY: two passes over the same sorted headers keep a single deterministic owner and let
 /// the method pass see the complete public nominal set even when a method precedes its
@@ -204,7 +208,7 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
 /// receiver and would wrongly gate private methods on their own export binding.
 pub(crate) fn build_resolved_public_type_roots(
     input: BuildResolvedPublicTypeRootsInput<'_>,
-) -> Result<ResolvedPublicTypeRootTable, CompilerError> {
+) -> Result<ResolvedPublicTypeRootTable, InfrastructureFailure> {
     let BuildResolvedPublicTypeRootsInput {
         sorted_headers,
         resolved_struct_fields_by_path,
@@ -544,7 +548,7 @@ pub(crate) fn build_resolved_public_type_roots(
 /// template lists, then classifies each through `ResolvedTraitSourceFact::classify`: a core
 /// trait maps to `Core(CoreTraitKind)`, an imported trait to `Imported(origin)`, and a local
 /// source trait to `Source(canonical_path)`. A `TraitId` without a resolved definition is a
-/// `CompilerError`, never a silent omission.
+/// `InfrastructureFailure`, never a silent omission.
 /// WHY: the transient facts let bound projection resolve each local `TraitId` after the
 /// `TraitEnvironment` is dropped. The facts needed by exported generic bounds and by public
 /// trait incompatibility relations are retained, keeping the table minimal while the
@@ -554,7 +558,7 @@ fn build_trait_source_facts(
     receiver_method_list_ids: &[GenericParameterListId],
     type_environment: &TypeEnvironment,
     trait_environment: &TraitEnvironment,
-) -> Result<FxHashMap<TraitId, ResolvedTraitSourceFact>, CompilerError> {
+) -> Result<FxHashMap<TraitId, ResolvedTraitSourceFact>, InfrastructureFailure> {
     let mut trait_ids = collect_bound_trait_ids_from_roots(roots, type_environment)?;
     for list_id in receiver_method_list_ids {
         collect_bound_trait_ids_from_list(type_environment, *list_id, &mut trait_ids)?;
@@ -589,7 +593,7 @@ fn build_trait_source_facts(
 fn collect_bound_trait_ids_from_roots(
     roots: &[ResolvedPublicTypeRoot],
     type_environment: &TypeEnvironment,
-) -> Result<FxHashSet<TraitId>, CompilerError> {
+) -> Result<FxHashSet<TraitId>, InfrastructureFailure> {
     let mut bound_trait_ids = FxHashSet::default();
 
     for root in roots {
@@ -638,12 +642,15 @@ fn collect_bound_trait_ids_from_list(
     type_environment: &TypeEnvironment,
     list_id: GenericParameterListId,
     bound_trait_ids: &mut FxHashSet<TraitId>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(list) = type_environment.generic_parameters(list_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "resolved public type-root construction: GenericParameterListId({}) is missing from the TypeEnvironment while collecting bound trait IDs",
-            list_id.0
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "resolved public type-root construction: GenericParameterListId({}) is missing from the TypeEnvironment while collecting bound trait IDs",
+                list_id.0
+            ),
+        ));
     };
 
     for parameter in &list.parameters {
@@ -659,28 +666,34 @@ fn collect_bound_trait_ids_from_list(
 ///
 /// Returns `Ok(None)` when the struct or choice definition has no generic parameter list
 /// (a non-generic nominal). A `TypeId` that is not registered in the `TypeEnvironment`, or
-/// that resolves to a definition that is neither a struct nor a choice, is a `CompilerError`:
+/// that resolves to a definition that is neither a struct nor a choice, is an `InfrastructureFailure`:
 /// the root was admitted as a nominal declaration, so a missing or wrong-category definition
 /// is an internal invariant violation, not a silent skip.
 fn nominal_generic_parameter_list_id(
     type_environment: &TypeEnvironment,
     type_id: TypeId,
-) -> Result<Option<GenericParameterListId>, CompilerError> {
+) -> Result<Option<GenericParameterListId>, InfrastructureFailure> {
     let Some(definition) = type_environment.get(type_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "resolved public type-root construction: a nominal root TypeId({}) is not registered in the TypeEnvironment while collecting bound trait IDs",
-            type_id.0
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "resolved public type-root construction: a nominal root TypeId({}) is not registered in the TypeEnvironment while collecting bound trait IDs",
+                type_id.0
+            ),
+        ));
     };
 
     Ok(match definition {
         TypeDefinition::Struct(def) => def.generic_parameters,
         TypeDefinition::Choice(def) => def.generic_parameters,
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "resolved public type-root construction: a nominal root TypeId({}) resolved to a non-nominal definition while collecting bound trait IDs",
-                type_id.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "resolved public type-root construction: a nominal root TypeId({}) resolved to a non-nominal definition while collecting bound trait IDs",
+                    type_id.0
+                ),
+            ));
         }
     })
 }
@@ -717,8 +730,11 @@ fn missing_public_root_fact(
     description: &str,
     path: &PathId,
     _string_table: &StringTable,
-) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Public {description} '{path:?}' was not published before root-table construction.",
-    ))
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "Public {description} '{path:?}' was not published before root-table construction.",
+        ),
+    )
 }

@@ -1,4 +1,3 @@
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_module;
 use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::emit::sections::{
@@ -30,7 +29,7 @@ use crate::backends::wasm::tests::lowering::test_support::{
     local as hir_local, statement as hir_statement, string_expression,
 };
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
-use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -510,14 +509,8 @@ fn rejects_invalid_helper_export_policy() {
         &path_fork.snapshot_table(),
     )
     .expect_err("invalid helper policy should fail");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm generation failure should be wrapped for rendering");
-    assert_eq!(
-        &error.error_type,
-        &ErrorType::Backend(BackendErrorType::WasmGeneration)
-    );
-    assert!(error.msg.contains("moth_str_ptr"));
+    assert_eq!(&error.kind, &InfrastructureFailureKind::WasmGeneration);
+    assert!(error.message.contains("moth_str_ptr"));
 }
 
 #[test]
@@ -550,10 +543,7 @@ fn rejects_mismatched_checked_integer_operand_types() {
 
     let error = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
         .expect_err("mismatched checked integer operands should fail emission");
-    assert_eq!(
-        error.error_type,
-        ErrorType::Backend(BackendErrorType::WasmGeneration)
-    );
+    assert_eq!(error.kind, InfrastructureFailureKind::WasmGeneration);
 }
 
 #[test]
@@ -1367,11 +1357,11 @@ fn scalar_storage_facts_follow_exact_scalars_and_natural_layout() {
     );
     assert_eq!(
         WasmScalarStorageKind::from_fixed_scalar(FixedScalar::Byte),
-        Some(WasmScalarStorageKind::U8)
+        WasmScalarStorageKind::U8
     );
     assert_eq!(
         WasmScalarStorageKind::from_fixed_scalar(FixedScalar::F16),
-        Some(WasmScalarStorageKind::F16)
+        WasmScalarStorageKind::F16
     );
 }
 
@@ -1925,8 +1915,7 @@ for (const invalidBits of [0x7c00, 0xfe00]) {
 }
 
 fn build_binary16_scalar_storage_boundary_module() -> WasmLirModule {
-    let f16_kind = WasmScalarStorageKind::from_fixed_scalar(FixedScalar::F16)
-        .expect("F16 has fixed scalar storage");
+    let f16_kind = WasmScalarStorageKind::from_fixed_scalar(FixedScalar::F16);
 
     let source = WasmLirLocalId(0);
     let store_address = WasmLirLocalId(1);
@@ -2026,11 +2015,8 @@ fn scalar_storage_rejects_mismatched_local_carrier() {
 
     let error = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
         .expect_err("a scalar memory store with the wrong carrier must fail emission");
-    assert_eq!(
-        error.error_type,
-        ErrorType::Backend(BackendErrorType::WasmGeneration)
-    );
-    assert!(error.msg.contains("scalar store value"));
+    assert_eq!(error.kind, InfrastructureFailureKind::WasmGeneration);
+    assert!(error.message.contains("scalar store value"));
 }
 
 #[test]
@@ -2083,14 +2069,8 @@ fn rejects_unsupported_wasm_feature_flags() {
         &path_fork.snapshot_table(),
     )
     .expect_err("unsupported feature toggle should fail");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm generation failure should be wrapped for rendering");
-    assert_eq!(
-        &error.error_type,
-        &ErrorType::Backend(BackendErrorType::WasmGeneration)
-    );
-    assert!(error.msg.contains("use_wasm_gc"));
+    assert_eq!(&error.kind, &InfrastructureFailureKind::WasmGeneration);
+    assert!(error.message.contains("use_wasm_gc"));
 }
 
 #[test]
@@ -2143,14 +2123,8 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         &path_fork.snapshot_table(),
     )
     .expect_err("unsupported cfg strategy should fail");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm generation failure should be wrapped for rendering");
-    assert_eq!(
-        &error.error_type,
-        &ErrorType::Backend(BackendErrorType::WasmGeneration)
-    );
-    assert!(error.msg.contains("dispatcher-loop"));
+    assert_eq!(&error.kind, &InfrastructureFailureKind::WasmGeneration);
+    assert!(error.message.contains("dispatcher-loop"));
 }
 
 #[test]
@@ -3165,10 +3139,7 @@ fn build_round_f16_lir_module() -> WasmLirModule {
 
 fn build_scalar_storage_lir_module() -> WasmLirModule {
     let address = WasmLirLocalId(0);
-    let fixed_kind = |scalar| {
-        WasmScalarStorageKind::from_fixed_scalar(scalar)
-            .expect("fixture uses supported fixed scalar storage")
-    };
+    let fixed_kind = |scalar| WasmScalarStorageKind::from_fixed_scalar(scalar);
     let i8_kind = fixed_kind(FixedScalar::I8);
     let u8_kind = fixed_kind(FixedScalar::U8);
     let i16_kind = fixed_kind(FixedScalar::I16);

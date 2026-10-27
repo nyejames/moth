@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
@@ -39,11 +40,11 @@ use crate::compiler_frontend::external_packages::test_support::{
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageRegistry, ExternalSignatureType,
 };
-use crate::compiler_frontend::hir::hir_builder::{
-    build_ast_with_registered_types, lower_ast, setup_builder,
-};
+use crate::compiler_frontend::hir::hir_builder::setup_builder;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tests::type_id_fixture_support::multi_bind_target;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast, multi_bind_target,
+};
 
 /// One exact `I32` literal expression.
 ///
@@ -541,12 +542,15 @@ fn duplicate_local_declarations_in_same_scope_fail() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("duplicate symbol should fail");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
+    let error = match error {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
     assert!(
         error
-            .msg
+            .message
             .contains("Local 'my_var' is already declared in this function scope")
     );
 }

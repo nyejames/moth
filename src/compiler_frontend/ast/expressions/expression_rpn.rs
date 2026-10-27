@@ -7,7 +7,8 @@ use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureContributor;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericComparisonDomain, NumericOperator,
@@ -218,7 +219,7 @@ fn enclosed_range(items: &[ExpressionRpnItem]) -> std::ops::Range<usize> {
 /// operand. Returns `None` for an empty fragment.
 pub(crate) fn trailing_operand_start(
     items: &[ExpressionRpnItem],
-) -> Result<Option<usize>, CompilerError> {
+) -> Result<Option<usize>, InfrastructureFailure> {
     let Some(last) = items.len().checked_sub(1) else {
         return Ok(None);
     };
@@ -228,7 +229,8 @@ pub(crate) fn trailing_operand_start(
             .and_then(|distance| last.checked_sub(distance))
             .filter(|open| matches!(items[*open], ExpressionRpnItem::GroupOpen { .. }))
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "grouped expression close does not match its open marker",
                 )
             })?,
@@ -242,7 +244,7 @@ impl ExpressionRpnItem {
     pub(crate) fn source_span(
         &self,
         expressions: &AstExpressionBuilder,
-    ) -> Result<Option<SourceSpan>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, InfrastructureFailure> {
         Ok(match self {
             ExpressionRpnItem::Operand(expression) => expressions.view(*expression)?.span(),
             ExpressionRpnItem::PendingNumericLiteral { span, .. }

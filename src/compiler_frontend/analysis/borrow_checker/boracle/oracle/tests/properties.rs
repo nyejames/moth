@@ -32,7 +32,8 @@ use crate::compiler_frontend::analysis::borrow_checker::problem::{
     Event, EventId, EventKind, EventSource, Loan, OriginKind, PlaceId, PointId, ProgramPoint,
     RebindValue, TerminatorEventKind, Use, UseId, UseKind, ValueOriginId,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 #[test]
 fn boracle_operational_replacing_alias_with_copy_cannot_create_runtime_conflict() {
@@ -653,7 +654,7 @@ struct ProblemRows {
 fn rebuild_problem(
     problem: &BorrowProblem,
     rows: ProblemRows,
-) -> Result<BorrowProblem, CompilerError> {
+) -> Result<BorrowProblem, InfrastructureFailure> {
     BorrowProblem::new(BorrowProblemParts {
         bindings: problem.bindings().to_vec(),
         points: rows.points,
@@ -672,7 +673,7 @@ fn rebuild_problem(
 
 fn replace_alias_with_copy(
     problem: &BorrowProblem,
-) -> Result<Option<BorrowProblem>, CompilerError> {
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
     let Some(copy_origin) = problem
         .origins()
         .iter()
@@ -777,7 +778,7 @@ fn final_use_conflict_fixture() -> (BorrowProblem, EventId) {
 
 fn add_alias_conflict_probe(
     problem: &BorrowProblem,
-) -> Result<Option<BorrowProblem>, CompilerError> {
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
     let Some((alias_block, alias_event)) = problem.events().iter().find_map(|event| {
         let is_alias = match &event.kind {
             EventKind::AliasFromPlace {
@@ -940,7 +941,7 @@ fn assert_probe_destination(problem: &BorrowProblem, property: &str) -> PlaceId 
 fn add_fresh_rebinding_probe(
     problem: &BorrowProblem,
     cyclic: bool,
-) -> Result<Option<BorrowProblem>, CompilerError> {
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
     let Some((rebind_block, rebind_event)) = problem.events().iter().find_map(|event| {
         matches!(
             event.kind,
@@ -1036,12 +1037,13 @@ fn add_fresh_rebinding_probe(
 
 fn add_final_capability_use(
     problem: &BorrowProblem,
-) -> Result<Option<BorrowProblem>, CompilerError> {
-    let block_zero = problem
-        .control_flow()
-        .blocks
-        .first()
-        .ok_or_else(|| CompilerError::compiler_error("generated problem has no entry block"))?;
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
+    let block_zero = problem.control_flow().blocks.first().ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            "generated problem has no entry block",
+        )
+    })?;
     let Some(scope_exit) = block_zero.events.iter().find(|event_id| {
         matches!(
             problem.events()[event_id.index()].kind,
@@ -1155,7 +1157,7 @@ fn insert_event_before(
     block: BlockId,
     anchor: EventId,
     inserted: EventId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     insert_event(blocks, block, anchor, inserted, true)
 }
 
@@ -1164,7 +1166,7 @@ fn insert_event_after(
     block: BlockId,
     anchor: EventId,
     inserted: EventId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     insert_event(blocks, block, anchor, inserted, false)
 }
 
@@ -1174,18 +1176,22 @@ fn insert_event(
     anchor: EventId,
     inserted: EventId,
     before: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let block_row = blocks.get_mut(block.index()).ok_or_else(|| {
-        CompilerError::compiler_error(format!("property probe cannot locate block {block:?}"))
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            format!("property probe cannot locate block {block:?}"),
+        )
     })?;
     let position = block_row
         .events
         .iter()
         .position(|event_id| *event_id == anchor)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "property probe cannot locate anchor event {anchor:?} in block {block:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("property probe cannot locate anchor event {anchor:?} in block {block:?}"),
+            )
         })?;
     let insertion = if before { position } else { position + 1 };
     let mut event_ids = block_row.events.to_vec();
@@ -1198,19 +1204,19 @@ fn refresh_block_bounds_and_ordinals(
     blocks: &mut [CfgBlock],
     points: &mut [ProgramPoint],
     events: &[Event],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for block in blocks {
         let Some(first_event) = block.events.first().copied() else {
-            return Err(CompilerError::compiler_error(format!(
-                "property transformation emptied block {:?}",
-                block.id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("property transformation emptied block {:?}", block.id),
+            ));
         };
         let Some(last_event) = block.events.last().copied() else {
-            return Err(CompilerError::compiler_error(format!(
-                "property transformation emptied block {:?}",
-                block.id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("property transformation emptied block {:?}", block.id),
+            ));
         };
         block.entry = events[first_event.index()].point;
         block.exit = events[last_event.index()].point;
@@ -1221,7 +1227,9 @@ fn refresh_block_bounds_and_ordinals(
     Ok(())
 }
 
-fn append_unreachable_use(problem: &BorrowProblem) -> Result<Option<BorrowProblem>, CompilerError> {
+fn append_unreachable_use(
+    problem: &BorrowProblem,
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
     let next_block = BlockId::new(problem.control_flow().blocks.len() as u32);
     let access_point = PointId::new(problem.points().len() as u32);
     let exit_point = PointId::new(access_point.raw() + 1);
@@ -1283,7 +1291,9 @@ fn append_unreachable_use(problem: &BorrowProblem) -> Result<Option<BorrowProble
     .map(Some)
 }
 
-fn delete_final_use(problem: &BorrowProblem) -> Result<Option<BorrowProblem>, CompilerError> {
+fn delete_final_use(
+    problem: &BorrowProblem,
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
     let Some((event_to_remove, use_to_remove)) = final_read_access(problem) else {
         return Ok(None);
     };
@@ -1411,7 +1421,9 @@ fn remap_event_use_references(kind: &mut EventKind, removed: UseId) -> bool {
     true
 }
 
-fn renumber_branch_blocks(problem: &BorrowProblem) -> Result<Option<BorrowProblem>, CompilerError> {
+fn renumber_branch_blocks(
+    problem: &BorrowProblem,
+) -> Result<Option<BorrowProblem>, InfrastructureFailure> {
     if problem.control_flow().blocks.len() < 3 {
         return Ok(None);
     }

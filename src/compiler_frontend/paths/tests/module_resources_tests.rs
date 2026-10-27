@@ -12,7 +12,6 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::Path;
 
 fn origin(relative: &str) -> StableResourceOriginId {
@@ -60,30 +59,6 @@ fn the_first_authored_span_owns_the_origin_record() {
         .expect("origin should be in range");
 
     assert_eq!(record.first_authored_span, Some(first_authored));
-}
-
-#[test]
-fn resource_origin_spans_are_stable_through_string_remapping() {
-    let mut table = ModuleResourceTable::new();
-    let first_authored = span(30);
-    let resource = table.intern_origin(origin("logo.svg"), Some(first_authored));
-
-    let mut local_strings = StringTable::new();
-    local_strings.intern("unused");
-    let mut merged_strings = StringTable::new();
-    merged_strings.intern("prefix");
-    let remap = merged_strings.merge_from(&local_strings);
-    assert!(!remap.is_identity());
-
-    table.remap_string_ids(&remap);
-
-    assert_eq!(
-        table
-            .try_origin(resource)
-            .expect("resource should remain readable after remapping")
-            .first_authored_span,
-        Some(first_authored)
-    );
 }
 
 #[test]

@@ -6,7 +6,8 @@
 //! This module provides backend-agnostic type classification helpers that
 //! backends use to decide ABI, lowering strategy, and runtime representation.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -33,7 +34,7 @@ pub enum HirTypeClass {
     /// One arbitrary-precision `Dec` scale identity.
     ///
     /// WHAT: carries the semantic scale so backends can distinguish the `Dec` family from
-    ///       every fixed scalar and reject reachable Dec values until their runtime exists.
+    ///       every fixed scalar and let each target's feature validation gate reachable Dec values.
     /// WHY: collapsing the internal `Number` variant into `HeapAllocated` or a scalar
     ///      substitute would erase the identity that target gates and transport decisions
     ///      need.
@@ -51,11 +52,12 @@ pub enum HirTypeClass {
 pub fn classify_hir_type(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
-) -> Result<HirTypeClass, CompilerError> {
+) -> Result<HirTypeClass, InfrastructureFailure> {
     let Some(definition) = type_environment.get(type_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "Unregistered TypeId {type_id:?} reached HIR type classification"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HirConstruction,
+            format!("Unregistered TypeId {type_id:?} reached HIR type classification"),
+        ));
     };
 
     match definition {
@@ -77,7 +79,8 @@ pub fn classify_hir_type(
 
         TypeDefinition::Function(..) => Ok(HirTypeClass::Function),
 
-        TypeDefinition::AnonymousConstRecordMarker => Err(CompilerError::compiler_error(
+        TypeDefinition::AnonymousConstRecordMarker => Err(InfrastructureFailure::internal(
+            CompilerStage::HirConstruction,
             "compile-time-only anonymous const-record marker reached executable HIR type classification",
         )),
     }

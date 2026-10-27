@@ -1,6 +1,24 @@
+use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
+fn fresh_warning_owner() -> BoundaryAccumulator {
+    BoundaryAccumulator::with_root_string_table(StringTable::new())
+}
+
+fn build_html_backend(
+    builder: &crate::projects::html_project::html_project_builder::HtmlProjectBuilder,
+    compilation: crate::build_system::build::ProjectCompilation,
+    config: &Config,
+    profile: crate::build_system::BuildProfile,
+    warning_owner: &mut BoundaryAccumulator,
+) -> Result<crate::build_system::build::Project, PreparedFailure> {
+    let mut backend_context =
+        crate::build_system::backend_build_context::BackendBuildContext::new(warning_owner);
+    builder.build_backend(compilation, config, profile, &[], &mut backend_context)
+}
 #[derive(Debug)]
 struct DummyJsImportProvider {
     calls: Arc<AtomicUsize>,
@@ -29,7 +47,7 @@ impl ExternalImportProvider for DummyJsImportProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let package_path = dummy_package_path(&request.canonical_source_path);
@@ -50,7 +68,6 @@ impl ExternalImportProvider for DummyJsImportProvider {
                 use_widget_function_id,
             ],
             runtime_asset: None,
-            diagnostics: Vec::new(),
             required_runtime_imports: Vec::new(),
         }))
     }
@@ -75,14 +92,14 @@ fn dummy_package_path(canonical_source_path: &Path) -> String {
 fn register_dummy_package(
     context: &mut ExternalImportProviderContext,
     package_path: String,
-) -> Result<crate::compiler_frontend::external_packages::ExternalPackageId, CompilerMessages> {
+) -> Result<crate::compiler_frontend::external_packages::ExternalPackageId, PreparedFailure> {
     context
         .package_registry
         .register_package(
             package_path,
             crate::builder_surface::PackageOrigin::ProjectLocal,
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 /// Build one JS runtime asset fixture whose origin carries a stable provider owner.
@@ -107,7 +124,7 @@ fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsse
 fn register_dummy_widget_type(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalTypeId, CompilerMessages> {
+) -> Result<ExternalTypeId, PreparedFailure> {
     context
         .package_registry
         .register_external_type(
@@ -117,13 +134,13 @@ fn register_dummy_widget_type(
                 abi_type: ExternalAbiType::Handle,
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn register_dummy_draw_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -141,14 +158,14 @@ fn register_dummy_draw_function(
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn register_dummy_make_widget_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
     widget_type_id: ExternalTypeId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -164,14 +181,14 @@ fn register_dummy_make_widget_function(
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn register_dummy_use_widget_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
     widget_type_id: ExternalTypeId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -194,14 +211,11 @@ fn register_dummy_use_widget_function(
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
-fn provider_error_to_messages(
-    error: CompilerError,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    CompilerMessages::from_error_ref(error, string_table)
+fn provider_error_to_failure(error: InfrastructureFailure) -> PreparedFailure {
+    error.into()
 }
 
 fn builder_surface_with_dummy_js_provider(calls: Arc<AtomicUsize>) -> BuilderSurface {
@@ -312,7 +326,7 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let package_path = dummy_package_path(&request.canonical_source_path);
@@ -326,7 +340,6 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
             runtime_asset: Some(fixture_dummy_js_runtime_asset(
                 request.canonical_source_path.clone(),
             )),
-            diagnostics: Vec::new(),
             required_runtime_imports: Vec::new(),
         }))
     }
@@ -335,7 +348,7 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
 fn register_dummy_draw_function_with_js_lowering(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -356,7 +369,7 @@ fn register_dummy_draw_function_with_js_lowering(
                 },
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn builder_surface_with_dummy_js_provider_with_lowering(calls: Arc<AtomicUsize>) -> BuilderSurface {
@@ -383,20 +396,19 @@ fn provider_created_package_registry_survives_into_module() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface =
         builder_surface_with_dummy_js_provider_with_lowering(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("provider-backed import should compile");
+        &mut warning_owner,
+    ));
 
     let module = modules
         .successful_module_views()
@@ -455,17 +467,16 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("legal JS re-export should compile before entry glue assembly");
+        &mut warning_owner,
+    ));
 
     let components = modules
         .successful_module_views()
@@ -575,20 +586,19 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface =
         builder_surface_with_dummy_js_provider_with_lowering(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("provider-backed imports should compile");
+        &mut warning_owner,
+    ));
 
     let module = modules
         .successful_module_views()
@@ -638,18 +648,17 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("unreachable provider-backed call should compile");
+        &mut warning_owner,
+    ));
 
     let module = modules
         .successful_module_views()
@@ -726,17 +735,16 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
         .binding_packages
         .resolve_package_id("@web/canvas")
         .expect("@web/canvas should be registered for HTML projects");
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("unused @html canvas wrapper should compile");
+        &mut warning_owner,
+    ));
 
     let module = modules
         .successful_module_views()
@@ -792,34 +800,32 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface =
         builder_surface_with_dummy_js_provider_with_lowering(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("provider-backed import should compile");
+        &mut warning_owner,
+    ));
 
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
     let project_compilation =
         crate::build_system::build::ProjectCompilation::from_frontend(modules)
             .expect("compiled modules should assemble entries");
-    let project = builder
-        .build_backend(
-            project_compilation,
-            &config,
-            crate::build_system::BuildProfile::Dev,
-            &[],
-            &mut string_table,
-        )
-        .expect("HTML build should succeed with module-owned registry");
+    let project = build_html_backend(
+        &builder,
+        project_compilation,
+        &config,
+        crate::build_system::BuildProfile::Dev,
+        &mut warning_owner,
+    )
+    .expect("HTML build should succeed with module-owned registry");
 
     assert!(
         !project.output_files.is_empty(),
@@ -854,7 +860,7 @@ fn linked_module_js_lowering_is_observed_separately() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "phase6helper",
@@ -864,28 +870,26 @@ fn linked_module_js_lowering_is_observed_separately() {
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("provider-backed import should compile");
+        &mut warning_owner,
+    ));
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
     let project_compilation =
         crate::build_system::build::ProjectCompilation::from_frontend(modules)
             .expect("compiled modules should assemble entries");
-    let project = builder
-        .build_backend(
-            project_compilation,
-            &config,
-            crate::build_system::BuildProfile::Dev,
-            &[],
-            &mut string_table,
-        )
-        .expect("HTML build should succeed with module-owned registry");
+    let project = build_html_backend(
+        &builder,
+        project_compilation,
+        &config,
+        crate::build_system::BuildProfile::Dev,
+        &mut warning_owner,
+    )
+    .expect("HTML build should succeed with module-owned registry");
     let snapshot = timing_session.finish();
     drop(project);
 
@@ -929,19 +933,18 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface = builder_surface_with_dummy_js_provider(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("provider-backed direct selections should compile");
+        &mut warning_owner,
+    ));
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -976,19 +979,18 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface = builder_surface_with_dummy_js_provider(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("provider-backed namespace binding should compile");
+        &mut warning_owner,
+    ));
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -1035,19 +1037,18 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface = builder_surface_with_dummy_js_provider(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("same bare JS filename in different directories should compile");
+        &mut warning_owner,
+    ));
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -1082,19 +1083,18 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface = builder_surface_with_dummy_js_provider(Arc::clone(&calls));
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("same-package opaque type should pass to function expecting that exact type");
+        &mut warning_owner,
+    ));
 
     assert!(
         modules
@@ -1126,28 +1126,24 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut frontend_surface = builder_surface_with_dummy_js_provider(Arc::clone(&calls));
 
-    let mut frontend = compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("diagnosed modules are retained in the typed frontend outcome");
-    let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
     assert!(
-        messages.error_diagnostics().any(|diagnostic| {
-            matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. })
-        }),
-        "expected type mismatch diagnostic for cross-package opaque type, got {messages:?}"
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001"),
+        "expected type mismatch diagnostic for cross-package opaque type"
     );
 }
 
@@ -1177,7 +1173,11 @@ fn directory_project_rejects_missing_entry_root() {
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    let mut source_files = crate::compiler_frontend::source::SourceDatabase::empty();
+    let mut source_files = Some(
+        crate::compiler_frontend::source::SourceDatabaseBuilder::new(
+            crate::compiler_frontend::source::SourceDatabase::empty(),
+        ),
+    );
     let parse_result = crate::build_system::project_config::compile_project_config_file(
         &mut config,
         &config_path,
@@ -1186,6 +1186,16 @@ fn directory_project_rejects_missing_entry_root() {
         &mut string_table,
     );
     assert!(parse_result.is_ok(), "config parse should succeed");
+    let mut source_builder = source_files
+        .take()
+        .expect("config should retain its source builder");
+    source_builder
+        .assemble_finalized_tables()
+        .expect("config source span table should assemble");
+    source_builder
+        .finish()
+        .expect("config source builder should satisfy lifecycle invariants");
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
 
     let result = compile_project_frontend(
         &mut config,
@@ -1193,23 +1203,17 @@ fn directory_project_rejects_missing_entry_root() {
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
-
-    let Err(messages) = result else {
-        panic!("expected Err for missing entry root");
-    };
+    let reports = diagnosed_reports(&result);
     assert!(
-        messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::ConfiguredEntryRootMissing { .. },
-                    ..
-                }
-            )
-        }),
-        "expected ConfiguredEntryRootMissing for a nonexistent entry root, got {messages:?}"
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-CONFIG-0001"
+                    && view.reason_key() == Some("invalid_config.configured_entry_root_missing")
+            }),
+        "expected ConfiguredEntryRootMissing for a nonexistent entry root"
     );
 }
 
@@ -1249,18 +1253,17 @@ fn html_js_provider_namespace_binding_resolves() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("real JS provider namespace binding should compile");
+        &mut warning_owner,
+    ));
 
     assert!(
         modules
@@ -1308,18 +1311,17 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
     let mut config = Config::new(dir.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("sibling modules with distinct JS providers should compile");
+        &mut warning_owner,
+    ));
 
     let artefacts = modules
         .project
@@ -1431,18 +1433,17 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
     let mut config = Config::new(dir.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("sibling modules with distinct JS providers should compile");
+        &mut warning_owner,
+    ));
 
     let artefacts = modules
         .project
@@ -1542,18 +1543,17 @@ fn html_js_provider_direct_selection_resolves() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("real JS provider direct selections should compile");
+        &mut warning_owner,
+    ));
 
     assert!(
         modules
@@ -1587,18 +1587,17 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("direct alias for function and opaque type should compile");
+        &mut warning_owner,
+    ));
 
     assert!(
         modules
@@ -1632,38 +1631,29 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let messages = match compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    ) {
-        Ok(_) => panic!("project-local JS receiver-style signature should be rejected"),
-        Err(messages) => messages,
-    };
-
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
     assert!(
-        messages.has_errors(),
+        reports.counts().errors > 0,
         "expected at least one error diagnostic for project-local JS receiver-style signature"
     );
-    assert_has_diagnostic_code(&messages, "MOTH-IMPORT-0022");
-
-    // The provider interned the logical JS source path into the caller-owned discovery fork, so
-    // the diagnostic's primary path renders as the JS source, not the importing `@page.moth` (and
-    // without panicking on a foreign PathId).
-    let diagnostic = messages
-        .error_diagnostics()
+    assert_has_diagnostic_code(&result, "MOTH-IMPORT-0022");
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("expected at least one error diagnostic");
-    let rendered = terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        messages.diagnostic_render_context(0),
-    );
+    let context = DiagnosticRenderContext::for_report(report);
+    let rendered = terse::format_terse_diagnostic_view(view, context);
     assert!(
         rendered.contains("drawing.js"),
         "provider diagnostic primary path should resolve to the JS source, got: {rendered}"
@@ -1699,18 +1689,17 @@ fn html_js_provider_repeated_imports_reuse_cache() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("repeated JS imports should compile");
+        &mut warning_owner,
+    ));
 
     let module = modules
         .successful_module_views()
@@ -1748,18 +1737,17 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("fallible JS function with Error! should compile");
+        &mut warning_owner,
+    ));
 
     assert!(
         modules

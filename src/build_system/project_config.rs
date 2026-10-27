@@ -12,20 +12,78 @@ use validation::ConfigApplyError;
 pub(crate) use validation::validate_directory_output_settings;
 
 use crate::build_system::create_project_modules::extract_source_code;
+use crate::build_system::create_project_modules::source_loading::{
+    SourceReadError, registered_source_read_error, retained_source_error,
+};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceKind};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError, SourceKind,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 
 use std::path::Path;
+use std::sync::Arc;
+
+pub(crate) enum ProjectConfigFailure {
+    Prepared(PreparedFailure),
+    Diagnosed(DiagnosticReportSet),
+    Infrastructure(InfrastructureErrors),
+}
+
+impl From<PreparedFailure> for ProjectConfigFailure {
+    fn from(failure: PreparedFailure) -> Self {
+        Self::Prepared(failure)
+    }
+}
+
+fn append_config_source_finalization_failure(
+    failure: PreparedFailure,
+    finish_error: InfrastructureFailure,
+) -> PreparedFailure {
+    match failure {
+        PreparedFailure::Diagnosed(_) => PreparedFailure::Infrastructure(finish_error.into()),
+        PreparedFailure::Infrastructure(mut errors) => {
+            errors.push(finish_error);
+            PreparedFailure::Infrastructure(errors)
+        }
+    }
+}
+
+fn capture_root_diagnostics(
+    diagnostics: Vec<DiagnosticDraft>,
+    root_string_table: &StringTable,
+) -> PreparedFailure {
+    match PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        root_string_table,
+        None,
+        || None,
+    ) {
+        Ok(batch) => PreparedFailure::Diagnosed(batch),
+        Err(error) => PreparedFailure::from(error),
+    }
+}
 
 // -------------------------
 //  Config Parse Services
@@ -57,9 +115,9 @@ pub(crate) struct ProjectConfigParseServices<'a> {
 pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
+    project_source_builder: &mut Option<SourceDatabaseBuilder>,
     string_table: &mut StringTable,
-    project_source_files: Option<&mut SourceDatabase>,
-) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
     let config_path = config.config_file_path();
 
     if !config_path.exists() {
@@ -70,32 +128,36 @@ pub fn load_project_config(
         config.project_field_config_dependencies.clear();
         config.extra_project_fields.clear();
         if config.entry_dir.is_dir() {
-            return Err(CompilerMessages::from_diagnostic(
-                CompilerDiagnostic::invalid_config_reason(
-                    Some(string_table.intern("config.moth")),
-                    InvalidConfigReason::MissingConfigFile,
-                    None,
-                ),
-                string_table.clone(),
-            ));
+            let failure = {
+                let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                capture_root_diagnostics(
+                    vec![project_config::invalid_config_reason(
+                        Some(diagnostic_strings.intern("config.moth")),
+                        InvalidConfigReason::MissingConfigFile,
+                        None,
+                    )],
+                    diagnostic_strings.strings(),
+                )
+            };
+            return Err(ProjectConfigFailure::Prepared(failure));
         }
 
-        return validate_directory_output_settings_if_needed(config, string_table);
+        return validate_directory_output_settings_if_needed(config, string_table)
+            .map_err(ProjectConfigFailure::Prepared);
     }
-    let Some(project_source_files) = project_source_files else {
-        return Err(CompilerMessages::from_error(
-            CompilerError::compiler_error(
-                "config.moth exists but the project source database is absent",
-            ),
-            string_table.clone(),
-        ));
-    };
+    if project_source_builder.is_none() {
+        return Err(PreparedFailure::from(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            "config.moth exists but the project source database is absent",
+        ))
+        .into());
+    }
 
     compile_project_config_file(
         config,
         &config_path,
         services,
-        project_source_files,
+        project_source_builder,
         string_table,
     )
 }
@@ -113,29 +175,34 @@ pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
-    project_source_files: &mut SourceDatabase,
+    project_source_builder: &mut Option<SourceDatabaseBuilder>,
     string_table: &mut StringTable,
-) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
     config.project_config_loaded = false;
     config.config_resolution_records.clear();
     config.project_field_config_dependencies.clear();
     config.extra_project_fields.clear();
     config.setting_spans.clear();
     config.html_section = crate::projects::settings::HtmlSectionConfig::default();
+    let source_builder = project_source_builder.as_mut().ok_or_else(|| {
+        PreparedFailure::from(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            "project config source database is absent",
+        ))
+    })?;
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
-        CompilerMessages::from_error(
-            CompilerError::file_error(
-                config_path,
-                format!("Failed to canonicalize config path: {error}"),
-            ),
-            string_table.clone(),
-        )
+        PreparedFailure::from(InfrastructureFailure::filesystem(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            config_path,
+            format!("Failed to canonicalize config path: {error}"),
+        ))
     })?;
 
     // Register config before tokenization so its retained syntax and diagnostics share the
     // project identity context with every source discovered later. Config sits outside the entry
     // root, so its own directory roots the logical path and yields a bare `config.moth`.
-    let config_file_id = project_source_files
+    let config_file_id = source_builder
+        .sources_mut()
         .insert(
             canonical_config_path.clone(),
             SourceKind::Compiler(SourceFileKind::Moth),
@@ -144,38 +211,62 @@ pub(crate) fn compile_project_config_file(
             string_table,
         )
         .map_err(|error| match error {
-            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
-                CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                string_table.clone(),
+            SourceDatabaseError::Capacity(capacity) => capture_root_diagnostics(
+                vec![token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
+                    capacity.resource(),
+                    None,
+                )],
+                string_table,
             ),
-            SourceDatabaseError::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(error, string_table)
-            }
+            SourceDatabaseError::Infrastructure(error) => PreparedFailure::from(error),
         })?;
 
-    let source_code = match extract_source_code(&canonical_config_path, string_table) {
+    let mut path_fork = PathInternerFork::empty();
+    let source_code = match extract_source_code(&canonical_config_path) {
         Ok(source_code) => source_code,
-        Err(error) => {
-            project_source_files
-                .record_source_load_error(config_file_id, error.clone())
-                .map_err(|slot_error| {
-                    CompilerMessages::from_error(slot_error, string_table.clone())
-                })?;
-            return Err(CompilerMessages::from_error(error, string_table.clone()));
+        Err(SourceReadError::Infrastructure(infrastructure)) => {
+            source_builder
+                .sources_mut()
+                .record_source_load_error(config_file_id, infrastructure.clone())
+                .map_err(PreparedFailure::from)?;
+            return Err(PreparedFailure::from(infrastructure).into());
+        }
+        Err(SourceReadError::NonUtf8) => {
+            let failure = registered_source_read_error(
+                SourceReadError::NonUtf8,
+                config_file_id,
+                source_builder.sources(),
+                &mut path_fork,
+            );
+            return Err(failure
+                .into_failure(string_table, Arc::new(path_fork.shared_table()))
+                .into());
         }
     };
-    project_source_files
+    if let Err(error) = source_builder
+        .sources_mut()
         .retain_text(config_file_id, source_code)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let source_code = project_source_files
+    {
+        let failure = retained_source_error(
+            error,
+            config_file_id,
+            source_builder.sources(),
+            &mut path_fork,
+        );
+        return Err(failure
+            .into_failure(string_table, Arc::new(path_fork.shared_table()))
+            .into());
+    }
+    let source_code = source_builder
+        .sources()
         .retained_text(config_file_id)
         .ok_or_else(|| {
-            CompilerMessages::from_error(
-                CompilerError::compiler_error(
-                    "registered config source lost its retained source text",
-                ),
-                string_table.clone(),
-            )
+            PreparedFailure::from(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                "registered config source lost its retained source text",
+            ))
         })?;
     let ConfigCompilationOutcome {
         result,
@@ -198,19 +289,69 @@ pub(crate) fn compile_project_config_file(
         },
         string_table,
     );
+    let mut compiler_failure = None;
     let validated_config = match result {
-        Ok(compiled_config) => {
+        Ok(compiled_config) => Some(
             validate_and_apply_compiled_config(config, &compiled_config, services, string_table)
                 .map(|settings| (compiled_config, settings))
+                .map_err(ProjectConfigFailure::Prepared),
+        ),
+        Err(failure) => {
+            compiler_failure = Some(failure);
+            None
         }
-        Err(messages) => Err(messages),
     };
 
-    // Both compiler and build-owned diagnostics are complete before the source becomes immutable.
-    project_source_files
-        .install_extended_spans(outcome_file_id, span_builder.freeze())
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    // The config producer is done. Success keeps the owner live for later project sources; a
+    // build-owned config failure returns it to bootstrap for terminal finalization. Compiler
+    // diagnostics are terminal immediately and consume the owner below.
+    source_builder.retain_span_builder(outcome_file_id, span_builder);
+    if let Err(finish_error) = source_builder.finish_source(outcome_file_id) {
+        if let Some(failure) = compiler_failure {
+            return Err(ProjectConfigFailure::Prepared(
+                append_config_source_finalization_failure(failure, finish_error),
+            ));
+        }
+        return match validated_config {
+            Some(Err(ProjectConfigFailure::Prepared(failure))) => {
+                Err(ProjectConfigFailure::Prepared(
+                    append_config_source_finalization_failure(failure, finish_error),
+                ))
+            }
+            Some(Err(failure)) => Err(failure),
+            Some(Ok(_)) | None => Err(PreparedFailure::from(finish_error).into()),
+        };
+    }
 
+    if let Some(failure) = compiler_failure {
+        if let Err(finish_error) = source_builder.assemble_finalized_tables() {
+            return Err(ProjectConfigFailure::Prepared(
+                append_config_source_finalization_failure(failure, finish_error),
+            ));
+        }
+        let source_owner = project_source_builder
+            .take()
+            .expect("the config source owner remains available through span finalization");
+        let source_database = match source_owner.finish() {
+            Ok(source_database) => source_database,
+            Err(finish_error) => {
+                return Err(ProjectConfigFailure::Prepared(
+                    append_config_source_finalization_failure(failure, finish_error),
+                ));
+            }
+        };
+        return match finalize_compiler_diagnostic_failure(
+            failure,
+            source_database,
+            string_table.take_for_handoff(),
+        ) {
+            Ok(reports) => Err(ProjectConfigFailure::Diagnosed(reports)),
+            Err(errors) => Err(ProjectConfigFailure::Infrastructure(errors)),
+        };
+    }
+
+    let validated_config =
+        validated_config.expect("a non-AST config result has a validation outcome");
     let (compiled_config, validated_output_settings) = validated_config?;
 
     // Retain compiler-owned provenance until the build boundary projects source providers,
@@ -221,31 +362,57 @@ pub(crate) fn compile_project_config_file(
     Ok(validated_output_settings)
 }
 
+fn finalize_compiler_diagnostic_failure(
+    failure: PreparedFailure,
+    source_database: SourceDatabase,
+    string_table: StringTable,
+) -> Result<DiagnosticReportSet, InfrastructureErrors> {
+    let source_database = Arc::new(source_database);
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, Some((source_database, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors);
+        }
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
 fn validate_and_apply_compiled_config(
     config: &mut Config,
     compiled_config: &CompiledConfigSource,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
-) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, PreparedFailure> {
     let mut errors = Vec::new();
-    match validation::validate_and_apply_config_declarations(
-        config,
-        compiled_config,
-        &services.frontend_surface.config_schemas,
-        string_table,
-    ) {
+    let validation_result = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        validation::validate_and_apply_config_declarations(
+            config,
+            compiled_config,
+            &services.frontend_surface.config_schemas,
+            &mut diagnostic_strings,
+        )
+    };
+    match validation_result {
         Ok(()) => {}
         Err(ConfigApplyError::Diagnostics(mut validation_errors)) => {
             errors.append(&mut validation_errors);
         }
         Err(ConfigApplyError::Compiler(error)) => {
-            return Err(CompilerMessages::from_error_ref(error, string_table));
+            return Err(PreparedFailure::from(error));
         }
     }
 
     // Output policy needs the completed config values, even when another field was diagnosed.
     let validated_output_settings = if config.entry_dir.is_dir() {
-        match validate_directory_output_settings(config, string_table) {
+        let output_settings = {
+            let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+            validate_directory_output_settings(config, &mut diagnostic_strings)
+        };
+        match output_settings {
             Ok(settings) => Some(settings),
             Err(mut output_errors) => {
                 errors.append(&mut output_errors);
@@ -259,24 +426,23 @@ fn validate_and_apply_compiled_config(
     if errors.is_empty() {
         Ok(validated_output_settings)
     } else {
-        Err(CompilerMessages::from_diagnostics(
-            errors,
-            string_table.clone(),
-        ))
+        Err(capture_root_diagnostics(errors, string_table))
     }
 }
 
 fn validate_directory_output_settings_if_needed(
     config: &Config,
     string_table: &mut StringTable,
-) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, PreparedFailure> {
     if !config.entry_dir.is_dir() {
         return Ok(None);
     }
 
-    validate_directory_output_settings(config, string_table)
+    let validation_result = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        validate_directory_output_settings(config, &mut diagnostic_strings)
+    };
+    validation_result
         .map(Some)
-        .map_err(|diagnostics| {
-            CompilerMessages::from_diagnostics(diagnostics, string_table.clone())
-        })
+        .map_err(|diagnostics| capture_root_diagnostics(diagnostics, string_table))
 }

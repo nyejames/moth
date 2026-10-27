@@ -173,6 +173,7 @@ fn cli_lanes_mirror_compiler_feature_sets_without_unifying_lanes() {
     for (name, features) in [
         ("cli-boracle", &["boracle"][..]),
         ("cli-boracle-campaign", &["boracle", "boracle_campaign"][..]),
+        ("cli-compiler-bug-test", &["test_compiler_bug"][..]),
     ] {
         let lane = FEATURE_LANES
             .iter()
@@ -486,20 +487,22 @@ fn opt_in_ownership_rejects_a_compact_package_selector() {
 }
 
 #[test]
-fn the_standard_execution_set_excludes_every_boracle_lane() {
+fn the_standard_execution_set_excludes_every_opt_in_lane() {
     let standard_names: Vec<&str> = standard_execution_lanes().map(|lane| lane.name).collect();
 
     assert!(!standard_names.contains(&"boracle"));
     assert!(!standard_names.contains(&"boracle-campaign"));
     assert!(!standard_names.contains(&"cli-boracle"));
     assert!(!standard_names.contains(&"cli-boracle-campaign"));
+    assert!(!standard_names.contains(&"compiler-bug-test"));
+    assert!(!standard_names.contains(&"cli-compiler-bug-test"));
 
     let opt_in_count = FEATURE_LANES
         .iter()
         .filter(|lane| matches!(lane.kind, FeatureLaneKind::OptIn { .. }))
         .count();
 
-    assert_eq!(opt_in_count, 4);
+    assert_eq!(opt_in_count, 6);
     assert_eq!(standard_names.len(), FEATURE_LANES.len() - opt_in_count);
 }
 

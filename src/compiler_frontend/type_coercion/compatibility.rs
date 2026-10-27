@@ -5,8 +5,7 @@
 //! WHY: this is the sole owner of compatibility policy. All call sites that
 //! need to check type compatibility must go through `is_type_compatible` so
 //! that structural compatibility rules are applied consistently.
-//! `datatypes.rs` owns type structure only; it no longer carries any
-//! compatibility logic.
+//! `datatypes.rs` owns type structure only and carries no compatibility logic.
 
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;

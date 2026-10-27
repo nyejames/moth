@@ -6,11 +6,8 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-fn authored_span() -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        SourceId::COMPILATION_ROOT,
-        LocalSpan::source_start(),
-    ))
+fn authored_span() -> SourceSpan {
+    SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
 }
 
 #[test]
@@ -18,7 +15,7 @@ fn parsed_type_ref_named_remaps_name_without_changing_span() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
     let name_local = local.intern("MyType");
-    let span = authored_span();
+    let span = Some(authored_span());
     let mut parsed = ParsedTypeRef::Named {
         name: name_local,
         span,
@@ -46,13 +43,13 @@ fn parsed_type_ref_applied_remaps_nested_names() {
     let mut parsed = ParsedTypeRef::Applied {
         base: Box::new(ParsedTypeRef::Named {
             name: box_name,
-            span: authored_span(),
+            span: Some(authored_span()),
         }),
         arguments: vec![ParsedTypeRef::Named {
             name: string_name,
-            span: authored_span(),
+            span: Some(authored_span()),
         }],
-        span: authored_span(),
+        span: Some(authored_span()),
     };
 
     let remap = global.merge_from(&local);
@@ -82,13 +79,13 @@ fn parsed_type_ref_collection_remaps_element_and_capacity_name() {
     let mut parsed = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::Named {
             name: element_name,
-            span: authored_span(),
+            span: Some(authored_span()),
         }),
-        span: authored_span(),
+        span: Some(authored_span()),
         fixed_capacity: Some(
             crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity::BareConstant {
                 name: capacity_name,
-                span: authored_span(),
+                span: Some(authored_span()),
             },
         ),
     };
@@ -121,9 +118,9 @@ fn parsed_type_ref_optional_remaps_inner_name() {
     let mut parsed = ParsedTypeRef::Optional {
         inner: Box::new(ParsedTypeRef::Named {
             name: bool_name,
-            span: authored_span(),
+            span: Some(authored_span()),
         }),
-        span: authored_span(),
+        span: Some(authored_span()),
     };
 
     let remap = global.merge_from(&local);
@@ -147,13 +144,13 @@ fn parsed_type_ref_map_and_qualified_names_remap_recursively() {
     let mut parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::Named {
             name: key_name,
-            span: authored_span(),
+            span: Some(authored_span()),
         }),
         value: Box::new(ParsedTypeRef::Qualified {
             path,
-            span: authored_span(),
+            span: Some(authored_span()),
         }),
-        span: authored_span(),
+        span: Some(authored_span()),
     };
 
     let remap = global.merge_from(&local);

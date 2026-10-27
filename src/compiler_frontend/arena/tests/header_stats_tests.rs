@@ -116,7 +116,11 @@ fn multi_file_declarations_are_aggregated() {
     let prepared_syntax = prepare_header_syntax(
         &mut [entry_output, helper_output],
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut path_fork,
     )
     .expect("header syntax should prepare");

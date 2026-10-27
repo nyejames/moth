@@ -23,7 +23,8 @@ use crate::compiler_frontend::ast::templates::tir::{
     copy_tir_subtree_with_active_slot_plan, push_runtime_slot_contribution_source,
     tir_node_is_control_flow_root,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 
 pub(super) fn build_runtime_wrapper_site_plan(
@@ -188,7 +189,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         wrapper_set_id: TemplateWrapperSetId,
     ) -> Result<TemplateIrNodeId, TemplateError> {
         let Some(wrapper_set) = self.store.get_wrapper_set(wrapper_set_id) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "Runtime slot site planning found a slot wrapper-set ID that was not present in the TIR store.",
             )
             .into());
@@ -219,7 +220,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
     ) -> Result<TemplateIrNodeId, TemplateError> {
         let (wrapper_root, wrapper_span) = {
             let wrapper_template = self.store.get_template(wrapper_ref.root).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "Runtime slot site planning found a slot wrapper template ref {} that was not present in the TIR store.",
                     wrapper_ref
                 ))
@@ -239,7 +240,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         }
 
         let Some(target_key) = layout.schema.loose_fill_target_key() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "Runtime slot site planning could not apply a TIR slot wrapper to a loose contribution.",
             )
             .into());
@@ -313,7 +314,8 @@ fn inject_runtime_slot_fill(
     copy_state: &mut TirCopyState,
 ) -> Result<RuntimeSlotInjection, TemplateError> {
     let node = store.get_node(wrapper_root).cloned().ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Child-wrapper TIR path could not read the wrapper root node.",
         )
     })?;
@@ -367,7 +369,7 @@ fn inject_runtime_slot_fill(
             let child_root = store
                 .get_template(reference.root)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "Runtime slot site planning found child template {} missing from the TIR store.",
                         reference.root
                     ))

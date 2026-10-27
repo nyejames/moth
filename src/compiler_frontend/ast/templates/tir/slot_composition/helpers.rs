@@ -17,8 +17,11 @@ use crate::compiler_frontend::ast::templates::tir::slot_layout::TirSlotLayout;
 use crate::compiler_frontend::ast::templates::tir::{
     DerivedTemplateMetadata, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrStore,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
 
 use super::head_chain::HeadChainResolutionInputs;
@@ -27,8 +30,8 @@ type SlotCompositionResult<T> = Result<T, TemplateError>;
 type StoredInsertContributionTemplates = Option<Vec<(TemplateIrId, Option<SourceSpan>)>>;
 
 /// Builds a template infrastructure failure without rendering it into the source-diagnostic lane.
-pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
-    CompilerError::compiler_error(message).into()
+pub(super) fn internal_infrastructure_failure(message: &str) -> TemplateError {
+    InfrastructureFailure::internal(CompilerStage::AstConstruction, message).into()
 }
 
 /// Builds the diagnostic for an `$insert(...)` helper that targets a slot the
@@ -41,19 +44,19 @@ pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
 pub(super) fn unknown_slot_target_error(
     target: &SlotKey,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     match target {
-        SlotKey::Default => CompilerDiagnostic::invalid_template_slot(
+        SlotKey::Default => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertCannotTargetDefaultSlot,
             None,
             span,
         ),
-        SlotKey::Named(name) => CompilerDiagnostic::invalid_template_slot(
+        SlotKey::Named(name) => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot,
             Some(*name),
             span,
         ),
-        SlotKey::Positional(_) => CompilerDiagnostic::invalid_template_slot(
+        SlotKey::Positional(_) => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot,
             None,
             span,
@@ -65,8 +68,8 @@ pub(super) fn unknown_slot_target_error(
 /// positional slots.
 pub(super) fn loose_content_without_default_slot_error(
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_template_slot(
+) -> DiagnosticDraft {
+    templates::invalid_template_slot(
         InvalidTemplateSlotReason::LooseContentWithoutDefaultSlot,
         None,
         span,
@@ -75,8 +78,8 @@ pub(super) fn loose_content_without_default_slot_error(
 
 pub(super) fn extra_loose_content_without_default_slot_error(
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_template_slot(
+) -> DiagnosticDraft {
+    templates::invalid_template_slot(
         InvalidTemplateSlotReason::ExtraLooseContentWithoutDefaultSlot,
         None,
         span,
@@ -92,7 +95,9 @@ pub(crate) fn root_node_id_for_template(
         .get_template(template_id)
         .map(|template| template.root)
         .ok_or_else(|| {
-            internal_compiler_error("TIR slot routing: template ID was not present in the store.")
+            internal_infrastructure_failure(
+                "TIR slot routing: template ID was not present in the store.",
+            )
         })
 }
 
@@ -103,7 +108,7 @@ pub(crate) fn children_of_node(
     node_id: TemplateIrNodeId,
 ) -> SlotCompositionResult<Vec<TemplateIrNodeId>> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(internal_compiler_error(
+        return Err(internal_infrastructure_failure(
             "TIR slot routing: node ID was not present in the store.",
         ));
     };
@@ -117,14 +122,16 @@ pub(crate) fn children_of_node(
 pub(crate) fn stored_insert_contribution_templates(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<StoredInsertContributionTemplates, CompilerError> {
+) -> Result<StoredInsertContributionTemplates, InfrastructureFailure> {
     let template = store.get_template(template_id).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR slot composition: stored insert carrier referenced a missing template.",
         )
     })?;
     let root = store.get_node(template.root).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR slot composition: stored insert carrier referenced a missing root node.",
         )
     })?;
@@ -139,7 +146,8 @@ pub(crate) fn stored_insert_contribution_templates(
     let mut contributions = Vec::with_capacity(children.len());
     for child_id in children {
         let child = store.get_node(*child_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR slot composition: stored insert carrier referenced a missing child node.",
             )
         })?;
@@ -182,7 +190,7 @@ pub(super) fn rebuild_root_sequence(
     resolved_children: Vec<TemplateIrNodeId>,
 ) -> SlotCompositionResult<TemplateIrNodeId> {
     let original_root_node = store.get_node(original_root_node_id).ok_or_else(|| {
-        internal_compiler_error(
+        internal_infrastructure_failure(
             "TIR head-chain composition: original root node ID was not present in the store.",
         )
     })?;

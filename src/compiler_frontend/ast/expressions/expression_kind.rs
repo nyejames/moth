@@ -28,7 +28,6 @@ pub enum Operator {
     // Unary numeric negation
     Negate,
 
-    // Range construction
     Range,
 }
 

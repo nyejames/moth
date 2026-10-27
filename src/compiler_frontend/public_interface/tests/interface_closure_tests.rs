@@ -22,7 +22,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
     ExportedGenericParameterIdentity, GenericDeclarationOrigin, StableTraitRequirementIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{PublicFoldedField, PublicFoldedValue};
 use crate::compiler_frontend::public_call_summary::{
@@ -192,7 +192,7 @@ fn local_interface(bindings: Vec<ExportBinding>) -> LocalPublicInterface {
 fn close(
     bindings: Vec<ExportBinding>,
     providers: Vec<&PublicSemanticInterface>,
-) -> Result<PublicSemanticInterface, CompilerError> {
+) -> Result<PublicSemanticInterface, InfrastructureFailure> {
     let provider_dependencies = SourceProviderDependencySet::new(
         providers
             .into_iter()
@@ -681,10 +681,10 @@ fn disagreeing_provider_declarations_fail_deterministically() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("disagrees with an equal-origin provider interface"),
         "unexpected error: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -732,10 +732,10 @@ fn disagreeing_provider_summaries_fail_deterministically() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("disagrees with an equal-origin provider interface"),
         "unexpected error: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -761,9 +761,9 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
     .expect_err("a malformed successful interface must fail while its binding view is built");
 
     assert!(
-        error.msg.contains("duplicate declaration origin"),
+        error.message.contains("duplicate declaration origin"),
         "unexpected error: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -813,9 +813,11 @@ fn disagreeing_evidence_records_fail_in_both_provider_orders() {
         let error = close(bindings.clone(), providers)
             .expect_err("differing evidence records with one identity must fail in either order");
         assert!(
-            error.msg.contains("disagree on reusable evidence identity"),
+            error
+                .message
+                .contains("disagree on reusable evidence identity"),
             "unexpected error: {}",
-            error.msg
+            error.message
         );
     }
 }

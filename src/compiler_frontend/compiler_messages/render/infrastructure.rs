@@ -1,20 +1,19 @@
 //! Cause-derived infrastructure presentation shared by terminal, terse and HTML output.
 //!
-//! Original errors stay untouched. This transitional policy does not resolve source spans:
-//! a compact source ID alone is not evidence of a matching retained source owner.
+//! Renderers use the typed cause kind, stage, host path, message and details without consulting
+//! source identities or changing the stored failure.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, ErrorType,
+    InfrastructureClass, InfrastructureDetail, InfrastructureFailure,
 };
 
 pub(crate) const ISSUE_URL: &str = "https://github.com/nyejames/moth/issues";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InfrastructureClass {
-    CompilerBug,
-    Operational,
-}
+/// The code and title of the infrastructure failure record. Infrastructure failures are not
+/// diagnostic descriptors, so this constant is the single production spelling of the code; the
+/// dev-server card, the terse record and the benchmark report all read it.
+pub(crate) const INFRASTRUCTURE_FAILURE_CODE: &str = "MOTH-INFRA-0001";
+pub(crate) const INFRASTRUCTURE_FAILURE_TITLE: &str = "Infrastructure failure";
 
 impl InfrastructureClass {
     pub(crate) fn introduction(self) -> &'static str {
@@ -29,68 +28,15 @@ impl InfrastructureClass {
     }
 }
 
-pub(crate) fn infrastructure_class(error_type: &ErrorType) -> InfrastructureClass {
-    match error_type {
-        ErrorType::File | ErrorType::DevServer => InfrastructureClass::Operational,
-        ErrorType::Compiler
-        | ErrorType::HirTransformation
-        | ErrorType::Backend(BackendErrorType::LirTransformation)
-        | ErrorType::Backend(BackendErrorType::WasmGeneration) => InfrastructureClass::CompilerBug,
-    }
-}
-
-pub(crate) fn infrastructure_heading(error_type: &ErrorType) -> &'static str {
-    match error_type {
-        ErrorType::Compiler => "Compiler Bug",
-        ErrorType::File => "Filesystem Failure",
-        ErrorType::DevServer => "Dev Server Failure",
-        ErrorType::HirTransformation => "HIR Transformation Bug",
-        ErrorType::Backend(BackendErrorType::LirTransformation) => "LIR Transformation Bug",
-        ErrorType::Backend(BackendErrorType::WasmGeneration) => "Wasm Generation Bug",
-    }
-}
-
-pub(crate) fn format_error_guidance_lines(error: &CompilerError) -> Vec<String> {
-    let mut lines = Vec::new();
-
-    if let Some(stage) = error
-        .metadata
-        .get(&CompilerErrorMetadataKey::CompilationStage)
-    {
-        lines.push(format!("Stage: {stage}"));
-    }
-    if let Some(suggestion) = error
-        .metadata
-        .get(&CompilerErrorMetadataKey::PrimarySuggestion)
-    {
-        lines.push(suggestion.to_owned());
-    }
-    if let Some(alternative) = error
-        .metadata
-        .get(&CompilerErrorMetadataKey::AlternativeSuggestion)
-    {
-        lines.push(format!("Alternative: {alternative}"));
-    }
-    if let Some(replacement) = error
-        .metadata
-        .get(&CompilerErrorMetadataKey::SuggestedReplacement)
-    {
-        lines.push(format!("Suggested replacement: {replacement}"));
-    }
-    match (
-        error
-            .metadata
-            .get(&CompilerErrorMetadataKey::SuggestedInsertion),
-        error
-            .metadata
-            .get(&CompilerErrorMetadataKey::SuggestedLocation),
-    ) {
-        (Some(insertion), Some(location)) => {
-            lines.push(format!("Suggested insertion: '{insertion}' {location}"))
+pub(crate) fn format_error_guidance_lines(error: &InfrastructureFailure) -> Vec<String> {
+    let mut lines = vec![format!("Stage: {}", error.stage)];
+    for detail in error.details.iter() {
+        match detail {
+            InfrastructureDetail::PrimarySuggestion(suggestion) => {
+                lines.push(suggestion.to_string());
+            }
+            InfrastructureDetail::OutputRejectionReason(_) => {}
         }
-        (Some(insertion), None) => lines.push(format!("Suggested insertion: '{insertion}'")),
-        (None, Some(location)) => lines.push(format!("Suggested location: {location}")),
-        (None, None) => {}
     }
     lines
 }

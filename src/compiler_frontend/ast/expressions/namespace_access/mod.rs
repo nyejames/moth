@@ -11,6 +11,10 @@
 mod leaf_resolution;
 mod traversal;
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use leaf_resolution::{LeafDispatchContext, resolve_namespace_value_member};
 use traversal::{NamespaceMemberLookup, lookup_namespace_member};
 
@@ -22,7 +26,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
+    InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
@@ -92,7 +96,7 @@ pub(super) fn parse_namespace_access(
             Some(token_stream.current_span())
         };
         if token_stream.current_tag() != TokenTag::SYMBOL {
-            return Err(CompilerDiagnostic::invalid_field_access(
+            return Err(calls_data::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
                 None,
@@ -104,7 +108,8 @@ pub(super) fn parse_namespace_access(
         let member_name = token_stream
             .current_string_id_in(string_table)?
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "namespace member symbol had no string payload",
                 )
             })?;
@@ -121,9 +126,7 @@ pub(super) fn parse_namespace_access(
                 NamespaceRecordSource::SourceFile(_)
             )
         {
-            return Err(
-                CompilerDiagnostic::nested_dependency_traversal(root_name, member_span).into(),
-            );
+            return Err(project_config::nested_dependency_traversal(root_name, member_span).into());
         }
 
         match lookup {
@@ -136,7 +139,7 @@ pub(super) fn parse_namespace_access(
                     continue;
                 }
 
-                return Err(CompilerDiagnostic::namespace_type_value_misuse(
+                return Err(project_config::namespace_type_value_misuse(
                     member_name,
                     NamespaceTypeValueMisuseKind::Value,
                     NamespaceTypeValueMisuseKind::Namespace,
@@ -147,7 +150,7 @@ pub(super) fn parse_namespace_access(
 
             NamespaceMemberLookup::Value(value_member) => {
                 if has_following_dot {
-                    return Err(CompilerDiagnostic::namespace_type_value_misuse(
+                    return Err(project_config::namespace_type_value_misuse(
                         member_name,
                         NamespaceTypeValueMisuseKind::Namespace,
                         NamespaceTypeValueMisuseKind::Value,
@@ -190,7 +193,7 @@ pub(super) fn parse_namespace_access(
                     )
                 };
 
-                return Err(CompilerDiagnostic::namespace_type_value_misuse(
+                return Err(project_config::namespace_type_value_misuse(
                     member_name,
                     expected,
                     found,
@@ -201,7 +204,7 @@ pub(super) fn parse_namespace_access(
 
             NamespaceMemberLookup::Missing => {
                 return Err(
-                    CompilerDiagnostic::unknown_value_name(member_name, member_span).into(),
+                    names_declarations::unknown_value_name(member_name, member_span).into(),
                 );
             }
         }

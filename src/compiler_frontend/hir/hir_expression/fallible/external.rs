@@ -27,8 +27,8 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
         let args = self.lower_invoke_arguments(args, receiver, span)?;
-        let types = self.lower_call_result_types(result_type_ids, span)?;
-        let error = self.lower_type_id(error_type_id, span)?;
+        let types = self.lower_call_result_types(result_type_ids)?;
+        let error = self.lower_type_id(error_type_id)?;
         let mut results = self.emit_fallible_operation(
             HirFallibleOperation::Call {
                 target: CallTarget::External(id),

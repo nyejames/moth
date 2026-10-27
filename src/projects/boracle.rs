@@ -14,43 +14,61 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 #[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
+};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-
 /// Run the feature-gated Boracle source service for one single-file entry.
 pub fn run_boracle(
     path: &str,
     dump: BoracleDump,
     rule_selection: BoracleRuleSelection,
-) -> Result<String, CompilerMessages> {
-    let (input, string_table) = compile_boracle_input(path)?;
-    run_hir_module(
+) -> CompilationResult<String> {
+    let (input, string_table, warnings) = match compile_boracle_input(path)? {
+        CompilationOutcome::Success {
+            value: (input, string_table),
+            warnings,
+        } => (input, string_table, warnings),
+        CompilationOutcome::Diagnosed(reports) => {
+            return Ok(CompilationOutcome::Diagnosed(reports));
+        }
+    };
+    let value = run_hir_module(
         &input,
         BoracleServiceOptions {
             dump,
             rule_selection,
         },
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+    .map_err(InfrastructureErrors::from)?;
+    drop(string_table);
+    Ok(CompilationOutcome::Success { value, warnings })
 }
 
 /// Solve the same compiler-owned source payload as [`run_boracle`] without flattening the typed
 /// function reports into a developer dump.
 #[cfg(test)]
-fn solve_boracle(path: &str) -> Result<BoracleModuleReport, CompilerMessages> {
-    let (input, string_table) = compile_boracle_input(path)?;
-    solve_hir_module(&input).map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+fn solve_boracle(path: &str) -> CompilationResult<BoracleModuleReport> {
+    let (input, string_table, warnings) = match compile_boracle_input(path)? {
+        CompilationOutcome::Success {
+            value: (input, string_table),
+            warnings,
+        } => (input, string_table, warnings),
+        CompilationOutcome::Diagnosed(reports) => {
+            return Ok(CompilationOutcome::Diagnosed(reports));
+        }
+    };
+    let value = solve_hir_module(&input).map_err(InfrastructureErrors::from)?;
+    drop(string_table);
+    Ok(CompilationOutcome::Success { value, warnings })
 }
 
-fn compile_boracle_input(
-    path: &str,
-) -> Result<(BoracleModuleInput, StringTable), CompilerMessages> {
+fn compile_boracle_input(path: &str) -> CompilationResult<(BoracleModuleInput, StringTable)> {
     let normalized_path = if path.trim().is_empty() { "." } else { path };
-    let valid_path = check_if_valid_path(normalized_path)
-        .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?;
-
+    let valid_path = check_if_valid_path(normalized_path)?;
     let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let BuildBootstrap {
         config,
@@ -58,22 +76,39 @@ fn compile_boracle_input(
         mut string_table,
         mut frontend_surface,
         ..
-    } = bootstrap_project_build(&project_builder, valid_path, &BuildConfigInputSet::new())?;
+    } = match bootstrap_project_build(&project_builder, valid_path, &BuildConfigInputSet::new()) {
+        Ok(bootstrap) => bootstrap,
+        Err(failure) => {
+            return failure
+                .into_diagnostic_reports()
+                .map(CompilationOutcome::Diagnosed);
+        }
+    };
 
     if config.entry_dir.is_dir() {
-        let error = CompilerError::compiler_error(
+        let error = InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            &config.entry_dir,
             "Boracle source mode currently accepts one .moth file, not a directory project",
         );
-        return Err(CompilerMessages::from_error_ref(error, &string_table));
+        return Err(error.into());
     }
 
-    let input = compile_single_file_boracle(
+    let (input, warnings) = match compile_single_file_boracle(
         &config,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
-    )?;
-    Ok((input, string_table))
+    )? {
+        CompilationOutcome::Success { value, warnings } => (value, warnings),
+        CompilationOutcome::Diagnosed(reports) => {
+            return Ok(CompilationOutcome::Diagnosed(reports));
+        }
+    };
+    Ok(CompilationOutcome::Success {
+        value: (input, string_table),
+        warnings,
+    })
 }
 
 #[cfg(test)]

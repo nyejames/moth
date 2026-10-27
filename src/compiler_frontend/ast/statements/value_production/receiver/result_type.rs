@@ -13,9 +13,11 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::completeness::visit_reachable_then_values;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, types_borrows_targets,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, TypeMismatchContext,
-    ValueReceiverContext,
+    InvalidControlFlowStatementReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -23,8 +25,7 @@ use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 /// File-local result alias for value-producing receiver type inference.
 ///
-/// Diagnosed failures remain plain `CompilerDiagnostic` values. The receiver
-/// owner converts them at the same accumulation boundary as its other checks.
+/// The parser error lane carries typed draft diagnostics alongside infrastructure failures.
 type ResultTypeResult<T> = Result<T, ExpressionParseError>;
 
 /// Maps a receiver kind to the diagnostic context used when branch types mismatch.
@@ -55,13 +56,13 @@ pub(super) fn infer_inline_result_type(
 
         if !is_type_compatible(expected, then_type, env) {
             return Err(
-                CompilerDiagnostic::type_mismatch(expected, then_type, context, span).into(),
+                types_borrows_targets::type_mismatch(expected, then_type, context, span).into(),
             );
         }
 
         if !is_type_compatible(expected, else_type, env) {
             return Err(
-                CompilerDiagnostic::type_mismatch(expected, else_type, context, span).into(),
+                types_borrows_targets::type_mismatch(expected, else_type, context, span).into(),
             );
         }
 
@@ -69,7 +70,9 @@ pub(super) fn infer_inline_result_type(
     }
 
     if then_type != else_type {
-        return Err(CompilerDiagnostic::type_mismatch(then_type, else_type, context, span).into());
+        return Err(
+            types_borrows_targets::type_mismatch(then_type, else_type, context, span).into(),
+        );
     }
 
     Ok(then_type)
@@ -164,7 +167,7 @@ fn unify_single_produced_types(
     receiver_kind: ValueReceiverKind,
 ) -> ResultTypeResult<TypeId> {
     let Some((first_type, _)) = produced_types.first().cloned() else {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfNoProducingPath,
             span,
         )
@@ -174,7 +177,7 @@ fn unify_single_produced_types(
     let context = receiver_type_mismatch_context(receiver_kind);
     for (produced_type, produced_span) in produced_types.into_iter().skip(1) {
         if produced_type != first_type {
-            return Err(CompilerDiagnostic::type_mismatch(
+            return Err(types_borrows_targets::type_mismatch(
                 first_type,
                 produced_type,
                 context,

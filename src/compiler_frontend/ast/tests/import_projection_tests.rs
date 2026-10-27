@@ -32,9 +32,12 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
         ModuleRootRole::Normal,
     );
 
-    let normal_path = imported_nominal_path(&project_normal, &mut string_table, &mut path_fork);
-    let support_path = imported_nominal_path(&project_support, &mut string_table, &mut path_fork);
-    let builder_path = imported_nominal_path(&builder_normal, &mut string_table, &mut path_fork);
+    let normal_path = imported_nominal_path(&project_normal, &mut string_table, &mut path_fork)
+        .expect("an empty path fork interns a short imported nominal path");
+    let support_path = imported_nominal_path(&project_support, &mut string_table, &mut path_fork)
+        .expect("an empty path fork interns a short imported nominal path");
+    let builder_path = imported_nominal_path(&builder_normal, &mut string_table, &mut path_fork)
+        .expect("an empty path fork interns a short imported nominal path");
 
     assert_eq!(
         path_fork.render_portable(normal_path, &string_table, &mut scratch),

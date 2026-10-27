@@ -1,0 +1,5 @@
+Label = |
+    text String,
+|
+label = Label("ok")
+[:text=[label.text]]

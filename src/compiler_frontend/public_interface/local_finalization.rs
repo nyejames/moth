@@ -17,7 +17,8 @@ use super::model::{
     PublicReceiverMethodSemantics,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::{
     PublicCallSummary, validate_public_call_summary,
@@ -43,7 +44,7 @@ impl PublicInterfaceDraft {
         self,
         borrow_analysis: &BorrowAnalysis,
         hir_module: &HirModule,
-    ) -> Result<LocalPublicInterface, CompilerError> {
+    ) -> Result<LocalPublicInterface, InfrastructureFailure> {
         // Transient construction-time indexes: validate uniqueness and join summaries by origin.
         // They are dropped before the `LocalPublicInterface` boundary, which stores only the
         // contiguous, origin-ordered `Vec<ConcreteCallSummaryRecord>`.
@@ -54,15 +55,19 @@ impl PublicInterfaceDraft {
             match &record.semantics {
                 PublicDeclarationSemantics::Function(semantics) => {
                     let OriginDeclarationId::Function(origin) = &record.origin else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "public-interface finalization found function semantics under a non-function declaration origin",
                         ));
                     };
                     if !matches!(origin.kind(), FunctionOriginKind::Free) {
-                        return Err(CompilerError::compiler_error(format!(
-                            "public-interface finalization found receiver origin {:?} in a free-function record",
-                            origin
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "public-interface finalization found receiver origin {:?} in a free-function record",
+                                origin
+                            ),
+                        ));
                     }
                     match &semantics.category {
                         PublicFunctionCategory::ConcreteLocal => {
@@ -86,7 +91,8 @@ impl PublicInterfaceDraft {
                 }
                 PublicDeclarationSemantics::Struct(semantics) => {
                     let OriginDeclarationId::Type(receiver_origin) = &record.origin else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "public-interface finalization found struct semantics under a non-type declaration origin",
                         ));
                     };
@@ -101,7 +107,8 @@ impl PublicInterfaceDraft {
                 }
                 PublicDeclarationSemantics::Choice(semantics) => {
                     let OriginDeclarationId::Type(receiver_origin) = &record.origin else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "public-interface finalization found choice semantics under a non-type declaration origin",
                         ));
                     };
@@ -122,10 +129,13 @@ impl PublicInterfaceDraft {
 
         for origin in hir_module.function_ids_by_origin.keys() {
             if !expected_origins.contains(origin) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface finalization found extra stable function origin {:?} not present in the direct declaration draft",
-                    origin
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface finalization found extra stable function origin {:?} not present in the direct declaration draft",
+                        origin
+                    ),
+                ));
             }
         }
 
@@ -152,19 +162,25 @@ fn finalize_receiver_method_summaries(
     expected_origins: &mut FxHashSet<OriginFunctionId>,
     borrow_analysis: &BorrowAnalysis,
     hir_module: &HirModule,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for method in methods {
         let Some(method_receiver) = method.method_origin.receiver() else {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface finalization found free-function origin {:?} in receiver {:?}",
-                method.method_origin, receiver_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface finalization found free-function origin {:?} in receiver {:?}",
+                    method.method_origin, receiver_origin
+                ),
+            ));
         };
         if method_receiver != receiver_origin {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface finalization found receiver origin {:?} attached to {:?}",
-                method_receiver, receiver_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface finalization found receiver origin {:?} attached to {:?}",
+                    method_receiver, receiver_origin
+                ),
+            ));
         }
         match method.category {
             PublicReceiverMethodCategory::ConcreteLocal => {
@@ -196,35 +212,41 @@ fn finalize_callable_summary(
     expected_origins: &mut FxHashSet<OriginFunctionId>,
     borrow_analysis: &BorrowAnalysis,
     hir_module: &HirModule,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if !expected_origins.insert(origin.clone()) {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface finalization found duplicate callable origin {:?}",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface finalization found duplicate callable origin {:?}",
+                origin
+            ),
+        ));
     }
     let local_function_id = hir_module
         .function_ids_by_origin
         .get(origin)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "public-interface finalization is missing the local FunctionId for stable origin {:?}",
                 origin
             ))
         })?;
     if Some(local_function_id) == hir_module.start_function {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface finalization mapped callable origin {:?} to the implicit start function",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface finalization mapped callable origin {:?} to the implicit start function",
+                origin
+            ),
+        ));
     }
 
     let summary = borrow_analysis
         .public_call_summaries
         .get(&local_function_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "public-interface finalization is missing the borrow call summary for stable origin {:?} and local function {:?}",
                 origin, local_function_id
             ))
@@ -234,9 +256,9 @@ fn finalize_callable_summary(
         .map(|parameter| parameter.access)
         .collect::<Vec<_>>();
     validate_public_call_summary(&declared_parameter_access, summary).map_err(|error| {
-        CompilerError::compiler_error(format!(
+        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "public-interface finalization found an invalid call summary for stable origin {:?}: {}",
-            origin, error.msg
+            origin, error.message
         ))
     })?;
 
@@ -244,10 +266,13 @@ fn finalize_callable_summary(
         .insert(origin.clone(), summary.clone())
         .is_some()
     {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface finalization found duplicate concrete call summary for callable origin {:?}",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface finalization found duplicate concrete call summary for callable origin {:?}",
+                origin
+            ),
+        ));
     }
     Ok(())
 }
@@ -256,19 +281,25 @@ fn validate_generic_template_callable(
     origin: &OriginFunctionId,
     concrete_call_summaries: &FxHashMap<OriginFunctionId, PublicCallSummary>,
     hir_module: &HirModule,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if concrete_call_summaries.contains_key(origin) {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface finalization found a concrete base summary for generic template origin {:?}; generated summaries belong to sidecars",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface finalization found a concrete base summary for generic template origin {:?}; generated summaries belong to sidecars",
+                origin
+            ),
+        ));
     }
 
     if hir_module.function_ids_by_origin.contains_key(origin) {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface finalization found a local HIR FunctionId for generic template origin {:?}",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface finalization found a local HIR FunctionId for generic template origin {:?}",
+                origin
+            ),
+        ));
     }
 
     Ok(())

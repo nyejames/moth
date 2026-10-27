@@ -15,7 +15,7 @@
 
 use crate::builder_surface::core_packages::register_core_text_package;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::external_packages::{
     ExternalConstEvalOp, ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry,
     ExternalSymbolId, TextConstEvalOp,
@@ -680,7 +680,7 @@ export:\n\
 #[test]
 fn active_origin_missing_from_table_fails_internally() {
     // Hidden invariant: when the active root's SourceId maps to no owning module origin, the
-    // projection must fail through CompilerError rather than silently using a fallback origin.
+    // projection must fail through InfrastructureFailure rather than silently using a fallback origin.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut headers = parse_single_file_headers_with_fork(
@@ -727,15 +727,15 @@ fn active_origin_missing_from_table_fails_internally() {
         Ok(_) => panic!("an active root with no owning module origin must fail"),
     };
     assert!(
-        error.msg.contains("no owning module origin"),
+        error.message.contains("no owning module origin"),
         "the error must state the missing-origin violation, got: {}",
-        error.msg
+        error.message
     );
 }
 
 #[test]
 fn out_of_range_active_root_file_id_fails_internally() {
-    // Hidden invariant: an out-of-range SourceId is an internal CompilerError, not a silent None.
+    // Hidden invariant: an out-of-range SourceId is an internal InfrastructureFailure, not a silent None.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut headers = parse_single_file_headers_with_fork(
@@ -784,9 +784,9 @@ fn out_of_range_active_root_file_id_fails_internally() {
         Ok(_) => panic!("an out-of-range active root SourceId must fail"),
     };
     assert!(
-        error.msg.contains("out-of-range"),
+        error.message.contains("out-of-range"),
         "the error must state the out-of-range violation, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -869,9 +869,11 @@ fn conflicting_public_header_ownership_fails_internally() {
         Ok(_) => panic!("conflicting public header ownership must fail"),
     };
     assert!(
-        error.msg.contains("does not match the active root origin"),
+        error
+            .message
+            .contains("does not match the active root origin"),
         "the error must state the ownership conflict, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -921,9 +923,9 @@ fn zero_public_exports_still_validates_active_origin() {
         ),
     };
     assert!(
-        error.msg.contains("no owning module origin"),
+        error.message.contains("no owning module origin"),
         "the error must state the missing-origin violation, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1219,7 +1221,7 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     );
     assert!(
         result.is_err(),
-        "a public export-targeted nominal header with a compilation-root identity must be a CompilerError"
+        "a public export-targeted nominal header with a compilation-root identity must be an InfrastructureFailure"
     );
 }
 
@@ -1934,6 +1936,6 @@ fn public_source_trait_origin_index_rejects_unowned_source_identity() {
             &path_fork,
         )
         .expect_err("a public trait must have a registered physical source identity");
-        assert_eq!(error.error_type, ErrorType::Compiler);
+        assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     }
 }

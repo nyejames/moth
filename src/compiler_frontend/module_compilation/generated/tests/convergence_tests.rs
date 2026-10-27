@@ -9,10 +9,20 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, diagnostic_type_name,
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::InvalidFallibleHandlingView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    TypeMismatchView, type_mismatch,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticLabelMessage, DiagnosticPayload};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{CompilerStage, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -26,7 +36,7 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
-    PublishedBoundary, test_sidecar,
+    PublishedBoundary, assert_compiler_bug, test_sidecar,
 };
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts,
@@ -194,8 +204,7 @@ fn convergence_model_sorts_nodes_and_classifies_validated_call_targets() {
     let model = ConvergenceModel::from_link_facts(
         &base_facts,
         vec![(&beta, &beta_facts), (&alpha, &alpha_facts)],
-    )
-    .unwrap();
+    );
 
     assert_eq!(model.node_count(), 3);
     assert_eq!(
@@ -268,8 +277,7 @@ fn convergence_model_keeps_provider_private_calls_as_fixed_leaves() {
         vec![(&generated, &generated_facts)],
         &rustc_hash::FxHashSet::default(),
         &base_private_identities,
-    )
-    .unwrap();
+    );
 
     assert_eq!(
         model.callers(ConvergenceNodeId(0)),
@@ -296,8 +304,7 @@ fn convergence_model_classifies_active_base_public_cross_module_calls() {
         vec![(&generated, &generated_facts)],
         &base_public_origins,
         &rustc_hash::FxHashSet::default(),
-    )
-    .unwrap();
+    );
 
     assert_eq!(
         model.callers(ConvergenceNodeId(0)),
@@ -317,11 +324,9 @@ fn convergence_models_keep_equal_identities_local_to_each_boundary() {
     let first_generated = link_facts_for_calls(Vec::new());
     let second_generated = link_facts_for_calls(Vec::new());
 
-    let first = ConvergenceModel::from_link_facts(&first_base, vec![(&identity, &first_generated)])
-        .unwrap();
+    let first = ConvergenceModel::from_link_facts(&first_base, vec![(&identity, &first_generated)]);
     let second =
-        ConvergenceModel::from_link_facts(&second_base, vec![(&identity, &second_generated)])
-            .unwrap();
+        ConvergenceModel::from_link_facts(&second_base, vec![(&identity, &second_generated)]);
 
     assert_eq!(
         first.node_id(&ConvergenceNode::Generated(Box::new(identity.clone()))),
@@ -342,16 +347,23 @@ fn convergence_model_rejects_duplicate_local_generated_identities() {
     let first_generated = link_facts_for_calls(Vec::new());
     let second_generated = link_facts_for_calls(Vec::new());
 
-    let error = ConvergenceModel::from_link_facts(
-        &base_facts,
-        vec![
-            (&identity, &first_generated),
-            (&identity, &second_generated),
-        ],
-    )
-    .unwrap_err();
-
-    assert!(error.msg.contains("duplicate generated identity"));
+    let expected_message = format!(
+        "convergence model received duplicate generated identity {:?}",
+        identity
+    );
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        &expected_message,
+        || {
+            ConvergenceModel::from_link_facts(
+                &base_facts,
+                vec![
+                    (&identity, &first_generated),
+                    (&identity, &second_generated),
+                ],
+            )
+        },
+    );
 }
 
 #[test]
@@ -410,13 +422,11 @@ fn convergence_base_changes_enqueue_only_callers_with_changed_direct_inputs() {
         ],
         &base_public_origins,
         &base_private_identities,
-    )
-    .expect("test convergence model should build");
+    );
 
     let mut queue = VecDeque::new();
     let mut queued_nodes = vec![false; model.node_count()];
-    enqueue_base_dependents(&model, &changes, &mut queue, &mut queued_nodes)
-        .expect("base dependents should enqueue");
+    enqueue_base_dependents(&model, &changes, &mut queue, &mut queued_nodes);
     let expected_node = model
         .node_id(&ConvergenceNode::Generated(Box::new(generated_a)))
         .expect("generated A should have a node");
@@ -559,8 +569,7 @@ fn convergence_direct_summaries_read_exact_active_base_report_facts() {
         vec![(&generated, &generated_facts)],
         &base_public_origins,
         &base_private_identities,
-    )
-    .expect("test active-base model should build");
+    );
     let node = model
         .node_id(&ConvergenceNode::Generated(Box::new(generated)))
         .expect("generated node should exist");
@@ -594,7 +603,7 @@ fn convergence_base_changes_reject_a_narrowing_report() {
         &next.analysis.public_call_summaries,
     )
     .expect_err("a narrowing base summary must stop convergence");
-    assert!(error.msg.contains("narrowed"));
+    assert!(error.message.contains("narrowed"));
 }
 
 #[test]
@@ -635,21 +644,27 @@ fn missing_base_summary_is_not_an_infallible_summary() {
     let complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
     let missing = BorrowCheckReport::default();
 
-    assert!(
-        base_summary_changes(
-            &hir,
-            &missing.analysis.public_call_summaries,
-            &complete.analysis.public_call_summaries
-        )
-        .is_err()
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        "previous base borrow report is missing summary for FunctionId(0)",
+        || {
+            base_summary_changes(
+                &hir,
+                &missing.analysis.public_call_summaries,
+                &complete.analysis.public_call_summaries,
+            )
+        },
     );
-    assert!(
-        base_summary_changes(
-            &hir,
-            &complete.analysis.public_call_summaries,
-            &missing.analysis.public_call_summaries
-        )
-        .is_err()
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        "next base borrow report is missing summary for FunctionId(0)",
+        || {
+            base_summary_changes(
+                &hir,
+                &complete.analysis.public_call_summaries,
+                &missing.analysis.public_call_summaries,
+            )
+        },
     );
 }
 
@@ -659,8 +674,16 @@ fn builtin_failure_inference_requires_semantic_facts_and_call_summary() {
     let mut complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
     let mut missing = BorrowCheckReport::default();
 
-    assert!(infer_builtin_failure_summaries(&hir, &mut missing).is_err());
-    assert!(infer_builtin_failure_summaries(&hir, &mut complete).is_err());
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        "implicit builtin failure analysis is missing call summary for FunctionId(0)",
+        || infer_builtin_failure_summaries(&hir, &mut missing),
+    );
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        "implicit builtin failure analysis is missing semantic facts for FunctionId(0)",
+        || infer_builtin_failure_summaries(&hir, &mut complete),
+    );
 }
 
 fn failure_contributor(source: HirBuiltinFailureSource) -> HirBuiltinFailureContributor {
@@ -715,7 +738,11 @@ fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
         facts.contributors[0].codes = codes;
         hir.function_failure_facts.insert(FunctionId(0), facts);
         let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
-        assert!(infer_builtin_failure_summaries(&hir, &mut report).is_err());
+        assert_compiler_bug(
+            CompilerStage::ProjectBuildAssembly,
+            "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
+            || infer_builtin_failure_summaries(&hir, &mut report),
+        );
     }
 }
 
@@ -736,11 +763,15 @@ fn authored_cast_failure_contributor_accepts_cast_policy_codes_only() {
         hir.function_failure_facts.insert(FunctionId(0), facts);
         let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
 
-        assert_eq!(
-            infer_builtin_failure_summaries(&hir, &mut report).is_ok(),
-            accepted,
-            "unexpected implicit cast classification for {code:?}"
-        );
+        if accepted {
+            infer_builtin_failure_summaries(&hir, &mut report);
+        } else {
+            assert_compiler_bug(
+                CompilerStage::ProjectBuildAssembly,
+                "implicit cast failure contributor carries a non-implicit builtin failure code",
+                || infer_builtin_failure_summaries(&hir, &mut report),
+            );
+        }
     }
 }
 
@@ -772,7 +803,7 @@ fn builtin_failure_inference_reaches_local_recursive_fixed_point() {
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
     assert!(
         report
             .analysis
@@ -795,48 +826,107 @@ fn declared_error_and_export_boundaries_never_forward_builtin_failure_bit() {
             failure_facts(boundary, vec![HirBuiltinFailureSource::NumericOperation]),
         );
         let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
-        infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+        infer_builtin_failure_summaries(&hir, &mut report);
         assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
         assert_eq!(
-            builtin_failure_diagnostic(&hir, &report, FunctionId(0))
-                .unwrap()
-                .is_some(),
+            builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_some(),
             boundary != HirBuiltinFailureBoundary::BuiltinErrorSlot,
         );
     }
 }
 
-fn failure_witness_span(index: u32) -> Option<SourceSpan> {
+fn failure_witness_span(index: u32) -> SourceSpan {
     let mut builder = ExtendedSpanBuilder::new();
     let local = LocalSpan::exact(index * 10, 3, &mut builder).unwrap();
-    Some(SourceSpan::new(
-        SourceId::from_index(index as usize + 1),
-        local,
-    ))
+    SourceSpan::new(SourceId::from_index(index as usize + 1), local)
 }
 
-fn exported_failure_witness(hir: &HirModule, report: &BorrowCheckReport) -> BuiltinFailureWitness {
-    let diagnostic = builtin_failure_diagnostic(hir, report, FunctionId(0))
-        .unwrap()
-        .unwrap();
-    assert_eq!(diagnostic.primary_span, failure_witness_span(0));
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = diagnostic.payload
-    else {
-        panic!("expected exported builtin failure reason");
-    };
-    let mut spans: Vec<_> = witness.call_spans.iter().copied().flatten().collect();
-    spans.extend(witness.origin_span);
+#[derive(Debug, PartialEq, Eq)]
+enum ExportedFailureOrigin {
+    Operation,
+    CompoundWriteBack { rendered_target: String },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ExportedFailureWitness {
+    call_spans: Vec<Option<SourceSpan>>,
+    origin_span: Option<SourceSpan>,
+    origin: ExportedFailureOrigin,
+    elided_call_hops: u32,
+}
+
+fn exported_failure_witness(hir: &HirModule, report: &BorrowCheckReport) -> ExportedFailureWitness {
+    let draft = builtin_failure_diagnostic(hir, report, FunctionId(0))
+        .expect("exported failure fixture should produce a diagnostic");
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("the exported failure draft should compact");
     assert_eq!(
-        diagnostic
-            .labels
-            .iter()
-            .filter_map(|label| label.span)
-            .collect::<Vec<_>>(),
-        spans
+        diagnostic.descriptor().code,
+        "MOTH-RULE-0051",
+        "the witness remains an invalid fallible-handling diagnostic"
     );
-    *witness
+    assert!(matches!(
+        diagnostic.primary_site(),
+        SiteRef::Local(span) if span == failure_witness_span(0)
+    ));
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
+    );
+    let facts = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the exported failure should retain typed fallible-handling facts");
+    let elided_call_hops = u32::try_from(
+        facts
+            .count
+            .expect("the exported failure view retains its elided-hop count"),
+    )
+    .expect("the diagnostic count originated as a u32 witness value");
+
+    let mut call_spans = Vec::new();
+    let mut label_positions = Vec::new();
+    let mut origin_span = None;
+    let mut origin = ExportedFailureOrigin::Operation;
+    let string_table = StringTable::new();
+    for label in diagnostic.durable_labels() {
+        let span = match label.site {
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+            SiteRef::Absent => None,
+        };
+        if let Some(span) = span {
+            label_positions.push(span);
+        }
+        match label.message {
+            DurableLabelMessage::BuiltinFailureCall => call_spans.push(span),
+            DurableLabelMessage::BuiltinFailureOrigin => {
+                origin_span = span;
+                origin = ExportedFailureOrigin::Operation;
+            }
+            DurableLabelMessage::BuiltinWriteBackOrigin { target_type } => {
+                origin_span = span;
+                origin = ExportedFailureOrigin::CompoundWriteBack {
+                    rendered_target: diagnostic.types().display_for_render(
+                        target_type,
+                        &string_table,
+                        None,
+                    ),
+                };
+            }
+            _ => panic!("unexpected label role on builtin failure witness"),
+        }
+    }
+    let mut expected_label_positions: Vec<_> = call_spans.iter().copied().flatten().collect();
+    expected_label_positions.extend(origin_span);
+    assert_eq!(label_positions, expected_label_positions);
+
+    ExportedFailureWitness {
+        call_spans,
+        origin_span,
+        origin,
+        elided_call_hops,
+    }
 }
 
 #[test]
@@ -866,8 +956,8 @@ fn builtin_failure_witness_resolves_local_private_and_generated_hops_in_order() 
             HirBuiltinFailureBoundary::InferPrivate
         };
         let mut facts = failure_facts(boundary, vec![source]);
-        facts.span = failure_witness_span(index as u32);
-        facts.contributors[0].span = failure_witness_span(index as u32 + 4);
+        facts.span = Some(failure_witness_span(index as u32));
+        facts.contributors[0].span = Some(failure_witness_span(index as u32 + 4));
         if index == 3 {
             facts.contributors[0].codes = vec![
                 BuiltinErrorCode::DivideByZero,
@@ -890,18 +980,17 @@ fn builtin_failure_witness_resolves_local_private_and_generated_hops_in_order() 
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(
         witness.call_spans,
-        (4..7).map(failure_witness_span).collect::<Vec<_>>()
+        (4..7)
+            .map(|index| Some(failure_witness_span(index)))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(witness.origin_span, failure_witness_span(7));
-    assert_eq!(
-        witness.codes,
-        hir.function_failure_facts[&FunctionId(3)].contributors[0].codes
-    );
+    assert_eq!(witness.origin_span, Some(failure_witness_span(7)));
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -925,8 +1014,8 @@ fn builtin_failure_witness_keeps_three_calls_and_origin_after_elided_middle_hops
             HirBuiltinFailureSource::Call(CallTarget::Local(FunctionId(index + 1)))
         };
         let mut facts = failure_facts(boundary, vec![source]);
-        facts.span = failure_witness_span(index);
-        facts.contributors[0].span = failure_witness_span(index + 6);
+        facts.span = Some(failure_witness_span(index));
+        facts.contributors[0].span = Some(failure_witness_span(index + 6));
         hir.function_failure_facts.insert(FunctionId(index), facts);
     }
     let mut report = report((0..6).map(|index| {
@@ -935,15 +1024,17 @@ fn builtin_failure_witness_keeps_three_calls_and_origin_after_elided_middle_hops
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(
         witness.call_spans,
-        (6..9).map(failure_witness_span).collect::<Vec<_>>()
+        (6..9)
+            .map(|index| Some(failure_witness_span(index)))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(witness.origin_span, failure_witness_span(11));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.origin_span, Some(failure_witness_span(11)));
     assert_eq!(witness.elided_call_hops, 2);
 }
 
@@ -956,8 +1047,8 @@ fn builtin_failure_witness_skips_recursive_back_edge_to_reach_later_origin() {
             FunctionId(1),
         ))],
     );
-    boundary.span = failure_witness_span(0);
-    boundary.contributors[0].span = failure_witness_span(2);
+    boundary.span = Some(failure_witness_span(0));
+    boundary.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
     let mut recursive = failure_facts(
         HirBuiltinFailureBoundary::InferPrivate,
@@ -966,8 +1057,8 @@ fn builtin_failure_witness_skips_recursive_back_edge_to_reach_later_origin() {
             HirBuiltinFailureSource::NumericOperation,
         ],
     );
-    recursive.contributors[0].span = failure_witness_span(3);
-    recursive.contributors[1].span = failure_witness_span(4);
+    recursive.contributors[0].span = Some(failure_witness_span(3));
+    recursive.contributors[1].span = Some(failure_witness_span(4));
     hir.function_failure_facts.insert(FunctionId(1), recursive);
     let mut report = report((0..2).map(|index| {
         (
@@ -975,15 +1066,15 @@ fn builtin_failure_witness_skips_recursive_back_edge_to_reach_later_origin() {
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     // The self-recursive call precedes the numeric producer in source order, but the
     // witness skips only the back-edge: the earlier boundary hop stays visible while the
     // recursive hop contributes no label and the later origin is retained.
     let witness = exported_failure_witness(&hir, &report);
-    assert_eq!(witness.call_spans, vec![failure_witness_span(2)]);
-    assert_eq!(witness.origin_span, failure_witness_span(4));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.call_spans, vec![Some(failure_witness_span(2))]);
+    assert_eq!(witness.origin_span, Some(failure_witness_span(4)));
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -999,8 +1090,8 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
             FunctionId(1),
         ))],
     );
-    boundary.span = failure_witness_span(0);
-    boundary.contributors[0].span = failure_witness_span(2);
+    boundary.span = Some(failure_witness_span(0));
+    boundary.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
     let mut first = failure_facts(
         HirBuiltinFailureBoundary::InferPrivate,
@@ -1009,8 +1100,8 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
             HirBuiltinFailureSource::NumericOperation,
         ],
     );
-    first.contributors[0].span = failure_witness_span(3);
-    first.contributors[1].span = failure_witness_span(4);
+    first.contributors[0].span = Some(failure_witness_span(3));
+    first.contributors[1].span = Some(failure_witness_span(4));
     hir.function_failure_facts.insert(FunctionId(1), first);
     let mut second = failure_facts(
         HirBuiltinFailureBoundary::InferPrivate,
@@ -1018,7 +1109,7 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
             FunctionId(1),
         ))],
     );
-    second.contributors[0].span = failure_witness_span(5);
+    second.contributors[0].span = Some(failure_witness_span(5));
     hir.function_failure_facts.insert(FunctionId(2), second);
     let mut report = report((0..3).map(|index| {
         (
@@ -1026,15 +1117,14 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     // The mutual cycle (first -> second -> first) carries no origin of its own: the witness
     // backtracks past the second hop and resolves the later numeric producer in the first
     // helper, so only the entry hop stays visible.
     let witness = exported_failure_witness(&hir, &report);
-    assert_eq!(witness.call_spans, vec![failure_witness_span(2)]);
-    assert_eq!(witness.origin_span, failure_witness_span(4));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.call_spans, vec![Some(failure_witness_span(2))]);
+    assert_eq!(witness.origin_span, Some(failure_witness_span(4)));
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -1055,8 +1145,8 @@ fn builtin_failure_witness_expands_each_recursive_body_once_before_late_origin()
             FunctionId(1),
         ))],
     );
-    boundary.span = failure_witness_span(0);
-    boundary.contributors[0].span = failure_witness_span(1);
+    boundary.span = Some(failure_witness_span(0));
+    boundary.contributors[0].span = Some(failure_witness_span(1));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
     for body in 1..=BODY_COUNT {
         let mut sources = (1..=BODY_COUNT)
@@ -1069,7 +1159,7 @@ fn builtin_failure_witness_expands_each_recursive_body_once_before_late_origin()
         let mut facts = failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources);
         if body == 1 {
             let origin = facts.contributors.last_mut().expect("body 1 has an origin");
-            origin.span = failure_witness_span(2);
+            origin.span = Some(failure_witness_span(2));
         }
         hir.function_failure_facts.insert(FunctionId(body), facts);
     }
@@ -1079,18 +1169,20 @@ fn builtin_failure_witness_expands_each_recursive_body_once_before_late_origin()
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     let boundary_call = &hir.function_failure_facts[&FunctionId(0)].contributors[0];
     let mut entered = FxHashSet::from_iter([FunctionId(0)]);
-    let witness =
-        builtin_failure_witness_search(&hir, &report, boundary_call, &mut entered).unwrap();
+    let witness = builtin_failure_witness_search(&hir, &report, boundary_call, &mut entered);
     assert_eq!(entered.len(), BODY_COUNT as usize + 1);
-    assert_eq!(witness.call_spans, vec![failure_witness_span(1)]);
-    assert_eq!(witness.origin_span, failure_witness_span(2));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.call_spans, vec![Some(failure_witness_span(1))]);
+    assert_eq!(witness.origin_span, Some(failure_witness_span(2)));
     assert_eq!(witness.elided_call_hops, 0);
-    assert_eq!(exported_failure_witness(&hir, &report), witness);
+    let exported = exported_failure_witness(&hir, &report);
+    assert_eq!(exported.call_spans, witness.call_spans);
+    assert_eq!(exported.origin_span, witness.origin_span);
+    assert_eq!(exported.origin, ExportedFailureOrigin::Operation);
+    assert_eq!(exported.elided_call_hops, witness.elided_call_hops);
 }
 
 #[test]
@@ -1108,7 +1200,7 @@ fn builtin_failure_witness_never_classifies_candidates_after_an_early_terminal_l
             FunctionId(1),
         ))],
     );
-    boundary.contributors[0].span = failure_witness_span(1);
+    boundary.contributors[0].span = Some(failure_witness_span(1));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
     let mut sources = vec![HirBuiltinFailureSource::Call(CallTarget::CrossModule(
         foreign.clone(),
@@ -1119,7 +1211,7 @@ fn builtin_failure_witness_never_classifies_candidates_after_an_early_terminal_l
         ))))
     }));
     let mut helper = failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources);
-    helper.contributors[0].span = failure_witness_span(2);
+    helper.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(1), helper);
     let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
     escaping.escapes_builtin_failure = true;
@@ -1133,14 +1225,12 @@ fn builtin_failure_witness_never_classifies_candidates_after_an_early_terminal_l
 
     let boundary_call = &hir.function_failure_facts[&FunctionId(0)].contributors[0];
     let mut entered = FxHashSet::from_iter([FunctionId(0)]);
-    let witness =
-        builtin_failure_witness_search(&hir, &report, boundary_call, &mut entered).unwrap();
+    let witness = builtin_failure_witness_search(&hir, &report, boundary_call, &mut entered);
     assert_eq!(
         witness.call_spans,
-        vec![failure_witness_span(1), failure_witness_span(2)]
+        vec![Some(failure_witness_span(1)), Some(failure_witness_span(2))]
     );
     assert_eq!(witness.origin_span, None);
-    assert!(witness.codes.is_empty());
 }
 
 #[test]
@@ -1152,8 +1242,8 @@ fn builtin_failure_witness_keeps_origin_free_recursion_free_of_numeric_failure()
             FunctionId(1),
         ))],
     );
-    boundary.span = failure_witness_span(0);
-    boundary.contributors[0].span = failure_witness_span(2);
+    boundary.span = Some(failure_witness_span(0));
+    boundary.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
     let mut recursive = failure_facts(
         HirBuiltinFailureBoundary::InferPrivate,
@@ -1161,7 +1251,7 @@ fn builtin_failure_witness_keeps_origin_free_recursion_free_of_numeric_failure()
             FunctionId(1),
         ))],
     );
-    recursive.contributors[0].span = failure_witness_span(3);
+    recursive.contributors[0].span = Some(failure_witness_span(3));
     hir.function_failure_facts.insert(FunctionId(1), recursive);
     let mut report = report((0..2).map(|index| {
         (
@@ -1169,16 +1259,12 @@ fn builtin_failure_witness_keeps_origin_free_recursion_free_of_numeric_failure()
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     // Skipping back-edges must not invent an origin: a purely recursive graph converges to
     // no escaping failure, so the exported boundary carries no rejection at all.
     assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
-    assert!(
-        builtin_failure_diagnostic(&hir, &report, FunctionId(0))
-            .unwrap()
-            .is_none()
-    );
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_none());
 }
 
 #[test]
@@ -1191,8 +1277,8 @@ fn builtin_failure_witness_stops_at_cross_module_summary_and_requires_that_summa
             foreign.clone(),
         ))],
     );
-    facts.span = failure_witness_span(0);
-    facts.contributors[0].span = failure_witness_span(1);
+    facts.span = Some(failure_witness_span(0));
+    facts.contributors[0].span = Some(failure_witness_span(1));
     hir.function_failure_facts.insert(FunctionId(0), facts);
     let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
     escaping.escapes_builtin_failure = true;
@@ -1201,13 +1287,19 @@ fn builtin_failure_witness_stops_at_cross_module_summary_and_requires_that_summa
     let report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
 
     let witness = exported_failure_witness(&hir, &report);
-    assert_eq!(witness.call_spans, vec![failure_witness_span(1)]);
+    assert_eq!(witness.call_spans, vec![Some(failure_witness_span(1))]);
     assert_eq!(witness.origin_span, None);
-    assert!(witness.codes.is_empty());
     assert_eq!(witness.elided_call_hops, 0);
 
     hir.imported_call_summaries.remove(&foreign);
-    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_err());
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        &format!(
+            "implicit builtin failure contributor has no exact call summary for {:?}",
+            CallTarget::CrossModule(foreign.clone())
+        ),
+        || builtin_failure_diagnostic(&hir, &report, FunctionId(0)),
+    );
 }
 
 #[test]
@@ -1223,8 +1315,8 @@ fn builtin_failure_witness_stops_at_unavailable_call_before_later_origin() {
             FunctionId(1),
         ))],
     );
-    boundary.span = failure_witness_span(0);
-    boundary.contributors[0].span = failure_witness_span(2);
+    boundary.span = Some(failure_witness_span(0));
+    boundary.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
     let mut helper = failure_facts(
         HirBuiltinFailureBoundary::InferPrivate,
@@ -1233,8 +1325,8 @@ fn builtin_failure_witness_stops_at_unavailable_call_before_later_origin() {
             HirBuiltinFailureSource::NumericOperation,
         ],
     );
-    helper.contributors[0].span = failure_witness_span(3);
-    helper.contributors[1].span = failure_witness_span(4);
+    helper.contributors[0].span = Some(failure_witness_span(3));
+    helper.contributors[1].span = Some(failure_witness_span(4));
     hir.function_failure_facts.insert(FunctionId(1), helper);
     let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
     escaping.escapes_builtin_failure = true;
@@ -1245,15 +1337,14 @@ fn builtin_failure_witness_stops_at_unavailable_call_before_later_origin() {
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(
         witness.call_spans,
-        vec![failure_witness_span(2), failure_witness_span(3)]
+        vec![Some(failure_witness_span(2)), Some(failure_witness_span(3))]
     );
     assert_eq!(witness.origin_span, None);
-    assert!(witness.codes.is_empty());
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -1283,30 +1374,18 @@ fn assertion_message_candidates_validate_without_forwarding_failure() {
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
     assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
-    assert!(
-        builtin_failure_diagnostic(&hir, &report, FunctionId(0))
-            .unwrap()
-            .is_some()
-    );
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_some());
     report
         .analysis
         .public_call_summaries
         .get_mut(&FunctionId(1))
         .unwrap()
         .escapes_builtin_failure = false;
-    assert!(
-        builtin_failure_diagnostic(&hir, &report, FunctionId(0))
-            .unwrap()
-            .is_none()
-    );
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_none());
     report.analysis.public_call_summaries.remove(&FunctionId(1));
-    assert!(
-        builtin_failure_diagnostic(&hir, &report, FunctionId(0))
-            .unwrap()
-            .is_some()
-    );
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).is_some());
 }
 
 #[test]
@@ -1337,10 +1416,8 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
         display_name: "assertion".to_owned(),
         call_span: None,
     }])[0];
-    transaction.enter(request).unwrap();
-    transaction
-        .complete(request, initial.clone(), sidecar)
-        .unwrap();
+    transaction.enter(request);
+    transaction.complete(request, initial.clone(), sidecar, Default::default());
     let base = base_hir(&[], std::slice::from_ref(&private));
     let base_links = link_facts_for_calls(vec![]);
     let private_identities = FxHashSet::from_iter([private.clone()]);
@@ -1350,16 +1427,13 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
         transaction.completed_link_facts(),
         &public_origins,
         &private_identities,
-    )
-    .unwrap();
-    model
-        .include_deferred_validation_dependencies(
-            &base,
-            &mut transaction,
-            &public_origins,
-            &private_identities,
-        )
-        .unwrap();
+    );
+    model.include_deferred_validation_dependencies(
+        &base,
+        &mut transaction,
+        &public_origins,
+        &private_identities,
+    );
     assert_eq!(
         model.callers(ConvergenceNodeId(0)),
         Some(&[ConvergenceNodeId(1)][..])
@@ -1374,8 +1448,7 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
         },
         &mut queue,
         &mut queued,
-    )
-    .unwrap();
+    );
     assert_eq!(
         queue.into_iter().collect::<Vec<_>>(),
         vec![ConvergenceNodeId(1)]
@@ -1415,18 +1488,20 @@ fn builtin_failure_call_resolution_preserves_exact_summary_bits() {
         CallTarget::ModulePrivate(private),
         CallTarget::Generated(Box::new(generated)),
     ] {
-        assert!(call_escapes_builtin_failure(&hir, &report, &target).unwrap());
+        assert!(call_escapes_builtin_failure(&hir, &report, &target));
     }
-    assert!(
-        call_escapes_builtin_failure(&hir, &report, &CallTarget::Local(FunctionId(1))).is_err()
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        "implicit builtin failure contributor has no exact call summary for Local(FunctionId(1))",
+        || call_escapes_builtin_failure(&hir, &report, &CallTarget::Local(FunctionId(1))),
     );
-    assert!(
-        call_escapes_builtin_failure(
-            &hir,
-            &report,
-            &CallTarget::Generated(Box::new(generated_identity("missing"))),
-        )
-        .is_err()
+    let missing_generated = CallTarget::Generated(Box::new(generated_identity("missing")));
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        &format!(
+            "implicit builtin failure contributor has no exact call summary for {missing_generated:?}"
+        ),
+        || call_escapes_builtin_failure(&hir, &report, &missing_generated),
     );
 }
 
@@ -1445,8 +1520,7 @@ fn convergence_callers_queue_reaches_generated_cycle_without_duplicate_entries()
             (&generated_b, &generated_b_facts),
             (&generated_a, &generated_a_facts),
         ],
-    )
-    .expect("test generated cycle should build");
+    );
     let node_a = model
         .node_id(&ConvergenceNode::Generated(Box::new(generated_a)))
         .expect("generated A should have a node");
@@ -1456,10 +1530,8 @@ fn convergence_callers_queue_reaches_generated_cycle_without_duplicate_entries()
 
     let mut queue = VecDeque::new();
     let mut queued_nodes = vec![false; model.node_count()];
-    enqueue_convergence_callers(&model, node_b, &mut queue, &mut queued_nodes)
-        .expect("B callers should enqueue");
-    enqueue_convergence_callers(&model, node_a, &mut queue, &mut queued_nodes)
-        .expect("A callers should enqueue");
+    enqueue_convergence_callers(&model, node_b, &mut queue, &mut queued_nodes);
+    enqueue_convergence_callers(&model, node_a, &mut queue, &mut queued_nodes);
 
     assert_eq!(
         queue.into_iter().collect::<Vec<_>>(),
@@ -1501,7 +1573,6 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
@@ -1557,7 +1628,7 @@ fn builtin_failure_witness_writeback_priority_is_local_to_its_arithmetic_at_each
     for earlier in [false, true] {
         for private_hop in [false, true] {
             let mut hir = base_hir(&[origin("boundary")], &[private_identity("helper")]);
-            let arithmetic_span = failure_witness_span(2);
+            let arithmetic_span = Some(failure_witness_span(2));
             let mut helper = failure_facts(
                 if private_hop {
                     HirBuiltinFailureBoundary::InferPrivate
@@ -1572,12 +1643,12 @@ fn builtin_failure_witness_writeback_priority_is_local_to_its_arithmetic_at_each
                     },
                 ],
             );
-            helper.span = failure_witness_span(0);
+            helper.span = Some(failure_witness_span(0));
             helper.contributors[0].span = arithmetic_span;
-            helper.contributors[1].span = failure_witness_span(3);
+            helper.contributors[1].span = Some(failure_witness_span(3));
             if earlier {
                 let mut unrelated = failure_contributor(HirBuiltinFailureSource::NumericOperation);
-                unrelated.span = failure_witness_span(1);
+                unrelated.span = Some(failure_witness_span(1));
                 helper.contributors.insert(0, unrelated);
             }
             let helper_id = FunctionId(u32::from(private_hop));
@@ -1587,8 +1658,8 @@ fn builtin_failure_witness_writeback_priority_is_local_to_its_arithmetic_at_each
                     HirBuiltinFailureBoundary::ExportedNoSlot,
                     vec![HirBuiltinFailureSource::Call(CallTarget::Local(helper_id))],
                 );
-                boundary.span = failure_witness_span(0);
-                boundary.contributors[0].span = failure_witness_span(4);
+                boundary.span = Some(failure_witness_span(0));
+                boundary.contributors[0].span = Some(failure_witness_span(4));
                 hir.function_failure_facts.insert(FunctionId(0), boundary);
             } else {
                 hir.function_failure_facts.insert(
@@ -1602,18 +1673,20 @@ fn builtin_failure_witness_writeback_priority_is_local_to_its_arithmetic_at_each
                     summary(FunctionReturnAliasSummary::Fresh),
                 )
             }));
-            infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+            infer_builtin_failure_summaries(&hir, &mut report);
             let witness = exported_failure_witness(&hir, &report);
             assert_eq!(
                 witness.origin_span,
-                failure_witness_span(if earlier { 1 } else { 3 })
+                Some(failure_witness_span(if earlier { 1 } else { 3 }))
             );
             assert_eq!(
                 witness.origin,
                 if earlier {
-                    BuiltinFailureOriginKind::Operation
+                    ExportedFailureOrigin::Operation
                 } else {
-                    BuiltinFailureOriginKind::CompoundWriteBack { target: TypeId(8) }
+                    ExportedFailureOrigin::CompoundWriteBack {
+                        rendered_target: "TypeId(8)".to_owned(),
+                    }
                 }
             );
             assert_eq!(witness.call_spans.len(), usize::from(private_hop));
@@ -1634,10 +1707,10 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
             FunctionId(1),
         ))],
     );
-    boundary.span = failure_witness_span(0);
-    boundary.contributors[0].span = failure_witness_span(2);
+    boundary.span = Some(failure_witness_span(0));
+    boundary.contributors[0].span = Some(failure_witness_span(2));
     hir.function_failure_facts.insert(FunctionId(0), boundary);
-    let arithmetic_span = failure_witness_span(3);
+    let arithmetic_span = Some(failure_witness_span(3));
     let mut recursive = failure_facts(
         HirBuiltinFailureBoundary::InferPrivate,
         vec![
@@ -1649,9 +1722,9 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
             },
         ],
     );
-    recursive.contributors[0].span = failure_witness_span(5);
+    recursive.contributors[0].span = Some(failure_witness_span(5));
     recursive.contributors[1].span = arithmetic_span;
-    recursive.contributors[2].span = failure_witness_span(6);
+    recursive.contributors[2].span = Some(failure_witness_span(6));
     hir.function_failure_facts.insert(FunctionId(1), recursive);
     let mut report = report((0..2).map(|index| {
         (
@@ -1659,20 +1732,22 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
             summary(FunctionReturnAliasSummary::Fresh),
         )
     }));
-    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    infer_builtin_failure_summaries(&hir, &mut report);
 
     let witness = exported_failure_witness(&hir, &report);
-    assert_eq!(witness.call_spans, vec![failure_witness_span(2)]);
-    assert_eq!(witness.origin_span, failure_witness_span(6));
+    assert_eq!(witness.call_spans, vec![Some(failure_witness_span(2))]);
+    assert_eq!(witness.origin_span, Some(failure_witness_span(6)));
     assert_eq!(
         witness.origin,
-        BuiltinFailureOriginKind::CompoundWriteBack { target: TypeId(8) }
+        ExportedFailureOrigin::CompoundWriteBack {
+            rendered_target: "TypeId(8)".to_owned(),
+        }
     );
     assert_eq!(witness.elided_call_hops, 0);
 }
 // `builtin_failure_witness_keeps_three_calls_and_origin_after_elided_middle_hops`
 // above owns the exact synthetic witness assertions (ordered call spans, origin
-// span, typed codes, elided count). D02 determinism over real source lives with
+// span, and elided count). Determinism over real source lives with
 // the frontend pipeline owner in
 // `src/build_system/tests/compile_project_frontend_tests/package_materialisation_tests.rs`
 // (`exported_private_chain_witness_rendering_is_stable_across_repeated_compilation`),
@@ -1706,9 +1781,9 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
     ]);
 
     for request_id in request_ids {
-        let identity = transaction.identity(request_id).unwrap().clone();
+        let identity = transaction.identity(request_id).clone();
         assert_eq!(
-            transaction.enter(request_id).unwrap(),
+            transaction.enter(request_id),
             GeneratedRequestEntry::Materialise
         );
         let mut sidecar =
@@ -1721,13 +1796,12 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
             orphan_facts.clone()
         };
         sidecar.module.executable.hir.expressions.freeze();
-        transaction
-            .complete(
-                request_id,
-                summary(FunctionReturnAliasSummary::Fresh),
-                sidecar,
-            )
-            .unwrap();
+        transaction.complete(
+            request_id,
+            summary(FunctionReturnAliasSummary::Fresh),
+            sidecar,
+            Default::default(),
+        );
     }
 
     let reachable = reachable_generated_sidecars(&base_facts, &transaction);
@@ -1746,17 +1820,25 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
     assert_eq!(hir.generated_call_summaries.len(), 1);
     assert!(hir.generated_call_summaries.contains_key(&alpha));
 
-    transaction.retain_reachable_sidecars(&reachable).unwrap();
-    assert!(transaction.sidecar_mut(&orphan).is_err());
-    let delta = transaction.finish().unwrap();
+    transaction.retain_reachable_sidecars(&reachable);
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        &format!("Generated transaction cannot find sidecar {orphan:?}"),
+        || transaction.sidecar_mut(&orphan),
+    );
+    let (delta, warnings) = transaction.finish();
     assert_eq!(delta.records().len(), 2);
+    assert_eq!(warnings.len(), 2);
 }
 
 fn compile_owned_service_fixture(
     source: &str,
     single_file: bool,
     external_sources: &[(&str, &str)],
-) -> (ProjectFrontendCompilation, StringTable) {
+) -> (
+    CompilationOutcome<ProjectFrontendCompilation>,
+    BoundaryAccumulator,
+) {
     let directory = tempfile::tempdir().expect("the service fixture directory should exist");
     let source_root = directory.path().join("src");
     fs::create_dir_all(&source_root).expect("the service source root should exist");
@@ -1777,7 +1859,7 @@ fn compile_owned_service_fixture(
         directory.path().to_path_buf()
     };
     let mut config = Config::new(entry);
-    let mut strings = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut surface = BuilderSurface::with_mandatory_core();
     if !external_sources.is_empty() {
         surface
@@ -1790,12 +1872,12 @@ fn compile_owned_service_fixture(
         None,
         &StyleDirectiveRegistry::built_ins(),
         &mut surface,
-        &mut strings,
+        &mut warning_owner,
     )
     .expect("the canonical service should return its complete retained-fact outcome");
     fs::write(&source_path, "no semantic source remains\n")
         .expect("the original source should be replaced");
-    (frontend, strings)
+    (frontend, warning_owner)
 }
 
 #[test]
@@ -1821,8 +1903,13 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
         result = forward(1, recovered, false) catch then 0\n[: result=[result]]\n";
 
     for single_file in [false, true] {
-        let (frontend, strings) = compile_owned_service_fixture(SOURCE, single_file, &[]);
-        assert!(!frontend.has_diagnosed_or_blocked());
+        let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, single_file, &[]);
+        let CompilationOutcome::Success {
+            value: frontend, ..
+        } = frontend
+        else {
+            panic!("the completed service fixture should produce a successful outcome");
+        };
 
         let modules = frontend
             .project
@@ -1871,8 +1958,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .iter()
                 .map(|function| (function.id, summary(FunctionReturnAliasSummary::Fresh))),
         );
-        infer_builtin_failure_summaries(base, &mut base_report)
-            .expect("retained base facts should reconverge");
+        infer_builtin_failure_summaries(base, &mut base_report);
         assert!(base_report.analysis.public_call_summaries[&helper].escapes_builtin_failure);
         let named_base_function = |name: &str| {
             base.function_ids_by_private_origin
@@ -1887,8 +1973,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             &base_report,
             outer,
             &base.function_failure_facts[&outer].contributors[0],
-        )
-        .expect("the retained private chain should select its concrete recursive origin");
+        );
         assert_eq!(
             witness.call_spans,
             ["outer", "middle", "inner"].map(|name| base.function_failure_facts
@@ -1897,17 +1982,12 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .span)
         );
         assert_eq!(witness.origin_span, Some(origin_span));
-        assert_eq!(witness.codes, [BuiltinErrorCode::IntOverflow]);
         assert_eq!(witness.elided_call_hops, 1);
         assert!(!witness.call_spans.contains(&Some(recursive_span)));
 
         let check = named_base_function("check");
         assert!(!base_report.analysis.public_call_summaries[&check].escapes_builtin_failure);
-        assert!(
-            builtin_failure_diagnostic(base, &base_report, check)
-                .expect("the concrete inactive message should be validated")
-                .is_none()
-        );
+        assert!(builtin_failure_diagnostic(base, &base_report, check).is_none());
         assert!(
             !modules[0]
                 .link_facts
@@ -1921,11 +2001,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
         );
         let recover = named_base_function("recover");
         assert!(!base_report.analysis.public_call_summaries[&recover].escapes_builtin_failure);
-        assert!(
-            builtin_failure_diagnostic(base, &base_report, recover)
-                .expect("the infallible concrete operand should remain lawful with a custom catch")
-                .is_none()
-        );
+        assert!(builtin_failure_diagnostic(base, &base_report, recover).is_none());
         let load = named_base_function("load");
         let custom_type = base
             .functions
@@ -1934,10 +2010,39 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .expect("the typed producer survives the service")
             .error_return
             .expect("load retains its custom failure channel");
-        let type_context = DiagnosticRenderContext::new(&strings)
-            .with_optional_type_environment(Some(&modules[0].executable.type_environment))
-            .with_path_table(&modules[0].executable.path_table);
-        assert_eq!(diagnostic_type_name(custom_type, type_context), "Failure");
+        let diagnostic = type_mismatch(
+            custom_type,
+            custom_type,
+            TypeMismatchContext::Assignment,
+            None,
+        );
+        let prepared = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
+            warning_owner.string_table().clone(),
+            Some(&modules[0].executable.type_environment),
+            Some(std::sync::Arc::clone(&modules[0].executable.path_table)),
+        );
+        let mut accumulator = BoundaryAccumulator::new();
+        accumulator.append_prepared(prepared, None);
+        let result: CompilationResult<()> = accumulator
+            .finish(InstallMode::Frozen)
+            .map(CompilationOutcome::Diagnosed);
+        let Ok(CompilationOutcome::Diagnosed(reports)) = result else {
+            panic!("the captured type mismatch should produce a diagnosed result");
+        };
+        let (diagnostic_report, view) = reports.iter().next().expect("captured custom type");
+        let type_mismatch = view
+            .family_view::<TypeMismatchView>()
+            .expect("the diagnostic must retain type-mismatch facts");
+        let type_context = DiagnosticRenderContext::for_report(diagnostic_report);
+        assert_eq!(
+            view.types().display_for_render(
+                type_mismatch.expected,
+                type_context.string_table,
+                type_context.path_table(),
+            ),
+            "Failure"
+        );
         let (typed_span, failure_block, error_local) = base
             .blocks
             .iter()
@@ -2091,8 +2196,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .iter()
                 .map(|function| (function.id, summary(FunctionReturnAliasSummary::Fresh))),
         );
-        infer_builtin_failure_summaries(generated, &mut generated_report)
-            .expect("generated facts should consume the retained base helper summary");
+        infer_builtin_failure_summaries(generated, &mut generated_report);
         assert!(generated_report.analysis.public_call_summaries[&root].escapes_builtin_failure);
         assert!(
             sidecar
@@ -2136,29 +2240,54 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
 
     for single_file in [false, true] {
         for (source, assertion) in [(assertion_source, true), (catch_source, false)] {
-            let (frontend, mut strings) = compile_owned_service_fixture(source, single_file, &[]);
-            assert!(frontend.has_diagnosed_or_blocked());
-            let messages =
-                frontend.into_render_messages_with_frozen_identity(&mut strings, None, None);
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-            assert_eq!(diagnostics.len(), 1);
-            let diagnostic = diagnostics[0];
-            let context = messages.diagnostic_render_context(0);
-            let identity = messages
-                .frozen_identity_context_for_diagnostic(0)
-                .expect("the retained diagnosis owns its compiled source snapshot");
-            let span_start = |span: Option<SourceSpan>| {
-                span.expect("the diagnosed semantic site retains an exact source span")
-                    .byte_range(identity)
-                    .start() as usize
+            let (frontend, _) = compile_owned_service_fixture(source, single_file, &[]);
+            let CompilationOutcome::Diagnosed(reports) = frontend else {
+                panic!("the completed generated fixture should produce a diagnosed result");
+            };
+            assert_eq!(reports.counts().errors, 1);
+            let (report, view) = reports
+                .iter_severity(
+                    crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error,
+                )
+                .next()
+                .expect("concrete generated failure should retain one diagnostic");
+            let expected_reason_key = if assertion {
+                "invalid_fallible_handling.assertion_message_cannot_escape"
+            } else {
+                "invalid_fallible_handling.custom_error_mixed_with_implicit_failure"
+            };
+            assert_eq!(view.reason_key(), Some(expected_reason_key));
+            let identity = report.context();
+            let context = DiagnosticRenderContext::for_report(report);
+            let primary_site = view.primary_site();
+            let span_start = |site: crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'_>| {
+                match site {
+                    crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span) => {
+                        span.byte_range(identity).start() as usize
+                    }
+                    crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                        span,
+                        context,
+                    } => span
+                        .byte_range(context.expect("foreign site identity should be installed"))
+                        .start() as usize,
+                    crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                        panic!("the diagnosed semantic site retains an exact source span")
+                    }
+                }
+            };
+            let source_id = match primary_site {
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+                | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                    span,
+                    ..
+                } => span.source(),
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                    panic!("the source diagnosis retains its primary source")
+                }
             };
             let snapshot = identity
-                .line_index(
-                    diagnostic
-                        .primary_span
-                        .expect("the source diagnosis retains its primary source")
-                        .source(),
-                )
+                .line_index(source_id)
                 .expect("the completed diagnosis retains its source line index");
             assert_eq!(
                 (0..snapshot.line_count())
@@ -2168,73 +2297,57 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
                     .collect::<Vec<_>>(),
                 source.lines().collect::<Vec<_>>()
             );
-            let DiagnosticPayload::InvalidFallibleHandling { reason } = &diagnostic.payload else {
-                panic!("concrete generated failure must diagnose its retained boundary fact");
-            };
             if assertion {
                 assert_eq!(
-                    *reason,
-                    InvalidFallibleHandlingReason::AssertionMessageCannotEscape
-                );
-                assert_eq!(
-                    span_start(diagnostic.primary_span),
+                    span_start(primary_site),
                     source
                         .find("message(value, 1)")
                         .expect("the fixture contains its inert message call")
                 );
                 assert_eq!(
                     context
-                        .primary_position(diagnostic)
+                        .site_position(primary_site)
                         .expect("the retained inert message span resolves after source deletion")
                         .line,
                     "    assert(true, message(value, 1))"
                 );
             } else {
-                let InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                    error_type_id,
-                    typed_producer_span,
-                    implicit_producer_span,
-                } = reason
-                else {
-                    panic!("the completed generated operand must conflict with custom Failure");
-                };
-                assert_eq!(diagnostic_type_name(*error_type_id, context), "Failure");
                 assert_eq!(
-                    span_start(diagnostic.primary_span),
+                    span_start(primary_site),
                     source
                         .find("catch |failure| then 0")
                         .expect("the fixture contains its custom handler")
                 );
+                let labels = view.durable_labels().collect::<Vec<_>>();
+                assert_eq!(labels.len(), 2);
+                assert!(matches!(
+                    labels[0].message,
+                    crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::TypedFailureProducer { .. }
+                ));
+                assert!(matches!(
+                    labels[1].message,
+                    crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::ImplicitFailureProducer
+                ));
                 assert_eq!(
-                    span_start(*typed_producer_span),
+                    span_start(labels[0].site),
                     source
                         .find("load(operand(value, value))")
                         .expect("the fixture contains its typed producer")
                 );
                 assert_eq!(
-                    span_start(*implicit_producer_span),
+                    span_start(labels[1].site),
                     source
                         .find("operand(value, value)")
                         .expect("the fixture contains its generated private operand")
                 );
-                assert_eq!(
-                    diagnostic
-                        .labels
-                        .iter()
-                        .map(|label| (label.span, label.message.as_ref()))
-                        .collect::<Vec<_>>(),
-                    [
-                        (
-                            *typed_producer_span,
-                            Some(&DiagnosticLabelMessage::TypedFailureProducer {
-                                error_type_id: *error_type_id,
-                            })
-                        ),
-                        (
-                            *implicit_producer_span,
-                            Some(&DiagnosticLabelMessage::ImplicitFailureProducer)
-                        ),
-                    ]
+                let label_text = crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_view(
+                    view,
+                    context,
+                )
+                .join("\n");
+                assert!(
+                    label_text.contains("Failure"),
+                    "the typed producer label should name the custom error type: {label_text}"
                 );
             }
         }
@@ -2249,7 +2362,12 @@ fn active_and_inert_generic_message_share_one_completed_service_identity() {
         check(\"safe\")\nactive_message = message(\"live\")\n[: result=[active_message]]\n";
     for single_file in [false, true] {
         let (frontend, _) = compile_owned_service_fixture(SOURCE, single_file, &[]);
-        assert!(!frontend.has_diagnosed_or_blocked());
+        let CompilationOutcome::Success {
+            value: frontend, ..
+        } = frontend
+        else {
+            panic!("the completed service fixture should produce a successful outcome");
+        };
         let artefacts = frontend
             .project
             .successful_artefacts_in_module_id_order()
@@ -2388,7 +2506,12 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
                 ("active_message.js", ACTIVE_MESSAGE),
             ],
         );
-        assert!(!frontend.has_diagnosed_or_blocked());
+        let CompilationOutcome::Success {
+            value: frontend, ..
+        } = frontend
+        else {
+            panic!("the completed service fixture should produce a successful outcome");
+        };
         let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
         assert_eq!(
             sidecars.len(),

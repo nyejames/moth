@@ -12,13 +12,19 @@ use crate::compiler_frontend::ast::const_eval::{
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, ResolvedOperation,
+};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOp, OwnedExpr,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::OperatorOperandPosition;
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -82,10 +88,10 @@ pub fn evaluate_expression(
         }
 
         let ExpressionRpnItem::Operand(expression) = &ordered_nodes[0] else {
-            return Err(CompilerError::compiler_error(
-                "Expression ordering produced a single operator without an operand.",
-            )
-            .into());
+            return Err(lone_operator_missing_operand(
+                &ordered_nodes[0],
+                string_table,
+            ));
         };
 
         let requirement = if context.kind.is_constant_context() {
@@ -111,7 +117,7 @@ pub fn evaluate_expression(
                 root
             }
             ConstantFoldOutcome::Refused { reason, .. } => {
-                return Err(reason.into_diagnostic().into());
+                return Err(reason.into_draft().into());
             }
         };
         // A standalone producer retains its slots for multi-bind, return and handling owners.
@@ -228,7 +234,7 @@ pub fn evaluate_expression(
             root
         }
         ConstantFoldOutcome::Refused { reason, .. } => {
-            return Err(reason.into_diagnostic().into());
+            return Err(reason.into_draft().into());
         }
     };
 
@@ -245,6 +251,33 @@ pub fn evaluate_expression(
         return Ok(expressions.own(folded));
     }
     Ok(expressions.with_failure_facts(expressions.own(folded), failure)?)
+}
+
+/// Diagnose a fast-path expression that is only an operator, with no operand.
+fn lone_operator_missing_operand(
+    item: &ExpressionRpnItem,
+    string_table: &mut StringTable,
+) -> ExpressionTypingError {
+    let (operator, span) = match item {
+        ExpressionRpnItem::Operator { operator, span } => (operator, *span),
+        ExpressionRpnItem::ResolvedOperator(ResolvedOperation { operator, span, .. }) => {
+            (operator, *span)
+        }
+        _ => {
+            return InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "Expression ordering produced a single non-operand without an operator spelling.",
+            )
+            .into();
+        }
+    };
+    let position = if operator.required_values() == 1 {
+        OperatorOperandPosition::Unary
+    } else {
+        OperatorOperandPosition::BinaryRight
+    };
+    token_lexical::missing_operator_operand(string_table.intern(operator.to_str()), position, span)
+        .into()
 }
 
 fn substitute_explicit_numeric_constants(
@@ -343,7 +376,8 @@ pub(super) fn materialize_pending_literal(
 ) -> Result<TypeId, ExpressionTypingError> {
     let expression = {
         let Some(item) = nodes.get(index) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Pending literal resolution could not retrieve its RPN item.",
             )
             .into());
@@ -354,7 +388,8 @@ pub(super) fn materialize_pending_literal(
             value_mode,
         } = item
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Pending literal resolution indexed a non-literal RPN item.",
             )
             .into());
@@ -371,14 +406,14 @@ pub(super) fn materialize_pending_literal(
             Some(PendingLiteralDestination::FixedScalar(scalar)) => {
                 let value = materialize_fixed_scalar(token, token.sign, scalar, string_table)
                     .map_err(|reason| {
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                        token_lexical::invalid_number_literal(token.source_text, reason, *span)
                     })?;
                 expressions.fixed_scalar(const_values, value, *span, *value_mode)?
             }
             Some(PendingLiteralDestination::Number { scale, type_id }) => {
                 let value = materialize_number(token, token.sign, scale, string_table).map_err(
                     |reason| {
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                        token_lexical::invalid_number_literal(token.source_text, reason, *span)
                     },
                 )?;
                 expressions.number(const_values, value, type_id, *span, *value_mode)?
@@ -395,7 +430,8 @@ pub(super) fn materialize_pending_literal(
     };
     let type_id = expressions.view_owned(expression)?.value_type_id()?;
     let Some(item) = nodes.get_mut(index) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Pending literal resolution could not retrieve its RPN item.",
         )
         .into());
@@ -460,7 +496,7 @@ fn default_materialised_literal(
     if token.kind == NumericLiteralKind::WholeNumber {
         let value = materialize_fixed_scalar(token, token.sign, FixedScalar::I32, string_table)
             .map_err(|reason| {
-                CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+                token_lexical::invalid_number_literal(token.source_text, reason, span)
             })?;
 
         return Ok(expressions.fixed_scalar(const_values, value, span, value_mode)?);
@@ -470,9 +506,7 @@ fn default_materialised_literal(
     // rounds and negates in one destination-precision step: no positive intermediate exists and
     // signed zero is preserved exactly.
     let value = materialize_fixed_scalar(token, token.sign, FixedScalar::F64, string_table)
-        .map_err(|reason| {
-            CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
-        })?;
+        .map_err(|reason| token_lexical::invalid_number_literal(token.source_text, reason, span))?;
 
     Ok(expressions.fixed_scalar(const_values, value, span, value_mode)?)
 }
@@ -481,10 +515,13 @@ fn default_materialised_literal(
 ///
 /// Group markers disappear during ordering and pending literals during typing. Every later
 /// consumer handles their presence as a broken compiler invariant, not a source diagnostic.
-pub(crate) fn pending_expression_item_bug(function: &'static str) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Pending expression item reached {function}; evaluate_expression must resolve it first."
-    ))
+pub(crate) fn pending_expression_item_bug(function: &'static str) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "Pending expression item reached {function}; evaluate_expression must resolve it first."
+        ),
+    )
 }
 
 /// Complete resolved transient postfix syntax as fixed-edge semantic operations.
@@ -515,13 +552,19 @@ pub(crate) fn expression_from_resolved_items(
             ExpressionRpnItem::ResolvedOperator(facts) => {
                 let right = if facts.operator.required_values() == 2 {
                     Some(stack.pop().ok_or_else(|| {
-                        CompilerError::compiler_error("Resolved operation lost its right operand.")
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "Resolved operation lost its right operand.",
+                        )
                     })?)
                 } else {
                     None
                 };
                 let left = stack.pop().ok_or_else(|| {
-                    CompilerError::compiler_error("Resolved operation lost its left operand.")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Resolved operation lost its left operand.",
+                    )
                 })?;
                 let (left, right) = substitute_explicit_text_equality_operands(
                     &facts.operator,
@@ -554,7 +597,8 @@ pub(crate) fn expression_from_resolved_items(
         }
     }
     let [root] = stack.as_slice() else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Resolved expression construction did not produce one root.",
         )
         .into());
@@ -595,7 +639,7 @@ fn fold_completed_node(
         {
             Ok(root)
         }
-        ConstantFoldOutcome::Refused { reason, .. } => Err(reason.into_diagnostic().into()),
+        ConstantFoldOutcome::Refused { reason, .. } => Err(reason.into_draft().into()),
     }
 }
 
@@ -630,7 +674,7 @@ fn validate_expression_result_type(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::type_mismatch(
+    Err(types_borrows_targets::type_mismatch(
         expected_type_id,
         actual_type_id,
         TypeMismatchContext::General,

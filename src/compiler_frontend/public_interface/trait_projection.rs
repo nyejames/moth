@@ -27,7 +27,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
     GenericParameterOriginResolver, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -46,7 +47,7 @@ use rustc_hash::FxHashMap;
 /// the only generic parameter in a trait signature is the trait `this_type`, which the
 /// projection special-cases as [`TraitSurfaceTypeIdentity::SelfType`] before canonical
 /// projection. Any other `GenericParameterId` reaching the canonical projection is an
-/// internal invariant violation, so this resolver returns a precise `CompilerError` instead
+/// internal invariant violation, so this resolver returns a precise `InfrastructureFailure` instead
 /// of inventing an identity.
 struct TraitRequirementGenericParameterResolver;
 
@@ -54,14 +55,17 @@ impl GenericParameterOriginResolver for TraitRequirementGenericParameterResolver
     fn resolve_generic_parameter_origin(
         &self,
         parameter_id: GenericParameterId,
-    ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
-        Err(CompilerError::compiler_error(format!(
-            "public-interface draft trait projection: GenericParameterId({}) reached canonical \
+    ) -> Result<ExportedGenericParameterIdentity, InfrastructureFailure> {
+        Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft trait projection: GenericParameterId({}) reached canonical \
              projection inside a trait requirement; only the trait self type may appear and it \
              is special-cased as SelfType, so a nested or unrelated generic parameter is an \
              internal invariant violation",
-            parameter_id.0
-        )))
+                parameter_id.0
+            ),
+        ))
     }
 }
 
@@ -107,9 +111,11 @@ pub(crate) struct DirectTraitProjectionInput<'a> {
 impl<'a> DirectTraitProjection<'a> {
     /// Build the projection state, indexing trait roots by public name.
     ///
-    /// A root without a resolvable name is a `CompilerError`, and two roots sharing a public
+    /// A root without a resolvable name is an `InfrastructureFailure`, and two roots sharing a public
     /// name is a duplicate that is rejected rather than silently overwriting the first.
-    pub(super) fn new(input: DirectTraitProjectionInput<'a>) -> Result<Self, CompilerError> {
+    pub(super) fn new(
+        input: DirectTraitProjectionInput<'a>,
+    ) -> Result<Self, InfrastructureFailure> {
         let DirectTraitProjectionInput {
             trait_roots,
             trait_source_facts,
@@ -127,18 +133,21 @@ impl<'a> DirectTraitProjection<'a> {
                 .component(root.canonical_path)
                 .map(|component| string_table.resolve(component))
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "public-interface draft trait projection: a trait root has no resolvable \
                          defining name (canonical path: {:?})",
                         root.canonical_path
                     ))
                 })?;
             if roots_by_name.insert(name, root).is_some() {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft trait projection: two trait roots share the public \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface draft trait projection: two trait roots share the public \
                      name '{}'; a duplicate trait root must not silently overwrite the first",
-                    name
-                )));
+                        name
+                    ),
+                ));
             }
         }
         Ok(Self {
@@ -165,17 +174,20 @@ impl<'a> DirectTraitProjection<'a> {
     /// publicly-authored `must not` incompatibilities for the trait, canonicalized through the
     /// shared `trait_source_facts` source/core mapping owner, preserving authored source order.
     /// A missing, duplicate, self, unmatched, wrong-origin or malformed-self fact is a
-    /// `CompilerError`.
+    /// `InfrastructureFailure`.
     pub(super) fn project_binding(
         &mut self,
         binding: &'a ExportBinding,
-    ) -> Result<PublicTraitSemantics, CompilerError> {
+    ) -> Result<PublicTraitSemantics, InfrastructureFailure> {
         let OriginDeclarationId::Trait(trait_origin) = binding.origin() else {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: a non-trait export binding '{}' was \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft trait projection: a non-trait export binding '{}' was \
                  passed to the trait projection",
-                binding.public_name()
-            )));
+                    binding.public_name()
+                ),
+            ));
         };
 
         let public_name = binding.public_name();
@@ -186,7 +198,7 @@ impl<'a> DirectTraitProjection<'a> {
             .or_else(|| self.roots_by_name.get(public_name))
             .copied()
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "public-interface draft trait projection: the trait export binding '{}' for \
                      defining trait '{}' has no matching trait root; every direct trait binding \
                      must join exactly one root",
@@ -200,7 +212,7 @@ impl<'a> DirectTraitProjection<'a> {
             .public_source_trait_origins
             .get(&root.canonical_path)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "public-interface draft trait projection: the trait root '{}' canonical path \
                      has no retained public source-trait origin; a private, unexported or unowned \
                      trait must not enter the public interface",
@@ -208,20 +220,26 @@ impl<'a> DirectTraitProjection<'a> {
                 ))
             })?;
         if resolved_origin != trait_origin {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: the trait export binding '{}' origin \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft trait projection: the trait export binding '{}' origin \
                  {:?} disagrees with its root resolved origin {:?}; the binding and root must \
                  name the same trait",
-                public_name, trait_origin, resolved_origin
-            )));
+                    public_name, trait_origin, resolved_origin
+                ),
+            ));
         }
 
         if self.consumed.insert(defining_name, ()).is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: trait '{}' joined more than once; \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft trait projection: trait '{}' joined more than once; \
                  aliases preserve one declaration record and must not project its root twice",
-                defining_name
-            )));
+                    defining_name
+                ),
+            ));
         }
 
         // Validate the trait root this_type before projecting requirements.
@@ -256,7 +274,7 @@ impl<'a> DirectTraitProjection<'a> {
                     self.path_fork,
                 )
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
         let incompatibilities = project_trait_incompatibilities(
             &root.incompatible_trait_ids,
@@ -292,37 +310,46 @@ fn validate_trait_root_this_type(
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(definition) = type_environment.get(root.this_type) else {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft trait projection: the trait root '{}' this_type TypeId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft trait projection: the trait root '{}' this_type TypeId({}) \
              is not registered in the TypeEnvironment; the trait self type must be a synthetic \
              generic parameter",
-            path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
-            root.this_type.0
-        )));
+                path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
+                root.this_type.0
+            ),
+        ));
     };
 
     let TypeDefinition::GenericParameter(parameter) = definition else {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft trait projection: the trait root '{}' this_type TypeId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft trait projection: the trait root '{}' this_type TypeId({}) \
              resolved to {:?}, not a GenericParameter; the trait self type must be the synthetic \
              generic parameter named exactly \"This\"",
-            path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
-            root.this_type.0,
-            definition
-        )));
+                path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
+                root.this_type.0,
+                definition
+            ),
+        ));
     };
 
     let name = string_table.resolve(parameter.name);
     if name != "This" {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft trait projection: the trait root '{}' this_type is a \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft trait projection: the trait root '{}' this_type is a \
              GenericParameter named '{}', not \"This\"; the trait self type must be named \
              exactly \"This\"",
-            path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
-            name
-        )));
+                path_name(root.canonical_path, path_fork, string_table).unwrap_or("<root>"),
+                name
+            ),
+        ));
     }
 
     Ok(())
@@ -334,14 +361,17 @@ fn project_trait_requirement(
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<PublicTraitRequirementSurface, CompilerError> {
+) -> Result<PublicTraitRequirementSurface, InfrastructureFailure> {
     if requirement.receiver.this_type != owning_this_type {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft trait projection: a requirement receiver this_type TypeId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft trait projection: a requirement receiver this_type TypeId({}) \
              does not equal the owning trait this_type TypeId({}); receiver self must match the \
              owning trait before mapping immutable or mutable access",
-            requirement.receiver.this_type.0, owning_this_type.0
-        )));
+                requirement.receiver.this_type.0, owning_this_type.0
+            ),
+        ));
     }
 
     let receiver_access = match requirement.receiver.access {
@@ -387,7 +417,7 @@ fn project_trait_requirement(
                 contract,
             })
         })
-        .collect::<Result<Vec<_>, CompilerError>>()?;
+        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
     let returns = requirement
         .returns
@@ -404,7 +434,7 @@ fn project_trait_requirement(
                 type_identity,
             })
         })
-        .collect::<Result<Vec<_>, CompilerError>>()?;
+        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
     Ok(PublicTraitRequirementSurface {
         name,
@@ -420,7 +450,7 @@ fn project_trait_surface_type_identity(
     owning_this_type: TypeId,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<TraitSurfaceTypeIdentity, CompilerError> {
+) -> Result<TraitSurfaceTypeIdentity, InfrastructureFailure> {
     if type_id == owning_this_type {
         return Ok(TraitSurfaceTypeIdentity::SelfType);
     }
@@ -436,16 +466,19 @@ fn project_trait_incompatibilities(
     owning_trait_origin: &OriginTraitId,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
-) -> Result<Vec<CanonicalTraitIdentity>, CompilerError> {
+) -> Result<Vec<CanonicalTraitIdentity>, InfrastructureFailure> {
     let owning_canonical = CanonicalTraitIdentity::Source(owning_trait_origin.clone());
 
     let mut incompatibilities = Vec::with_capacity(incompatible_trait_ids.len());
     for trait_id in incompatible_trait_ids {
         let Some(source_fact) = trait_source_facts.get(trait_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: an incompatibility TraitId({}) for trait origin {:?} has no retained trait source fact; a missing local mapping is an internal invariant violation",
-                trait_id.0, owning_trait_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft trait projection: an incompatibility TraitId({}) for trait origin {:?} has no retained trait source fact; a missing local mapping is an internal invariant violation",
+                    trait_id.0, owning_trait_origin
+                ),
+            ));
         };
 
         let canonical_identity = project_trait_source_fact_to_canonical_identity(
@@ -454,17 +487,23 @@ fn project_trait_incompatibilities(
         )?;
 
         if canonical_identity == owning_canonical {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: the trait origin {:?} carries an incompatibility that resolves to itself; an internal self-relation must not enter the public trait surface",
-                owning_trait_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft trait projection: the trait origin {:?} carries an incompatibility that resolves to itself; an internal self-relation must not enter the public trait surface",
+                    owning_trait_origin
+                ),
+            ));
         }
 
         if incompatibilities.contains(&canonical_identity) {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft trait projection: two incompatibility trait ids for trait origin {:?} resolved to the same canonical trait identity {:?}; a duplicate must not enter the public trait surface",
-                owning_trait_origin, canonical_identity
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft trait projection: two incompatibility trait ids for trait origin {:?} resolved to the same canonical trait identity {:?}; a duplicate must not enter the public trait surface",
+                    owning_trait_origin, canonical_identity
+                ),
+            ));
         }
 
         incompatibilities.push(canonical_identity);

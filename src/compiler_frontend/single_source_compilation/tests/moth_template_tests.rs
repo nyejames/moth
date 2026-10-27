@@ -9,8 +9,10 @@
 //!       request, no builder and no filesystem.
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
@@ -27,7 +29,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -37,10 +39,8 @@ use crate::compiler_frontend::{
     FrontendFilePrepareSource,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
 const TEMPLATE_PATH: &str = "site/intro.mtf";
 const MARKDOWN_PATH: &str = "site/docs/intro.md";
@@ -65,7 +65,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         content,
         module_resources,
         warnings,
-        mut source_database,
+        source_database,
     } = folded;
     assert_eq!(
         content,
@@ -80,7 +80,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         module_resources.origins().is_empty(),
         "a plain request has no file values, so no resource origin is interned"
     );
-    assert!(warnings.is_empty());
+    assert!(warnings.is_none());
 
     let source_id = source_database
         .get_by_canonical_path(Path::new("/templates/intro.mtf"))
@@ -91,11 +91,6 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         Some("# Intro"),
         "the folded result should retain the exact standalone source snapshot",
     );
-
-    Arc::get_mut(&mut source_database)
-        .expect("the folded result should own its source database uniquely")
-        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
-        .expect_err("the service should install each source span table exactly once");
 }
 
 #[test]
@@ -105,7 +100,7 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
     let source_path = Path::new("/templates/broken.mtf");
     let source_code = "]";
 
-    let messages = match compile_moth_template_source(
+    let failure = match compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path,
             source_code: Some(source_code.to_owned()),
@@ -115,11 +110,16 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
         &mut string_table,
     ) {
         Ok(_) => panic!("an unescaped template close should be diagnosed during preparation"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
+    assert!(
+        matches!(failure.failure, PreparedFailure::Diagnosed(_)),
+        "preparation diagnostics should remain on the diagnosed path",
+    );
 
-    let source_database = messages
-        .source_database_for_diagnostic(0)
+    let source_database = failure
+        .source_database
+        .as_ref()
         .expect("preparation diagnostics should retain their source database");
     let source_id = source_database
         .get_by_canonical_path(source_path)
@@ -161,40 +161,94 @@ fn float_interpolation_renders_the_exact_f64_sum() {
 }
 
 #[test]
-fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
+fn direct_template_tail_finalizes_extended_diagnostic_spans() {
     // An untyped whole literal materialises at the exact I32 default, so the direct service must
     // diagnose the out-of-range value instead of returning a folded template with a pending width.
     let style_directives = StyleDirectiveRegistry::built_ins();
     let directory = tempfile::tempdir().expect("the direct template directory should exist");
     let source_path = directory.path().join("wide.mtf");
-    fs::write(&source_path, "[:[3_000_000_000]]").expect("the direct template should be written");
+    let source_code = format!("{}\n[:[3_000_000_000]]", " ".repeat(4 * 1024 * 1024 + 1));
+    fs::write(&source_path, &source_code).expect("the direct template should be written");
 
-    let messages = compile_moth_template_source(
+    let mut string_table = StringTable::new();
+    let failure = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: &source_path,
-            source_code: Some("[:[3_000_000_000]]".to_owned()),
+            source_code: Some(source_code.clone()),
             style_directives: &style_directives,
             file_value_resolution: None,
         },
-        &mut StringTable::new(),
+        &mut string_table,
     )
     .err()
     .expect("an out-of-range untyped interpolation must not fold");
+    let source_id = failure
+        .source_database
+        .as_ref()
+        .expect("the direct service should retain its finalized source database")
+        .get_by_canonical_path(&source_path)
+        .expect("the direct source should remain registered")
+        .id;
     drop(style_directives);
     fs::write(&source_path, "mutated direct template\n")
         .expect("the diagnosed direct source should be replaced");
 
-    assert!(
-        messages.diagnostics().any(|diagnostic| matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidNumberLiteral {
-                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-                ..
-            }
-        )),
+    let mut accumulator = BoundaryAccumulator::new();
+    let install = failure.append_to_boundary(&mut accumulator);
+    let failure: crate::compiler_frontend::compiler_errors::CompilationResult<()> = accumulator
+        .finish(install)
+        .map(crate::compiler_frontend::compiler_errors::CompilationOutcome::Diagnosed);
+    let Ok(crate::compiler_frontend::compiler_errors::CompilationOutcome::Diagnosed(reports)) =
+        &failure
+    else {
+        panic!("direct interpolation failure should produce a diagnosed result");
+    };
+    assert_eq!(
+        reports
+            .iter()
+            .map(|(_, view)| view.reason_key())
+            .collect::<Vec<_>>(),
+        [Some("invalid_number_literal.outside_fixed_scalar_range")],
         "the I32 default must diagnose the out-of-range interpolation literal",
     );
-    let rendered = render_compiler_messages_html(&messages, directory.path());
+    assert_eq!(
+        reports
+            .iter()
+            .map(|(_, view)| {
+                view.family_view::<InvalidNumberLiteralView>()
+                    .expect("number literal diagnostic should retain typed facts")
+                    .scalar
+            })
+            .collect::<Vec<_>>(),
+        [Some(FixedScalar::I32)],
+        "the overflowing default interpolation must target I32",
+    );
+    let (report, view) = reports
+        .iter()
+        .next()
+        .expect("the direct interpolation failure should produce a diagnostic");
+    let span = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span) => {
+            span
+        }
+        _ => panic!("the direct diagnostic should own a local source span"),
+    };
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(report.context());
+    assert!(
+        range.start() > 4 * 1024 * 1024,
+        "the diagnostic should resolve through a span beyond the inline start limit"
+    );
+    assert!(
+        span.local().is_extended(),
+        "the direct diagnostic must actually use extended-span encoding"
+    );
+    assert_eq!(
+        &source_code[range.start() as usize..range.end() as usize],
+        "3_000_000_000",
+        "the direct service tail should retain the exact diagnostic span"
+    );
+    let rendered = render_compilation_result_html(&failure, directory.path());
     assert!(rendered.contains(r#"<span class="source-line">[:[3_000_000_000]]</span>"#));
     assert!(!rendered.contains("mutated direct template"));
 }
@@ -207,7 +261,11 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     let template_path = Path::new(TEMPLATE_PATH);
     let markdown_path = Path::new(MARKDOWN_PATH);
     // The template names a nested Markdown content source, a resource file and the site root.
-    let template_source = "# Intro\n\n[@docs/intro.md]\n\n[@assets/logo.svg] [@/]";
+    let template_source = format!(
+        "{}# Intro\n\n[@docs/intro.md]\n\n[@assets/logo.svg] [@/]",
+        "\n".repeat(5_000),
+    );
+    let markdown_source = format!("{}Nested intro body.", "\n".repeat(5_000));
     let mut source_files = SourceDatabase::build(
         [template_path, markdown_path],
         template_path,
@@ -227,7 +285,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         .expect("markdown source should have a source identity")
         .id;
     source_files
-        .retain_text(markdown_id, "Nested intro body.".to_owned())
+        .retain_text(markdown_id, markdown_source.clone())
         .expect("markdown source should retain its text");
     let mut path_fork = source_files.fork_path_interner();
 
@@ -238,25 +296,43 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
             .id
     };
 
-    let (prepared_template, template_span_builder) = prepare_bundle_source(
+    let (prepared_template, mut template_span_builder) = prepare_bundle_source(
         &source_files,
         template_path,
-        template_source,
+        &template_source,
         &style_directives,
         &mut string_table,
         &mut path_fork,
     );
-    let (prepared_markdown, markdown_span_builder) = prepare_bundle_source(
+    let (prepared_markdown, mut markdown_span_builder) = prepare_bundle_source(
         &source_files,
         markdown_path,
-        "Nested intro body.",
+        &markdown_source,
         &style_directives,
         &mut string_table,
         &mut path_fork,
+    );
+    let template_reference_span = prepared_template
+        .structural_file_references
+        .references()
+        .iter()
+        .find(|reference| reference.class == PreparedFileReferenceClass::ContentSource)
+        .expect("prepared template should retain its nested content source span")
+        .span;
+    let source_prefix = "\n".repeat(2_000);
+    let template_marker_span = SourceSpan::new(
+        template_id,
+        LocalSpan::exact(0, 2_000, &mut template_span_builder)
+            .expect("the prepared template marker should fit its source span table"),
+    );
+    let markdown_marker_span = SourceSpan::new(
+        markdown_id,
+        LocalSpan::exact(0, 2_000, &mut markdown_span_builder)
+            .expect("the prepared content marker should fit its source span table"),
     );
     // The bundle compiler forks from its source database, so publish the preparation fork's
     // complete path domain before handing that database to the bundle owner.
-    source_files.adopt_path_builder(path_fork.clone_path_builder());
+    source_files.adopt_path_builder(path_fork.fork_path_builder());
 
     // This is the Stage 0 fact the caller supplies: one content target, one resource source and
     // the site root's no-target outcome, keyed by the prepared occurrence identities.
@@ -380,7 +456,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
             .any(|origin| origin.origin == expected_resource_origin),
         "the folded module's resource table must report the resolved origin as a source fact"
     );
-    assert!(warnings.is_empty());
+    assert!(warnings.is_none());
 
     let template_id = source_database
         .get_by_canonical_path(template_path)
@@ -390,14 +466,39 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         .get_by_canonical_path(markdown_path)
         .expect("folded bundle should retain the content source identity")
         .id;
+    let template_marker_range = template_marker_span.byte_range(source_database.as_ref());
+    assert_eq!(
+        &template_source
+            [template_marker_range.start() as usize..template_marker_range.end() as usize],
+        source_prefix,
+        "the finalized template source should resolve its retained extended span",
+    );
+    let template_reference_range = template_reference_span.byte_range(source_database.as_ref());
+    assert!(
+        template_reference_range.start() > 4_095,
+        "the nested content reference should retain its high source offset"
+    );
+    let template_reference_text = &template_source
+        [template_reference_range.start() as usize..template_reference_range.end() as usize];
+    assert!(
+        template_reference_text.contains("docs/intro.md"),
+        "the finalized template span should resolve through its retained source table: {template_reference_text:?}"
+    );
+    let markdown_marker_range = markdown_marker_span.byte_range(source_database.as_ref());
+    assert_eq!(
+        &markdown_source
+            [markdown_marker_range.start() as usize..markdown_marker_range.end() as usize],
+        source_prefix,
+        "the finalized prepared-content source should resolve its retained extended span",
+    );
     assert_eq!(
         source_database.retained_text(template_id),
-        Some(template_source),
+        Some(template_source.as_str()),
         "bundle folding must preserve the exact template snapshot",
     );
     assert_eq!(
         source_database.retained_text(markdown_id),
-        Some("Nested intro body."),
+        Some(markdown_source.as_str()),
         "bundle folding must preserve the exact dependency snapshot",
     );
 }

@@ -17,9 +17,6 @@ use crate::compiler_frontend::builtins::casts::evidence::{
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTraitConformanceReason,
-};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::SourceTokenOwner;
@@ -31,7 +28,10 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
+use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+    parse_single_file_ast_diagnostic,
+};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
@@ -728,7 +728,7 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         other => panic!("expected authored This return, got {other:?}"),
     };
     let this_name = strings.intern("This");
-    let synthetic_parameters = trait_this_parameter_list(this_name, Some(declaration.name_span));
+    let synthetic_parameters = trait_this_parameter_list(this_name, declaration.name_span);
     let synthetic_parameter = synthetic_parameters
         .parameters
         .first()
@@ -817,9 +817,9 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
 fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
     let source =
         "-- é🦋\nRENDERABLE must:\n    render |This| -> String\n    render |This| -> String\n;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    let primary_span = diagnostic
-        .primary_span
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0070", None);
+    let primary_span = ast_error_primary_span(diagnostic)
         .expect("duplicate requirement should retain its exact primary span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
 
@@ -830,11 +830,10 @@ fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
         &source[primary_range.start() as usize..primary_range.end() as usize],
         "render"
     );
-    assert_eq!(diagnostic.labels.len(), 1);
+    let labels = ast_error_label_spans(diagnostic);
+    assert_eq!(labels.len(), 1);
 
-    let first_span = diagnostic.labels[0]
-        .span
-        .expect("previous requirement label should retain its exact span");
+    let first_span = labels[0].expect("previous requirement label should retain its exact span");
     assert_eq!(first_span.source(), SourceId::COMPILATION_ROOT);
     let first_span_builder = ExtendedSpanBuilder::new();
     let first_range =
@@ -849,19 +848,13 @@ fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
 fn builtin_numeric_conformance_targets_report_exact_target_spans() {
     for target in FixedScalar::ALL.into_iter().map(|scalar| scalar.name()) {
         let source = format!("DISPLAYABLE must:\n;\n{target} must DISPLAYABLE\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidTraitConformance {
-                    reason: InvalidTraitConformanceReason::BuiltinTarget,
-                    ..
-                }
-            ),
-            "{target} should be rejected as a builtin conformance target"
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0073",
+            Some("invalid_trait_conformance.builtin_target"),
         );
-        let target_span = diagnostic
-            .primary_span
+        let target_span = ast_error_primary_span(diagnostic)
             .expect("builtin-target diagnostics should retain their target span");
         assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
 
@@ -877,17 +870,14 @@ fn builtin_numeric_conformance_targets_report_exact_target_spans() {
 #[test]
 fn incompatible_fixed_cast_conformances_report_both_source_spans() {
     let source = "Thing = | value I8 |\nThing must CASTABLE_TO_I8\nThing must TRY_CASTABLE_TO_I8\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidTraitConformance {
-            reason: InvalidTraitConformanceReason::IncompatibleTraitEvidence { .. },
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0073",
+        Some("invalid_trait_conformance.incompatible_trait_evidence"),
+    );
 
-    let conflicting_trait_span = diagnostic
-        .primary_span
+    let conflicting_trait_span = ast_error_primary_span(diagnostic)
         .expect("incompatible conformance diagnostics should retain the second trait span");
     assert_eq!(conflicting_trait_span.source(), SourceId::COMPILATION_ROOT);
     let span_builder = ExtendedSpanBuilder::new();
@@ -898,10 +888,11 @@ fn incompatible_fixed_cast_conformances_report_both_source_spans() {
         "TRY_CASTABLE_TO_I8"
     );
 
-    let previous_span = diagnostic
-        .labels
+    let labels = ast_error_label_spans(diagnostic);
+    let previous_span = labels
         .first()
-        .and_then(|label| label.span)
+        .copied()
+        .flatten()
         .expect("incompatible conformance diagnostics should label the first target");
     assert_eq!(previous_span.source(), SourceId::COMPILATION_ROOT);
     let label_builder = ExtendedSpanBuilder::new();
@@ -917,19 +908,13 @@ fn incompatible_fixed_cast_conformances_report_both_source_spans() {
 fn dec_conformance_targets_report_builtin_target_with_exact_spans() {
     for target in ["Dec", "Dec2", "_Dec", "__dEc01"] {
         let source = format!("DISPLAYABLE must:\n;\n{target} must DISPLAYABLE\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidTraitConformance {
-                    reason: InvalidTraitConformanceReason::BuiltinTarget,
-                    ..
-                }
-            ),
-            "{target} should be rejected as a builtin conformance target"
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0073",
+            Some("invalid_trait_conformance.builtin_target"),
         );
-        let target_span = diagnostic
-            .primary_span
+        let target_span = ast_error_primary_span(diagnostic)
             .expect("builtin-target diagnostics should retain their target span");
         assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
 
@@ -945,10 +930,10 @@ fn dec_conformance_targets_report_builtin_target_with_exact_spans() {
 #[test]
 fn unknown_trait_reference_diagnostic_retains_exact_reference_span() {
     let source = "Thing = | value I32 |\nThing must UNKNOWN\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    let trait_span = diagnostic
-        .primary_span
-        .unwrap_or_else(|| panic!("unknown trait reference diagnostic lacks span: {diagnostic:?}"));
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0069", None);
+    let trait_span = ast_error_primary_span(diagnostic)
+        .unwrap_or_else(|| panic!("unknown trait reference diagnostic lacks span: {failure:?}"));
     assert_eq!(trait_span.source(), SourceId::COMPILATION_ROOT);
 
     let span_builder = ExtendedSpanBuilder::new();

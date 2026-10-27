@@ -4,7 +4,8 @@
 //! origin classification.
 //! WHY: backends need to distinguish regular functions from the implicit entry `start` function.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::semantic_identity::{
@@ -59,19 +60,25 @@ pub(crate) struct HirFunctionOriginLookup {
 }
 
 impl HirFunctionOriginLookup {
-    pub(crate) fn from_seeds(seeds: Vec<FunctionOriginSeed>) -> Result<Self, CompilerError> {
+    pub(crate) fn from_seeds(
+        seeds: Vec<FunctionOriginSeed>,
+    ) -> Result<Self, InfrastructureFailure> {
         let mut by_path = FxHashMap::default();
         let mut origins = FxHashSet::default();
 
         for seed in seeds {
             if origins.contains(&seed.origin) {
-                return Err(CompilerError::compiler_error(format!(
-                    "HIR function-origin lowering received duplicate stable origin {:?}",
-                    seed.origin
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
+                        "HIR function-origin lowering received duplicate stable origin {:?}",
+                        seed.origin
+                    ),
+                ));
             }
             if by_path.contains_key(&seed.path) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "HIR function-origin lowering received duplicate declaration paths",
                 ));
             }
@@ -90,22 +97,26 @@ impl HirFunctionOriginLookup {
     pub(crate) fn from_public_and_private_seeds(
         public_seeds: Vec<FunctionOriginSeed>,
         private_seeds: Vec<PrivateFunctionOriginSeed>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut lookup = Self::from_seeds(public_seeds)?;
         let mut private_origins = FxHashSet::default();
         for seed in private_seeds {
             if lookup.by_path.contains_key(&seed.path)
                 || lookup.private_by_path.contains_key(&seed.path)
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "HIR function-origin lowering received duplicate declaration paths",
                 ));
             }
             if !private_origins.insert(seed.origin.clone()) {
-                return Err(CompilerError::compiler_error(format!(
-                    "HIR function-origin lowering received duplicate stable origin {:?}",
-                    seed.origin
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
+                        "HIR function-origin lowering received duplicate stable origin {:?}",
+                        seed.origin
+                    ),
+                ));
             }
             lookup.private_by_path.insert(seed.path, seed.origin);
         }
@@ -135,7 +146,7 @@ impl HirFunctionOriginLookup {
     /// function has been classified.
     /// WHY: an unmatched seed means a public callable declaration did not lower to local HIR,
     /// which is an internal compiler invariant failure rather than a silent finalization deferral.
-    pub(crate) fn validate_all_seeds_consumed(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate_all_seeds_consumed(&self) -> Result<(), InfrastructureFailure> {
         let unused_seed_count = self
             .by_path
             .keys()
@@ -143,9 +154,12 @@ impl HirFunctionOriginLookup {
             .filter(|path| !self.consumed_paths.contains(*path))
             .count();
         if unused_seed_count > 0 {
-            return Err(CompilerError::compiler_error(format!(
-                "HIR function-origin lowering received {unused_seed_count} unused concrete origin seed(s)"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                format!(
+                    "HIR function-origin lowering received {unused_seed_count} unused concrete origin seed(s)"
+                ),
+            ));
         }
 
         Ok(())

@@ -1,24 +1,25 @@
-//! Dev-server HTML rendering for `CompilerDiagnostic`.
+//! Dev-server HTML rendering for frozen diagnostic views.
 //!
 //! WHAT: converts structured diagnostics into escaped HTML cards for the dev-server error page.
 //! WHY: the dev-server needs clickable source links and readable diagnostic output.
 
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::render::infrastructure::{
-    ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
-    infrastructure_heading,
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureClass, InfrastructureErrors,
 };
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::infrastructure::{
+    INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE, ISSUE_URL,
+    format_error_guidance_lines,
+};
+use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
     display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
-    relative_display_path_from_root, render_payload, resolve_label_render_facts_from_root,
-};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
+    relative_display_path_from_root,
 };
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
-#[cfg(test)]
-use std::path::Path;
 
 fn severity_display(severity: DiagnosticSeverity) -> (&'static str, &'static str, &'static str) {
     match severity {
@@ -33,11 +34,11 @@ fn severity_display(severity: DiagnosticSeverity) -> (&'static str, &'static str
 }
 
 fn render_source_frame(
-    diagnostic: &CompilerDiagnostic,
+    subject: &DiagnosticSubject<'_>,
     project_root: &std::path::Path,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let Some(primary_position) = context.primary_position(diagnostic) else {
+    let Some(primary_position) = subject.primary_position(context) else {
         return String::new();
     };
 
@@ -83,69 +84,66 @@ fn render_source_frame(
     )
 }
 
-#[cfg(test)]
-pub(crate) fn render_diagnostics_html_with_context(
-    diagnostics: &[CompilerDiagnostic],
-    project_root: &Path,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    if diagnostics.is_empty() {
-        return String::from("<p>No compiler diagnostics available.</p>");
-    }
-
-    diagnostics
-        .iter()
-        .map(|d| render_diagnostic_card(d, project_root, context))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(crate) fn render_compiler_messages_html(
-    messages: &CompilerMessages,
+/// Render a compilation result without co-presenting diagnostics and infrastructure failures.
+pub(crate) fn render_compilation_result_html<T>(
+    result: &CompilationResult<T>,
     project_root: &std::path::Path,
 ) -> String {
-    // The outer infrastructure failure renders as an error card beside the diagnostics,
-    // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
-    // display order without fabricating a user diagnostic.
-    let mut cards = Vec::new();
-    let mut outer_emitted = messages.infrastructure_errors().is_none();
-    for diagnostic_index in messages.diagnostic_display_order() {
-        let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-        if !outer_emitted && diagnostic.severity != DiagnosticSeverity::Error {
-            if let Some(errors) = messages.infrastructure_errors() {
-                cards.push(render_infrastructure_card(errors));
-            }
-            outer_emitted = true;
+    match result {
+        Ok(CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        }) => render_diagnostic_reports_html(warnings, project_root),
+        Ok(CompilationOutcome::Success { warnings: None, .. }) => {
+            String::from("<p>No compiler diagnostics available.</p>")
         }
-        cards.push(render_diagnostic_card(
-            diagnostic,
-            project_root,
-            messages.diagnostic_render_context(diagnostic_index),
-        ));
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            render_diagnostic_reports_html(reports, project_root)
+        }
+        Err(errors) => render_infrastructure_card(errors),
     }
-    if !outer_emitted && let Some(errors) = messages.infrastructure_errors() {
-        cards.push(render_infrastructure_card(errors));
-    }
+}
+
+fn render_diagnostic_reports_html(
+    reports: &DiagnosticReportSet,
+    project_root: &std::path::Path,
+) -> String {
+    let cards = [
+        DiagnosticSeverity::Error,
+        DiagnosticSeverity::Warning,
+        DiagnosticSeverity::Note,
+    ]
+    .into_iter()
+    .flat_map(|severity| {
+        reports.iter_severity(severity).map(|(report, view)| {
+            render_diagnostic_card(
+                view,
+                project_root,
+                DiagnosticRenderContext::for_report(report),
+            )
+        })
+    })
+    .collect::<Vec<_>>();
     if cards.is_empty() {
         return String::from("<p>No compiler diagnostics available.</p>");
     }
     cards.join("\n")
 }
 
-/// Keep all causes inside one infrastructure event, without resolving unpaired source IDs.
+/// Keep all causes inside one infrastructure event and preserve their order.
 fn render_infrastructure_card(errors: &InfrastructureErrors) -> String {
     let (severity_label, severity_visual, badge_class) =
         severity_display(DiagnosticSeverity::Error);
     let mut body = String::new();
     for (index, error) in errors.iter().enumerate() {
         body.push_str(r#"<section class="infrastructure-cause">"#);
-        let heading = infrastructure_heading(&error.error_type);
+        let heading = error.kind.heading();
         if index == 0 {
             body.push_str(&format!("<h3>{heading}</h3>"));
         } else {
             body.push_str(&format!("<h3>Additional cause {index}: {heading}</h3>"));
         }
-        let class = infrastructure_class(&error.error_type);
+        let class = error.kind.class();
         body.push_str(&format!(
             r#"<p class="infrastructure-introduction">{}</p>"#,
             escape_html(class.introduction())
@@ -155,7 +153,7 @@ fn render_infrastructure_card(errors: &InfrastructureErrors) -> String {
         }
         body.push_str(&format!(
             r#"<p>Details:</p><p class="diagnostic-message">{}</p>"#,
-            escape_html(&error.msg)
+            escape_html(&error.message)
         ));
         if let Some(host_path) = error.host_path.as_deref() {
             body.push_str(&format!(
@@ -172,16 +170,17 @@ fn render_infrastructure_card(errors: &InfrastructureErrors) -> String {
         body.push_str("</section>");
     }
     format!(
-        r#"<article class="diagnostic" data-diagnostic-code="MOTH-INFRA-0001"><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">Infrastructure failure</span></div>{body}</article>"#
+        r#"<article class="diagnostic" data-diagnostic-code="{INFRASTRUCTURE_FAILURE_CODE}"><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">{INFRASTRUCTURE_FAILURE_TITLE}</span></div>{body}</article>"#
     )
 }
 fn render_diagnostic_card(
-    diagnostic: &CompilerDiagnostic,
+    view: DiagnosticView<'_>,
     project_root: &std::path::Path,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let descriptor = diagnostic.kind.descriptor();
-    let (severity_label, severity_visual, badge_class) = severity_display(diagnostic.severity);
+    let subject = DiagnosticSubject::new(view);
+    let descriptor = subject.descriptor();
+    let (severity_label, severity_visual, badge_class) = severity_display(subject.severity());
 
     // The code is available as a data attribute for debugging but not shown
     // visibly in the browser card. Terse/terminal output still shows codes.
@@ -190,9 +189,9 @@ fn render_diagnostic_card(
         escape_html(descriptor.code)
     );
 
-    let source_frame = render_source_frame(diagnostic, project_root, context);
+    let source_frame = render_source_frame(&subject, project_root, context);
 
-    let rendered_payload = render_payload(&diagnostic.payload, context);
+    let rendered_payload = subject.payload(context);
 
     let mut body = String::new();
 
@@ -212,23 +211,19 @@ fn render_diagnostic_card(
 
     body.push_str(&source_frame);
 
-    let primary_display_path = context
-        .primary_position(diagnostic)
+    let primary_display_path = subject
+        .primary_position(context)
         .map(|position| relative_display_path_from_root(position.path.as_path(), project_root));
     for ResolvedDiagnosticLabel {
-        style,
         path,
         line,
         column,
         message,
-    } in resolve_label_render_facts_from_root(diagnostic, context, project_root)
+    } in subject.resolved_labels(context, project_root)
     {
-        let style_name = match style {
-            DiagnosticLabelStyle::Secondary => "info",
-        };
         let escaped_message = escape_html(&message);
         let rendered_label = match (path.as_deref(), line, column) {
-            (None, None, None) => format!("{style_name}: - {escaped_message}"),
+            (None, None, None) => format!("info: - {escaped_message}"),
             (Some(label_path), Some(label_line), Some(label_column)) => {
                 let include_path = primary_display_path
                     .as_deref()
@@ -241,9 +236,9 @@ fn render_diagnostic_card(
                 // A location-only label carries an empty message, so the separator is omitted
                 // rather than trailing the location.
                 if message.is_empty() {
-                    format!("{style_name}: {location}")
+                    format!("info: {location}")
                 } else {
-                    format!("{style_name}: {location} - {escaped_message}")
+                    format!("info: {location} - {escaped_message}")
                 }
             }
             _ => continue,

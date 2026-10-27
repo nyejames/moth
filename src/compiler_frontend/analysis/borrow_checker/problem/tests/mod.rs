@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -148,8 +148,8 @@ fn borrow_problem_rejects_typed_definition_of_projected_place() {
     *destination = BindingDestination::Define(projected);
 
     let error = BorrowProblem::new(parts).expect_err("a definition must name a local binding");
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("cannot define projected place"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("cannot define projected place"));
 }
 
 #[test]
@@ -173,14 +173,14 @@ fn borrow_problem_same_statement_access_fixture_preserves_event_order_at_one_poi
 }
 
 #[test]
-fn borrow_problem_malformed_dense_ids_fail_through_the_internal_compiler_error_lane() {
+fn borrow_problem_malformed_dense_ids_fail_through_the_internal_infrastructure_failure_lane() {
     let mut parts = empty();
     parts.points[0].id = PointId::new(1);
 
     let error = BorrowProblem::new(parts).expect_err("non-dense point IDs must be rejected");
 
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("program-point IDs must be dense"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("program-point IDs must be dense"));
 }
 
 #[test]
@@ -198,8 +198,8 @@ fn borrow_problem_malformed_unowned_event_fails_atomic_construction() {
 
     let error = BorrowProblem::new(parts).expect_err("every event must belong to one block");
 
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("every normalized event"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("every normalized event"));
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn borrow_problem_rejects_exit_block_without_a_terminator() {
 
     let error = BorrowProblem::new(parts).expect_err("exit blocks need terminal events");
 
-    assert!(error.msg.contains("must end in a terminator event"));
+    assert!(error.message.contains("must end in a terminator event"));
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn borrow_problem_rejects_nonterminal_terminator_on_an_exit_block() {
 
     let error = BorrowProblem::new(parts).expect_err("exit blocks need terminal terminators");
 
-    assert!(error.msg.contains("must end in a terminal terminator"));
+    assert!(error.message.contains("must end in a terminal terminator"));
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn borrow_problem_rejects_terminator_edges_that_disagree_with_the_cfg() {
 
     let error = BorrowProblem::new(parts).expect_err("terminator edges must match the CFG");
 
-    assert!(error.msg.contains("do not match its outgoing edges"));
+    assert!(error.message.contains("do not match its outgoing edges"));
 }
 
 #[test]
@@ -252,8 +252,8 @@ fn borrow_problem_rejects_points_outside_their_block_range() {
 
     let error = BorrowProblem::new(parts).expect_err("point range must be coherent");
 
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("outside the entry/exit range"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("outside the entry/exit range"));
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn borrow_problem_rejects_call_effect_without_granular_arguments() {
 
     let error = BorrowProblem::new(parts).expect_err("non-empty calls need argument events");
 
-    assert!(error.msg.contains("no granular argument events"));
+    assert!(error.message.contains("no granular argument events"));
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn borrow_problem_rejects_granular_argument_after_call_effect() {
 
     let error = BorrowProblem::new(parts).expect_err("argument events must precede the effect");
 
-    assert!(error.msg.contains("must precede its CallEffect"));
+    assert!(error.message.contains("must precede its CallEffect"));
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn borrow_problem_rejects_call_argument_with_inconsistent_access_kind() {
 
     let error = BorrowProblem::new(parts).expect_err("call argument access must match its use");
 
-    assert!(error.msg.contains("access kind inconsistent"));
+    assert!(error.message.contains("access kind inconsistent"));
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn borrow_problem_rejects_granular_argument_without_call_effect() {
 
     let error = BorrowProblem::new(parts).expect_err("argument events need a call effect");
 
-    assert!(error.msg.contains("no CallEffect event"));
+    assert!(error.message.contains("no CallEffect event"));
 }
 
 #[test]
@@ -335,7 +335,11 @@ fn borrow_problem_rejects_granular_arguments_in_declared_order_only() {
 
     let error = BorrowProblem::new(parts).expect_err("CFG argument order must be semantic order");
 
-    assert!(error.msg.contains("do not exactly match its CallEffect"));
+    assert!(
+        error
+            .message
+            .contains("do not exactly match its CallEffect")
+    );
 }
 
 #[test]
@@ -357,7 +361,7 @@ fn borrow_problem_rejects_call_result_alias_parameter_out_of_range() {
 
     let error = BorrowProblem::new(parts).expect_err("call result parameter index must be valid");
 
-    assert!(error.msg.contains("outside call"));
+    assert!(error.message.contains("outside call"));
 }
 
 #[test]
@@ -381,15 +385,15 @@ fn borrow_problem_rejects_empty_alias_params() {
     // any argument.
     // WHY: that is malformed normalized input. Accepting it let the solver publish the
     // call-result origin as a fresh independent generation; the invariant must fail at
-    // validation with a CompilerError naming the origin, call, event and result place.
+    // validation with an InfrastructureFailure naming the origin, call, event and result place.
     let error = BorrowProblem::new(parts).expect_err("empty AliasParams is malformed input");
 
     assert!(
-        error.msg.contains("empty AliasParams")
-            && error.msg.contains("CallEffect event")
-            && error.msg.contains("result place")
-            && error.msg.contains("EventId(1)")
-            && error.msg.contains("PlaceId(0)"),
+        error.message.contains("empty AliasParams")
+            && error.message.contains("CallEffect event")
+            && error.message.contains("result place")
+            && error.message.contains("EventId(1)")
+            && error.message.contains("PlaceId(0)"),
         "expected the rejection to name origin, call, event and result place, got: {error:?}"
     );
 }
@@ -407,7 +411,7 @@ fn borrow_problem_rejects_detached_call_result_origin() {
 
     let error = BorrowProblem::new(parts).expect_err("call result origins need an owning effect");
 
-    assert!(error.msg.contains("not attached to a CallEffect"));
+    assert!(error.message.contains("not attached to a CallEffect"));
 }
 
 #[test]
@@ -433,7 +437,7 @@ fn borrow_problem_rejects_call_result_origin_from_another_call() {
 
     let error = BorrowProblem::new(parts).expect_err("result origin must belong to its call");
 
-    assert!(error.msg.contains("inconsistent call ownership"));
+    assert!(error.message.contains("inconsistent call ownership"));
 }
 
 #[test]
@@ -767,8 +771,8 @@ fn borrow_problem_hir_extractor_rejects_duplicate_jump_destinations() {
     let error = from_hir(&module, &function, None, None)
         .expect_err("an edge cannot define one destination more than once");
 
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("destination"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("destination"));
 }
 
 #[test]

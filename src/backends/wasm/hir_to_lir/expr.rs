@@ -1,6 +1,5 @@
 //! Expression lowering helpers for HIR -> Wasm LIR.
 
-use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::{WasmFunctionLoweringContext, lower_type_to_abi};
 use crate::backends::wasm::hir_to_lir::static_data::intern_static_utf8;
 use crate::backends::wasm::lir::instructions::{
@@ -12,7 +11,8 @@ use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fall
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -38,7 +38,7 @@ pub(crate) fn lower_expression(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     expression_id: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<ExprLoweringOutput, CompilerError> {
+) -> Result<ExprLoweringOutput, InfrastructureFailure> {
     let hir = context.module_context.hir_module;
     let expression = hir.expressions.expression(expression_id);
     // This matcher is intentionally partial while Wasm support is experimental. Unsupported HIR
@@ -51,12 +51,12 @@ pub(crate) fn lower_expression(
             match scalar {
                 FixedScalar::I8 | FixedScalar::I16 | FixedScalar::I32 => {
                     let value = value.as_i64().ok_or_else(|| {
-                        lir_transformation_error(format!(
+                        InfrastructureFailure::lir_transformation(format!(
                             "Wasm lowering received an invalid {scalar:?} integer value"
                         ))
                     })?;
                     let value = i32::try_from(value).map_err(|_| {
-                        lir_transformation_error(format!(
+                        InfrastructureFailure::lir_transformation(format!(
                             "Wasm lowering received out-of-range {scalar:?} integer value"
                         ))
                     })?;
@@ -64,12 +64,12 @@ pub(crate) fn lower_expression(
                 }
                 FixedScalar::U8 | FixedScalar::U16 | FixedScalar::U32 | FixedScalar::Byte => {
                     let value = value.as_u64().ok_or_else(|| {
-                        lir_transformation_error(format!(
+                        InfrastructureFailure::lir_transformation(format!(
                             "Wasm lowering received an invalid {scalar:?} integer value"
                         ))
                     })?;
                     let value = u32::try_from(value).map_err(|_| {
-                        lir_transformation_error(format!(
+                        InfrastructureFailure::lir_transformation(format!(
                             "Wasm lowering received out-of-range {scalar:?} integer value"
                         ))
                     })? as i32;
@@ -77,13 +77,17 @@ pub(crate) fn lower_expression(
                 }
                 FixedScalar::I64 => {
                     let value = value.as_i64().ok_or_else(|| {
-                        lir_transformation_error("Wasm lowering received an invalid I64 value")
+                        InfrastructureFailure::lir_transformation(
+                            "Wasm lowering received an invalid I64 value",
+                        )
                     })?;
                     statements.push(WasmLirStmt::ConstI64 { dst, value });
                 }
                 FixedScalar::U64 => {
                     let value = value.as_u64().ok_or_else(|| {
-                        lir_transformation_error("Wasm lowering received an invalid U64 value")
+                        InfrastructureFailure::lir_transformation(
+                            "Wasm lowering received an invalid U64 value",
+                        )
                     })?;
                     statements.push(WasmLirStmt::ConstI64 {
                         dst,
@@ -92,19 +96,25 @@ pub(crate) fn lower_expression(
                 }
                 FixedScalar::F32 => {
                     let value = value.as_f64().ok_or_else(|| {
-                        lir_transformation_error("Wasm lowering received an invalid F32 value")
+                        InfrastructureFailure::lir_transformation(
+                            "Wasm lowering received an invalid F32 value",
+                        )
                     })? as f32;
                     statements.push(WasmLirStmt::ConstF32 { dst, value });
                 }
                 FixedScalar::F64 => {
                     let value = value.as_f64().ok_or_else(|| {
-                        lir_transformation_error("Wasm lowering received an invalid F64 value")
+                        InfrastructureFailure::lir_transformation(
+                            "Wasm lowering received an invalid F64 value",
+                        )
                     })?;
                     statements.push(WasmLirStmt::ConstF64 { dst, value });
                 }
                 FixedScalar::F16 => {
                     let value = value.as_f64().ok_or_else(|| {
-                        lir_transformation_error("Wasm lowering received an invalid F16 value")
+                        InfrastructureFailure::lir_transformation(
+                            "Wasm lowering received an invalid F16 value",
+                        )
                     })?;
                     // Every canonical binary16 value is exact in F32, including signed zero.
                     statements.push(WasmLirStmt::ConstF32 {
@@ -124,9 +134,12 @@ pub(crate) fn lower_expression(
             fields,
         } => {
             if !hir.expressions.variant_fields(*fields).is_empty() {
-                return Err(lir_transformation_error(
-                    "Wasm backend does not yet support variant payload fields",
-                ));
+                // Unreachable: `validate_wasm_unsupported_shapes` rejects reachable variant
+                // payload construction (`VariantPayloadValues`) before lowering.
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm backend does not yet support variant payload fields"
+                );
             }
             match carrier {
                 crate::compiler_frontend::hir::expressions::HirVariantCarrier::Choice {
@@ -145,9 +158,10 @@ pub(crate) fn lower_expression(
                 }
             }
         }
-        HirExpressionKind::RouteConstruct { .. } => Err(lir_transformation_error(
-            "Wasm constructor route reached expression lowering after backend feature validation",
-        )),
+        HirExpressionKind::RouteConstruct { .. } => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm constructor route reached expression lowering after backend feature validation"
+        ),
         HirExpressionKind::Bool(value) => {
             let dst = context.alloc_temp(WasmAbiType::I32);
             statements.push(WasmLirStmt::ConstI32 {
@@ -206,9 +220,12 @@ pub(crate) fn lower_expression(
         HirExpressionKind::BinOp { left, op, right } => {
             lower_binary_expression(context, expression_id, *left, *op, *right, statements)
         }
-        HirExpressionKind::UnaryOp { op, .. } => Err(lir_transformation_error(format!(
+        // Unreachable: `validate_wasm_unsupported_shapes` rejects reachable unary operators
+        // (`UnaryOperators`) before lowering.
+        HirExpressionKind::UnaryOp { op, .. } => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm lowering does not yet support unary operator {op:?}"
-        ))),
+        ),
         HirExpressionKind::Collection(items) => {
             if is_empty_string_collection(context, expression_id, *items) {
                 let dst =
@@ -220,13 +237,17 @@ pub(crate) fn lower_expression(
                 });
             }
 
-            Err(lir_transformation_error(
-                "Wasm lowering only supports empty Vec<String> collection literals in this pass",
-            ))
+            // Unreachable: `validate_wasm_unsupported_shapes` rejects reachable non-empty
+            // collection literals (`NonEmptyCollections`) before lowering.
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Wasm lowering only supports empty Vec<String> collection literals in this pass"
+            )
         }
-        HirExpressionKind::MapLiteral(_) => Err(lir_transformation_error(
-            "Wasm hashmap literal reached lowering before backend feature validation",
-        )),
+        HirExpressionKind::MapLiteral(_) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm hashmap literal reached lowering before backend feature validation"
+        ),
         HirExpressionKind::Cast { source, policy } => match *policy {
             BuiltinCastPolicyId::NumericConversion {
                 source: source_domain,
@@ -264,18 +285,25 @@ pub(crate) fn lower_expression(
                 expression_id,
                 statements,
             ),
-            _ => Err(lir_transformation_error(format!(
+            // Unreachable: `validate_wasm_runtime_casts` rejects every reachable cast policy
+            // outside the arms above before lowering (`RuntimeCasts`).
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "Wasm lowering does not yet support cast policy {policy:?}"
-            ))),
+            ),
         },
-        HirExpressionKind::Number(_) => Err(lir_transformation_error(
-            "Wasm lowering reached a Dec literal after target validation",
-        )),
+        HirExpressionKind::Number(_) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering reached a Dec literal after target validation"
+        ),
+        // Unreachable: `validate_wasm_unsupported_shapes` rejects reachable struct, range, and
+        // variant payload expressions (`StructRangeVariantPayloadExpressions`) before lowering.
         HirExpressionKind::StructConstruct { .. }
         | HirExpressionKind::Range { .. }
-        | HirExpressionKind::VariantPayloadGet { .. } => Err(lir_transformation_error(
-            "Wasm lowering does not yet support this HIR expression",
-        )),
+        | HirExpressionKind::VariantPayloadGet { .. } => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering does not yet support this HIR expression"
+        ),
     }
 }
 
@@ -286,13 +314,14 @@ fn lower_infallible_numeric_conversion(
     source_expression: HirValueId,
     target_expression: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<ExprLoweringOutput, CompilerError> {
+) -> Result<ExprLoweringOutput, InfrastructureFailure> {
     if matches!(source_domain, NumericScalar::Number(_))
         || matches!(target_domain, NumericScalar::Number(_))
     {
-        return Err(lir_transformation_error(
-            "Wasm lowering does not support Dec conversion casts",
-        ));
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering does not support Dec conversion casts"
+        );
     }
     let type_environment = context.module_context.type_environment;
     if source_domain == target_domain
@@ -301,7 +330,7 @@ fn lower_infallible_numeric_conversion(
         || numeric_conversion_fallibility(source_domain, target_domain)
             != BuiltinCastFallibility::Infallible
     {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm numeric conversion has inconsistent or fallible HIR cast evidence",
         ));
     }
@@ -321,7 +350,7 @@ fn lower_infallible_numeric_conversion(
 
     if source_domain.is_integer() && target_domain.is_integer() {
         let Some((source_minimum, _)) = source_domain.integer_range() else {
-            return Err(lir_transformation_error(
+            return Err(InfrastructureFailure::lir_transformation(
                 "Wasm integer conversion source has no canonical integer range",
             ));
         };
@@ -342,7 +371,7 @@ fn lower_infallible_numeric_conversion(
 
     if source_domain.is_integer() {
         let Some((source_minimum, _)) = source_domain.integer_range() else {
-            return Err(lir_transformation_error(
+            return Err(InfrastructureFailure::lir_transformation(
                 "Wasm integer conversion source has no canonical integer range",
             ));
         };
@@ -403,7 +432,7 @@ fn lower_infallible_numeric_conversion(
         });
     }
 
-    Err(lir_transformation_error(format!(
+    Err(InfrastructureFailure::lir_transformation(format!(
         "Wasm numeric conversion cannot map {source_domain} ({source_abi:?}) to {target_domain} ({target_abi:?})"
     )))
 }
@@ -414,11 +443,12 @@ fn lower_infallible_numeric_to_string(
     source_expression: HirValueId,
     target_expression: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<ExprLoweringOutput, CompilerError> {
+) -> Result<ExprLoweringOutput, InfrastructureFailure> {
     if matches!(source_domain, NumericScalar::Number(_)) {
-        return Err(lir_transformation_error(
-            "Wasm lowering does not support Dec-to-String casts",
-        ));
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering does not support Dec-to-String casts"
+        );
     }
 
     let type_environment = context.module_context.type_environment;
@@ -434,7 +464,7 @@ fn lower_infallible_numeric_to_string(
         || expression_type(context, source_expression) != source_domain.type_id(type_environment)
         || expression_type(context, target_expression) != type_environment.builtins().string
     {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm NumericToString cast has inconsistent or unsupported HIR evidence",
         ));
     }
@@ -445,7 +475,7 @@ fn lower_infallible_numeric_to_string(
         Some(BinaryFloatPrecision::Binary64) => WasmAbiType::F64,
         None if source_domain.is_integer() => source_abi,
         None => {
-            return Err(lir_transformation_error(
+            return Err(InfrastructureFailure::lir_transformation(
                 "Wasm NumericToString source has no supported numeric precision",
             ));
         }
@@ -454,7 +484,7 @@ fn lower_infallible_numeric_to_string(
         || (float_precision.is_none() && !matches!(source_abi, WasmAbiType::I32 | WasmAbiType::I64))
         || expression_abi(context, target_expression) != WasmAbiType::Handle
     {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm NumericToString cannot map {source_domain} ({source_abi:?}) to a string handle"
         )));
     }
@@ -462,7 +492,7 @@ fn lower_infallible_numeric_to_string(
     // Evaluate a cast source once; the LIR carries its canonical domain precision separately.
     let source_value = lower_expression(context, source_expression, statements)?;
     if context.local_type_by_id.get(&source_value.value).copied() != Some(source_abi) {
-        return Err(lir_transformation_error(format!(
+        return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm NumericToString source lowered to an unexpected carrier for {source_domain}"
         )));
     }
@@ -498,7 +528,7 @@ fn lower_infallible_byte_conversion(
     source_expression: HirValueId,
     target_expression: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<ExprLoweringOutput, CompilerError> {
+) -> Result<ExprLoweringOutput, InfrastructureFailure> {
     if expression_type(context, source_expression) != builtin_type_ids::fixed_scalar(source_scalar)
         || expression_type(context, target_expression)
             != builtin_type_ids::fixed_scalar(target_scalar)
@@ -509,7 +539,7 @@ fn lower_infallible_byte_conversion(
         || expression_abi(context, source_expression) != WasmAbiType::I32
         || expression_abi(context, target_expression) != WasmAbiType::I32
     {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm Byte/U8 conversion has inconsistent HIR types or carriers",
         ));
     }
@@ -524,14 +554,14 @@ fn lower_infallible_byte_conversion(
 fn render_structural_string(
     context: &WasmFunctionLoweringContext<'_, '_>,
     pieces: HirStringPieceRange,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let Some(url_map) = context
         .module_context
         .request
         .structural_string_urls
         .as_ref()
     else {
-        return Err(lir_transformation_error(
+        return Err(InfrastructureFailure::lir_transformation(
             "Wasm lowering received a structural string without a builder URL map",
         ));
     };
@@ -549,7 +579,7 @@ fn render_structural_string(
             }
             ConstStringPiece::Resource(resource_id) => {
                 let Some(url) = url_map.resource_urls.get(resource_id) else {
-                    return Err(lir_transformation_error(format!(
+                    return Err(InfrastructureFailure::lir_transformation(format!(
                         "Wasm lowering has no rendered URL for structural resource {resource_id:?}"
                     )));
                 };
@@ -557,7 +587,7 @@ fn render_structural_string(
             }
             ConstStringPiece::SiteRoot => {
                 let Some(url) = url_map.site_root_url.as_deref() else {
-                    return Err(lir_transformation_error(
+                    return Err(InfrastructureFailure::lir_transformation(
                         "Wasm lowering has no rendered URL for a structural site root",
                     ));
                 };
@@ -599,7 +629,7 @@ fn lower_binary_expression(
     op: HirBinOp,
     right: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<ExprLoweringOutput, CompilerError> {
+) -> Result<ExprLoweringOutput, InfrastructureFailure> {
     if matches!(op, HirBinOp::StringAppend) {
         return lower_string_concat_expression(context, expression, statements);
     }
@@ -698,11 +728,11 @@ fn lower_binary_expression(
             }
 
             if lhs_abi != rhs_abi {
-                return Err(lir_transformation_error(format!(
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm lowering does not support ordered comparison {op:?} for mismatched ABI types {lhs_abi:?} and {rhs_abi:?}"
-                )));
+                );
             }
-
             match lhs_abi {
                 WasmAbiType::I32 | WasmAbiType::I64 | WasmAbiType::F32 | WasmAbiType::F64 => {
                     let statement = match op {
@@ -726,7 +756,10 @@ fn lower_binary_expression(
                             lhs: lhs.value,
                             rhs: rhs.value,
                         },
-                        _ => unreachable!("ordered branch already filtered non-ordered operators"),
+                        _ => crate::compiler_bug!(
+                            CompilerStage::BackendLowering,
+                            "ordered branch already filtered non-ordered operators"
+                        ),
                     };
                     statements.push(statement);
                     Ok(ExprLoweringOutput {
@@ -734,9 +767,10 @@ fn lower_binary_expression(
                         prefer_move: false,
                     })
                 }
-                _ => Err(lir_transformation_error(format!(
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm lowering does not support ordered comparison {op:?} for ABI type {lhs_abi:?}"
-                ))),
+                ),
             }
         }
         HirBinOp::And => match lhs_abi {
@@ -752,7 +786,10 @@ fn lower_binary_expression(
                     prefer_move: false,
                 })
             }
-            _ => Err(binop_unsupported_abi_error("And", lhs_abi)),
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Wasm lowering does not support And for ABI type {lhs_abi:?}"
+            ),
         },
         HirBinOp::Or => match lhs_abi {
             WasmAbiType::I32 => {
@@ -767,9 +804,12 @@ fn lower_binary_expression(
                     prefer_move: false,
                 })
             }
-            _ => Err(binop_unsupported_abi_error("Or", lhs_abi)),
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Wasm lowering does not support Or for ABI type {lhs_abi:?}"
+            ),
         },
-        _ => Err(lir_transformation_error(format!(
+        _ => Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering does not yet support binary operator {op:?}"
         ))),
     }
@@ -780,21 +820,23 @@ fn scalar_comparison_types(
     lhs_type: crate::compiler_frontend::datatypes::ids::TypeId,
     rhs_type: crate::compiler_frontend::datatypes::ids::TypeId,
     op: HirBinOp,
-) -> Result<Option<(WasmScalarComparisonType, WasmScalarComparisonType)>, CompilerError> {
+) -> Result<Option<(WasmScalarComparisonType, WasmScalarComparisonType)>, InfrastructureFailure> {
     let environment = &context.module_context.type_environment;
     let lhs_numeric = NumericScalar::from_type_id(lhs_type, environment);
     let rhs_numeric = NumericScalar::from_type_id(rhs_type, environment);
     match (lhs_numeric, rhs_numeric) {
         (Some(lhs), Some(rhs)) => {
             if matches!(lhs, NumericScalar::Number(_)) || matches!(rhs, NumericScalar::Number(_)) {
-                return Err(lir_transformation_error(
-                    "Wasm lowering does not support Dec comparisons",
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm lowering does not support Dec comparisons"
+                );
             }
             if !comparison_supported(lhs, rhs) {
-                return Err(lir_transformation_error(format!(
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm lowering received unsupported scalar comparison {lhs:?} {op:?} {rhs:?}"
-                )));
+                );
             }
             Ok(Some((comparison_type(lhs), comparison_type(rhs))))
         }
@@ -808,9 +850,14 @@ fn scalar_comparison_types(
             )))
         }
         (None, None) => Ok(None),
-        _ => Err(lir_transformation_error(format!(
+        // Unreachable: the producer pairs a numeric operand with a non-numeric one only as
+        // `Option<T>` against `T` (`resolve_option_equality_type`, operator_policy/comparison.rs),
+        // and the Wasm fixed-width and Number value gates reject every reachable `Option` of a
+        // numeric type before lowering.
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm lowering received incompatible scalar comparison operands for {op:?}"
-        ))),
+        ),
     }
 }
 
@@ -829,11 +876,17 @@ fn comparison_type(scalar: NumericScalar) -> WasmScalarComparisonType {
                 WasmScalarComparisonType::Float(scalar.bit_width() as u8)
             }
             FixedScalarClass::Octet => {
-                unreachable!("Byte is not a NumericScalar")
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Byte is not a NumericScalar"
+                )
             }
         },
         NumericScalar::Number(_) => {
-            unreachable!("Number comparisons are rejected before ABI mapping")
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Number comparisons are rejected before ABI mapping"
+            )
         }
     }
 }
@@ -846,21 +899,18 @@ fn scalar_comparison_op(op: HirBinOp) -> WasmScalarComparisonOp {
         HirBinOp::Le => WasmScalarComparisonOp::Le,
         HirBinOp::Gt => WasmScalarComparisonOp::Gt,
         HirBinOp::Ge => WasmScalarComparisonOp::Ge,
-        _ => unreachable!("only scalar comparisons use this mapper"),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "only scalar comparisons use this mapper"
+        ),
     }
-}
-
-fn binop_unsupported_abi_error(op: &str, abi: WasmAbiType) -> CompilerError {
-    lir_transformation_error(format!(
-        "Wasm lowering does not support {op} for ABI type {abi:?}"
-    ))
 }
 
 fn lower_string_concat_expression(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     expression_id: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<ExprLoweringOutput, CompilerError> {
+) -> Result<ExprLoweringOutput, InfrastructureFailure> {
     // WHAT: lower compiler-owned StringAppend chains into explicit buffer operations.
     // WHY: both normal functions and runtime fragments should follow the same string-concat path
     // so control-flow-heavy runtime wrappers do not need a second lowering contract.
@@ -890,7 +940,7 @@ fn lower_string_concat_expression(
                         .filter(|scalar| scalar.is_integer());
                 let chunk_handle = if let Some(integer) = integer_chunk {
                     if !matches!(abi, WasmAbiType::I32 | WasmAbiType::I64) {
-                        return Err(lir_transformation_error(format!(
+                        return Err(InfrastructureFailure::lir_transformation(format!(
                             "Wasm lowering expected an integer carrier for string concatenation, found {abi:?}"
                         )));
                     }
@@ -913,11 +963,12 @@ fn lower_string_concat_expression(
                 } else {
                     match abi {
                         WasmAbiType::Handle => lowered.value,
-                        other => {
-                            return Err(lir_transformation_error(format!(
-                                "Wasm lowering string concatenation requires handle-compatible chunks, found {other:?}"
-                            )));
-                        }
+                        // Unreachable: `validate_wasm_unsupported_shapes` rejects unsupported
+                        // template chunk types (`TemplateChunkTypes`) before lowering.
+                        other => crate::compiler_bug!(
+                            CompilerStage::BackendLowering,
+                            "Wasm lowering string concatenation requires handle-compatible chunks, found {other:?}"
+                        ),
                     }
                 };
                 statements.push(WasmLirStmt::StringPushHandle {
@@ -1008,7 +1059,7 @@ pub(super) fn expression_type(
 fn lower_place_local(
     context: &WasmFunctionLoweringContext<'_, '_>,
     place: HirPlace,
-) -> Result<WasmLirLocalId, CompilerError> {
+) -> Result<WasmLirLocalId, InfrastructureFailure> {
     // WHAT: place lowering currently supports direct locals only.
     // WHY: field/index projections require additional memory-model and layout work.
     if context
@@ -1019,14 +1070,17 @@ fn lower_place_local(
         .is_empty()
     {
         context.local_map.get(&place.root).copied().ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm lowering could not resolve local {:?}",
                 place.root
             ))
         })
     } else {
-        Err(lir_transformation_error(
-            "Wasm lowering currently supports only direct local places",
-        ))
+        // Unreachable: `validate_wasm_unsupported_shapes` rejects projected place reads
+        // (`ProjectedPlaces`) before lowering.
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering currently supports only direct local places"
+        )
     }
 }

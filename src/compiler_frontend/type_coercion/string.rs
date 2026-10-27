@@ -2,9 +2,8 @@
 //!
 //! WHAT: defines what expression types are renderable as string content and
 //! provides the coercion logic used at template boundaries.
-//! WHY: previously, the rules for "what can become a string in a template"
-//! were inlined directly into `template_folding.rs`. Moving them here makes
-//! the policy explicit and reusable without touching template mechanics.
+//! WHY: a shared policy keeps template-boundary conversion explicit and separate from template
+//! mechanics.
 
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
@@ -16,7 +15,8 @@ use crate::compiler_frontend::builtins::casts::policies::{
     BuiltinCastLiteral, apply_builtin_cast_policy,
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Format completed scalar content through the existing numeric text policy.
@@ -27,7 +27,7 @@ pub(crate) fn fold_expression_to_string(
     expression: ExpressionView<'_>,
     const_values: &ConstValueStore,
     string_table: &StringTable,
-) -> Result<Option<String>, CompilerError> {
+) -> Result<Option<String>, InfrastructureFailure> {
     match expression.operation() {
         ExpressionOperationView::Constant(value) => {
             fold_constant_to_string(value, const_values, string_table)
@@ -43,9 +43,12 @@ fn fold_constant_to_string(
     value: ConstValueId,
     const_values: &ConstValueStore,
     string_table: &StringTable,
-) -> Result<Option<String>, CompilerError> {
+) -> Result<Option<String>, InfrastructureFailure> {
     let payload = const_values.payload(value).ok_or_else(|| {
-        CompilerError::compiler_error("String folding received a foreign constant value ID.")
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "String folding received a foreign constant value ID.",
+        )
     })?;
     let text = match payload {
         ConstValuePayload::String(ConstStringValue::Text(string)) => {

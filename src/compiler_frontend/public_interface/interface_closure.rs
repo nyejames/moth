@@ -19,7 +19,8 @@ use super::{ProviderInterfaceId, SourceProviderDependencySet};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
@@ -33,7 +34,7 @@ impl PublicSemanticInterface {
         local: LocalPublicInterface,
         provider_dependencies: &SourceProviderDependencySet<'_>,
         external_registry: &ExternalPackageRegistry,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let LocalPublicInterface {
             draft,
             concrete_call_summaries,
@@ -66,7 +67,7 @@ impl PublicSemanticInterface {
         // closure agreement check rejects their disagreement deterministically.
         providers.dedup_by(|left, right| left.0 == right.0);
 
-        let mut closure = InterfaceClosure::new(&direct, providers)?;
+        let mut closure = InterfaceClosure::new(&direct, providers);
         for binding in &direct.export_bindings {
             closure.work.enqueue_declaration(binding.origin().clone());
         }
@@ -125,7 +126,7 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
     fn new(
         direct: &'direct PublicSemanticInterface,
         providers: &[(ProviderInterfaceId, &'provider PublicSemanticInterface)],
-    ) -> Result<Self, CompilerError> {
+    ) -> Self {
         let providers = providers
             .iter()
             .map(|(_, provider)| *provider)
@@ -189,20 +190,20 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
             }
         }
 
-        Ok(Self {
+        Self {
             direct,
             providers,
             declarations_by_origin,
             summaries_by_origin,
             evidence_by_identity,
             evidence_identities_by_origin,
-        })
+        }
     }
 
     fn declaration_at(
         &self,
         reference: RecordRef,
-    ) -> Result<&PublicDeclarationRecord, CompilerError> {
+    ) -> Result<&PublicDeclarationRecord, InfrastructureFailure> {
         let interface = if reference.source == 0 {
             Some(self.direct)
         } else {
@@ -222,7 +223,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
         })
     }
 
-    fn summary_at(&self, reference: RecordRef) -> Result<&PublicCallSummary, CompilerError> {
+    fn summary_at(
+        &self,
+        reference: RecordRef,
+    ) -> Result<&PublicCallSummary, InfrastructureFailure> {
         let interface = if reference.source == 0 {
             Some(self.direct)
         } else {
@@ -246,7 +250,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
             })
     }
 
-    fn evidence_at(&self, reference: RecordRef) -> Result<&PublicEvidenceRecord, CompilerError> {
+    fn evidence_at(
+        &self,
+        reference: RecordRef,
+    ) -> Result<&PublicEvidenceRecord, InfrastructureFailure> {
         let interface = if reference.source == 0 {
             Some(self.direct)
         } else {
@@ -276,7 +283,7 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
     fn find_declaration(
         &self,
         origin: &OriginDeclarationId,
-    ) -> Result<&PublicDeclarationRecord, CompilerError> {
+    ) -> Result<&PublicDeclarationRecord, InfrastructureFailure> {
         let references = self.declarations_by_origin.get(origin).ok_or_else(|| {
             closure_error(format!(
                 "reachable declaration origin {:?} is absent from the local and completed provider interfaces",
@@ -299,7 +306,10 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
     }
 
     /// Validate that every interface publishing one concrete summary agrees on it.
-    fn validate_summary_agreement(&self, origin: &OriginFunctionId) -> Result<(), CompilerError> {
+    fn validate_summary_agreement(
+        &self,
+        origin: &OriginFunctionId,
+    ) -> Result<(), InfrastructureFailure> {
         let references = self.summaries_by_origin.get(origin).ok_or_else(|| {
             closure_error(format!(
                 "reachable concrete callable {:?} has no completed call summary",
@@ -325,7 +335,7 @@ impl<'direct, 'provider> ClosureIndex<'direct, 'provider> {
     fn validate_evidence_agreement(
         &self,
         identity: &CanonicalEvidenceIdentity,
-    ) -> Result<&PublicEvidenceRecord, CompilerError> {
+    ) -> Result<&PublicEvidenceRecord, InfrastructureFailure> {
         let references = self.evidence_by_identity.get(identity).ok_or_else(|| {
             closure_error(format!(
                 "reachable reusable evidence identity {:?} is absent from the local and completed provider interfaces",
@@ -398,7 +408,7 @@ impl ClosureWork {
         &mut self,
         state: &ClosureIndex<'_, '_>,
         declaration: &PublicDeclarationRecord,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut callable_origins = Vec::new();
         collect_concrete_callable_origins(declaration, &mut callable_origins);
 
@@ -565,14 +575,14 @@ impl<'direct, 'provider> InterfaceClosure<'direct, 'provider> {
     fn new(
         direct: &'direct PublicSemanticInterface,
         providers: Vec<(ProviderInterfaceId, &'provider PublicSemanticInterface)>,
-    ) -> Result<Self, CompilerError> {
-        Ok(Self {
-            state: ClosureIndex::new(direct, &providers)?,
+    ) -> Self {
+        Self {
+            state: ClosureIndex::new(direct, &providers),
             work: ClosureWork::new(),
-        })
+        }
     }
 
-    fn compute(&mut self) -> Result<(), CompilerError> {
+    fn compute(&mut self) -> Result<(), InfrastructureFailure> {
         while let Some(item) = self.work.pending.pop_front() {
             match item {
                 ClosureWorkItem::Declaration(origin) => {
@@ -654,7 +664,7 @@ impl<'provider> ClosureSelection<'provider> {
     fn materialize(
         self,
         direct: &mut PublicSemanticInterface,
-    ) -> Result<ClosedInterfaceRecords, CompilerError> {
+    ) -> Result<ClosedInterfaceRecords, InfrastructureFailure> {
         let mut declarations = Vec::with_capacity(self.selected_declarations.len());
         let mut moved_declarations = FxHashSet::default();
         drain_selected_direct_records(
@@ -919,11 +929,11 @@ fn collect_type_origins(identity: &CanonicalTypeIdentity, origins: &mut Vec<Orig
     });
 }
 
-fn closure_error(detail: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "public semantic interface closure: {}",
-        detail.into()
-    ))
+fn closure_error(detail: impl Into<String>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!("public semantic interface closure: {}", detail.into()),
+    )
 }
 
 #[cfg(test)]

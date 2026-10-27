@@ -3,27 +3,61 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use crate::build_system::BuildProfile;
+use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::build_system::build::{BackendBuilder, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
-    WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
+    WriteMode, WriteOptions, write_project_outputs as write_project_outputs_inner,
 };
 use crate::builder_surface::BuilderSurface;
-use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::compiler_errors::{
+    CompilationOutcome, CompilationResult,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    names_declarations, project_config,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidConfigReason, NameNamespace,
-    NamingConvention, RuleDiagnosticKind,
+    DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
+
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+
+fn diagnosed_reports<T>(
+    result: &CompilationResult<T>,
+) -> &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("expected a diagnosed compilation result")
+        }
+        Err(errors) => panic!("expected diagnostics, got infrastructure errors: {errors:?}"),
+    }
+}
+
+fn successful_compilation_value<T>(result: CompilationResult<T>) -> T {
+    match result {
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("expected compilation success, got diagnostics: {reports:?}")
+        }
+        Err(errors) => {
+            panic!("expected compilation success, got infrastructure errors: {errors:?}")
+        }
+    }
+}
 
 #[cfg(test)]
 type RestoreFn = Box<dyn Fn(&Path) -> Result<(), std::io::Error> + Send>;
@@ -157,10 +191,48 @@ fn module_root_activity_html_policy_requires_any_root_activity() {
 fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
-) -> Result<OutputWriteSummary, CompilerMessages> {
-    let mut project = project.clone();
+) -> CompilationResult<OutputWriteSummary> {
+    let mut project = Project {
+        output_files: project.output_files.clone(),
+        entry_page_rel: project.entry_page_rel.clone(),
+        cleanup_policy: project.cleanup_policy.clone(),
+        deferred_resources: project.deferred_resources.clone(),
+        resource_inputs: project.resource_inputs.clone(),
+    };
     let mut string_table = StringTable::default();
-    write_project_outputs_with_table(&mut project, options, &mut string_table)
+    let result = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        write_project_outputs_inner(&mut project, options, &mut diagnostic_strings)
+    };
+    match result {
+        Ok(summary) => Ok(CompilationOutcome::Success {
+            value: summary,
+            warnings: None,
+        }),
+        Err(failure) => freeze_prepared_failure(failure, string_table),
+    }
+}
+fn write_project_outputs_with_table(
+    project: &mut Project,
+    options: &WriteOptions,
+    string_table: &mut StringTable,
+) -> Result<OutputWriteSummary, PreparedFailure> {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    write_project_outputs_inner(project, options, &mut diagnostic_strings)
+}
+
+fn freeze_prepared_failure<T>(
+    failure: PreparedFailure,
+    root_string_table: StringTable,
+) -> CompilationResult<T> {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
+    match failure {
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => accumulator.append_infrastructure(errors),
+    }
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
 }
 
 fn always_write_options(output_root: PathBuf, project_entry_dir: Option<PathBuf>) -> WriteOptions {
@@ -203,7 +275,6 @@ fn test_output_plan(
             builder: BuilderKind::Html,
             profile,
         },
-        setting_span: None,
     })
 }
 
@@ -212,112 +283,13 @@ fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) 
         output_files,
         entry_page_rel,
         cleanup_policy: html_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     }
 }
 
-fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
-    CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, span)
-}
-
-fn unknown_name_error(
-    name: StringId,
-    namespace: NameNamespace,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        span,
-        DiagnosticPayload::UnknownName { name, namespace },
-    )
-}
-
-struct WarningBuilder;
-
-impl BackendBuilder for WarningBuilder {
-    fn build_backend(
-        &self,
-        _project_compilation: super::ProjectCompilation,
-        _config: &Config,
-        _build_profile: BuildProfile,
-        _flags: &[Flag],
-        string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
-        Ok(Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("generated.js"),
-                FileKind::Js(String::from("console.log('ok');")),
-            )],
-            entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic([".js"]),
-            warnings: vec![naming_convention_warning(
-                string_table.get_or_intern("x".to_string()),
-                None,
-            )],
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        })
-    }
-
-    fn validate_project_config(
-        &self,
-        _config: &Config,
-        _string_table: &mut StringTable,
-    ) -> Result<(), ProjectConfigError> {
-        Ok(())
-    }
-
-    fn frontend_surface(&self) -> BuilderSurface {
-        BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
-    }
-}
-
-struct LateFailureBuilder {
-    package_root: PathBuf,
-}
-
-impl BackendBuilder for LateFailureBuilder {
-    fn build_backend(
-        &self,
-        _project_compilation: super::ProjectCompilation,
-        _config: &Config,
-        _build_profile: BuildProfile,
-        _flags: &[Flag],
-        string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
-        Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("injected late backend failure"),
-            string_table,
-        ))
-    }
-
-    fn validate_project_config(
-        &self,
-        _config: &Config,
-        _string_table: &mut StringTable,
-    ) -> Result<(), ProjectConfigError> {
-        Ok(())
-    }
-
-    fn frontend_surface(&self) -> BuilderSurface {
-        let mut surface = BuilderSurface::with_mandatory_core();
-        surface.source_packages.register_filesystem_root(
-            "warnpkg",
-            self.package_root.clone(),
-            PackageOrigin::Builder,
-        );
-        surface
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
-    }
+fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, span)
 }
 
 struct ValidationTrackingBuilder {
@@ -337,8 +309,8 @@ impl BackendBuilder for EntryTrackingBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, PreparedFailure> {
         self.module_count.store(
             project_compilation.module_count(),
             std::sync::atomic::Ordering::SeqCst,
@@ -352,7 +324,6 @@ impl BackendBuilder for EntryTrackingBuilder {
             output_files: vec![],
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         })
@@ -361,7 +332,7 @@ impl BackendBuilder for EntryTrackingBuilder {
     fn validate_project_config(
         &self,
         _config: &Config,
-        _string_table: &mut StringTable,
+        _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
         Ok(())
     }
@@ -382,14 +353,13 @@ impl BackendBuilder for ValidationTrackingBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, PreparedFailure> {
         self.built.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Project {
             output_files: vec![],
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         })
@@ -398,7 +368,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
     fn validate_project_config(
         &self,
         _config: &Config,
-        _string_table: &mut StringTable,
+        _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
         self.validated
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -423,22 +393,23 @@ impl BackendBuilder for FailingValidationBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, PreparedFailure> {
         panic!("should not call build_backend if validation fails");
     }
 
     fn validate_project_config(
         &self,
         _config: &Config,
-        string_table: &mut StringTable,
+        strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
-        Err(CompilerDiagnostic::invalid_config_reason(
-            Some(string_table.intern("fake_config_error")),
-            InvalidConfigReason::UnsupportedScalarValue,
-            None,
-        )
-        .into())
+        Err(ProjectConfigError::Diagnostic(
+            project_config::invalid_config_reason(
+                Some(strings.intern("fake_config_error")),
+                InvalidConfigReason::UnsupportedScalarValue,
+                None,
+            ),
+        ))
     }
 
     fn frontend_surface(&self) -> BuilderSurface {
@@ -459,8 +430,8 @@ impl BackendBuilder for NoDirectiveBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, PreparedFailure> {
         Ok(Project {
             output_files: vec![OutputFile::new(
                 PathBuf::from("index.html"),
@@ -468,7 +439,6 @@ impl BackendBuilder for NoDirectiveBuilder {
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::generic([".html"]),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         })
@@ -477,7 +447,7 @@ impl BackendBuilder for NoDirectiveBuilder {
     fn validate_project_config(
         &self,
         _config: &Config,
-        _string_table: &mut StringTable,
+        _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
         Ok(())
     }
@@ -500,8 +470,8 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, PreparedFailure> {
         project_compilation
             .modules()
             .find(|module| module.metadata.entry_point.ends_with("src/@page.moth"))
@@ -511,23 +481,28 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             .find(|module| module.metadata.entry_point.ends_with("src/docs/@page.moth"))
             .expect("directory build should discover docs module");
 
-        let warning = naming_convention_warning(string_table.get_or_intern("x".to_string()), None);
-        let error = unknown_name_error(
-            string_table.get_or_intern("homepage diagnostic".to_string()),
-            NameNamespace::Value,
-            None,
-        );
+        let (error, warning) = {
+            let mut strings = context.diagnostic_strings();
+            (
+                names_declarations::unknown_value_name(strings.intern("homepage diagnostic"), None),
+                naming_convention_warning(strings.intern("x"), None),
+            )
+        };
 
-        Err(CompilerMessages::from_diagnostics(
-            vec![error, warning],
-            string_table.clone(),
-        ))
+        let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+            DiagnosticBag::from_diagnostics(vec![error, warning]),
+            context.strings(),
+            None,
+            || None,
+        )
+        .map_err(PreparedFailure::from)?;
+        Err(PreparedFailure::Diagnosed(batch))
     }
 
     fn validate_project_config(
         &self,
         _config: &Config,
-        _string_table: &mut StringTable,
+        _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
         Ok(())
     }

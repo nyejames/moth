@@ -11,7 +11,8 @@ use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailure
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ProducedValues, ValueBlock, ValueIfBlock, ValueLexicalScope, ValueMatchBlock,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -52,7 +53,8 @@ pub(crate) fn commit_constant_result_block(
         )
     };
     if slots.len() != result_type_ids.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Folded call result slots disagree with the call's success types.",
         )
         .into());

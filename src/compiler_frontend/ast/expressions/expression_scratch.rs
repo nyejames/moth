@@ -1,6 +1,7 @@
 //! Producer-local DAGs. Nothing borrowed from a candidate survives promotion.
 //! Candidate handles carry the prefix owner token and serial, while promotion keeps a raw ID map.
 use super::*;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CandidateSerial(u64);
 #[derive(Clone, Copy)]
@@ -142,13 +143,13 @@ pub(crate) struct ExpressionCandidate<'p> {
     rows: Vec<Option<ScratchCompletedExpressionInput<'p>>>,
 }
 impl<'p> ExpressionCandidate<'p> {
-    pub(crate) fn view(&self, id: OwnedExpr) -> Result<ExpressionView<'p>, CompilerError> {
+    pub(crate) fn view(&self, id: OwnedExpr) -> Result<ExpressionView<'p>, InfrastructureFailure> {
         self.prefix.view_owned(id)
     }
     pub(crate) fn retain(
         &self,
         view: ExpressionView<'p>,
-    ) -> Result<ExistingExprId<'p>, CompilerError> {
+    ) -> Result<ExistingExprId<'p>, InfrastructureFailure> {
         if self.prefix.storage.owner != view.store().owner {
             return Err(invariant("foreign expression prefix"));
         }
@@ -160,7 +161,7 @@ impl<'p> ExpressionCandidate<'p> {
             prefix: std::marker::PhantomData,
         })
     }
-    fn validate_edge_owner(&self, edge: CandidateEdge<'p>) -> Result<(), CompilerError> {
+    fn validate_edge_owner(&self, edge: CandidateEdge<'p>) -> Result<(), InfrastructureFailure> {
         let (owner, candidate) = match edge {
             CandidateEdge::New(id) => (id.owner, id.candidate),
             CandidateEdge::Existing(id) => (id.owner, id.candidate),
@@ -170,7 +171,7 @@ impl<'p> ExpressionCandidate<'p> {
         }
         Ok(())
     }
-    fn validate_edge(&self, edge: CandidateEdge<'p>) -> Result<(), CompilerError> {
+    fn validate_edge(&self, edge: CandidateEdge<'p>) -> Result<(), InfrastructureFailure> {
         self.validate_edge_owner(edge)?;
         match edge {
             CandidateEdge::New(id) => {
@@ -286,7 +287,10 @@ impl<'p> ExpressionCandidate<'p> {
             return Ok(Promotion::Existing(id.id));
         }
         let CandidateEdge::New(root) = root else {
-            unreachable!()
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "prepare already returned Existing for CandidateEdge::Existing; remaining root is CandidateEdge::New"
+            )
         };
         let mut colors = vec![0u8; self.rows.len()];
         let mut order = Vec::new();

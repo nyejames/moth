@@ -115,8 +115,9 @@ impl CleanupPolicy {
 pub struct ValidatedOutputFolder {
     pub relative_path: PathBuf,
     pub resolved_path: PathBuf,
-    /// Exact authored config span, when this folder came from source config.
-    pub span: Option<SourceSpan>,
+    /// Exact authored config span, when this folder came from source config. Crate-private: the
+    /// span resolves only under the build owner that retains the project source database.
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Validated development and release output settings produced during bootstrap.
@@ -155,7 +156,8 @@ pub struct ValidatedOutputPlan {
     pub project_root: PathBuf,
     pub entry_root: PathBuf,
     pub owner: OutputOwner,
-    pub setting_span: Option<SourceSpan>,
+    /// Crate-private for the same reason as [`ValidatedOutputFolder::span`].
+    pub(crate) setting_span: Option<SourceSpan>,
 }
 
 /// Explicit output plan for a single-file command.
@@ -164,8 +166,6 @@ pub struct SingleFileOutputPlan {
     pub output_root: PathBuf,
     pub project_root: Option<PathBuf>,
     pub owner: OutputOwner,
-    /// Single-file paths are command/filesystem facts, never authored config spans.
-    pub setting_span: Option<SourceSpan>,
 }
 
 /// The output plan consumed by the writer.
@@ -207,7 +207,7 @@ impl OutputPlan {
     pub(crate) fn setting_span(&self) -> Option<SourceSpan> {
         match self {
             Self::Directory(plan) => plan.setting_span,
-            Self::SingleFile(plan) => plan.setting_span,
+            Self::SingleFile(_) => None,
         }
     }
 }
@@ -227,9 +227,8 @@ impl OutputPlan {
 /// authored `.` segments anywhere in the path, and a resolved path equal to or inside an
 /// explicitly configured non-root `entry_root`.
 ///
-/// `resolved_entry_root` is `None` for the transitional empty or `.` entry root form, where
-/// entry-root containment is not enforced and the output is validated against the project root
-/// only.
+/// `resolved_entry_root` is `None` for the empty or `.` entry-root spelling, which resolves to the
+/// project root. In that case the output is validated against the project root only.
 pub(crate) fn classify_output_folder(
     relative: &Path,
     project_root: &Path,

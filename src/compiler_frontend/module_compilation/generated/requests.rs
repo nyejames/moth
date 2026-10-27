@@ -19,7 +19,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     ExportedGenericParameterIdentity, GenericParameterOriginResolver, NominalOriginResolver,
     project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, NominalTypeId};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -39,27 +40,30 @@ impl NominalOriginResolver for GeneratedRequestNominalOrigins<'_> {
     fn resolve_nominal_origin(
         &self,
         nominal_id: NominalTypeId,
-    ) -> Result<OriginTypeId, CompilerError> {
+    ) -> Result<OriginTypeId, InfrastructureFailure> {
         let type_id = self
             .type_environment
             .type_id_for_nominal_id(nominal_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Generated request references a nominal type without a local type identity",
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated request references a nominal type without a local type identity"
                 )
-            })?;
+            });
         let canonical_identity = self
             .type_environment
             .canonical_identity_for_type_id(type_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Generated request nominal type has no canonical identity",
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated request nominal type has no canonical identity"
                 )
-            })?;
+            });
         let CanonicalTypeIdentity::SourceNominal(origin) = canonical_identity else {
-            return Err(CompilerError::compiler_error(
-                "Generated request nominal type has a non-source canonical identity",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated request nominal type has a non-source canonical identity"
+            );
         };
 
         Ok(origin.clone())
@@ -76,12 +80,13 @@ impl GenericParameterOriginResolver for GeneratedRequestGenericParameters<'_> {
     fn resolve_generic_parameter_origin(
         &self,
         parameter_id: GenericParameterId,
-    ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
+    ) -> Result<ExportedGenericParameterIdentity, InfrastructureFailure> {
         let type_id = self
             .type_environment
             .type_id_for_generic_parameter(parameter_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
                     "Generated request references a generic parameter without a local type handle",
                 )
             })?;
@@ -107,7 +112,7 @@ impl GenericParameterOriginResolver for GeneratedRequestGenericParameters<'_> {
                 continue;
             };
             let owner = template.generic_parameter_owner.clone().ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly,
                     "Generated request references a private generic parameter across a generated boundary",
                 )
             })?;
@@ -117,10 +122,13 @@ impl GenericParameterOriginResolver for GeneratedRequestGenericParameters<'_> {
                 self.string_table.resolve(parameter.name).to_owned(),
             ));
         }
-        Err(CompilerError::compiler_error(format!(
-            "Generated request references generic parameter {parameter_id:?} as TypeId({}) without a stable exported identity",
-            type_id.0
-        )))
+        Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Generated request references generic parameter {parameter_id:?} as TypeId({}) without a stable exported identity",
+                type_id.0
+            ),
+        ))
     }
 }
 
@@ -139,24 +147,27 @@ pub(crate) fn install_generated_request_contracts<'a>(
     external_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     module_ast: &mut Ast,
-) -> Result<Vec<CanonicalGeneratedRequest>, CompilerError> {
+) -> Result<Vec<CanonicalGeneratedRequest>, InfrastructureFailure> {
     let requests = requests.into_iter();
     let mut identities = Vec::with_capacity(requests.size_hint().0);
     for request in requests {
         let template = templates.get(&request.key.function_path).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "Deferred generic request has no requester-local generic contract",
             )
         })?;
         let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "Deferred generic request template has no stable declaration identity",
             )
         })?;
         if let Some(request_identity) = request.declaration_identity.as_ref()
             && request_identity != &declaration_identity
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "Deferred generic request declaration identity disagrees with its template",
             ));
         }
@@ -211,7 +222,8 @@ pub(crate) fn install_generated_request_contracts<'a>(
             ) {
                 continue;
             }
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated request path collides with another imported or generated callable",
             ));
         }
@@ -223,7 +235,8 @@ pub(crate) fn install_generated_request_contracts<'a>(
                 request.key.type_arguments.as_ref(),
             )
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
                     "Deferred generic request does not match its projected parameter list",
                 )
             })?;
@@ -262,7 +275,7 @@ fn canonicalize_generated_request_evidence(
     request: &GenericFunctionInstantiationRequest,
     materialisation_context: &ModuleMaterialisationCapture,
     external_registry: &ExternalPackageRegistry,
-) -> Result<Box<[CanonicalEvidenceIdentity]>, CompilerError> {
+) -> Result<Box<[CanonicalEvidenceIdentity]>, InfrastructureFailure> {
     if request.evidence.is_empty() {
         return Ok(Box::new([]));
     }
@@ -287,11 +300,12 @@ fn canonicalize_generated_request_evidence(
                 let evidence = materialisation_context
                     .trait_evidence_environment
                     .get(evidence_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Generated request retained a missing requester-local evidence selection",
+                    .unwrap_or_else(|| {
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
+                            "Generated request retained a missing requester-local evidence selection"
                         )
-                    })?;
+                    });
                 (evidence.target_type_id, evidence.trait_id)
             }
             BoundEvidenceSelection::BuiltinCastProof {
@@ -304,9 +318,10 @@ fn canonicalize_generated_request_evidence(
                     &materialisation_context.type_environment,
                     &materialisation_context.trait_environment,
                 ) {
-                    return Err(CompilerError::compiler_error(
-                        "Generated request retained an invalid on-demand builtin cast proof",
-                    ));
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
+                        "Generated request retained an invalid on-demand builtin cast proof"
+                    );
                 }
                 (source_type_id, trait_id)
             }
@@ -320,11 +335,12 @@ fn canonicalize_generated_request_evidence(
             .trait_environment
             .canonical_identity_for_id(trait_id)
             .cloned()
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Generated request evidence has no stable canonical trait identity",
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated request evidence has no stable canonical trait identity"
                 )
-            })?;
+            });
         canonical_evidence.push(CanonicalEvidenceIdentity::new(
             target_type_identity,
             trait_identity,

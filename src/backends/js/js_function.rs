@@ -4,7 +4,9 @@
 //! Cyclic or unsupported control flow retains the dispatcher fallback.
 
 use crate::backends::js::JsEmitter;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
@@ -25,7 +27,10 @@ enum BranchTermination {
 }
 
 impl<'hir> JsEmitter<'hir> {
-    pub(crate) fn emit_function(&mut self, function: &HirFunction) -> Result<(), CompilerError> {
+    pub(crate) fn emit_function(
+        &mut self,
+        function: &HirFunction,
+    ) -> Result<(), InfrastructureFailure> {
         let function_name = self.function_name(function.id)?.to_owned();
 
         let mut parameters = Vec::with_capacity(function.params.len());
@@ -66,7 +71,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         function: &HirFunction,
         reachable_blocks: &[BlockId],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let parameter_set = function.params.iter().copied().collect::<HashSet<_>>();
         let mut local_ids = Vec::new();
 
@@ -103,7 +108,7 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_parameter_binding_setup(
         &mut self,
         function: &HirFunction,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for parameter_local in &function.params {
             let parameter_name = self.local_name(*parameter_local)?;
             self.emit_line(&format!(
@@ -121,7 +126,7 @@ impl<'hir> JsEmitter<'hir> {
     fn choose_control_flow_strategy(
         &self,
         function: &HirFunction,
-    ) -> Result<ControlFlowStrategy, CompilerError> {
+    ) -> Result<ControlFlowStrategy, InfrastructureFailure> {
         if self.has_cfg_cycle(function.entry)? {
             return Ok(ControlFlowStrategy::Dispatcher);
         }
@@ -154,7 +159,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_jump_argument_transfer(
         &mut self,
         args: &[HirJumpArgument],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if args.is_empty() {
             return Ok(());
         }
@@ -179,13 +184,13 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    fn has_cfg_cycle(&self, entry_block: BlockId) -> Result<bool, CompilerError> {
+    fn has_cfg_cycle(&self, entry_block: BlockId) -> Result<bool, InfrastructureFailure> {
         fn dfs(
             emitter: &JsEmitter<'_>,
             block_id: BlockId,
             visiting: &mut HashSet<BlockId>,
             visited: &mut HashSet<BlockId>,
-        ) -> Result<bool, CompilerError> {
+        ) -> Result<bool, InfrastructureFailure> {
             if visiting.contains(&block_id) {
                 return Ok(true);
             }
@@ -215,7 +220,7 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_structured_function_body(
         &mut self,
         function: &HirFunction,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut emitted_blocks = HashSet::new();
         self.emit_structured_block(function.entry, &mut emitted_blocks)
     }
@@ -224,7 +229,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         block_id: BlockId,
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if emitted_blocks.contains(&block_id) {
             return Ok(());
         }
@@ -259,11 +264,14 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::ReturnError(expression) => {
                 self.emit_error_return_terminator(*expression)
             }
-            HirTerminator::Uninitialized => Err(CompilerError::compiler_error(
-                "JavaScript backend: structured lowering encountered Uninitialized terminator",
-            )),
+            // Unreachable: `validate_blocks` rejects `Uninitialized` blocks before lowering.
+            HirTerminator::Uninitialized => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: structured lowering encountered Uninitialized terminator"
+            ),
             HirTerminator::RuntimeFailure { message, .. } => {
-                self.emit_runtime_failure_terminator(message)
+                self.emit_runtime_failure_terminator(message);
+                Ok(())
             }
             HirTerminator::AssertFailure {
                 message,
@@ -271,7 +279,8 @@ impl<'hir> JsEmitter<'hir> {
             } => self.emit_assert_failure_terminator(*message, *message_evaluation),
 
             HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {
-                Err(CompilerError::compiler_error(
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
                     "JavaScript backend: structured lowering does not support Break/Continue terminators",
                 ))
             }
@@ -284,7 +293,7 @@ impl<'hir> JsEmitter<'hir> {
         then_block: BlockId,
         else_block: BlockId,
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut branch_blocks = HashSet::new();
         let then_termination = self.inspect_branch_termination(then_block, &mut branch_blocks)?;
         let else_termination = self.inspect_branch_termination(else_block, &mut branch_blocks)?;
@@ -315,7 +324,7 @@ impl<'hir> JsEmitter<'hir> {
         terminator: &HirTerminator,
         expected_merge_target: Option<BlockId>,
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<BranchTermination, CompilerError> {
+    ) -> Result<BranchTermination, InfrastructureFailure> {
         let HirTerminator::Invoke {
             id,
             operation,
@@ -326,7 +335,8 @@ impl<'hir> JsEmitter<'hir> {
             ..
         } = terminator
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: expected Invoke",
             ));
         };
@@ -342,7 +352,8 @@ impl<'hir> JsEmitter<'hir> {
             && merge_target != expected_merge_target
             && merge_target.is_some()
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: Invoke unexpected merge",
             ));
         }
@@ -380,7 +391,7 @@ impl<'hir> JsEmitter<'hir> {
         scrutinee: HirValueId,
         arms: &[HirMatchArm],
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let merge_target = self.resolve_match_merge_target(arms)?;
         let scrutinee_type = self.hir.expressions.expression(scrutinee).ty;
         let scrutinee = self.lower_expr(scrutinee)?;
@@ -428,13 +439,14 @@ impl<'hir> JsEmitter<'hir> {
         block_id: BlockId,
         expected_merge_target: Option<BlockId>,
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<BranchTermination, CompilerError> {
+    ) -> Result<BranchTermination, InfrastructureFailure> {
         if expected_merge_target == Some(block_id) {
             return Ok(BranchTermination::Jump(block_id));
         }
 
         if emitted_blocks.contains(&block_id) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: branch block was emitted more than once during structured lowering",
             ));
         }
@@ -450,7 +462,8 @@ impl<'hir> JsEmitter<'hir> {
                     self.emit_jump_argument_transfer(args)?;
                     Ok(BranchTermination::Jump(*target))
                 } else {
-                    Err(CompilerError::compiler_error(
+                    Err(InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
                         "JavaScript backend: structured branch jumped to unexpected target",
                     ))
                 }
@@ -496,11 +509,12 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirTerminator::RuntimeFailure { message, .. } => {
-                self.emit_runtime_failure_terminator(message)?;
+                self.emit_runtime_failure_terminator(message);
                 Ok(BranchTermination::Terminated)
             }
 
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: structured lowering encountered unsupported branch terminator",
             )),
         }
@@ -514,7 +528,7 @@ impl<'hir> JsEmitter<'hir> {
         else_block: BlockId,
         expected_merge_target: Option<BlockId>,
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<BranchTermination, CompilerError> {
+    ) -> Result<BranchTermination, InfrastructureFailure> {
         self.emit_line(&format!("if ({condition}) {{"));
         self.indent += 1;
         let then_termination =
@@ -538,11 +552,12 @@ impl<'hir> JsEmitter<'hir> {
         &self,
         block_id: BlockId,
         branch_blocks: &mut HashSet<BlockId>,
-    ) -> Result<BranchTermination, CompilerError> {
+    ) -> Result<BranchTermination, InfrastructureFailure> {
         // Branch bodies need one lexical owner. A shared exit is safe only when represented
         // by a jump target, which the enclosing conditional emits after its arms.
         if !branch_blocks.insert(block_id) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: structured branches share a non-merge block",
             ));
         }
@@ -577,11 +592,14 @@ impl<'hir> JsEmitter<'hir> {
             | HirTerminator::RuntimeFailure { .. }
             | HirTerminator::AssertFailure { .. } => Ok(BranchTermination::Terminated),
 
-            HirTerminator::Uninitialized => Err(CompilerError::compiler_error(
-                "JavaScript backend: branch inspection encountered Uninitialized terminator",
-            )),
+            // Unreachable: `validate_blocks` rejects `Uninitialized` blocks before lowering.
+            HirTerminator::Uninitialized => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: branch inspection encountered Uninitialized terminator"
+            ),
 
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: branch terminator is unsupported for structured lowering",
             )),
         }
@@ -590,13 +608,14 @@ impl<'hir> JsEmitter<'hir> {
     fn resolve_branch_merge_target(
         then_termination: BranchTermination,
         else_termination: BranchTermination,
-    ) -> Result<Option<BlockId>, CompilerError> {
+    ) -> Result<Option<BlockId>, InfrastructureFailure> {
         match (then_termination, else_termination) {
             (BranchTermination::Jump(then_target), BranchTermination::Jump(else_target)) => {
                 if then_target == else_target {
                     Ok(Some(then_target))
                 } else {
-                    Err(CompilerError::compiler_error(
+                    Err(InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
                         "JavaScript backend: structured if-branches jump to different merge targets",
                     ))
                 }
@@ -612,7 +631,7 @@ impl<'hir> JsEmitter<'hir> {
     fn resolve_match_merge_target(
         &self,
         arms: &[HirMatchArm],
-    ) -> Result<Option<BlockId>, CompilerError> {
+    ) -> Result<Option<BlockId>, InfrastructureFailure> {
         Ok(
             match self.inspect_match_termination(arms, &mut HashSet::new())? {
                 BranchTermination::Jump(target) => Some(target),
@@ -625,9 +644,10 @@ impl<'hir> JsEmitter<'hir> {
         &self,
         arms: &[HirMatchArm],
         owned_blocks: &mut HashSet<BlockId>,
-    ) -> Result<BranchTermination, CompilerError> {
+    ) -> Result<BranchTermination, InfrastructureFailure> {
         if arms.is_empty() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript backend: structured match has no arms",
             ));
         }
@@ -649,7 +669,8 @@ impl<'hir> JsEmitter<'hir> {
                     | HirPattern::Wildcard
                     | HirPattern::ChoiceVariant { .. }
             ) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
                     "JavaScript backend: match pattern is unsupported for structured lowering",
                 ));
             }

@@ -22,9 +22,11 @@ use crate::compiler_frontend::ast::statements::body_dispatch::{
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -102,10 +104,13 @@ impl ValueBlockBranchBody {
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         match self {
             Self::Nodes { nodes, .. } => Ok(nodes),
-            Self::Draft(_) => Err(CompilerError::compiler_error(format!(
-                "a numeric-dependent statement was retained inside {position} and cannot be \
+            Self::Draft(_) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "a numeric-dependent statement was retained inside {position} and cannot be \
                  published before the enclosing body root completes"
-            ))
+                ),
+            )
             .into()),
         }
     }
@@ -155,7 +160,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     let then_request_end = outer_context.generic_request_checkpoint();
 
     if token_stream.current_tag() != TokenTag::ELSE {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
             Some(token_stream.current_span()),
         )
@@ -202,11 +207,11 @@ fn parse_one_value_block_body(
     path_fork: &mut PathInternerFork,
 ) -> BlockBodyResult<ValueBlockBranchBody> {
     let mut branch_context =
-        parent.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+        parent.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
     let branch_scope = branch_context.scope;
     branch_context.active_value_target = Some(active_target);
 
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let parsed_body = parse_function_body_statements(
         token_stream,
         branch_context,

@@ -9,7 +9,8 @@
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// Classification of a contribution's relationship to child-template wrapping.
 ///
@@ -40,9 +41,10 @@ impl ContributionShape {
 pub(crate) fn classify_tir_contribution_node(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
-) -> Result<ContributionShape, CompilerError> {
+) -> Result<ContributionShape, InfrastructureFailure> {
     let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR contribution classification: contribution node ID was not present in the store.",
         )
     })?;
@@ -50,7 +52,7 @@ pub(crate) fn classify_tir_contribution_node(
     let shape = match &node.kind {
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template = store.get_template(reference.root).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR contribution classification: child template ID was not present in the store.",
                 )
             })?;
@@ -62,7 +64,7 @@ pub(crate) fn classify_tir_contribution_node(
 
         TemplateIrNodeKind::InsertContribution { template } => {
             let referenced_template = store.get_template(*template).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR contribution classification: insert contribution template ID was not present in the store.",
                 )
             })?;
@@ -86,9 +88,9 @@ pub(crate) fn classify_tir_contribution_node(
 pub(crate) fn tir_node_is_control_flow_root(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR contribution control-flow classification: contribution node ID was not present in the store.",
         )
     })?;
@@ -102,7 +104,7 @@ pub(crate) fn tir_node_is_control_flow_root(
 
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template = store.get_template(reference.root).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR contribution control-flow classification: child template ID was not present in the store.",
                 )
             })?;

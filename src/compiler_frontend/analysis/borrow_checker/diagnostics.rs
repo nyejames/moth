@@ -4,9 +4,14 @@
 //! source spans without forcing the transfer code to duplicate lookup logic.
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    invalid_mutable_access, multiple_mutable_borrows, shared_mutable_conflict,
+    use_of_uninitialized_local,
+};
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, CompilerDiagnostic, DiagnosticPlace, InvalidMutableAccessReason,
+    BorrowAccessKind, DiagnosticPlace, InvalidMutableAccessReason,
 };
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId};
@@ -78,19 +83,6 @@ impl<'a> BorrowDiagnostics<'a> {
         self.module.side_table.terminator_span(block_id).copied()
     }
 
-    pub(super) fn function_error_span(&self, function_id: FunctionId) -> Option<SourceSpan> {
-        self.module
-            .side_table
-            .hir_source_span_for_hir(HirLocation::Function(function_id))
-    }
-
-    pub(super) fn module_error_span(&self) -> Option<SourceSpan> {
-        self.module
-            .start_function
-            .or_else(|| self.module.functions.first().map(|function| function.id))
-            .and_then(|function_id| self.function_error_span(function_id))
-    }
-
     pub(super) fn value_error_span(
         &self,
         value_id: HirValueId,
@@ -104,12 +96,8 @@ impl<'a> BorrowDiagnostics<'a> {
             .or(fallback)
     }
 
-    pub(super) fn internal_error(
-        &self,
-        message: impl Into<String>,
-        source_span: Option<SourceSpan>,
-    ) -> BorrowCheckError {
-        CompilerError::new(message, source_span, ErrorType::Compiler).into()
+    pub(super) fn internal_error(&self, message: impl Into<Box<str>>) -> BorrowCheckError {
+        InfrastructureFailure::internal(CompilerStage::BorrowChecking, message).into()
     }
 
     pub(super) fn multiple_mutable_borrows(
@@ -119,8 +107,7 @@ impl<'a> BorrowDiagnostics<'a> {
         existing_span: Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::multiple_mutable_borrows(place, conflicting_place, existing_span, span)
-            .into()
+        multiple_mutable_borrows(place, conflicting_place, existing_span, span).into()
     }
 
     pub(super) fn shared_mutable_conflict(
@@ -132,7 +119,7 @@ impl<'a> BorrowDiagnostics<'a> {
         existing_span: Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::shared_mutable_conflict(
+        shared_mutable_conflict(
             place,
             existing_access,
             requested_access,
@@ -151,14 +138,7 @@ impl<'a> BorrowDiagnostics<'a> {
         conflicting_span: Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::invalid_mutable_access(
-            place,
-            reason,
-            conflicting_place,
-            conflicting_span,
-            span,
-        )
-        .into()
+        invalid_mutable_access(place, reason, conflicting_place, conflicting_span, span).into()
     }
 
     pub(super) fn use_of_uninitialized_local(
@@ -166,6 +146,6 @@ impl<'a> BorrowDiagnostics<'a> {
         place: DiagnosticPlace,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::use_of_uninitialized_local(place, span).into()
+        use_of_uninitialized_local(place, span).into()
     }
 }

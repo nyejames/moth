@@ -1,9 +1,21 @@
 use super::*;
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigView, decode_invalid_config,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, dev_server::render_compilation_result_html,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticSeverity, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableResourceUse};
@@ -15,21 +27,72 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
-    let diagnostic = messages
-        .first_error()
-        .expect("expected an error-severity diagnostic");
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidConfig { reason, .. } => reason,
-        _ => panic!("expected an invalid config diagnostic"),
+fn freeze_prepared_failure(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+    project_source: Option<Arc<SourceDatabase>>,
+    package_source: Option<(Arc<SourceDatabase>, StablePackageIdentity)>,
+) -> CompilationResult<()> {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table.clone());
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, project_source.map(|source| (source, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors);
+        }
     }
+    if let Some((source_database, domain)) = package_source {
+        let source_row = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::new(),
+            StringTable::new(),
+            None,
+            None,
+        );
+        accumulator.append_prepared(source_row, Some((source_database, Some(domain))));
+    }
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
+}
+
+fn diagnostic_reports(result: &CompilationResult<()>) -> &DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Success {
+            warnings: Some(reports),
+            ..
+        })
+        | Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { warnings: None, .. }) => {
+            panic!("expected diagnostic reports")
+        }
+        Err(errors) => panic!("expected diagnostics, got infrastructure failure: {errors:?}"),
+    }
+}
+
+fn invalid_config_reason(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> InvalidConfigReason {
+    let failure = freeze_prepared_failure(failure, string_table, None, None);
+    let (_, diagnostic) = diagnostic_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected an error-severity diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected an invalid config diagnostic");
+    decode_invalid_config(&facts, diagnostic.string_ids())
+        .expect("invalid config view should retain its typed reason")
+        .1
 }
 fn module_resource_origin(
     package_name: &str,
@@ -144,7 +207,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
         origin.clone(),
         Some(first_span),
         ResourceUrlContext::page_document(Path::new("docs/first.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -152,7 +215,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
         origin.clone(),
         Some(second_span),
         ResourceUrlContext::page_document(Path::new("docs/second.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -160,7 +223,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
         origin,
         Some(third_span),
         ResourceUrlContext::page_document(Path::new("docs/third.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -187,7 +250,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
         first,
         Some(authored_site(0)),
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -196,7 +259,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
             second,
             Some(authored_site(2)),
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .unwrap_err();
@@ -205,19 +268,15 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
         output_path,
         existing_origin,
         conflicting_origin,
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a resource output path collision reason");
     };
-    assert_eq!(string_table.resolve(*output_path), "shared/logo.svg");
+    assert_eq!(string_table.resolve(output_path), "shared/logo.svg");
+    assert!(string_table.resolve(existing_origin).contains("name 'one'"));
     assert!(
         string_table
-            .resolve(*existing_origin)
-            .contains("name 'one'")
-    );
-    assert!(
-        string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("name 'two'")
     );
 }
@@ -245,7 +304,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
         first,
         Some(authored_site(0)),
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -254,7 +313,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
             second,
             Some(authored_site(2)),
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .unwrap_err();
@@ -263,18 +322,18 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
         existing_origin,
         conflicting_origin,
         ..
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a resource output path collision reason");
     };
     assert!(
         string_table
-            .resolve(*existing_origin)
+            .resolve(existing_origin)
             .contains("role 'normal'")
     );
     assert!(
         string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("role 'support'")
     );
 }
@@ -304,7 +363,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
         first,
         Some(authored_site(0)),
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -313,7 +372,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
             second,
             Some(authored_site(2)),
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .unwrap_err();
@@ -322,28 +381,28 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
         existing_origin,
         conflicting_origin,
         ..
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a resource output path collision reason");
     };
     assert!(
         string_table
-            .resolve(*existing_origin)
+            .resolve(existing_origin)
             .contains("package origin 'builder'")
     );
     assert!(
         string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("package origin 'dependency'")
     );
     assert!(
         string_table
-            .resolve(*existing_origin)
+            .resolve(existing_origin)
             .contains("name 'shared'")
     );
     assert!(
         string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("name 'shared'")
     );
 }
@@ -357,14 +416,18 @@ fn reserved_html_output_rejects_resource_planning() {
     let mut plan = HtmlResourceOutputPlan::new("app");
     let origin = module_resource_origin("app", "", "index.html");
 
-    plan.reserve_builder_output_path(Path::new("index.html"), "HTML page", &mut string_table)
-        .unwrap();
+    plan.reserve_builder_output_path(
+        Path::new("index.html"),
+        "HTML page",
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .unwrap();
     let error = plan
         .plan_origin(
             origin,
             Some(authored_site(0)),
             ResourceUrlContext::page_document(Path::new("other.html")).unwrap(),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .unwrap_err();
@@ -373,13 +436,13 @@ fn reserved_html_output_rejects_resource_planning() {
         output_path,
         origin,
         artefact_kind,
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a reserved resource output path reason");
     };
-    assert_eq!(string_table.resolve(*output_path), "index.html");
-    assert_eq!(string_table.resolve(*artefact_kind), "HTML page");
-    assert!(string_table.resolve(*origin).contains("index.html"));
+    assert_eq!(string_table.resolve(output_path), "index.html");
+    assert_eq!(string_table.resolve(artefact_kind), "HTML page");
+    assert!(string_table.resolve(origin).contains("index.html"));
 }
 
 #[test]
@@ -392,14 +455,18 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
     let origin = module_resource_origin("app", "_moth/js/glue", "module-0123456789abcdef.js");
     let mut plan = HtmlResourceOutputPlan::new("app");
 
-    plan.reserve_builder_output_path(glue_path, "JavaScript", &mut string_table)
-        .unwrap();
+    plan.reserve_builder_output_path(
+        glue_path,
+        "JavaScript",
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .unwrap();
     let error = plan
         .plan_origin(
             origin,
             Some(authored_site(0)),
             ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .unwrap_err();
@@ -408,18 +475,18 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
         output_path,
         origin,
         artefact_kind,
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a reserved resource output path reason");
     };
     assert_eq!(
-        string_table.resolve(*output_path),
+        string_table.resolve(output_path),
         glue_path.to_str().unwrap()
     );
-    assert_eq!(string_table.resolve(*artefact_kind), "JavaScript");
+    assert_eq!(string_table.resolve(artefact_kind), "JavaScript");
     assert!(
         string_table
-            .resolve(*origin)
+            .resolve(origin)
             .contains("module-0123456789abcdef.js")
     );
 }
@@ -477,42 +544,39 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
         package_origin,
         Some(package_site),
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .expect("the package origin should claim the output first");
-    let mut messages = plan
+    let prepared_failure = plan
         .plan_origin(
             project_origin,
             Some(project_site),
             ResourceUrlContext::PageDocument(PathBuf::from("other.html")),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .expect_err("the two provider origins should collide at their declared output path");
-
-    messages.set_source_database(Arc::new(project_database));
-    messages.install_source_contexts(
-        std::iter::once(RenderSourceContext {
-            diagnostic_range: 0..1,
-            source_database: Arc::new(package_database),
-            domain: Some(package_identity),
-        }),
-        0,
+    let failure = freeze_prepared_failure(
+        prepared_failure,
+        &string_table,
+        Some(Arc::new(project_database)),
+        Some((Arc::new(package_database), package_identity)),
     );
-    messages
-        .freeze_source_contexts()
-        .expect("mixed project/package source contexts should freeze");
-    let diagnostic = messages
-        .diagnostics()
+    let (report, diagnostic) = diagnostic_reports(&failure)
+        .iter()
         .next()
         .expect("collision should retain one diagnostic");
-    let context = messages.diagnostic_render_context(0);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(diagnostic.primary_site())
         .expect("project primary span should resolve");
+    let secondary_label = diagnostic
+        .durable_labels()
+        .next()
+        .expect("collision should retain the package secondary label");
     let secondary = context
-        .label_position(&diagnostic.labels[0])
+        .site_position(secondary_label.site)
         .expect("package secondary span should resolve through its domain handle");
     assert!(
         primary.line.contains("project_collision_snapshot")
@@ -526,7 +590,7 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
         "secondary should use the package snapshot, not the colliding project snapshot: {}",
         secondary.line
     );
-    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    let rendered = render_compilation_result_html(&failure, project_directory.path());
     assert!(
         rendered.contains("project_collision_snapshot"),
         "HTML rendering should include the project primary excerpt: {rendered}"
@@ -551,13 +615,13 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         "q".repeat(extended_length as usize)
     );
     let mut string_table = StringTable::new();
-    let (mut project_database, project_source) = retained_source_database(
+    let (project_database, project_source) = retained_source_database(
         project_directory.path(),
         "main.moth",
         &project_text,
         &mut string_table,
     );
-    let (mut package_database, package_source) = retained_source_database(
+    let (package_database, package_source) = retained_source_database(
         package_directory.path(),
         "main.moth",
         &package_text,
@@ -576,9 +640,17 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         1,
         "the project comparison span should use an extended row"
     );
-    project_database
-        .install_extended_spans(project_source, project_span_builder.freeze())
-        .expect("project extended-span table should install");
+    let mut project_source_owner = SourceDatabaseBuilder::new(project_database);
+    project_source_owner.retain_span_builder(project_source, project_span_builder);
+    project_source_owner
+        .finish_source(project_source)
+        .expect("project extended-span table should freeze");
+    project_source_owner
+        .assemble_finalized_tables()
+        .expect("project span table should assemble");
+    let project_database = project_source_owner
+        .finish()
+        .expect("project source owner should install its frozen table");
     let mut package_span_builder = ExtendedSpanBuilder::new();
     let package_local_span = LocalSpan::exact(0, extended_length, &mut package_span_builder)
         .expect("package span should be representable");
@@ -587,9 +659,17 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         1,
         "the package diagnostic span must use an extended row"
     );
-    package_database
-        .install_extended_spans(package_source, package_span_builder.freeze())
-        .expect("package extended-span table should install");
+    let mut package_source_owner = SourceDatabaseBuilder::new(package_database);
+    package_source_owner.retain_span_builder(package_source, package_span_builder);
+    package_source_owner
+        .finish_source(package_source)
+        .expect("package extended-span table should freeze");
+    package_source_owner
+        .assemble_finalized_tables()
+        .expect("package span table should assemble");
+    let package_database = package_source_owner
+        .finish()
+        .expect("package source owner should install its frozen table");
     let package_identity =
         StablePackageIdentity::source_package(PackageOrigin::Dependency, "reserved-pkg");
     let package_origin = provider_resource_origin_with_package_origin(
@@ -603,37 +683,34 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         source_domain: Some(package_identity.clone()),
     };
     let mut plan = HtmlResourceOutputPlan::new("app");
-    plan.reserve_builder_output_path(Path::new("index.html"), "HTML page", &mut string_table)
-        .expect("builder output should reserve the page path");
-    let mut messages = plan
+    plan.reserve_builder_output_path(
+        Path::new("index.html"),
+        "HTML page",
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .expect("builder output should reserve the page path");
+    let prepared_failure = plan
         .plan_origin(
             package_origin,
             Some(package_site),
             ResourceUrlContext::PageDocument(PathBuf::from("other.html")),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .expect_err("the package resource should collide with the reserved page path");
-
-    messages.set_source_database(Arc::new(project_database));
-    messages.install_source_contexts(
-        std::iter::once(RenderSourceContext {
-            diagnostic_range: 0..1,
-            source_database: Arc::new(package_database),
-            domain: Some(package_identity),
-        }),
-        0,
+    let failure = freeze_prepared_failure(
+        prepared_failure,
+        &string_table,
+        Some(Arc::new(project_database)),
+        Some((Arc::new(package_database), package_identity)),
     );
-    messages
-        .freeze_source_contexts()
-        .expect("mixed project/package source contexts should freeze");
-    let diagnostic = messages
-        .diagnostics()
+    let (report, diagnostic) = diagnostic_reports(&failure)
+        .iter()
         .next()
         .expect("reserved-path collision should retain one diagnostic");
-    let context = messages.diagnostic_render_context(0);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(diagnostic.primary_site())
         .expect("package primary span should resolve");
     assert_eq!(
         primary.end.column, extended_length,
@@ -645,7 +722,7 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         "reserved-path diagnostics must render the package snapshot through its domain: {}",
         primary.line
     );
-    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    let rendered = render_compilation_result_html(&failure, project_directory.path());
     assert!(
         rendered.contains("package_reserved_snapshot")
             && !rendered.contains("project_reserved_snapshot"),
@@ -695,7 +772,7 @@ fn live_resource_use_spans_override_intern_span() {
         &union,
         &spans,
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
     )
     .unwrap();
 
@@ -739,8 +816,13 @@ fn later_live_use_replaces_intern_fallback_span() {
             fallback: Some(ResourceDiagnosticSite::project(intern_span)),
         },
     );
-    plan.plan_union(&union, &fallback_spans, context.clone(), &mut string_table)
-        .unwrap();
+    plan.plan_union(
+        &union,
+        &fallback_spans,
+        context.clone(),
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .unwrap();
     assert_eq!(
         plan.records[0].first_authored_span,
         Some(ResourceDiagnosticSite::project(intern_span))
@@ -755,8 +837,13 @@ fn later_live_use_replaces_intern_fallback_span() {
             fallback: Some(ResourceDiagnosticSite::project(intern_span)),
         },
     );
-    plan.plan_union(&union, &live_spans, context, &mut string_table)
-        .unwrap();
+    plan.plan_union(
+        &union,
+        &live_spans,
+        context,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .unwrap();
 
     let record = &plan.records[0];
     assert_eq!(
@@ -811,7 +898,7 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
         origin.clone(),
         Some(ResourceDiagnosticSite::project(metadata_span)),
         context.clone(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Metadata,
     )
     .unwrap();
@@ -819,12 +906,17 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
         origin.clone(),
         Some(ResourceDiagnosticSite::project(fragment_span)),
         context.clone(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Metadata,
     )
     .unwrap();
-    plan.plan_union(&union, &spans, context, &mut string_table)
-        .unwrap();
+    plan.plan_union(
+        &union,
+        &spans,
+        context,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .unwrap();
 
     let record = &plan.records[0];
     assert_eq!(
@@ -855,7 +947,7 @@ fn metadata_only_use_plans_output_without_an_executable_use() {
         origin.clone(),
         Some(ResourceDiagnosticSite::project(metadata_span)),
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Metadata,
     )
     .unwrap();
@@ -886,7 +978,7 @@ fn record_for_origin_resolves_planned_records_directly() {
         first.clone(),
         None,
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -894,7 +986,7 @@ fn record_for_origin_resolves_planned_records_directly() {
         second.clone(),
         None,
         ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html")),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();
@@ -926,7 +1018,7 @@ fn project_local_origin_preserves_entry_root_relative_path() {
         origin,
         None,
         ResourceUrlContext::page_document(Path::new("docs/getting-started/index.html")).unwrap(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Executable,
     )
     .unwrap();

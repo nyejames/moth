@@ -5,9 +5,13 @@
 //!      facts; neither stage should expand a clause into provider bindings.
 
 use super::top_level_classifier::classify_symbol_statement_start_at_scanned;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
+    DependencyClauseKind, InvalidDependencyClauseReason,
 };
 use crate::compiler_frontend::headers::dependency_target::{
     CheckedExternalProviderTarget, DependencyTargetKind,
@@ -28,18 +32,18 @@ use rustc_hash::FxHashSet;
 ///      header parser converts either lane into `HeaderParseFailure` at the owning boundary.
 #[derive(Debug)]
 pub(crate) enum DependencyClauseParseError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
-impl From<CompilerDiagnostic> for DependencyClauseParseError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for DependencyClauseParseError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for DependencyClauseParseError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for DependencyClauseParseError {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
@@ -156,7 +160,8 @@ pub(crate) fn parse_dependency_clause_at_source(
 ) -> DependencyClauseResult<(ScannedDependencyClause, usize)> {
     if tokens.source() != source_id {
         return Err(DependencyClauseParseError::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "canonical dependency scan source identity does not match its caller",
             ),
         ));
@@ -171,9 +176,10 @@ pub(crate) fn parse_dependency_clause_at_source(
 
 fn checked_next_clause_index(index: usize) -> DependencyClauseResult<usize> {
     index.checked_add(1).ok_or_else(|| {
-        DependencyClauseParseError::Infrastructure(CompilerError::compiler_error(
+        crate::compiler_bug!(
+            CompilerStage::HeaderParsing,
             "dependency clause token index overflowed its source range",
-        ))
+        )
     })
 }
 
@@ -192,7 +198,7 @@ pub(crate) fn parse_dependency_clause_scanned(
     source_id: SourceId,
 ) -> DependencyClauseResult<(ScannedDependencyClause, usize)> {
     let Some(path_token) = tokens.get(start_offset) else {
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
+        return Err(project_config::invalid_dependency_clause(
             DependencyClauseKind::Namespace,
             InvalidDependencyClauseReason::MissingPath,
             None,
@@ -205,12 +211,13 @@ pub(crate) fn parse_dependency_clause_scanned(
         .filter(|_| path_token.tag == TokenTag::PATH)
     else {
         if path_token.tag == TokenTag::PATH {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "dependency path token has a malformed path payload",
             )
             .into());
         }
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
+        return Err(project_config::invalid_dependency_clause(
             DependencyClauseKind::Namespace,
             InvalidDependencyClauseReason::ExpectedPath,
             Some(SourceSpan::new(source_id, path_token.span)),
@@ -329,7 +336,7 @@ pub(crate) fn parse_dependency_clause_scanned(
             .and_then(|next| tokens.get(next))
             .is_some_and(|token| token.tag == TokenTag::DOT)
         {
-            return Err(CompilerDiagnostic::invalid_path(
+            return Err(token_lexical::invalid_path(
                 crate::compiler_frontend::compiler_messages::PathKind::WhitespaceMustBeQuoted,
                 Some(SourceSpan::new(source_id, selection_token.span)),
             )
@@ -475,17 +482,12 @@ fn continuation_entered_statement_error(
     selected_name_span: SourceSpan,
     comma_span: SourceSpan,
 ) -> DependencyClauseParseError {
-    let diagnostic = CompilerDiagnostic::invalid_dependency_clause(
+    let diagnostic = project_config::invalid_dependency_clause(
         DependencyClauseKind::DirectSelection,
         InvalidDependencyClauseReason::ContinuationEnteredStatement,
         Some(selected_name_span),
     )
-    .with_labels(vec![
-        crate::compiler_frontend::compiler_messages::DiagnosticLabel::secondary(
-            Some(comma_span),
-            None,
-        ),
-    ]);
+    .with_label(Some(comma_span), None);
     DependencyClauseParseError::Diagnostic(diagnostic)
 }
 
@@ -498,5 +500,5 @@ fn dependency_clause_error(
     reason: InvalidDependencyClauseReason,
     span: Option<SourceSpan>,
 ) -> DependencyClauseParseError {
-    CompilerDiagnostic::invalid_dependency_clause(kind, reason, span).into()
+    project_config::invalid_dependency_clause(kind, reason, span).into()
 }

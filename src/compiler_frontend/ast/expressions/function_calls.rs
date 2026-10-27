@@ -49,8 +49,9 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -71,7 +72,7 @@ pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
     pub signature: &'a FunctionSignature,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
-    pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub warnings: Option<&'a mut DiagnosticBag>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
@@ -102,7 +103,7 @@ pub struct ExternalFunctionCallParseInput<'a, 'b, 'tokens> {
     pub context: &'a ScopeContext,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
-    pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub warnings: Option<&'a mut DiagnosticBag>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
@@ -147,7 +148,7 @@ pub(crate) struct CallFinishContext<'a, 'b, 'tokens> {
     pub(crate) context: &'a ScopeContext,
     pub(crate) value_required: bool,
     pub(crate) allow_boundary_catch: bool,
-    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) warnings: Option<&'a mut DiagnosticBag>,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
     pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) const_values: &'a mut ConstValueStore,
@@ -299,7 +300,7 @@ struct RetainedSourceCallInput<'a, 'b, 'tokens> {
     type_interner: &'a mut AstTypeInterner<'b>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&'a mut DiagnosticBag>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
     function_path: &'a PathId,
@@ -398,7 +399,7 @@ pub(crate) struct RetainedCallHandlingInput<'a, 'b, 'tokens> {
     pub(crate) value_required: bool,
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) allow_boundary_catch: bool,
-    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) warnings: Option<&'a mut DiagnosticBag>,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -434,7 +435,7 @@ pub(crate) fn parse_retained_call_authored_handling(
         return Ok(DeferredCallHandling::Unhandled);
     }
 
-    let propagation_span = Some(token_stream.current_postfix_operator_span());
+    let propagation_span = Some(token_stream.current_span());
     let authored_suffix = parse_fragment_handling_suffix(
         token_stream,
         context,
@@ -453,7 +454,8 @@ pub(crate) fn parse_retained_call_authored_handling(
         path_fork,
     )?;
     let Some(ParsedFallibleSuffix::Ready(FallibleHandling::Propagate)) = authored_suffix else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "an authored operand `!` was not parsed as typed propagation",
         )
         .into());
@@ -635,7 +637,7 @@ pub(crate) fn parse_external_function_call_expression(
     // ------------------------
     //  Parse raw arguments
     // ------------------------
-    // External metadata does not expose public parameter names yet, so named arguments remain
+    // External metadata does not expose public parameter names, so named arguments remain
     // intentionally unsupported. The shared retaining intake keeps each numeric-dependent
     // argument's authored fragment and slot routing for the body root, so the deferral never
     // escapes the call that owns it.
@@ -806,19 +808,20 @@ fn settle_external_call_facts(
         builtin_error_type.type_id,
     );
 
-    let error_return_type_id = if external_function.is_fallible() {
-        let Some(error_return_type_id) = error_return_type_id else {
-            return Err(CompilerError::compiler_error(format!(
+    let error_return_type_id =
+        if external_function.is_fallible() {
+            let Some(error_return_type_id) = error_return_type_id else {
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "Fallible external function '{}' has no frontend-visible concrete error slot.",
                 external_function.name
             ))
             .into());
-        };
+            };
 
-        Some(error_return_type_id)
-    } else {
-        None
-    };
+            Some(error_return_type_id)
+        } else {
+            None
+        };
 
     // The float-integrity fact is settled once here, where the resolved success TypeId is
     // visible, so every later AST and HIR consumer carries one neutral boolean instead of
@@ -931,7 +934,7 @@ struct RetainedExternalCallInput<'a, 'b, 'tokens> {
     type_interner: &'a mut AstTypeInterner<'b>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&'a mut DiagnosticBag>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
     external_function_id: ExternalFunctionId,
@@ -987,7 +990,7 @@ fn retain_numeric_external_call(
     // slot is manufactured. The entry is only consulted when the operand's own `!` is authored: a
     // `catch` belongs to the enclosing expression owner, so a retained call never consumes it.
     let authored_handling = if token_stream.current_tag() == TokenTag::BANG {
-        let propagation_span = Some(token_stream.current_postfix_operator_span());
+        let propagation_span = Some(token_stream.current_span());
         let authored_suffix = parse_fragment_handling_suffix(
             token_stream,
             context,
@@ -1006,7 +1009,8 @@ fn retain_numeric_external_call(
             path_fork,
         )?;
         let Some(ParsedFallibleSuffix::Ready(FallibleHandling::Propagate)) = authored_suffix else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "an authored operand `!` was not parsed as typed propagation",
             )
             .into());
@@ -1197,7 +1201,7 @@ fn validate_external_return_slots_are_visible(
             .iter()
             .any(|slot| !slot.value_type.supports_success_return_type())
     {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "External function '{}' declares a return slot that is not frontend-visible at {:?}.",
             external_function.name, span
         ))
@@ -1264,10 +1268,13 @@ fn validate_external_signature_type_is_registered(
                 return Ok(());
             }
 
-            Err(CompilerError::compiler_error(format!(
-                "External function '{}' references unknown external type {:?} at {:?}.",
-                external_function.name, type_id, span
-            ))
+            Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "External function '{}' references unknown external type {:?} at {:?}.",
+                    external_function.name, type_id, span
+                ),
+            )
             .into())
         }
         ExternalSignatureType::Optional(inner) => {

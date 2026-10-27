@@ -5,7 +5,9 @@
 //! WHY: Moth template source is authored as a template body, but later frontend stages
 //! should see an ordinary constant header instead of a Moth template-specific AST path
 //! or textually wrapped source.
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::synthetic_content_header::{
@@ -40,7 +42,7 @@ pub(crate) fn prepare_moth_template_file(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
-) -> Result<FileFrontendPrepareOutput, CompilerError> {
+) -> Result<FileFrontendPrepareOutput, InfrastructureFailure> {
     let file_id = owner.source_id();
     #[cfg(feature = "data_layout_memory_probe")]
     crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
@@ -49,20 +51,22 @@ pub(crate) fn prepare_moth_template_file(
     );
     let canonical = owner.tokens_ref();
     if canonical.source() != file_id {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "Moth template source token owner does not match its file identity",
         ));
     }
     let token_count = owner.len();
     let token_stats = owner.token_stats();
     let body_range = MothTemplatePrepareContext::body_range(canonical)?;
-    let context = MothTemplatePrepareContext::new(source_file, file_id, body_range, string_table)?;
+    let context = MothTemplatePrepareContext::new(source_file, file_id, body_range, string_table);
     let (content_header, config_owned_path_syntax_ids) = {
         let body_facts =
             TokenFactView::from_source_range(canonical, context.body_range).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "Moth template body view is invalid: {error:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    format!("Moth template body view is invalid: {error:?}"),
+                )
             })?;
         let body_cursor = owner.cursor(context.body_range)?;
         let content_header = context.content_header(body_facts, string_table, path_fork)?;
@@ -116,7 +120,7 @@ pub(crate) fn prepare_moth_template_file(
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
-        warnings: Vec::new(),
+        warnings: DiagnosticBag::new(),
     })
 }
 
@@ -137,29 +141,41 @@ impl MothTemplatePrepareContext {
         file_id: SourceId,
         body_range: TokenRange,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerError> {
+    ) -> Self {
         let markdown_directive = string_table.intern(MOTH_TEMPLATE_MARKDOWN_DIRECTIVE);
 
-        Ok(Self {
+        Self {
             source_file,
             file_id,
             body_range,
             markdown_directive,
-        })
+        }
     }
 
-    fn body_range(canonical: &SourceTokens) -> Result<TokenRange, CompilerError> {
+    fn body_range(canonical: &SourceTokens) -> Result<TokenRange, InfrastructureFailure> {
         let body_start = TokenIndex::try_from_index(1).ok_or_else(|| {
-            CompilerError::compiler_error("Moth template body range start exceeded index space")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "Moth template body range start exceeded index space",
+            )
         })?;
         let body_end_index = canonical.len().checked_sub(1).ok_or_else(|| {
-            CompilerError::compiler_error("Moth template token stream is missing its Eof token")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "Moth template token stream is missing its Eof token",
+            )
         })?;
         let body_end = TokenIndex::try_from_index(body_end_index).ok_or_else(|| {
-            CompilerError::compiler_error("Moth template body range end exceeded index space")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "Moth template body range end exceeded index space",
+            )
         })?;
         canonical.range(body_start, body_end).map_err(|error| {
-            CompilerError::compiler_error(format!("Moth template body range is invalid: {error:?}"))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("Moth template body range is invalid: {error:?}"),
+            )
         })
     }
 
@@ -168,7 +184,7 @@ impl MothTemplatePrepareContext {
         body_tokens: TokenFactView<'_>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> Result<crate::compiler_frontend::headers::types::Header, CompilerError> {
+    ) -> Result<crate::compiler_frontend::headers::types::Header, InfrastructureFailure> {
         let initializer_references = collect_scanned_symbol_references(body_tokens, self.file_id);
 
         synthetic_content_header(

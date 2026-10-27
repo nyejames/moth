@@ -2,8 +2,7 @@
 //!
 //! WHAT: parses one or more expressions after `then`, validating arity and applying
 //! contextual coercion against the active value-production target.
-//! WHY: this logic was previously catch-specific; generalising it lets value `if`,
-//! match, and catch share one arity/coercion path.
+//! WHY: value `if`, match and catch all require the same arity and contextual-coercion policy.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
@@ -24,10 +23,14 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason, InvalidReturnShapeReason,
-    TypeMismatchContext, ValueReceiverContext,
+    InvalidFallibleHandlingReason, InvalidReturnShapeReason, TypeMismatchContext,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -166,7 +169,7 @@ pub(crate) fn parse_retained_produced_values(
                 // An expression start here means the author wrote more values than the receiver
                 // accepts; the ordinary multi-value path reports the same reason for that shape.
                 if is_expression_start_tag(token_stream.current_tag()) {
-                    return Err(CompilerDiagnostic::invalid_return_shape(
+                    return Err(calls_data::invalid_return_shape(
                         InvalidReturnShapeReason::TooManyReturnValues {
                             expected_count: arity,
                         },
@@ -175,7 +178,7 @@ pub(crate) fn parse_retained_produced_values(
                     .into());
                 }
 
-                return Err(CompilerDiagnostic::invalid_return_shape(
+                return Err(calls_data::invalid_return_shape(
                     InvalidReturnShapeReason::TooFewReturnValues {
                         expected_count: arity,
                         provided_count: values.len(),
@@ -189,7 +192,7 @@ pub(crate) fn parse_retained_produced_values(
     }
 
     if token_stream.current_tag() == TokenTag::COMMA {
-        return Err(CompilerDiagnostic::invalid_return_shape(
+        return Err(calls_data::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: arity,
             },
@@ -208,7 +211,8 @@ pub(crate) fn parse_retained_produced_values(
         let mut expressions = Vec::with_capacity(values.len());
         for value in values {
             let StatementExpression::Built(expression) = value else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a produced-value list reported ready while holding a retained fallback",
                 )
                 .into());
@@ -302,7 +306,7 @@ pub(crate) fn complete_retained_then_value<'env>(
     if effective_slot_types.is_empty() {
         // The contract carries no success values, so an authored fallback has nothing to produce:
         // the reason the parse-time path reports for an error-only receiver.
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
             span,
         )
@@ -310,7 +314,7 @@ pub(crate) fn complete_retained_then_value<'env>(
     }
 
     if effective_slot_types.len() != values.len() {
-        return Err(CompilerDiagnostic::invalid_return_shape(
+        return Err(calls_data::invalid_return_shape(
             if values.len() < effective_slot_types.len() {
                 InvalidReturnShapeReason::TooFewReturnValues {
                     expected_count: effective_slot_types.len(),
@@ -366,7 +370,7 @@ pub(crate) fn complete_retained_then_value<'env>(
             },
             ThenValueSlot::Completed(expression) => StatementExpression::Built(expression),
             ThenValueSlot::Taken => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a retained `then` value reached completion while a multi-bind producer still owned it",
                 )
                 .into());
@@ -407,7 +411,7 @@ pub(crate) fn validate_and_coerce_completed_then_group(
     services: &mut DeferredExpressionServices<'_, '_>,
 ) -> Result<(), ExpressionParseError> {
     if produced.expressions.len() != slot_type_ids.len() {
-        return Err(CompilerDiagnostic::invalid_return_shape(
+        return Err(calls_data::invalid_return_shape(
             if produced.expressions.len() < slot_type_ids.len() {
                 InvalidReturnShapeReason::TooFewReturnValues {
                     expected_count: slot_type_ids.len(),

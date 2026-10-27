@@ -7,10 +7,11 @@
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckError, BorrowCheckReport, check_borrows,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::{
-    BorrowDiagnosticKind, DiagnosticKind, DiagnosticPayload, InvalidMutableAccessReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -25,47 +26,43 @@ pub(crate) fn run_borrow_checker(
     check_borrows(module, external_package_registry, path_fork, string_table)
 }
 
-pub(crate) fn assert_borrow_error_kind(
-    error: &BorrowCheckError,
-    expected: BorrowDiagnosticKind,
-) -> &DiagnosticPayload {
+pub(crate) fn assert_borrow_error_view<View: FamilyView>(error: BorrowCheckError) -> View {
     let diagnostic = error
-        .diagnostic()
+        .into_draft_or_infrastructure()
         .expect("borrow user failure should remain a typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("borrow user failure should compact to a typed diagnostic");
 
-    assert_eq!(diagnostic.kind, DiagnosticKind::Borrow(expected));
-
-    &diagnostic.payload
+    view.family_view::<View>()
+        .expect("borrow user failure should compact to the expected typed family view")
 }
 
 pub(crate) fn assert_invalid_mutable_access_reason(
-    error: &BorrowCheckError,
+    error: BorrowCheckError,
     expected: InvalidMutableAccessReason,
 ) {
-    let payload = assert_borrow_error_kind(error, BorrowDiagnosticKind::InvalidMutableAccess);
-    let DiagnosticPayload::InvalidMutableAccess { reason, .. } = payload else {
-        panic!("expected invalid mutable access payload, found {payload:?}");
-    };
-
-    assert_eq!(*reason, expected);
+    let facts = assert_borrow_error_view::<InvalidMutableAccessView>(error);
+    assert_eq!(facts.reason, expected);
 }
 
 pub(crate) fn assert_infrastructure_error_contains(
     error: &BorrowCheckError,
-    expected_type: ErrorType,
+    expected_type: InfrastructureFailureKind,
     expected_messages: &[&str],
 ) {
     let infrastructure_error = error
         .infrastructure()
         .expect("invalid borrow metadata should remain an infrastructure failure");
 
-    assert_eq!(infrastructure_error.error_type, expected_type);
+    assert_eq!(infrastructure_error.kind, expected_type);
 
     assert!(
         expected_messages
             .iter()
-            .any(|expected| infrastructure_error.msg.contains(expected)),
+            .any(|expected| infrastructure_error.message.contains(expected)),
         "expected infrastructure error to contain one of {expected_messages:?}, got: {}",
-        infrastructure_error.msg,
+        infrastructure_error.message,
     );
 }

@@ -243,10 +243,10 @@ fn out_of_range_file_id_is_an_internal_error() {
     let result = origins.origin_for(SourceId::from_index(999));
     assert!(
         result.is_err(),
-        "an out-of-range SourceId must return an internal CompilerError, not None"
+        "an out-of-range SourceId must return an internal InfrastructureFailure, not None"
     );
     let error = result.unwrap_err();
-    let message = &error.msg;
+    let message = &error.message;
     assert!(
         message.contains("out-of-range"),
         "the out-of-range error must state the violation clearly, got: {message}"
@@ -266,9 +266,9 @@ fn compilation_root_id_is_rejected_by_origin_lookup() {
     );
     let error = result.unwrap_err();
     assert!(
-        error.msg.contains("compilation-root"),
+        error.message.contains("compilation-root"),
         "the root lookup error must identify the invalid identity, got: {}",
-        error.msg
+        error.message
     );
 }
 

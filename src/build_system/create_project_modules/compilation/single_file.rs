@@ -16,9 +16,17 @@ use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureFailure,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    BoundaryAccumulator, SuccessfulWarningBoundary, SuccessfulWarningSink,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
+    DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -64,8 +72,10 @@ use super::super::source_discovery;
 use super::super::source_package_discovery::build_source_package_boundary_indexes;
 use super::super::source_tree_index::SourceTreeIndex;
 use super::{
-    BoundaryPremergeFailure, append_finish_failure, canonical, compile_source_package_inventories,
-    discover_source_package_inventories, prepare_source_package_check_only_jobs,
+    BoundaryPremergeFailure, append_boundary_finish_failure, canonical,
+    compile_source_package_inventories, discover_source_package_inventories,
+    finalize_source_package_inventories, premerge_failure_to_reports,
+    prepare_source_package_check_only_jobs,
 };
 
 #[allow(
@@ -78,48 +88,50 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
-    string_table: &mut StringTable,
+    warning_owner: &mut BoundaryAccumulator,
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    let result = match compile_single_file_frontend_with_target(
-        config,
-        build_profile,
-        style_directives,
-        builder_surface,
-        extension,
-        string_table,
-        project_source_files,
-        build_config_inputs,
-        mode,
-        SingleFileFrontendTarget::Normal,
-    ) {
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let result = {
+        let (string_table, mut warning_sink) = warning_owner.compiler_parts_mut();
+        compile_single_file_frontend_with_target(
+            config,
+            build_profile,
+            style_directives,
+            builder_surface,
+            extension,
+            string_table,
+            project_source_files,
+            build_config_inputs,
+            mode,
+            Some(&mut warning_sink),
+            SingleFileFrontendTarget::Normal,
+        )
+    };
+    let result = match result {
         Ok(result) => result,
         Err(failure) => {
-            if let Some(package_source) = failure.package_source {
-                return Err((*failure.failure)
-                    .into_messages_with_source(string_table, Arc::new(*package_source)));
-            }
-            let mut messages = (*failure.failure).into_messages(string_table);
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(source_database) = project_source_files.as_ref()
-            {
-                messages.set_source_database(Arc::clone(source_database));
-            }
-            return Err(messages);
+            return match premerge_failure_to_reports(
+                failure,
+                warning_owner,
+                project_source_files.take(),
+            ) {
+                Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+                Err(errors) => Err(errors),
+            };
         }
     };
 
     match result {
-        SingleFileFrontendResult::Project(compilation) => Ok(*compilation),
+        SingleFileFrontendResult::Project(compilation) => {
+            (*compilation).into_compilation_result(warning_owner, project_source_files.take(), None)
+        }
         #[cfg(feature = "boracle")]
-        SingleFileFrontendResult::Boracle(_) => Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "normal single-file compilation unexpectedly returned a Boracle payload",
-            ),
-            string_table,
-        )),
+        SingleFileFrontendResult::Boracle(_) => crate::compiler_bug!(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            "normal single-file compilation unexpectedly returned a Boracle payload"
+        ),
     }
 }
 #[cfg(feature = "boracle")]
@@ -130,57 +142,70 @@ pub(crate) fn compile_single_file_boracle_frontend(
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
     string_table: &mut StringTable,
-) -> Result<BoracleModuleInput, CompilerMessages> {
+) -> CompilationResult<BoracleModuleInput> {
+    let root_string_table = std::mem::replace(string_table, StringTable::empty_unallocated());
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(root_string_table);
     let mut project_source_files = None;
-    let result = match compile_single_file_frontend_with_target(
-        config,
-        build_profile,
-        style_directives,
-        builder_surface,
-        extension,
-        string_table,
-        &mut project_source_files,
-        &BuildConfigInputSet::new(),
-        FrontendCompilationMode::Canonical,
-        SingleFileFrontendTarget::Boracle,
-    ) {
-        Ok(result) => result,
-        Err(failure) => {
-            if let Some(package_source) = failure.package_source {
-                return Err((*failure.failure)
-                    .into_messages_with_source(string_table, Arc::new(*package_source)));
-            }
-            let mut messages = (*failure.failure).into_messages(string_table);
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(source_database) = project_source_files.as_ref()
-            {
-                messages.set_source_database(Arc::clone(source_database));
-            }
-            return Err(messages);
-        }
+    let result = {
+        let (string_table, mut warning_sink) = warning_owner.compiler_parts_mut();
+        compile_single_file_frontend_with_target(
+            config,
+            build_profile,
+            style_directives,
+            builder_surface,
+            extension,
+            string_table,
+            &mut project_source_files,
+            &BuildConfigInputSet::new(),
+            FrontendCompilationMode::Canonical,
+            Some(&mut warning_sink),
+            SingleFileFrontendTarget::Boracle,
+        )
     };
 
-    match result {
-        SingleFileFrontendResult::Boracle(input) => Ok(*input),
-        SingleFileFrontendResult::Project(compilation) => {
-            if !compilation.has_diagnosed_or_blocked() {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Boracle source compilation unexpectedly returned a clean project payload",
-                    ),
-                    string_table,
-                ));
-            }
-            // The canonical scheduler retains failed package reports and blocks their consumer.
-            // Render only after the synthetic source owner has finalised its span tables.
-            let messages = compilation.into_render_messages_with_frozen_identity(
-                string_table,
-                project_source_files,
-                None,
+    let outcome = match result {
+        Err(failure) => match premerge_failure_to_reports(
+            failure,
+            &mut warning_owner,
+            project_source_files.take(),
+        ) {
+            Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+            Err(errors) => Err(errors),
+        },
+        Ok(SingleFileFrontendResult::Boracle(input)) => {
+            warning_owner.commit_successful_warnings(
+                SuccessfulWarningBoundary::Project,
+                project_source_files.take(),
             );
-            Err(messages)
+            warning_owner.finish_successful_warnings(*input)
         }
+        Ok(SingleFileFrontendResult::Project(compilation)) => {
+            if !compilation.has_diagnosed_or_blocked() {
+                crate::compiler_bug!(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                    "Boracle source compilation unexpectedly returned a clean project payload"
+                );
+            }
+            (*compilation).into_compilation_result(
+                &mut warning_owner,
+                project_source_files.take(),
+                None,
+            )
+            .map(|outcome| match outcome {
+                CompilationOutcome::Success { .. } => crate::compiler_bug!(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                    "Boracle source compilation unexpectedly returned a clean project outcome"
+                ),
+                CompilationOutcome::Diagnosed(reports) => {
+                    CompilationOutcome::Diagnosed(reports)
+                }
+            })
+        }
+    };
+    if matches!(&outcome, Ok(CompilationOutcome::Success { .. })) {
+        *string_table = warning_owner.into_root_string_table();
     }
+    outcome
 }
 enum SingleFileFrontendResult {
     Project(Box<ProjectFrontendCompilation>),
@@ -197,7 +222,7 @@ enum SingleFileFrontendTarget {
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "single-file target compilation keeps configuration, profile, directives, mutable builder/string/source owners, extension, build-config inputs, mode and target selector separate"
+    reason = "single-file target compilation keeps configuration, profile, directives, mutable builder/string/source owners, extension, build-config inputs, mode, optional warning sink and target selector separate"
 )]
 fn compile_single_file_frontend_with_target(
     config: &Config,
@@ -210,6 +235,7 @@ fn compile_single_file_frontend_with_target(
     build_config_inputs: &BuildConfigInputSet,
     // Only the synthetic consumer has no unselected sources. Packages retain ordinary Check policy.
     mode: FrontendCompilationMode,
+    mut warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
     target: SingleFileFrontendTarget,
 ) -> Result<SingleFileFrontendResult, BoundaryPremergeFailure> {
     let mut resource_inputs = ResourceInputRegistry::new();
@@ -221,7 +247,8 @@ fn compile_single_file_frontend_with_target(
     let extension_text = match extension.to_str() {
         Some(text) => text,
         None => {
-            return Err(CompilerError::file_error(
+            return Err(InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 &config.entry_dir,
                 "Entry file extension is not valid UTF-8".to_owned(),
             )
@@ -229,48 +256,51 @@ fn compile_single_file_frontend_with_target(
         }
     };
     if extension_text != LANGUAGE_SOURCE_EXTENSION {
-        let interned_path =
-            match discovery_path_fork.try_intern_filesystem_path(&config.entry_dir, string_table) {
-                Ok(path) => path,
-                Err(PathInternError::NonUtf8(non_utf8)) => {
-                    return Err(BoundaryPremergeFailure::from(
-                        non_utf8_filesystem_name_error(&non_utf8.path, "single-file entry path"),
-                    ));
-                }
-                Err(PathInternError::TableFull) => {
-                    // Authored exhaustion of the compact path table: the typed capacity diagnostic
-                    // travels without a path snapshot, because the exhausted table owns no further
-                    // PathId to render.
-                    return Err(PremergeFailure::Diagnosed(
-                        PremergeDiagnosticBatch::from_diagnostic(
-                            CompilerDiagnostic::source_table_capacity(
-                                SourceSpanCapacityResource::LogicalPath,
-                            ),
-                            std::mem::take(string_table),
-                        ),
-                    )
-                    .into());
-                }
-                Err(PathInternError::BaseMismatch { .. }) => {
-                    return Err(PremergeFailure::Infrastructure(CompilerError::compiler_error(
-                    "logical path merge base is not a structural prefix of the destination table",
-                ).into()).into());
-                }
-            };
-        let extension = string_table.intern(extension_text);
-        let diagnostic =
-            CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
+        let interned_path = match discovery_path_fork
+            .try_intern_filesystem_path(&config.entry_dir, string_table)
+        {
+            Ok(path) => path,
+            Err(PathInternError::NonUtf8(non_utf8)) => {
+                return Err(BoundaryPremergeFailure::from(
+                    non_utf8_filesystem_name_error(&non_utf8.path, "single-file entry path"),
+                ));
+            }
+            Err(PathInternError::TableFull) => {
+                // Authored exhaustion of the compact path table: the typed capacity diagnostic
+                // travels without a path snapshot, because the exhausted table owns no further
+                // PathId to render.
+                return Err(
+                    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                        DiagnosticBag::from(token_lexical::source_span_capacity(
+                            0,
+                            u32::MAX,
+                            SourceSpanCapacityResource::LogicalPath,
+                            None,
+                        )),
+                        string_table.take_for_handoff(),
+                        None,
+                        None,
+                    ))
+                    .into(),
+                );
+            }
+            Err(PathInternError::BaseMismatch { .. }) => {
+                return Err(PreparedFailure::Infrastructure(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "logical path merge base is not a structural prefix of the destination table").into()).into());
+            }
+        };
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        let extension = diagnostic_strings.intern(extension_text);
+        let diagnostic = imports::invalid_source_file_entry(interned_path, extension, None);
 
         // Move the local string table and path identity into the diagnosed lane. Discovery aborts
         // before a source database exists, so the path snapshot must travel with the diagnostic.
-        let table = std::mem::take(string_table);
-        let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-        if let Err(error) =
-            batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
-        {
-            return Err(PremergeFailure::Infrastructure(error.into()).into());
-        }
-        return Err(PremergeFailure::Diagnosed(batch).into());
+        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+            DiagnosticBag::from(diagnostic),
+            string_table.take_for_handoff(),
+            None,
+            || Some(Arc::new(discovery_path_fork.shared_table())),
+        )?;
+        return Err(PreparedFailure::Diagnosed(batch).into());
     }
 
     timing_scope!(
@@ -282,7 +312,8 @@ fn compile_single_file_frontend_with_target(
     let entry_path = match fs::canonicalize(&config.entry_dir) {
         Ok(path) => path,
         Err(error) => {
-            return Err(CompilerError::file_error(
+            return Err(InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 &config.entry_dir,
                 format!("Failed to resolve entry file path: {error}"),
             )
@@ -331,7 +362,7 @@ fn compile_single_file_frontend_with_target(
         prepared_source_package_roots,
         &builder_surface.source_file_kinds,
         module_roots,
-    )?;
+    );
     let namespace_set = ModuleNamespaceSet::for_single_file(
         source_package_indexes,
         &builder_surface.binding_packages,
@@ -382,14 +413,15 @@ fn compile_single_file_frontend_with_target(
     let source_package_dependencies = collected.source_package_dependencies;
     let mut source_owner = collected.source_files;
     let input_files = collected.input_files;
+    let input_source_ids: Vec<_> = input_files.iter().map(|input| input.source_id()).collect();
     let resolved_file_references = collected.resolved_file_references;
     #[cfg(feature = "timers")]
     timing_guard_build_boundary_inventory.finish();
     // Split the discovery builder once: preparation and semantic compilation borrow the
     // immutable database beside the retained span builders, and the builder stays the exclusive
     // owner that finalizes every table after the last span producer returns.
+    let mut path_interner = source_owner.sources_mut().fork_path_builder();
     let (source_files, mut source_spans) = source_owner.split();
-    let mut path_interner = source_files.clone_path_builder();
     // Every stage after the split runs inside one scoped pipeline. Its early returns funnel
     // through the single finalization tail below, so a diagnosed or infrastructure failure can
     // never drop the builder with live span owners or an unfinalized table.
@@ -432,6 +464,7 @@ fn compile_single_file_frontend_with_target(
                         string_table,
                     )?;
                 }
+                finalize_source_package_inventories(&mut inventories)?;
                 inventories
             } else {
                 Vec::new()
@@ -450,6 +483,7 @@ fn compile_single_file_frontend_with_target(
             source_package_inventories,
             &mut resource_inputs,
             string_table,
+            warning_sink.as_deref_mut(),
         )?;
 
         let string_table_fork = string_table.fork_for_module();
@@ -487,7 +521,7 @@ fn compile_single_file_frontend_with_target(
         // normal-module origin from the configured project identity, the empty logical module path
         // and `ModuleRootRole::Normal`. The empty path is the entry-root spelling and is always valid,
         // so construction failure is a proven internal invariant surfaced as a typed
-        // `CompilerError` rather than a panic. The origin travels through
+        // `InfrastructureFailure` rather than a panic. The origin travels through
         // preparation into semantic compilation so the single-file module receives the same canonical
         // identity contract as a directory-discovered module.
         let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
@@ -522,12 +556,11 @@ fn compile_single_file_frontend_with_target(
             path_fork,
             source_byte_count,
         );
-        let mut prepared = prepare_result?;
+        let (mut prepared, preparation_warnings) = prepare_result?;
         attach_single_file_resolved_references(
             &mut prepared,
             source_files,
             resolved_file_references,
-            string_table,
         )?;
 
         let source_facts =
@@ -537,11 +570,8 @@ fn compile_single_file_frontend_with_target(
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
-        let project_globals = config_boundary::build_project_globals_interface(
-            config,
-            &effective_project_fields,
-            string_table,
-        )?;
+        let project_globals =
+            config_boundary::build_project_globals_interface(config, &effective_project_fields)?;
         let fallback_span = None;
         let build_config_values = config_boundary::resolve_boundary_build_config(
             &source_facts,
@@ -586,11 +616,11 @@ fn compile_single_file_frontend_with_target(
             let generated_store = BoundaryGeneratedFunctionStore::default();
             let provider_materialisations =
                 super::seed_completed_package_materialisations(&completed_source_packages)?;
-            let provider_binding_index = super::build_provider_binding_index(&[])?;
+            let provider_binding_index = super::build_provider_binding_index(&[]);
             let package_binding_index = super::build_source_package_dependency_index(
                 &provider_binding_index,
                 &source_package_dependencies,
-            )?;
+            );
             let module_context = canonical::DirectoryModuleCompileContext::new(
                 &boundary_context,
                 &modules,
@@ -623,6 +653,7 @@ fn compile_single_file_frontend_with_target(
             let boracle_result = compile_module_for_boracle(
                 &compile_context,
                 prepared.semantic,
+                preparation_warnings,
                 generated_store.known_generated(),
                 #[cfg(feature = "timers")]
                 timing_module_context,
@@ -640,6 +671,7 @@ fn compile_single_file_frontend_with_target(
             string_table_base_len: base_len,
             path_base_len,
             prepared,
+            preparation_warnings,
             #[cfg(feature = "timers")]
             timing_module_key,
         };
@@ -655,6 +687,8 @@ fn compile_single_file_frontend_with_target(
             &mut resource_inputs,
             string_table,
             &mut path_interner,
+            warning_sink,
+            SuccessfulWarningBoundary::Project,
         )?;
         debug_assert!(
             project_batches.is_empty(),
@@ -669,22 +703,37 @@ fn compile_single_file_frontend_with_target(
         .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
         .map_err(BoundaryPremergeFailure::from)
     })();
+    let source_finish_result = input_source_ids.iter().copied().try_for_each(|source_id| {
+        if source_owner.is_source_finalized(source_id)? {
+            Ok(())
+        } else {
+            source_owner.finish_source(source_id)
+        }
+    });
+    let result = match (result, source_finish_result) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(finish_error)) => {
+            Err(PreparedFailure::Infrastructure(finish_error.into()).into())
+        }
+        (Err(failure), Err(finish_error)) => {
+            Err(append_boundary_finish_failure(failure, finish_error))
+        }
+    };
     // Finalize the source owner beside the semantic result. A finished source keeps
     // current attachment behavior; a failed finish keeps the semantic failure
     // authoritative and chains the finish failure beside it instead of replacing it.
     // A successful result with a failed finish surfaces only the finish error.
     source_owner.sources_mut().adopt_path_builder(path_interner);
-    let finish_outcome = source_owner.finish();
+    let finish_outcome = source_owner
+        .assemble_finalized_tables()
+        .and_then(|()| source_owner.finish());
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(PremergeFailure::Infrastructure(finish_error.into()).into());
+            return Err(PreparedFailure::Infrastructure(finish_error.into()).into());
         }
         (Err(failure), Err(finish_error)) => {
-            return Err(BoundaryPremergeFailure {
-                failure: Box::new(append_finish_failure(*failure.failure, finish_error)),
-                package_source: failure.package_source,
-            });
+            return Err(append_boundary_finish_failure(failure, finish_error));
         }
     };
     *project_source_files = Some(finalized);
@@ -711,8 +760,7 @@ fn attach_single_file_resolved_references(
     prepared: &mut PreparedModule,
     source_files: &SourceDatabase,
     references: Vec<SingleFileResolvedReference>,
-    _string_table: &StringTable,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut resolved_table = ResolvedFileReferenceTable::new();
 
     for reference in references {
@@ -720,7 +768,7 @@ fn attach_single_file_resolved_references(
             .get_by_canonical_path(&reference.source_path)
             .map(|identity| identity.id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "synthetic file-reference owner {:?} is absent from the boundary source database",
                     reference.source_path
                 ))
@@ -747,15 +795,13 @@ fn attach_single_file_resolved_references(
                     .get_by_canonical_path(&canonical)
                     .map(|identity| identity.id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                             "synthetic file-reference target {:?} is absent from the boundary source database",
                             canonical
                         ))
                     })?;
                 if reference.class != PreparedFileReferenceClass::ContentSource {
-                    return Err(CompilerError::compiler_error(
-                        "synthetic physical file-reference outcome has an incompatible class",
-                    ));
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "synthetic physical file-reference outcome has an incompatible class"));
                 }
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
                     source: target_file,
@@ -763,9 +809,7 @@ fn attach_single_file_resolved_references(
             }
             SingleFileReferenceOutcome::IdentifiedSourceKind => {
                 if reference.class != PreparedFileReferenceClass::SourceKindNoFileValue {
-                    return Err(CompilerError::compiler_error(
-                        "synthetic identified-source outcome has an incompatible class",
-                    ));
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "synthetic identified-source outcome has an incompatible class"));
                 }
                 ResolvedFileReferenceOutcome::Target(
                     ResolvedFileReferenceTarget::IdentifiedSourceKind,

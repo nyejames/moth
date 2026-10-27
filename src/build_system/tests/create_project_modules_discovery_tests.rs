@@ -1,5 +1,23 @@
+use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidCompileTimePathCode, InvalidCompileTimePathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_resolved_failure_for_test;
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceFailure;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
+fn invalid_compile_time_path_reason(
+    failure: &ResolvedFileReferenceFailure,
+) -> Option<InvalidCompileTimePathCode> {
+    let compact = compact_resolved_failure_for_test(*failure);
+    compact
+        .views()
+        .next()?
+        .family_view::<InvalidCompileTimePathView>()
+        .map(|facts| facts.reason)
+}
 #[test]
 fn discover_modules_uses_reachable_files_only() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -31,8 +49,11 @@ fn discover_modules_uses_reachable_files_only() {
     )
     .expect("config parse");
     let resolver = configured_resolver(&config);
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 2);
@@ -94,8 +115,11 @@ fn discover_modules_resolves_relative_child_dependencies() {
     .expect("config parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1, "expected exactly one entry module");
 
@@ -141,8 +165,11 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
     .expect("config parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let (waves, provider_bindings, _, _) = modules.into_parts();
     let modules: Vec<_> = waves.iter().flatten().collect();
     assert_eq!(
@@ -207,9 +234,9 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
     .expect("config parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, source_files) =
-        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives)
-            .expect("module discovery should pass");
+    let (modules, source_files) = successful_compilation_value(
+        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives),
+    );
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1, "expected exactly one entry module");
 
@@ -355,8 +382,11 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
     .expect("config parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 3, "expected one module per root directory");
 
@@ -405,8 +435,11 @@ fn directory_stage0_resolves_resource_from_consuming_module_root() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("resource reference should resolve during Stage 0");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let module = modules
         .waves()
         .iter()
@@ -458,9 +491,9 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, _resource_inputs, source_files) =
-        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
-            .expect("missing user-authored resource should remain a retained outcome");
+    let (modules, _resource_inputs, source_files) = successful_compilation_value(
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives),
+    );
     let module = modules
         .waves()
         .iter()
@@ -489,9 +522,14 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
         )
         .expect("entry source should remain in the source database")
         .id;
-    let span = diagnostic
-        .primary_span
-        .expect("Stage 0 file-reference diagnostics retain their authored span");
+    let compact = compact_resolved_failure_for_test(*diagnostic);
+    let diagnostic_view = compact
+        .first()
+        .expect("the emitted missing-resource diagnostic should compact");
+    let span = match diagnostic_view.primary_site() {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("the emitted diagnostic should retain its primary span"),
+    };
     assert_eq!(span.source(), source_id);
     let range = span.byte_range(&source_files);
     let source_text = source_files
@@ -531,8 +569,11 @@ fn directory_stage0_identifies_moth_value_without_preparing_it() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect(".moth value should be identified during Stage 0");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let module = modules
         .waves()
         .iter()
@@ -588,8 +629,11 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
     source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("NotADirectory should remain a typed path outcome");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let module = modules
         .waves()
         .iter()
@@ -607,17 +651,14 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
         .resolved_file_references
         .iter()
         .collect::<Vec<_>>();
-    assert!(matches!(
-        &references[0].outcome,
-        ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
-            if matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidCompileTimePath {
-                    reason: InvalidCompileTimePathReason::TargetNotRegular,
-                    ..
-                }
-            )
-    ));
+    let diagnostic = match &references[0].outcome {
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => diagnostic,
+        outcome => panic!("expected an invalid path diagnostic, got {outcome:?}"),
+    };
+    assert_eq!(
+        invalid_compile_time_path_reason(diagnostic),
+        Some(InvalidCompileTimePathCode::TargetNotRegular),
+    );
 }
 
 #[test]
@@ -657,9 +698,9 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let (modules, resource_inputs, _source_files) =
-        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
-            .expect("child-boundary failures should remain retained outcomes");
+    let (modules, resource_inputs, _source_files) = successful_compilation_value(
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives),
+    );
     let module = modules
         .waves()
         .iter()
@@ -677,10 +718,9 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
         .resolved_file_references
         .iter()
         .filter_map(|reference| match &reference.outcome {
-            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => match &diagnostic.payload {
-                DiagnosticPayload::InvalidCompileTimePath { reason, .. } => Some(*reason),
-                _ => None,
-            },
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
+                invalid_compile_time_path_reason(diagnostic)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -688,7 +728,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     assert!(
         reasons
             .iter()
-            .all(|reason| *reason == InvalidCompileTimePathReason::EscapesModuleBoundary)
+            .all(|reason| *reason == InvalidCompileTimePathCode::EscapesModuleBoundary)
     );
     assert!(resource_inputs.records().is_empty());
     assert!(resource_inputs.missing_watch_interests().is_empty());
@@ -746,9 +786,9 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let (modules, resource_inputs, _source_files) =
-        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
-            .expect("symlink-ancestor failures should remain retained outcomes");
+    let (modules, resource_inputs, _source_files) = successful_compilation_value(
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives),
+    );
     let module = modules
         .waves()
         .iter()
@@ -766,18 +806,17 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
         .resolved_file_references
         .iter()
         .filter_map(|reference| match &reference.outcome {
-            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => match &diagnostic.payload {
-                DiagnosticPayload::InvalidCompileTimePath { reason, .. } => Some(*reason),
-                _ => None,
-            },
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
+                invalid_compile_time_path_reason(diagnostic)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(reasons.len(), 6);
     assert!(
         reasons.iter().all(
-            |reason| *reason == InvalidCompileTimePathReason::EscapesSymlink
-                || *reason == InvalidCompileTimePathReason::EscapesModuleBoundary
+            |reason| *reason == InvalidCompileTimePathCode::EscapesSymlink
+                || *reason == InvalidCompileTimePathCode::EscapesModuleBoundary
         ),
         "unexpected symlink-ancestor reasons: {reasons:?}"
     );
@@ -814,8 +853,11 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should retain the path diagnostic");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let module = modules
         .waves()
         .iter()
@@ -838,29 +880,40 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => diagnostic,
         outcome => panic!("expected a retained diagnostic, got {outcome:?}"),
     };
-    let DiagnosticPayload::InvalidCompileTimePath {
-        reason: InvalidCompileTimePathReason::CaseMismatch { provided, expected },
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected a retained case-mismatch diagnostic");
-    };
+    let compact = compact_resolved_failure_for_test(*diagnostic);
+    let diagnostic_view = compact
+        .views()
+        .next()
+        .expect("the retained diagnostic should have a compact view");
+    let facts = diagnostic_view
+        .family_view::<InvalidCompileTimePathView>()
+        .expect("the retained diagnostic should have typed path facts");
+    assert_eq!(facts.reason, InvalidCompileTimePathCode::CaseMismatch);
     assert_eq!(
-        module.prepared.semantic.string_table.resolve(*provided),
+        module.prepared.semantic.string_table.resolve(
+            facts
+                .provided
+                .expect("case mismatch should retain provided text")
+        ),
         "Assets"
     );
     assert_eq!(
-        module.prepared.semantic.string_table.resolve(*expected),
+        module.prepared.semantic.string_table.resolve(
+            facts
+                .expected
+                .expect("case mismatch should retain expected text")
+        ),
         "assets"
     );
     let path_table = module.prepared.semantic.path_fork.snapshot_table();
-    let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
-            &module.prepared.semantic.string_table,
-        )
-        .with_path_table(&path_table),
-    );
+    let rendered =
+        crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view(
+            diagnostic_view,
+            crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
+                &module.prepared.semantic.string_table,
+            )
+            .with_path_table(&path_table),
+        );
     assert!(rendered.contains("Assets") && rendered.contains("assets"));
 }
 
@@ -1031,8 +1084,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
         PreparedSourcePackageRoots::default(),
         &source_file_kinds,
         ModuleRootTable::empty(),
-    )
-    .expect("synthetic resolver should build without prepared module roots");
+    );
 
     let style_directives = test_style_directives();
     let mut string_table = StringTable::new();
@@ -1067,28 +1119,24 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
 
     assert_eq!(collected.input_files.len(), 1);
     assert_eq!(collected.resolved_file_references.len(), 4);
-    assert!(collected.resolved_file_references.iter().all(|reference| {
-        matches!(
-            &reference.outcome,
-            SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                if matches!(
-                    &diagnostic.payload,
-                    DiagnosticPayload::InvalidCompileTimePath {
-                        reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
-                        ..
-                    }
-                )
-        )
-    }));
+    assert!(collected.resolved_file_references.into_iter().all(
+        |reference| match reference.outcome {
+            SingleFileReferenceOutcome::Diagnostic(diagnostic) => {
+                invalid_compile_time_path_reason(&diagnostic)
+                    == Some(InvalidCompileTimePathCode::EscapesModuleBoundary)
+            }
+            _ => false,
+        }
+    ));
     assert!(resource_inputs.records().is_empty());
     assert!(resource_inputs.missing_watch_interests().is_empty());
 }
 
 #[test]
 fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
-    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
-    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
-    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test.
+    // The timing collector is process-global, so an unguarded compile can inherit an active
+    // session's boundary/module IDs. Hold the shared instrumentation lock to keep this compile out
+    // of exact-snapshot timing tests.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
@@ -1116,41 +1164,35 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     builder_surface
         .source_file_kinds
         .register("mtf", SourceFileKind::MothTemplate);
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner =
+        crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
     let mut project_source_files = None;
-    let frontend = super::compilation::compile_single_file_frontend_with_inputs(
+    let result = super::compilation::compile_single_file_frontend_with_inputs(
         &config,
         crate::compiler_frontend::FrontendBuildProfile::Dev,
         &test_style_directives(),
         &mut builder_surface,
         entry.extension().expect("entry should have an extension"),
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
         &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
         crate::build_system::create_project_modules::FrontendCompilationMode::Canonical,
-    )
-    .expect("ordinary synthetic frontend should retain user diagnostics");
-
-    // AST now consumes file-value paths through Stage 0's resolved table, so the
-    // boundary-rejected value occurrences in the entry surface as this module's retained user
-    // diagnostics and the module is published as diagnosed. Stage 0 outcome rows are inspected by
-    // the preceding production discovery test; this invocation proves the complete frontend
-    // handoff preserves the physical registry even on the diagnosed path.
-    assert_eq!(
-        frontend
-            .project
-            .successful_artefacts_in_module_id_order()
-            .count(),
-        0
     );
-    assert_eq!(frontend.project.diagnosed.len(), 1);
-    assert!(frontend.has_diagnosed_or_blocked());
-    assert!(frontend.resource_inputs.records().is_empty());
+    let reports = diagnosed_reports(&result);
+
+    // AST consumes file-value paths through Stage 0's resolved table, so this diagnosed result
+    // must still render its retained source identity from the ordinary single-file boundary.
+    assert!(reports.counts().errors > 0);
     assert!(
-        frontend
-            .resource_inputs
-            .missing_watch_interests()
-            .is_empty()
+        reports.iter().all(|(report, view)| {
+            let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view(
+                view,
+                crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::for_report(report),
+            );
+            rendered.contains("main.moth")
+        }),
+        "every retained diagnostic should keep the ordinary entry source identity"
     );
 }
 
@@ -1189,8 +1231,11 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
     source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("content references should reach a fixed point");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let module = modules
         .waves()
         .iter()
@@ -1233,7 +1278,7 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
             ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
                 source,
                 ..
-            }) => Some(*source),
+            }) => Some(source),
             _ => None,
         })
         .collect::<Vec<_>>();

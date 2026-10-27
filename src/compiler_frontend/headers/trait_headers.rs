@@ -7,9 +7,12 @@
 //!      This module parses syntax shells only; semantic trait resolution and evidence validation
 //!      are owned by AST.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDeclarationReason, InvalidSignatureMemberReason,
+    CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason,
 };
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
@@ -53,18 +56,23 @@ fn checked_symbol_id(
 ) -> TraitHeaderResult<StringId> {
     let Some(name) = token.string_id() else {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error("canonical symbol token is missing its string payload"),
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "canonical symbol token is missing its string payload",
+            ),
         ));
     };
     token
         .string_spelling(string_table)
         .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "canonical symbol payload could not be read: {error:?}",
-            )))
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("canonical symbol payload could not be read: {error:?}",),
+            ))
         })?
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "canonical symbol token is missing its string payload",
             ))
         })?;
@@ -88,8 +96,9 @@ pub(super) fn parse_trait_declaration(
         .path_fork
         .try_intern_child(context.source_file, declaration_name)
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "path table exhausted while interning trait path",
+            HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                Some(name_span),
             ))
         })?;
 
@@ -104,7 +113,7 @@ pub(super) fn parse_trait_declaration(
 
             TokenTag::EOF => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_end_of_file(
+                    token_lexical::unexpected_end_of_file(
                         Some(context.string_table.intern(";")),
                         cursor_span(cursor),
                     ),
@@ -138,13 +147,13 @@ fn parse_trait_requirement(
 ) -> TraitHeaderResult<TraitRequirementSyntax> {
     let Some(first) = cursor.current() else {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::unexpected_token_in_declaration(None),
+            token_lexical::unexpected_token_in_declaration(None),
         ));
     };
     let name_span = first.source_span();
     if first.tag() != TokenTag::SYMBOL {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::unexpected_token_in_declaration(Some(name_span)),
+            token_lexical::unexpected_token_in_declaration(Some(name_span)),
         ));
     }
     let method_name = checked_symbol_id(first, context.string_table)?;
@@ -155,7 +164,7 @@ fn parse_trait_requirement(
         .is_none_or(|token| token.tag() != TokenTag::TYPE_PARAMETER_BRACKET)
     {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
+            token_lexical::unexpected_token_in_declaration(cursor_span(cursor)),
         ));
     }
 
@@ -166,12 +175,13 @@ fn parse_trait_requirement(
         .path_fork
         .try_intern_child(trait_path, method_name)
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "path table exhausted while interning trait requirement path",
+            HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                Some(name_span),
             ))
         })?;
 
-    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+    let mut declaration_cursor = DeclarationCursor::new(*cursor);
     let signature = parse_trait_requirement_signature_syntax(
         &mut declaration_cursor,
         context.warnings,
@@ -190,7 +200,7 @@ fn parse_trait_requirement(
             .unwrap_or("");
         if param_name != "This" {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_signature_member(
+                names_declarations::invalid_signature_member(
                     InvalidSignatureMemberReason::TraitReceiverMustBeThis,
                     first_param.span,
                 ),
@@ -198,7 +208,7 @@ fn parse_trait_requirement(
         }
     } else {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_signature_member(
+            names_declarations::invalid_signature_member(
                 InvalidSignatureMemberReason::TraitReceiverMustBeThis,
                 Some(name_span),
             ),
@@ -227,7 +237,7 @@ pub(super) fn parse_trait_conformance(
     loop {
         let Some(current) = cursor.current() else {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_declaration(
+                names_declarations::invalid_declaration(
                     InvalidDeclarationReason::TraitConformanceMissingTrait,
                     Some(target.name),
                     None,
@@ -237,7 +247,7 @@ pub(super) fn parse_trait_conformance(
         if current.tag() != TokenTag::SYMBOL {
             if traits.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_declaration(
+                    names_declarations::invalid_declaration(
                         InvalidDeclarationReason::TraitConformanceMissingTrait,
                         Some(target.name),
                         Some(current.source_span()),
@@ -245,7 +255,7 @@ pub(super) fn parse_trait_conformance(
                 ));
             }
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::unexpected_token_in_declaration(Some(current.source_span())),
+                token_lexical::unexpected_token_in_declaration(Some(current.source_span())),
             ));
         }
         let trait_name = checked_symbol_id(current, context.string_table)?;
@@ -270,7 +280,7 @@ pub(super) fn parse_trait_conformance(
                     .is_none_or(|token| matches!(token.tag(), TokenTag::END | TokenTag::EOF))
                 {
                     return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::unexpected_trailing_comma(comma_span),
+                        token_lexical::unexpected_trailing_comma(comma_span),
                     ));
                 }
             }
@@ -279,7 +289,7 @@ pub(super) fn parse_trait_conformance(
 
             TokenTag::END => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_declaration(
+                    names_declarations::invalid_declaration(
                         InvalidDeclarationReason::TraitConformanceSemicolon,
                         Some(target.name),
                         cursor_span(cursor),
@@ -289,7 +299,7 @@ pub(super) fn parse_trait_conformance(
 
             _ => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
+                    token_lexical::unexpected_token_in_declaration(cursor_span(cursor)),
                 ));
             }
         }
@@ -317,7 +327,7 @@ pub(super) fn parse_specialized_conformance_target(
 
             TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
+                    token_lexical::unexpected_token_in_declaration(cursor_span(cursor)),
                 ));
             }
 
@@ -339,7 +349,7 @@ pub(super) fn parse_trait_incompatibility(
     loop {
         let Some(current) = cursor.current() else {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_declaration(
+                names_declarations::invalid_declaration(
                     InvalidDeclarationReason::TraitIncompatibilityMissingTrait,
                     Some(subject.name),
                     None,
@@ -349,7 +359,7 @@ pub(super) fn parse_trait_incompatibility(
         if current.tag() != TokenTag::SYMBOL {
             if incompatible_traits.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_declaration(
+                    names_declarations::invalid_declaration(
                         InvalidDeclarationReason::TraitIncompatibilityMissingTrait,
                         Some(subject.name),
                         Some(current.source_span()),
@@ -357,7 +367,7 @@ pub(super) fn parse_trait_incompatibility(
                 ));
             }
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::unexpected_token_in_declaration(Some(current.source_span())),
+                token_lexical::unexpected_token_in_declaration(Some(current.source_span())),
             ));
         }
         let trait_name = checked_symbol_id(current, context.string_table)?;
@@ -381,7 +391,7 @@ pub(super) fn parse_trait_incompatibility(
                     .is_none_or(|token| matches!(token.tag(), TokenTag::END | TokenTag::EOF))
                 {
                     return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::unexpected_trailing_comma(comma_span),
+                        token_lexical::unexpected_trailing_comma(comma_span),
                     ));
                 }
             }
@@ -390,7 +400,7 @@ pub(super) fn parse_trait_incompatibility(
 
             TokenTag::END => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_declaration(
+                    names_declarations::invalid_declaration(
                         InvalidDeclarationReason::TraitIncompatibilitySemicolon,
                         Some(subject.name),
                         cursor_span(cursor),
@@ -400,7 +410,7 @@ pub(super) fn parse_trait_incompatibility(
 
             _ => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
+                    token_lexical::unexpected_token_in_declaration(cursor_span(cursor)),
                 ));
             }
         }
@@ -418,12 +428,15 @@ pub(super) fn conformance_header_path(
     span: SourceSpan,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<PathId, CompilerError> {
+) -> Result<PathId, HeaderParseFailure> {
     let name = string_table.intern(&format!("__trait_conformance_{:?}", span.local()));
     path_fork
         .try_intern_child(target_path, name)
         .ok_or_else(|| {
-            CompilerError::compiler_error("path table exhausted while interning conformance path")
+            HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                Some(span),
+            ))
         })
 }
 
@@ -432,14 +445,15 @@ pub(super) fn incompatibility_header_path(
     span: SourceSpan,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<PathId, CompilerError> {
+) -> Result<PathId, HeaderParseFailure> {
     let name = string_table.intern(&format!("__trait_incompatibility_{:?}", span.local()));
     path_fork
         .try_intern_child(subject_path, name)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "path table exhausted while interning incompatibility path",
-            )
+            HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                Some(span),
+            ))
         })
 }
 
@@ -453,7 +467,7 @@ pub(super) fn ensure_trait_name_is_all_caps(
     }
 
     Err(HeaderParseFailure::Diagnostic(
-        CompilerDiagnostic::invalid_declaration(
+        names_declarations::invalid_declaration(
             InvalidDeclarationReason::InvalidTraitName,
             Some(trait_name),
             span,

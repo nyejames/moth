@@ -33,7 +33,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     ExportedGenericParameterIdentity, GenericDeclarationOrigin, ModulePrivateNominalIdentity,
     ModulePrivateTraitIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -167,18 +168,16 @@ struct TemplateDeclarationSelection<'template> {
 }
 
 impl ModuleMaterialisationPreparationBuilder {
-    pub(crate) fn from_environment(
-        input: ModuleMaterialisationEnvironmentInput<'_>,
-    ) -> Result<Self, CompilerError> {
-        Ok(Self {
-            context: ModuleMaterialisationCapture::from_environment(input)?,
-        })
+    pub(crate) fn from_environment(input: ModuleMaterialisationEnvironmentInput<'_>) -> Self {
+        Self {
+            context: ModuleMaterialisationCapture::from_environment(input),
+        }
     }
 
     pub(super) fn inherit_stable_context(
         &mut self,
         context: &ModuleMaterialisationContext,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for artefact in &context.artefacts {
             self.inherit_nominal_blueprints(artefact)?;
         }
@@ -215,13 +214,15 @@ impl ModuleMaterialisationPreparationBuilder {
         const_values: &ConstValueStore,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<ModuleMaterialisationPreparation, CompilerError> {
+    ) -> Result<ModuleMaterialisationPreparation, InfrastructureFailure> {
         Ok(self
             .detach(const_values, &[], &[], resources, path_fork)?
             .context)
     }
 
-    pub(crate) fn finalize_generic_template_identity_index(&mut self) -> Result<(), CompilerError> {
+    pub(crate) fn finalize_generic_template_identity_index(
+        &mut self,
+    ) -> Result<(), InfrastructureFailure> {
         self.context.rebuild_generic_template_identity_index()
     }
 
@@ -232,7 +233,7 @@ impl ModuleMaterialisationPreparationBuilder {
         evidence: &[PublicEvidenceRecord],
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<ModuleMaterialisationPreparedBuilder, CompilerError> {
+    ) -> Result<ModuleMaterialisationPreparedBuilder, InfrastructureFailure> {
         self.context
             .detach(const_values, declarations, evidence, resources, path_fork)
     }
@@ -245,7 +246,7 @@ impl ModuleMaterialisationPreparationBuilder {
         public_nominal_origins_by_path: &FxHashMap<PathId, OriginTypeId>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Vec<(PathId, ModulePrivateExecutableIdentity)>, CompilerError> {
+    ) -> Result<Vec<(PathId, ModulePrivateExecutableIdentity)>, InfrastructureFailure> {
         self.context.install_concrete_executable_contracts(
             const_values,
             module_origin,
@@ -265,14 +266,17 @@ impl ModuleMaterialisationPreparationBuilder {
     pub(super) fn inherit_nominal_blueprints<N: MaterialisationNominalSource>(
         &mut self,
         source: &N,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for (identity, blueprint) in source.nominal_blueprints() {
             if let Some(existing) = self.context.nominal_blueprints.get_mut(identity) {
                 if existing != blueprint {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Generated materialisation {} disagrees on nominal blueprint {identity:?}",
-                        N::SOURCE_LABEL,
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
+                        format!(
+                            "Generated materialisation {} disagrees on nominal blueprint {identity:?}",
+                            N::SOURCE_LABEL,
+                        ),
+                    ));
                 }
                 existing.merge_provenance_from(blueprint);
             } else {
@@ -301,7 +305,7 @@ impl ModuleMaterialisationPreparedBuilder {
     pub(crate) fn freeze(
         mut self,
         public_interface: &PublicSemanticInterface,
-    ) -> Result<Option<ModuleMaterialisationContext>, CompilerError> {
+    ) -> Result<Option<ModuleMaterialisationContext>, InfrastructureFailure> {
         // Public convergence replaces owned facts only. AST/default projection ended at detach.
         let context = Arc::make_mut(&mut self.context.stable_context);
         let mut declarations = std::mem::take(&mut context.declaration_closure).into_vec();
@@ -359,7 +363,7 @@ impl ModuleMaterialisationPreparation {
     pub(super) fn validate_requester_string_prefix(
         &self,
         live_string_table: &StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let requester_len = self.string_table.len();
         let compatible_prefix = live_string_table.len() >= requester_len
             && self.string_table.iter().zip(live_string_table.iter()).all(
@@ -368,7 +372,8 @@ impl ModuleMaterialisationPreparation {
                 },
             );
         if !compatible_prefix {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "generated materialisation requester string table is not an exact prefix of the live boundary string table",
             ));
         }
@@ -459,7 +464,7 @@ impl ModuleMaterialisationCapture {
         public_evidence: &[PublicEvidenceRecord],
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<ModuleMaterialisationPreparedBuilder, CompilerError> {
+    ) -> Result<ModuleMaterialisationPreparedBuilder, InfrastructureFailure> {
         self.rebuild_generic_template_identity_index()?;
         let inherited_declarations = self
             .inherited_stable_context
@@ -482,7 +487,7 @@ impl ModuleMaterialisationCapture {
         let template_selections = templates
             .into_iter()
             .map(|template| self.template_declaration_selection(const_values, template, path_fork))
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         let retained_local_paths = template_selections
             .iter()
             .flat_map(|selection| selection.local_declarations.iter().copied())
@@ -579,7 +584,7 @@ impl ModuleMaterialisationCapture {
                     path_fork,
                 )
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         if let Some(context) = &self.inherited_stable_context {
             artefacts.extend(context.artefacts.iter().cloned());
         }
@@ -598,7 +603,8 @@ impl ModuleMaterialisationCapture {
                 Ok(StableGenericCallableContract {
                     declaration_identity: template.declaration_identity.clone().ok_or_else(
                         || {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::GenericMaterialisation,
                                 "Generic callable contract has no stable identity",
                             )
                         },
@@ -618,7 +624,7 @@ impl ModuleMaterialisationCapture {
                     generic_parameters: self.stable_generic_parameters(template)?,
                 })
             })
-            .collect::<Result<Box<[_]>, CompilerError>>()?;
+            .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
         let nominal_bindings = self.stable_nominal_bindings(&self.nominal_blueprints);
         let stable_context = ModuleMaterialisationContext {
             declaration_closure: declaration_closure.into_boxed_slice(),
@@ -660,7 +666,7 @@ impl ModuleMaterialisationCapture {
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<GenericTemplateArtefact, CompilerError> {
+    ) -> Result<GenericTemplateArtefact, InfrastructureFailure> {
         let TemplateDeclarationSelection {
             template,
             generic_parameters,
@@ -671,12 +677,16 @@ impl ModuleMaterialisationCapture {
         // Share one lazily frozen declaring-domain owner across every artefact in this freeze.
         let donor_identity = self.donor_identity();
         let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Retained generic template has no stable declaration identity",
             )
         })?;
         let body = template.body_tokens.as_ref().ok_or_else(|| {
-            CompilerError::compiler_error("Retained generic template has no body syntax")
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Retained generic template has no body syntax",
+            )
         })?;
         let generic_parameter_owner = template.generic_parameter_owner.clone();
         let receiver = self
@@ -700,7 +710,7 @@ impl ModuleMaterialisationCapture {
             resources,
             path_fork,
         )?;
-        let declarations = self.stable_declaration_bindings(&selected_paths, declarations)?;
+        let declarations = self.stable_declaration_bindings(&selected_paths, declarations);
         let callable_paths = selected_paths
             .iter()
             .copied()
@@ -728,7 +738,7 @@ impl ModuleMaterialisationCapture {
             semantic_closure,
             resources,
             path_fork,
-        )?;
+        );
         // Keep every already-resolved spelling of the retained nominals, not just body-visible
         // names. Imported canonical paths must survive nested sidecars and global publication.
         let nominals = self.stable_nominal_bindings(&nominal_blueprints);
@@ -778,9 +788,12 @@ impl ModuleMaterialisationCapture {
         const_values: &ConstValueStore,
         template: &'template GenericFunctionTemplate,
         path_fork: &PathInternerFork,
-    ) -> Result<TemplateDeclarationSelection<'template>, CompilerError> {
+    ) -> Result<TemplateDeclarationSelection<'template>, InfrastructureFailure> {
         let body = template.body_tokens.as_ref().ok_or_else(|| {
-            CompilerError::compiler_error("Retained generic template has no body syntax")
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Retained generic template has no body syntax",
+            )
         })?;
         let generic_parameters = self.stable_generic_parameters(template)?;
         let capture_string_table =
@@ -820,12 +833,13 @@ impl ModuleMaterialisationCapture {
     fn stable_generic_parameters(
         &self,
         template: &GenericFunctionTemplate,
-    ) -> Result<Box<[StableGenericParameter]>, CompilerError> {
+    ) -> Result<Box<[StableGenericParameter]>, InfrastructureFailure> {
         let parameters = self
             .type_environment
             .generic_parameters(template.generic_parameter_list_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Retained generic template references a missing parameter list",
                 )
             })?;
@@ -842,7 +856,7 @@ impl ModuleMaterialisationCapture {
                                 .generic_parameter_owner
                                 .clone()
                                 .ok_or_else(|| {
-                                    CompilerError::compiler_error(
+                                    InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                         "Public retained generic template has no explicit generic-parameter owner",
                                     )
                                 })?,
@@ -852,7 +866,7 @@ impl ModuleMaterialisationCapture {
                     ),
                     Some(GeneratedDeclarationIdentity::ModulePrivate(_)) => None,
                     None => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Retained generic template has no declaration identity",
                         ));
                     }
@@ -865,12 +879,12 @@ impl ModuleMaterialisationCapture {
                             .canonical_identity_for_id(*trait_id)
                             .cloned()
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                     "Retained generic parameter bound has no stable trait identity",
                                 )
                             })
                     })
-                    .collect::<Result<Box<[_]>, CompilerError>>()?;
+                    .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
                 Ok(StableGenericParameter {
                     name,
                     exported_identity,
@@ -886,7 +900,7 @@ impl ModuleMaterialisationCapture {
         value_id: ConstValueId,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<PublicFoldedValue, CompilerError> {
+    ) -> Result<PublicFoldedValue, InfrastructureFailure> {
         let nominal_origins = MaterialisationNominalOriginResolver {
             type_environment: &self.type_environment,
         };
@@ -910,7 +924,7 @@ impl ModuleMaterialisationCapture {
         const_values: &ConstValueStore,
         logical_path: &PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<PathId, CompilerError> {
+    ) -> Result<PathId, InfrastructureFailure> {
         const_values
             .module_constant_paths()
             .find(|path| {
@@ -926,10 +940,13 @@ impl ModuleMaterialisationCapture {
                 let mut scratch = Vec::new();
                 let rendered =
                     path_fork.render_portable(*logical_path, &self.string_table, &mut scratch);
-                CompilerError::compiler_error(format!(
-                    "synthetic content constant for {} was not present before generic capture",
-                    rendered
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    format!(
+                        "synthetic content constant for {} was not present before generic capture",
+                        rendered
+                    ),
+                )
             })
     }
     pub(super) fn stable_folded_value_at_default_path(
@@ -939,7 +956,7 @@ impl ModuleMaterialisationCapture {
         value_id: ConstValueId,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<PublicFoldedValue, CompilerError> {
+    ) -> Result<PublicFoldedValue, InfrastructureFailure> {
         if self.default_const_templates_by_path.contains_key(path) {
             return self
                 .default_const_templates_by_path
@@ -950,10 +967,13 @@ impl ModuleMaterialisationCapture {
                     let mut scratch = Vec::new();
                     let rendered =
                         path_fork.render_portable(*path, &self.string_table, &mut scratch);
-                    CompilerError::compiler_error(format!(
-                        "Retained const template at {} has no stable folded template value",
-                        rendered
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
+                        format!(
+                            "Retained const template at {} has no stable folded template value",
+                            rendered
+                        ),
+                    )
                 });
         }
         self.stable_folded_value(const_values, value_id, resources, path_fork)
@@ -965,17 +985,23 @@ impl ModuleMaterialisationCapture {
         path: &PathId,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<PublicFoldedValue, CompilerError> {
+    ) -> Result<PublicFoldedValue, InfrastructureFailure> {
         let value_id = const_values.value_for_path(path).ok_or_else(|| {
             let mut scratch = Vec::new();
             let rendered = path_fork.render_portable(*path, &self.string_table, &mut scratch);
-            CompilerError::compiler_error(format!(
-                "Retained module constant at {} has no stable folded store value",
-                rendered
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "Retained module constant at {} has no stable folded store value",
+                    rendered
+                ),
+            )
         })?;
         const_values.metadata(value_id).ok_or_else(|| {
-            CompilerError::compiler_error("Retained module constant has no store metadata")
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Retained module constant has no store metadata",
+            )
         })?;
         let nominal_origins = MaterialisationNominalOriginResolver {
             type_environment: &self.type_environment,
@@ -1007,7 +1033,7 @@ impl ModuleMaterialisationCapture {
         source_file: &PathId,
         parameters: &[StableGenericParameter],
         referenced_names: &mut FxHashSet<String>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for parameter in parameters {
             for bound in &parameter.bounds {
                 if matches!(bound, CanonicalTraitIdentity::Core(_)) {
@@ -1018,12 +1044,14 @@ impl ModuleMaterialisationCapture {
                     .trait_environment
                     .id_for_canonical_identity(bound)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Retained generic bound has no declaring-module trait definition",
                         )
                     })?;
                 if !self.retain_visible_trait_spellings(source_file, trait_id, referenced_names)? {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Retained generic bound is not visible in its declaration file",
                     ));
                 }
@@ -1045,7 +1073,7 @@ impl ModuleMaterialisationCapture {
     /// such bounds are skipped, not rejected. A call that satisfies a bound does not check names,
     /// so only bound-provided dispatch needs the spelling in the body's file.
     ///
-    /// `selected_paths` is the selection taken before these spellings were added. Bound spellings
+    /// `selected_paths` is the selection taken before these spellings are added. Bound spellings
     /// name traits, which carry no generic bounds of their own, so one reselection by the caller
     /// is enough.
     fn retain_selected_bound_trait_names(
@@ -1053,7 +1081,7 @@ impl ModuleMaterialisationCapture {
         source_file: &PathId,
         selected_paths: &FxHashSet<PathId>,
         referenced_names: &mut FxHashSet<String>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for path in selected_paths {
             let parameter_list_id = self
                 .generic_function_templates_by_path
@@ -1071,7 +1099,8 @@ impl ModuleMaterialisationCapture {
                 .type_environment
                 .generic_parameters(parameter_list_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Retained generic declaration references a missing parameter list",
                     )
                 })?;
@@ -1094,7 +1123,7 @@ impl ModuleMaterialisationCapture {
         source_file: &PathId,
         trait_id: TraitId,
         referenced_names: &mut FxHashSet<String>,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let mut retained_visible_name = false;
         for (visible_name, target) in &visibility.visible_trait_names {
@@ -1112,12 +1141,13 @@ impl ModuleMaterialisationCapture {
     fn generic_parameter_slots(
         &self,
         template: &GenericFunctionTemplate,
-    ) -> Result<FxHashMap<GenericParameterId, usize>, CompilerError> {
+    ) -> Result<FxHashMap<GenericParameterId, usize>, InfrastructureFailure> {
         let parameters = self
             .type_environment
             .generic_parameters(template.generic_parameter_list_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Retained generic template references a missing parameter list",
                 )
             })?;
@@ -1136,14 +1166,15 @@ impl ModuleMaterialisationCapture {
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<StableFunctionSignature, CompilerError> {
+    ) -> Result<StableFunctionSignature, InfrastructureFailure> {
         let paths = path_fork;
         let parameters = signature
             .parameters
             .iter()
             .map(|parameter| {
                 let name = paths.component(parameter.id).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation function parameter has no defining name",
                     )
                 })?;
@@ -1178,12 +1209,13 @@ impl ModuleMaterialisationCapture {
                     span: parameter.binding_span,
                 })
             })
-            .collect::<Result<Box<[_]>, CompilerError>>()?;
+            .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
         let mut returns = Vec::new();
         let mut error_return = None;
         for returned in &signature.returns {
             let type_id = returned.type_id.ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation function return has no resolved type",
                 )
             })?;
@@ -1211,7 +1243,7 @@ impl ModuleMaterialisationCapture {
         referenced_names: &FxHashSet<String>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<StableFileVisibility, CompilerError> {
+    ) -> Result<StableFileVisibility, InfrastructureFailure> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let capture_declarations = |bindings: &FxHashMap<StringId, SourceDeclarationTarget>| {
             bindings
@@ -1244,7 +1276,8 @@ impl ModuleMaterialisationCapture {
                 .external_package_registry
                 .canonical_symbol_identity(*symbol_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation external binding has no canonical identity",
                     )
                 })?;
@@ -1313,7 +1346,7 @@ impl ModuleMaterialisationCapture {
                     )?,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         namespace_records.sort_by(|left, right| left.visible_name.cmp(&right.visible_name));
         Ok(StableFileVisibility {
             source_names: capture_declarations(&visibility.visible_source_names),
@@ -1337,18 +1370,24 @@ impl ModuleMaterialisationCapture {
         const_values: &ConstValueStore,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<StableReceiverMethod, CompilerError> {
+    ) -> Result<StableReceiverMethod, InfrastructureFailure> {
         let resolved = self
             .resolved_function_signatures_by_path
             .get(local_path)
             .ok_or_else(|| {
-                CompilerError::compiler_error("Receiver method has no resolved function signature")
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Receiver method has no resolved function signature",
+                )
             })?;
         let receiver = resolved
             .receiver
             .as_ref()
             .ok_or_else(|| {
-                CompilerError::compiler_error("Receiver method has no receiver signature")
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Receiver method has no receiver signature",
+                )
             })
             .and_then(|receiver| StableReceiverKey::capture(receiver, &self.string_table))?;
         let generic_template = self.generic_function_templates_by_path.get(local_path);
@@ -1394,7 +1433,7 @@ impl ModuleMaterialisationCapture {
         public_nominal_origins_by_path: &FxHashMap<PathId, OriginTypeId>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Vec<(PathId, ModulePrivateExecutableIdentity)>, CompilerError> {
+    ) -> Result<Vec<(PathId, ModulePrivateExecutableIdentity)>, InfrastructureFailure> {
         self.install_private_semantic_identities(
             module_origin,
             public_nominal_origins_by_path,
@@ -1421,7 +1460,8 @@ impl ModuleMaterialisationCapture {
                     .resolved_function_signatures_by_path
                     .get(&path)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Local generic template has no resolved function signature",
                         )
                     })?;
@@ -1438,7 +1478,8 @@ impl ModuleMaterialisationCapture {
                 .resolved_function_signatures_by_path
                 .get(&path)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generic template has no resolved function signature",
                     )
                 })?;
@@ -1457,7 +1498,8 @@ impl ModuleMaterialisationCapture {
                 }
                 Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) => {
                     if public_origins_by_path.contains_key(&path) {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Public generic receiver template has a non-source receiver owner",
                         ));
                     }
@@ -1474,21 +1516,24 @@ impl ModuleMaterialisationCapture {
                 .generic_function_templates_by_path
                 .get_mut(&path)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generic template disappeared while installing declaration identity",
                     )
                 })?;
             if let Some(existing_identity) = template.declaration_identity.as_ref()
                 && existing_identity != &expected_identity
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generic template declaration identity disagrees with its callable origin",
                 ));
             }
             if matches!(&expected_identity, GeneratedDeclarationIdentity::Public(_))
                 && generic_parameter_owner.is_none()
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Public generic template has no explicit generic-parameter owner",
                 ));
             }
@@ -1497,7 +1542,8 @@ impl ModuleMaterialisationCapture {
                 generic_parameter_owner.as_ref(),
             ) && existing != expected
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generic template generic-parameter owner disagrees with its callable origin",
                 ));
             }
@@ -1577,12 +1623,13 @@ impl ModuleMaterialisationCapture {
         template_parameter_list_id: GenericParameterListId,
         owner: &GenericDeclarationOrigin,
         receiver: Option<&ReceiverKey>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let generic_parameter_list_id = if owner.nominal_type_origin().is_some() {
             let receiver_path = match receiver {
                 Some(ReceiverKey::Struct(path) | ReceiverKey::Choice(path)) => path,
                 Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) | None => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Nominal generic-parameter owner has no source receiver path",
                     ));
                 }
@@ -1599,7 +1646,8 @@ impl ModuleMaterialisationCapture {
                         })
                 })
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Public generic receiver owner has no local nominal type handle",
                     )
                 })?;
@@ -1609,7 +1657,8 @@ impl ModuleMaterialisationCapture {
                 _ => None,
             }
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Public generic receiver owner has no generic parameter list",
                 )
             })?
@@ -1620,7 +1669,8 @@ impl ModuleMaterialisationCapture {
             .type_environment
             .generic_parameters(generic_parameter_list_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Public generic template references a missing parameter list",
                 )
             })?
@@ -1640,7 +1690,8 @@ impl ModuleMaterialisationCapture {
                 .type_environment
                 .type_id_for_generic_parameter(parameter_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Public generic template parameter has no local type handle",
                     )
                 })?;
@@ -1661,7 +1712,7 @@ impl ModuleMaterialisationCapture {
         module_origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
         public_nominal_origins_by_path: &FxHashMap<PathId, OriginTypeId>,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let nominal_types = self
             .nominal_type_ids_by_path
             .iter()
@@ -1707,12 +1758,14 @@ impl ModuleMaterialisationCapture {
             .iter()
             .map(|path| {
                 let trait_id = self.trait_environment.id_for_path(path).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Public materialisation trait path has no resolved trait definition",
                     )
                 })?;
                 let defining_name = path_fork.component(*path).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Public materialisation trait path has no defining name",
                     )
                 })?;
@@ -1721,7 +1774,7 @@ impl ModuleMaterialisationCapture {
                     self.string_table.resolve(defining_name).to_owned(),
                 ))
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         for (trait_id, defining_name) in private_traits {
             if self
                 .trait_environment
@@ -1757,7 +1810,7 @@ impl ModuleMaterialisationCapture {
                 };
                 Ok((definition.id, defining_path))
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         for (trait_id, defining_path) in private_traits {
             Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
                 CanonicalTraitIdentity::ModulePrivate(ModulePrivateTraitIdentity::new(
@@ -1778,7 +1831,7 @@ impl ModuleMaterialisationCapture {
         resolved: &ResolvedFunctionSignature,
         category: ModulePrivateExecutableCategory,
         path_fork: &PathInternerFork,
-    ) -> Result<ModulePrivateExecutableIdentity, CompilerError> {
+    ) -> Result<ModulePrivateExecutableIdentity, InfrastructureFailure> {
         let paths = path_fork;
         let receiver_path = match resolved.receiver.as_ref() {
             Some(ReceiverKey::Struct(receiver) | ReceiverKey::Choice(receiver)) => {
@@ -1786,7 +1839,8 @@ impl ModuleMaterialisationCapture {
                 Some(paths.render_portable(*receiver, &self.string_table, &mut scratch))
             }
             Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Module-private source receiver method has a non-source receiver",
                 ));
             }
@@ -1796,7 +1850,10 @@ impl ModuleMaterialisationCapture {
             .component(*path)
             .map(|name| self.string_table.resolve(name).to_owned())
             .ok_or_else(|| {
-                CompilerError::compiler_error("Module-private executable path has no defining name")
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Module-private executable path has no defining name",
+                )
             })?;
         let declaring_source = {
             let parent = paths.try_parent(*path).unwrap_or(PathId::ROOT);
@@ -1813,9 +1870,7 @@ impl ModuleMaterialisationCapture {
         ))
     }
 
-    fn from_environment(
-        input: ModuleMaterialisationEnvironmentInput<'_>,
-    ) -> Result<Self, CompilerError> {
+    fn from_environment(input: ModuleMaterialisationEnvironmentInput<'_>) -> Self {
         let ModuleMaterialisationEnvironmentInput {
             lookups,
             type_environment,
@@ -1828,7 +1883,7 @@ impl ModuleMaterialisationCapture {
             template_const_loop_iteration_limit,
         } = input;
 
-        Ok(Self {
+        Self {
             string_table: string_table.clone_preserving_inherited_prefix(),
             donor_identity_cache: Rc::new(OnceCell::new()),
             inherited_stable_context: None,
@@ -1863,7 +1918,7 @@ impl ModuleMaterialisationCapture {
             style_directives: lookups.style_directives.clone(),
             build_profile: lookups.build_profile,
             template_const_loop_iteration_limit,
-        })
+        }
     }
 }
 
@@ -1876,7 +1931,7 @@ fn retained_concrete_call_summaries(
     published_summaries: &[ConcreteCallSummaryRecord],
     declaration_closure: &[PublicDeclarationRecord],
     evidence: &[PublicEvidenceRecord],
-) -> Result<Box<[ConcreteCallSummaryRecord]>, CompilerError> {
+) -> Result<Box<[ConcreteCallSummaryRecord]>, InfrastructureFailure> {
     let mut evidenced_origins = evidence
         .iter()
         .flat_map(|record| record.requirement_mappings.iter())
@@ -1899,17 +1954,23 @@ fn retained_concrete_call_summaries(
         if let (Some(imported), Some(published)) = (imported_summary, published_summary)
             && imported != published
         {
-            return Err(CompilerError::compiler_error(format!(
-                "materialisation concrete call summary {origin:?} disagrees between imported provider records and this module's published interface"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "materialisation concrete call summary {origin:?} disagrees between imported provider records and this module's published interface"
+                ),
+            ));
         }
         let Some(summary) = imported_summary.or(published_summary) else {
             if generic_templates.contains(origin) {
                 continue;
             }
-            return Err(CompilerError::compiler_error(format!(
-                "retained reusable evidence names receiver method {origin:?} but neither an imported provider interface nor this module's published interface carries its call summary"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "retained reusable evidence names receiver method {origin:?} but neither an imported provider interface nor this module's published interface carries its call summary"
+                ),
+            ));
         };
         retained.push(ConcreteCallSummaryRecord {
             origin: origin.clone(),

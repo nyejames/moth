@@ -11,7 +11,8 @@ use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, BindingDestination, BindingId, BlockId, BorrowProblem, CallId, EventId, PlaceId,
     PlaceOverlap, ProjectionElem,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -347,12 +348,12 @@ impl OracleState {
         Ok(generation)
     }
 
-    pub(crate) fn state(&self, place: PlaceId) -> Result<RuntimePlaceState, CompilerError> {
+    pub(crate) fn state(&self, place: PlaceId) -> Result<RuntimePlaceState, InfrastructureFailure> {
         self.places.get(&place).cloned().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Boracle oracle cannot resolve uninterned place {:?}",
-                place
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("Boracle oracle cannot resolve uninterned place {:?}", place),
+            )
         })
     }
     pub(crate) fn set_state(&mut self, place: PlaceId, state: RuntimePlaceState) {
@@ -386,7 +387,7 @@ impl OracleState {
         event_kind: DefinitionEventKind,
         role: DefinitionRole,
         event_index: usize,
-    ) -> Result<DefinitionTransition, CompilerError> {
+    ) -> Result<DefinitionTransition, InfrastructureFailure> {
         let place = destination.place();
         // A pending call result is confirmed only by the builder's defining write, which
         // follows the `CallEffect` immediately. Any definition event that retires or replaces
@@ -395,11 +396,14 @@ impl OracleState {
         // generation the oracle no longer associates with the place. That is malformed
         // normalized input, not a role the transition may silently drop.
         if self.pending_call_results.contains_key(&place) {
-            return Err(CompilerError::compiler_error(format!(
-                "Boracle oracle received a definition event for place {:?} whose pending call \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle oracle received a definition event for place {:?} whose pending call \
                  result has not been confirmed",
-                place
-            )));
+                    place
+                ),
+            ));
         }
         if let Some(target) = self.write_through_target(problem, place_index, destination)? {
             return Ok(DefinitionTransition::WriteThroughAlias { target });
@@ -413,7 +417,8 @@ impl OracleState {
         );
         let (installed_state, target) = if installs_alias {
             let DefinitionRole::Alias { target, access } = role else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
                     "Boracle definition alias role did not provide an alias target",
                 ));
             };
@@ -460,7 +465,7 @@ impl OracleState {
         place_index: &PlaceIndex,
         place_id: PlaceId,
         max_dynamic_generations: usize,
-    ) -> Result<Result<Option<ResolvedPlace>, OracleLimitReason>, CompilerError> {
+    ) -> Result<Result<Option<ResolvedPlace>, OracleLimitReason>, InfrastructureFailure> {
         let Some(mut resolved) = self.resolve_place_state(problem, place_index, place_id)? else {
             return Ok(Ok(None));
         };
@@ -478,7 +483,7 @@ impl OracleState {
         problem: &BorrowProblem,
         place_index: &PlaceIndex,
         destination: BindingDestination,
-    ) -> Result<Option<RuntimeAccessTarget>, CompilerError> {
+    ) -> Result<Option<RuntimeAccessTarget>, InfrastructureFailure> {
         if destination.defines() {
             return Ok(None);
         }
@@ -498,18 +503,21 @@ impl OracleState {
         problem: &BorrowProblem,
         place_index: &PlaceIndex,
         place_id: PlaceId,
-    ) -> Result<Option<ResolvedPlace>, CompilerError> {
+    ) -> Result<Option<ResolvedPlace>, InfrastructureFailure> {
         let place = problem.places().get(place_id.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Boracle oracle cannot locate place {:?}",
-                place_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("Boracle oracle cannot locate place {:?}", place_id),
+            )
         })?;
         if place.id != place_id {
-            return Err(CompilerError::compiler_error(format!(
-                "Boracle oracle place index {:?} names {:?}",
-                place_id, place.id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle oracle place index {:?} names {:?}",
+                    place_id, place.id
+                ),
+            ));
         }
 
         for prefix_length in (0..=place.projections.len()).rev() {
@@ -554,11 +562,9 @@ impl OracleState {
         &mut self,
         mut target: RuntimeAccessTarget,
         max_dynamic_generations: usize,
-    ) -> Result<Result<RuntimeAccessTarget, OracleLimitReason>, CompilerError> {
-        match self.descend(&mut target, max_dynamic_generations) {
-            Ok(()) => Ok(Ok(target)),
-            Err(reason) => Ok(Err(reason)),
-        }
+    ) -> Result<RuntimeAccessTarget, OracleLimitReason> {
+        self.descend(&mut target, max_dynamic_generations)?;
+        Ok(target)
     }
 
     fn descend(
@@ -608,10 +614,13 @@ impl OracleState {
         event_index: usize,
         event_id: EventId,
         source: CapabilitySource,
-    ) -> Result<RuntimeCapabilityId, CompilerError> {
+    ) -> Result<RuntimeCapabilityId, InfrastructureFailure> {
         let capability_id = RuntimeCapabilityId(self.next_capability);
         self.next_capability = self.next_capability.checked_add(1).ok_or_else(|| {
-            CompilerError::compiler_error("Boracle oracle capability identity overflow")
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                "Boracle oracle capability identity overflow",
+            )
         })?;
         let capability = RuntimeCapability {
             kind,
@@ -636,7 +645,7 @@ impl OracleState {
         &mut self,
         capability_id: RuntimeCapabilityId,
         event_index: usize,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.end_capability_with_reason(
             capability_id,
             event_index,
@@ -651,18 +660,24 @@ impl OracleState {
         event_index: usize,
         end_reason: CapabilityEndReason,
         retired_holders: BTreeSet<PlaceId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let capability = self.capabilities.get_mut(&capability_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Boracle oracle cannot locate capability {:?}",
-                capability_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle oracle cannot locate capability {:?}",
+                    capability_id
+                ),
+            )
         })?;
         if capability.explicit_end.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "Boracle oracle capability {:?} ended more than once",
-                capability_id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle oracle capability {:?} ended more than once",
+                    capability_id
+                ),
+            ));
         }
         capability.explicit_end = Some(event_index);
         capability.end_reason = Some(end_reason);
@@ -704,12 +719,15 @@ impl OracleState {
         problem: &BorrowProblem,
         written: PlaceId,
         event_index: usize,
-    ) -> Result<Box<[RuntimeCapabilityId]>, CompilerError> {
+    ) -> Result<Box<[RuntimeCapabilityId]>, InfrastructureFailure> {
         let written_row = problem.places().get(written.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Boracle oracle cannot locate written place {:?} for holder retirement",
-                written
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle oracle cannot locate written place {:?} for holder retirement",
+                    written
+                ),
+            )
         })?;
         let mut overlapping = BTreeSet::new();
         for holder in self
@@ -746,7 +764,7 @@ impl OracleState {
         problem: &BorrowProblem,
         bindings: &[BindingId],
         event_index: usize,
-    ) -> Result<Box<[RuntimeCapabilityId]>, CompilerError> {
+    ) -> Result<Box<[RuntimeCapabilityId]>, InfrastructureFailure> {
         let binding_set = bindings.iter().copied().collect::<BTreeSet<_>>();
         let mut retired_places = BTreeSet::new();
         for place in self.pending_call_results.keys() {
@@ -755,17 +773,23 @@ impl OracleState {
                 .get(place.index())
                 .map(|place_row| place_row.root)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Boracle oracle cannot locate a pending call result place {:?}",
-                        place
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "Boracle oracle cannot locate a pending call result place {:?}",
+                            place
+                        ),
+                    )
                 })?;
             if binding_set.contains(&pending_root) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Boracle oracle scope exit retires a pending call result for place {:?} \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!(
+                        "Boracle oracle scope exit retires a pending call result for place {:?} \
                      before its confirming write",
-                    place
-                )));
+                        place
+                    ),
+                ));
             }
         }
         for place in problem.places() {
@@ -781,12 +805,13 @@ impl OracleState {
         &mut self,
         retired_places: &BTreeSet<PlaceId>,
         event_index: usize,
-    ) -> Result<Box<[RuntimeCapabilityId]>, CompilerError> {
+    ) -> Result<Box<[RuntimeCapabilityId]>, InfrastructureFailure> {
         let capability_ids = self.capabilities.keys().copied().collect::<Vec<_>>();
         let mut ended = Vec::new();
         for capability_id in capability_ids {
             let Some(capability) = self.capabilities.get(&capability_id) else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
                     "Boracle oracle lost a capability row during holder retirement",
                 ));
             };
@@ -810,7 +835,10 @@ impl OracleState {
                 // A multi-holder capability can cross several holder retirements; retain every
                 // static holder that retires while preserving the original interval endpoint.
                 let capability = self.capabilities.get_mut(&capability_id).ok_or_else(|| {
-                    CompilerError::compiler_error("Boracle oracle lost a capability row")
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        "Boracle oracle lost a capability row",
+                    )
                 })?;
                 capability.retired_holders.extend(retired_holders);
             }

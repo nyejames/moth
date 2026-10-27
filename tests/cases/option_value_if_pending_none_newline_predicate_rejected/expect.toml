@@ -1,4 +1,4 @@
-# Authored for Phase 5B.2 and unobserved until the parent harness run. No html_wasm block is declared, so no Wasm outcome is asserted.
+# No html_wasm block is declared, so no Wasm outcome is asserted.
 
 [backends.html]
 mode = "failure"

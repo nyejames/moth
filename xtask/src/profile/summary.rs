@@ -511,7 +511,6 @@ fn format_agent_summary_md(
         .collect();
     scored_cases.sort_by(|a, b| b.0.total_cmp(&a.0));
 
-    // Apply the root case limit.
     let limit = filter.root_case_limit();
     let selected: Vec<_> = scored_cases.into_iter().take(limit).collect();
 
@@ -540,7 +539,6 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
     let obs = data.observation;
     let hotspots = data.hotspots;
 
-    // Case heading
     lines.push(format!("### {}", obs.case_id));
     lines.push(String::new());
 
@@ -551,10 +549,8 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
         obs.command_args.join(" ")
     ));
 
-    // Wall time
     lines.push(format!("- Wall: ~{:.0}ms", obs.wall_ms));
 
-    // Top stage timing
     if let Some(top_stage) = obs
         .observations
         .stage_timings
@@ -586,7 +582,6 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
         ));
         lines.push(format!("- Bucket: {}", top_func.bucket.label));
 
-        // Suggested source paths
         if !top_func.bucket.suggested_paths.is_empty() {
             lines.push("- Read first:".to_string());
             for path in &top_func.bucket.suggested_paths {
@@ -595,7 +590,6 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
         }
     }
 
-    // Profile path
     lines.push(format!("- Profile: `{}`", data.profile_relative_path));
 
     // Deterministic hint
@@ -641,7 +635,6 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
     ));
     lines.push(String::new());
 
-    // Stage timings
     if !obs.observations.stage_timings.is_empty() {
         lines.push("## Stage timings".to_string());
         lines.push(String::new());
@@ -655,7 +648,6 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
         lines.push(String::new());
     }
 
-    // Counters
     if !obs.observations.counters.is_empty() {
         lines.push("## Counters".to_string());
         lines.push(String::new());
@@ -713,7 +705,6 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
         lines.push(String::new());
     }
 
-    // Bucket summary
     let bucket_summary = if hotspots.symbolication.is_failed() {
         Vec::new()
     } else {
@@ -734,7 +725,6 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
         lines.push(String::new());
     }
 
-    // Warnings
     if !hotspots.warnings.is_empty() {
         lines.push("## Warnings".to_string());
         lines.push(String::new());
@@ -744,7 +734,6 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
         lines.push(String::new());
     }
 
-    // Hint
     let hint = generate_hint(data);
     lines.push("## Hint".to_string());
     lines.push(String::new());
@@ -829,14 +818,12 @@ fn generate_hint(data: &CaseSummaryData<'_>) -> String {
             .to_string();
     }
 
-    // Find the top stage by timing value.
     let top_stage = obs
         .observations
         .stage_timings
         .iter()
         .max_by(|a, b| a.value.total_cmp(&b.value));
 
-    // Stage-specific hints.
     if let Some(stage) = top_stage {
         // AST + AST bucket: suggest AST owner paths.
         if stage.name == TIMING_FRONTEND_AST_TOTAL_NAME && top_func.bucket.label == "AST" {

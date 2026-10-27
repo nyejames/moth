@@ -8,7 +8,7 @@
 //! precede that owner; later preparation failures retain the loaded snapshot.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
@@ -29,7 +29,7 @@ use crate::compiler_frontend::{
 use std::path::Path;
 
 use super::source_discovery_error::SourceDiscoveryError;
-use super::source_loading::extract_source_code;
+use super::source_loading::read_registered_source;
 
 /// Source scan result retained by synthetic discovery.
 ///
@@ -55,37 +55,10 @@ pub(super) fn prepare_discovery_source(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
-    let source =
-        extract_source_code(file_path, string_table).map_err(SourceDiscoveryError::from)?;
-
-    prepare_discovery_source_text(
-        file_path,
-        source,
-        style_directives,
-        project_path_resolver,
-        entry_file_path,
-        source_files,
-        path_fork,
-        string_table,
-    )
-}
-#[allow(
-    clippy::too_many_arguments,
-    reason = "discovery preparation keeps the file path, source text, directives, resolver, entry path, and mutable database/path/string state as separate borrows"
-)]
-pub(super) fn prepare_discovery_source_text(
-    file_path: &Path,
-    source: String,
-    style_directives: &StyleDirectiveRegistry,
-    project_path_resolver: &Option<ProjectPathResolver>,
-    entry_file_path: &Path,
-    source_files: &mut SourceDatabase,
-    path_fork: &mut PathInternerFork,
-    string_table: &mut StringTable,
-) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
-    // Register the file before tokenization so the lexer handoff carries the traversal-local
-    // source identity. Discovery rebinds every prepared result to the final sorted database once
-    // the closure is complete, and this table dies with the traversal.
+    // Register the file before reading it so a failed read can name its portable logical path, and
+    // before tokenization so the lexer handoff carries the traversal-local source identity.
+    // Discovery rebinds every prepared result to the final sorted database once the closure is
+    // complete, and this table dies with the traversal.
     let source_id = source_files.insert(
         file_path.to_path_buf(),
         SourceKind::Compiler(SourceFileKind::Moth),
@@ -93,11 +66,10 @@ pub(super) fn prepare_discovery_source_text(
         project_path_resolver.as_ref(),
         string_table,
     )?;
+    let source = read_registered_source(file_path, source_id, source_files, path_fork)?;
     let logical_path = source_files.logical_path_in_fork(source_id, path_fork)?;
 
-    // Tokenize the file once. Callers may supply source text that was read during an earlier
-    // Stage 0 classification pass so provider-free discovery does not re-read the same Moth
-    // file before assembling `PreparedSourceInput` values.
+    // Tokenize the single read once; the same text feeds the lexer and the retained source record.
     let mut span_builder = ExtendedSpanBuilder::new();
     let tokenized = match tokenize(
         &source,
@@ -123,7 +95,8 @@ pub(super) fn prepare_discovery_source_text(
         }
     };
     if tokenized.logical_path != logical_path || tokenized.file_id != source_id {
-        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+        return Err(SourceDiscoveryError::from(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::Tokenization,
             "lexer source identity does not match its registered discovery identity",
         )));
     }
@@ -162,10 +135,6 @@ pub(super) fn prepare_discovery_template_source(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
-    let source =
-        extract_source_code(file_path, string_table).map_err(SourceDiscoveryError::from)?;
-    let source_byte_len = source.len();
-
     let source_id = source_files.insert(
         file_path.to_path_buf(),
         SourceKind::Compiler(SourceFileKind::MothTemplate),
@@ -173,6 +142,8 @@ pub(super) fn prepare_discovery_template_source(
         project_path_resolver.as_ref(),
         string_table,
     )?;
+    let source = read_registered_source(file_path, source_id, source_files, path_fork)?;
+    let source_byte_len = source.len();
     let prepared_output = prepare_discovery_output(
         FrontendFilePrepareInput {
             source: FrontendFilePrepareSource::MothTemplate {
@@ -239,7 +210,7 @@ fn prepare_discovery_output(
         Ok(remap) => remap,
         Err(error) => {
             outcome.result = Err(FileFrontendPrepareFailure::Infrastructure(
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "discovery file path merge failed: {error:?}"
                 )),
             ));

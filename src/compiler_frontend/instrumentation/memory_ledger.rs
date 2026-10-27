@@ -1,10 +1,19 @@
 //! Feature-gated memory ownership ledger for the data-layout probe.
 //!
 //! The ledger records compiler-owned storage, not allocator events. Every live owner is keyed by
-//! the address of its allocation, and owner `Drop` hooks retire that live key before an allocator
-//! address can be reused. Cumulative totals remain after retirement so preparation failures and
-//! diagnosed/dropped artefacts stay visible. The ledger is reset at the command-scoped frontend
-//! boundary and consumed once at the render boundary.
+//! the address of its allocation, and owner `Drop` hooks retire that live key. Source-token arrays
+//! and path tables retire their live totals when their owning `Drop` hooks run; generic-owner
+//! cumulative counts remain available beside live and peak bytes. The ledger also owns the
+//! probe's string and path merge/remap wall clock.
+#[cfg(feature = "data_layout_memory_probe")]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "data_layout_memory_probe")]
+use std::time::Instant;
+
+#[cfg(feature = "data_layout_memory_probe")]
+static STRING_MERGE_REMAP_NS: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "data_layout_memory_probe")]
+static PATH_MERGE_REMAP_NS: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -36,10 +45,22 @@ pub(crate) struct MemoryLedgerSnapshot {
     /// Largest individual builder shape/span capacity sample observed at `finish`.
     /// It is a high-water observation, not a claim that all builders coexist.
     pub(crate) transient_construction_peak_bytes: usize,
-    pub(crate) cutover_adapter_bytes: usize,
     pub(crate) donor_identity_string_tables: usize,
     pub(crate) donor_identity_string_storage_bytes: usize,
     pub(crate) donor_identity_path_tables: usize,
+    pub(crate) mutable_string_table_samples: usize,
+    pub(crate) mutable_string_table_slot_capacity_bytes: usize,
+    pub(crate) mutable_string_table_local_payload_bytes: usize,
+    pub(crate) mutable_string_table_reverse_capacity_entries: usize,
+    pub(crate) mutable_string_table_inherited_prefix_rows: usize,
+    pub(crate) mutable_string_table_inherited_reverse_capacity_entries: usize,
+    pub(crate) mutable_string_table_inherited_prefix_slot_bytes: usize,
+    pub(crate) mutable_string_table_peak_slot_capacity_bytes: usize,
+    pub(crate) mutable_path_builder_samples: usize,
+    pub(crate) mutable_path_table_storage_bytes: usize,
+    pub(crate) mutable_path_builder_lookup_layers: usize,
+    pub(crate) mutable_path_builder_lookup_capacity_entries: usize,
+    pub(crate) mutable_path_builder_local_lookup_capacity_entries: usize,
     pub(crate) donor_identity_path_storage_bytes: usize,
     pub(crate) generic_source_tokens_owners: usize,
     /// Cumulative bytes for every distinct generic source owner observed by the command.
@@ -54,13 +75,15 @@ pub(crate) struct MemoryLedgerSnapshot {
     pub(crate) requester_remap_capacity_bytes: usize,
     /// True when a bounded ledger map could not retain every distinct owner identity.
     pub(crate) observation_incomplete: bool,
+    pub(crate) string_merge_remap_ns: u64,
+    pub(crate) path_merge_remap_ns: u64,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
 mod enabled {
     use super::{
-        FrozenStringTable, MemoryLedgerSnapshot, PathIdRemap, PathSyntaxTable, PathTable,
-        SourceTokens,
+        FrozenStringTable, Instant, MemoryLedgerSnapshot, Ordering, PATH_MERGE_REMAP_NS,
+        PathIdRemap, PathSyntaxTable, PathTable, STRING_MERGE_REMAP_NS, SourceTokens,
     };
     use crate::compiler_frontend::tokenizer::tokens::SourceTokensMemoryLedgerMetrics;
     use rustc_hash::FxHashMap;
@@ -131,6 +154,19 @@ mod enabled {
         donor_identity_string_tables: usize,
         donor_identity_string_storage_bytes: usize,
         donor_identity_path_tables: usize,
+        mutable_string_table_samples: usize,
+        mutable_string_table_slot_capacity_bytes: usize,
+        mutable_string_table_local_payload_bytes: usize,
+        mutable_string_table_reverse_capacity_entries: usize,
+        mutable_string_table_inherited_prefix_rows: usize,
+        mutable_string_table_inherited_reverse_capacity_entries: usize,
+        mutable_string_table_inherited_prefix_slot_bytes: usize,
+        mutable_string_table_peak_slot_capacity_bytes: usize,
+        mutable_path_builder_samples: usize,
+        mutable_path_table_storage_bytes: usize,
+        mutable_path_builder_lookup_layers: usize,
+        mutable_path_builder_lookup_capacity_entries: usize,
+        mutable_path_builder_local_lookup_capacity_entries: usize,
         donor_identity_path_storage_bytes: usize,
         transient_construction_buffer_bytes: usize,
         transient_construction_peak_bytes: usize,
@@ -139,7 +175,6 @@ mod enabled {
         requester_remap_capacity_bytes: usize,
         observation_incomplete: bool,
         prepared: bool,
-        last_snapshot: Option<MemoryLedgerSnapshot>,
     }
 
     fn ledger() -> &'static Mutex<MemoryLedger> {
@@ -196,13 +231,27 @@ mod enabled {
             ledger.donor_identity_string_storage_bytes = 0;
             ledger.donor_identity_path_tables = 0;
             ledger.donor_identity_path_storage_bytes = 0;
+            ledger.mutable_string_table_samples = 0;
+            ledger.mutable_string_table_slot_capacity_bytes = 0;
+            ledger.mutable_string_table_local_payload_bytes = 0;
+            ledger.mutable_string_table_reverse_capacity_entries = 0;
+            ledger.mutable_string_table_inherited_prefix_rows = 0;
+            ledger.mutable_string_table_inherited_prefix_slot_bytes = 0;
+            ledger.mutable_string_table_inherited_reverse_capacity_entries = 0;
+            ledger.mutable_string_table_peak_slot_capacity_bytes = 0;
+            ledger.mutable_path_builder_samples = 0;
+            ledger.mutable_path_table_storage_bytes = 0;
+            ledger.mutable_path_builder_lookup_layers = 0;
+            ledger.mutable_path_builder_lookup_capacity_entries = 0;
+            ledger.mutable_path_builder_local_lookup_capacity_entries = 0;
             ledger.transient_construction_buffer_bytes = 0;
             ledger.transient_construction_peak_bytes = 0;
             ledger.requester_remap_count = 0;
             ledger.requester_remap_used_bytes = 0;
             ledger.requester_remap_capacity_bytes = 0;
             ledger.observation_incomplete = false;
-            ledger.last_snapshot = None;
+            STRING_MERGE_REMAP_NS.store(0, Ordering::Relaxed);
+            PATH_MERGE_REMAP_NS.store(0, Ordering::Relaxed);
         });
     }
 
@@ -373,7 +422,41 @@ mod enabled {
     pub(crate) fn release_source_tokens(tokens: &SourceTokens) {
         let address = tokens as *const SourceTokens as usize;
         with_ledger(|ledger| {
-            ledger.source_tokens.remove(&address);
+            if let Some(owner) = ledger.source_tokens.remove(&address) {
+                ledger.source_totals.owners = ledger.source_totals.owners.saturating_sub(1);
+                ledger.source_totals.shape_bytes = ledger
+                    .source_totals
+                    .shape_bytes
+                    .saturating_sub(owner.shape_bytes);
+                ledger.source_totals.shape_capacity_bytes = ledger
+                    .source_totals
+                    .shape_capacity_bytes
+                    .saturating_sub(owner.shape_capacity_bytes);
+                ledger.source_totals.span_bytes = ledger
+                    .source_totals
+                    .span_bytes
+                    .saturating_sub(owner.span_bytes);
+                ledger.source_totals.span_capacity_bytes = ledger
+                    .source_totals
+                    .span_capacity_bytes
+                    .saturating_sub(owner.span_capacity_bytes);
+                ledger.source_totals.numeric_store_bytes = ledger
+                    .source_totals
+                    .numeric_store_bytes
+                    .saturating_sub(owner.numeric_store_bytes);
+                ledger.source_totals.numeric_store_capacity_bytes = ledger
+                    .source_totals
+                    .numeric_store_capacity_bytes
+                    .saturating_sub(owner.numeric_store_capacity_bytes);
+                ledger.source_totals.sequence_store_bytes = ledger
+                    .source_totals
+                    .sequence_store_bytes
+                    .saturating_sub(owner.sequence_store_bytes);
+                ledger.source_totals.sequence_store_capacity_bytes = ledger
+                    .source_totals
+                    .sequence_store_capacity_bytes
+                    .saturating_sub(owner.sequence_store_capacity_bytes);
+            }
             // Generic identity uses the same published SourceTokens allocation. Retire its live
             // key only when that allocation itself drops, not when one StableBodySyntax drops.
             ledger.generic_source_tokens.remove(&address);
@@ -493,6 +576,92 @@ mod enabled {
         });
     }
 
+    /// Wall clock for one string or path merge/remap, started before the merge begins.
+    pub(crate) struct MergeRemapClock(Instant);
+
+    pub(crate) fn start_merge_remap_clock() -> MergeRemapClock {
+        MergeRemapClock(Instant::now())
+    }
+
+    pub(crate) fn record_string_merge_remap(clock: MergeRemapClock) {
+        STRING_MERGE_REMAP_NS.fetch_add(clock.elapsed_ns(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_path_merge_remap(clock: MergeRemapClock) {
+        PATH_MERGE_REMAP_NS.fetch_add(clock.elapsed_ns(), Ordering::Relaxed);
+    }
+
+    impl MergeRemapClock {
+        fn elapsed_ns(self) -> u64 {
+            u64::try_from(self.0.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        }
+    }
+
+    pub(crate) fn record_mutable_string_table(
+        slot_capacity_bytes: usize,
+        local_payload_bytes: usize,
+        reverse_capacity_entries: usize,
+        inherited_prefix_rows: usize,
+        inherited_prefix_slot_bytes: usize,
+        inherited_reverse_capacity_entries: usize,
+    ) {
+        with_ledger(|ledger| {
+            if !ledger.prepared {
+                return;
+            }
+            ledger.mutable_string_table_samples =
+                ledger.mutable_string_table_samples.saturating_add(1);
+            ledger.mutable_string_table_slot_capacity_bytes = ledger
+                .mutable_string_table_slot_capacity_bytes
+                .saturating_add(slot_capacity_bytes);
+            ledger.mutable_string_table_local_payload_bytes = ledger
+                .mutable_string_table_local_payload_bytes
+                .saturating_add(local_payload_bytes);
+            ledger.mutable_string_table_reverse_capacity_entries = ledger
+                .mutable_string_table_reverse_capacity_entries
+                .saturating_add(reverse_capacity_entries);
+            ledger.mutable_string_table_inherited_prefix_rows = ledger
+                .mutable_string_table_inherited_prefix_rows
+                .saturating_add(inherited_prefix_rows);
+            ledger.mutable_string_table_inherited_prefix_slot_bytes = ledger
+                .mutable_string_table_inherited_prefix_slot_bytes
+                .saturating_add(inherited_prefix_slot_bytes);
+            ledger.mutable_string_table_inherited_reverse_capacity_entries = ledger
+                .mutable_string_table_inherited_reverse_capacity_entries
+                .saturating_add(inherited_reverse_capacity_entries);
+            ledger.mutable_string_table_peak_slot_capacity_bytes = ledger
+                .mutable_string_table_peak_slot_capacity_bytes
+                .max(slot_capacity_bytes);
+        });
+    }
+
+    pub(crate) fn record_mutable_path_builder(
+        table_storage_bytes: usize,
+        lookup_layers: usize,
+        lookup_capacity_entries: usize,
+        local_lookup_capacity_entries: usize,
+    ) {
+        with_ledger(|ledger| {
+            if !ledger.prepared {
+                return;
+            }
+            ledger.mutable_path_builder_samples =
+                ledger.mutable_path_builder_samples.saturating_add(1);
+            ledger.mutable_path_table_storage_bytes = ledger
+                .mutable_path_table_storage_bytes
+                .saturating_add(table_storage_bytes);
+            ledger.mutable_path_builder_lookup_layers = ledger
+                .mutable_path_builder_lookup_layers
+                .saturating_add(lookup_layers);
+            ledger.mutable_path_builder_lookup_capacity_entries = ledger
+                .mutable_path_builder_lookup_capacity_entries
+                .saturating_add(lookup_capacity_entries);
+            ledger.mutable_path_builder_local_lookup_capacity_entries = ledger
+                .mutable_path_builder_local_lookup_capacity_entries
+                .saturating_add(local_lookup_capacity_entries);
+        });
+    }
+
     pub(crate) fn record_donor_identity_tables(
         path_table: Option<&PathTable>,
         string_table: Option<&FrozenStringTable>,
@@ -556,17 +725,23 @@ mod enabled {
     pub(crate) fn release_source_path_table(path_table: &PathSyntaxTable) {
         let address = path_table as *const PathSyntaxTable as usize;
         with_ledger(|ledger| {
-            ledger.source_path_tables.remove(&address);
+            if let Some(store) = ledger.source_path_tables.remove(&address) {
+                ledger.source_totals.path_store_bytes = ledger
+                    .source_totals
+                    .path_store_bytes
+                    .saturating_sub(store.bytes);
+                ledger.source_totals.path_store_capacity_bytes = ledger
+                    .source_totals
+                    .path_store_capacity_bytes
+                    .saturating_sub(store.capacity_bytes);
+            }
         });
     }
 
     pub(crate) fn snapshot() -> MemoryLedgerSnapshot {
         with_ledger(|ledger| {
-            if let Some(snapshot) = ledger.last_snapshot {
-                return snapshot;
-            }
             let totals = ledger.source_totals;
-            let snapshot = MemoryLedgerSnapshot {
+            MemoryLedgerSnapshot {
                 source_tokens_owners: totals.owners,
                 source_tokens_shape_bytes: totals.shape_bytes,
                 source_tokens_shape_capacity_bytes: totals.shape_capacity_bytes,
@@ -580,13 +755,32 @@ mod enabled {
                 source_tokens_sequence_store_capacity_bytes: totals.sequence_store_capacity_bytes,
                 transient_construction_buffer_bytes: ledger.transient_construction_buffer_bytes,
                 transient_construction_peak_bytes: ledger.transient_construction_peak_bytes,
-                // Production has no FileTokens adapter. Keep this explicit field stable so
-                // the probe can prove that no adapter allocation is reintroduced.
-                cutover_adapter_bytes: 0,
                 donor_identity_string_tables: ledger.donor_identity_string_tables,
                 donor_identity_string_storage_bytes: ledger.donor_identity_string_storage_bytes,
                 donor_identity_path_tables: ledger.donor_identity_path_tables,
                 donor_identity_path_storage_bytes: ledger.donor_identity_path_storage_bytes,
+                mutable_string_table_samples: ledger.mutable_string_table_samples,
+                mutable_string_table_slot_capacity_bytes: ledger
+                    .mutable_string_table_slot_capacity_bytes,
+                mutable_string_table_local_payload_bytes: ledger
+                    .mutable_string_table_local_payload_bytes,
+                mutable_string_table_reverse_capacity_entries: ledger
+                    .mutable_string_table_reverse_capacity_entries,
+                mutable_string_table_inherited_prefix_rows: ledger
+                    .mutable_string_table_inherited_prefix_rows,
+                mutable_string_table_inherited_prefix_slot_bytes: ledger
+                    .mutable_string_table_inherited_prefix_slot_bytes,
+                mutable_string_table_inherited_reverse_capacity_entries: ledger
+                    .mutable_string_table_inherited_reverse_capacity_entries,
+                mutable_string_table_peak_slot_capacity_bytes: ledger
+                    .mutable_string_table_peak_slot_capacity_bytes,
+                mutable_path_builder_samples: ledger.mutable_path_builder_samples,
+                mutable_path_table_storage_bytes: ledger.mutable_path_table_storage_bytes,
+                mutable_path_builder_lookup_layers: ledger.mutable_path_builder_lookup_layers,
+                mutable_path_builder_lookup_capacity_entries: ledger
+                    .mutable_path_builder_lookup_capacity_entries,
+                mutable_path_builder_local_lookup_capacity_entries: ledger
+                    .mutable_path_builder_local_lookup_capacity_entries,
                 generic_source_tokens_owners: ledger.generic_source_tokens_owners,
                 generic_source_tokens_bytes: ledger.generic_source_tokens_bytes,
                 generic_source_tokens_live_bytes: live_generic_source_token_bytes(ledger),
@@ -594,10 +788,10 @@ mod enabled {
                 requester_remap_count: ledger.requester_remap_count,
                 requester_remap_used_bytes: ledger.requester_remap_used_bytes,
                 requester_remap_capacity_bytes: ledger.requester_remap_capacity_bytes,
+                string_merge_remap_ns: STRING_MERGE_REMAP_NS.load(Ordering::Relaxed),
+                path_merge_remap_ns: PATH_MERGE_REMAP_NS.load(Ordering::Relaxed),
                 observation_incomplete: ledger.observation_incomplete,
-            };
-            ledger.last_snapshot = Some(snapshot);
-            snapshot
+            }
         })
     }
 }
@@ -612,9 +806,11 @@ pub(crate) use enabled::reset as reset_memory_ledger;
 #[cfg(feature = "data_layout_memory_probe")]
 pub(crate) use enabled::{
     observe_generic_source_tokens, prepare, record_donor_identity_tables,
-    record_generic_source_tokens, record_requester_remap, record_source_tokens,
-    record_source_tokens_path_table, record_transient_construction_buffer_bytes,
-    release_donor_identity_path, release_donor_identity_string, release_generic_source_tokens,
-    release_source_path_table, release_source_tokens, reset as reset_memory_ledger,
-    snapshot as snapshot_memory_ledger,
+    record_generic_source_tokens, record_mutable_path_builder, record_mutable_string_table,
+    record_path_merge_remap, record_requester_remap, record_source_tokens,
+    record_source_tokens_path_table, record_string_merge_remap,
+    record_transient_construction_buffer_bytes, release_donor_identity_path,
+    release_donor_identity_string, release_generic_source_tokens, release_source_path_table,
+    release_source_tokens, reset as reset_memory_ledger, snapshot as snapshot_memory_ledger,
+    start_merge_remap_clock,
 };

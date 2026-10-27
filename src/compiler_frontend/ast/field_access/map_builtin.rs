@@ -7,7 +7,7 @@ use super::MemberStepContext;
 use super::ParsedBuiltinMemberCall;
 use super::builtin_call_args::{
     BuiltinCallSite, builtin_argument_expectations, builtin_argument_shapes,
-    builtin_argument_slots, builtin_result_type_ids, concrete_shape_type, intern_concrete_shape,
+    builtin_argument_slots, builtin_result_type_ids, intern_concrete_shape,
     resolve_builtin_member_arguments,
 };
 use super::parse_chain::expression_from_postfix_node;
@@ -30,9 +30,10 @@ use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeI
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidAssignmentTargetReason;
+use crate::compiler_frontend::compiler_messages::InvalidBuiltinCallReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -64,8 +65,6 @@ pub(super) struct MapBuiltinMemberRule {
 /// One resolved map builtin member, independent of where its receiver value comes from.
 pub(super) struct MapBuiltinMember {
     pub(super) op: MapBuiltinOp,
-    /// The receiver's value slot, shared by the operation's value argument and success slots.
-    pub(super) value_shape: KnownShapeId,
     pub(super) rule: MapBuiltinMemberRule,
 }
 
@@ -139,11 +138,7 @@ pub(super) fn resolve_map_builtin_member(
         error_return_type_id,
     };
 
-    Ok(Some(MapBuiltinMember {
-        op,
-        value_shape,
-        rule,
-    }))
+    Ok(Some(MapBuiltinMember { op, rule }))
 }
 
 /// Parse one map builtin member step on a completed receiver node.
@@ -187,7 +182,7 @@ pub(super) fn parse_map_builtin_member_typed(
     // Property-style `length` requires no parentheses.
     if member.op.is_property() {
         if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
-            return Err(CompilerDiagnostic::invalid_builtin_call(
+            return Err(calls_data::invalid_builtin_call(
                 InvalidBuiltinCallReason::MapLengthIsProperty,
                 Some(member_name),
                 member_span,
@@ -215,10 +210,8 @@ pub(super) fn parse_map_builtin_member_typed(
         // `length` is a property, not a call, so there are no arguments to parse.
         // Reject assignment through `map.length`.
         if token_stream.current_tag().is_assignment_operator() {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
+            return Err(names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::ReadOnlyMapProperty,
-                None,
-                Some(receiver_type_id),
                 None,
                 None,
                 None,
@@ -248,7 +241,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
     // All other map builtins require parentheses.
     if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-        return Err(CompilerDiagnostic::invalid_builtin_call(
+        return Err(calls_data::invalid_builtin_call(
             InvalidBuiltinCallReason::MissingParentheses,
             Some(member_name),
             member_span,
@@ -321,10 +314,8 @@ pub(super) fn parse_map_builtin_member_typed(
 
     if matches!(member.op, MapBuiltinOp::Get) && token_stream.current_tag().is_assignment_operator()
     {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        return Err(names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::MapGetTargetNotWritable,
-            None,
-            concrete_shape_type(scope_context, member.value_shape),
             None,
             None,
             None,

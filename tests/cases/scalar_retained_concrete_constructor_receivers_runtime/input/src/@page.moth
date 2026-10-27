@@ -1,4 +1,4 @@
--- Phase 4: concrete nominal constructor receivers.
+-- Concrete nominal constructor receivers.
 --
 -- A concrete struct or choice payload constructor whose field argument depends
 -- on a pending numeric origin suspends as one retained call and resumes at the

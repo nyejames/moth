@@ -1,0 +1,1194 @@
+use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
+use super::*;
+
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    ExplicitMothExtensionView, ExplicitSourceExtensionView, UnsupportedExternalExtensionView,
+    UnsupportedSourceFileKindView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView, InvalidDependencyClauseView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
+
+fn prepared_failure_reports(
+    failure: PreparedFailure,
+) -> crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    let PreparedFailure::Diagnosed(batch) = failure else {
+        panic!("expected diagnosed reports, got {failure:?}");
+    };
+    assert!(
+        batch.has_errors(),
+        "expected a user-facing error diagnostic"
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("diagnosed reports should freeze")
+}
+
+fn assert_config_failure(failure: PreparedFailure, expected_reason: InvalidConfigCode) {
+    let reports = prepared_failure_reports(failure);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| {
+                diagnostic.descriptor().code == "MOTH-CONFIG-0001"
+                    && diagnostic
+                        .family_view::<InvalidConfigView>()
+                        .is_some_and(|facts| facts.reason == expected_reason)
+            }),
+        "expected the typed config failure {expected_reason:?}",
+    );
+}
+
+fn assert_reserved_project_dependency_failure(failure: PreparedFailure) {
+    let reports = prepared_failure_reports(failure);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| {
+                diagnostic
+                    .family_view::<InvalidDependencyClauseView>()
+                    .is_some_and(|facts| {
+                        facts.clause_kind == DependencyClauseKind::Namespace
+                            && facts.reason
+                                == InvalidDependencyClauseReason::ProjectGlobalsPathReserved
+                    })
+            }),
+        "expected the typed reserved project dependency failure",
+    );
+}
+
+// ── Project-structure collision tests ─────────────────────────────────────────
+
+#[test]
+fn rejects_reserved_project_globals_module_folder_at_entry_root() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/project")).expect("should create project module folder");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let failure = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("entry-root project folder must not claim @project");
+
+    assert_config_failure(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
+}
+
+#[test]
+fn rejects_reserved_project_globals_module_root_file() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src")).expect("should create src");
+    fs::write(root.join("src/@project.moth"), "x ~= 1\n")
+        .expect("should write reserved module root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let failure = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("@project.moth must not create a real project module");
+
+    assert_config_failure(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
+}
+
+#[test]
+fn rejects_reserved_project_globals_facade_root_file() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src")).expect("should create src");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("+project.moth"), "export:\n;\n")
+        .expect("should write reserved facade root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let failure = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("+project.moth must not claim the reserved project root");
+
+    assert_config_failure(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
+}
+
+#[test]
+fn rejects_nested_reserved_project_globals_dependency() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src")).expect("should create src");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let resolver = configured_resolver(&config);
+    for (source, expected_kind) in [
+        (
+            "@project/details\nx ~= 1\n",
+            DependencyClauseKind::Namespace,
+        ),
+        (
+            "@project/details value\nx ~= 1\n",
+            DependencyClauseKind::DirectSelection,
+        ),
+        (
+            "@project/details as project_details\nx ~= 1\n",
+            DependencyClauseKind::NamespaceAlias,
+        ),
+    ] {
+        fs::write(root.join("src/@page.moth"), source).expect("should write entry");
+        let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+        let diagnostic = first_error_diagnostic(&failure);
+        let facts = diagnostic
+            .family_view::<InvalidDependencyClauseView>()
+            .expect("reserved project dependency should retain typed clause facts");
+        assert_eq!(facts.clause_kind, expected_kind);
+        assert_eq!(
+            facts.reason,
+            InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
+            "unexpected reserved project dependency reason"
+        );
+    }
+}
+
+#[test]
+fn source_package_rejects_exact_reserved_project_globals_dependency() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("builder/helper");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::create_dir_all(&package_root).expect("should create helper package");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write project entry");
+    fs::write(package_root.join("@mod.moth"), "value ~= 1\n")
+        .expect("should write helper package root");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages.register_filesystem_root("helper", package_root, PackageOrigin::Builder);
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source = fs::canonicalize(root.join("builder/helper/@mod.moth"))
+        .expect("package source should canonicalize");
+
+    with_namespace_resolution(
+        &config,
+        &resolver,
+        &source_packages,
+        Some("helper"),
+        |namespace_set,
+         _source_tree_index,
+         package_prefix,
+         string_table,
+         provider_paths,
+         path_fork| {
+            let package_source_tree_index = namespace_set
+                .source_package_boundaries()
+                .find(|(prefix, _)| *prefix == package_prefix.expect("package boundary prefix"))
+                .map(|(_, index)| index)
+                .expect("requested source package boundary should be indexed");
+            // The resolution's fork is rebound to the caller-owned discovery fork inside
+            // `handle_provider_capable_dependency`, so a throwaway interner is sufficient here.
+            let throwaway_fork = PathInternerFork::empty();
+            let resolution = DirectoryDependencyResolution::package(
+                namespace_set,
+                package_prefix.expect("package boundary prefix"),
+                package_source_tree_index,
+                &throwaway_fork,
+            );
+            let provider = provider_root(&["project"], provider_paths);
+            let mut external_packages = ExternalPackageRegistry::new();
+            let providers = ExternalImportProviderRegistry::empty();
+            let mut cache =
+                crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new();
+            let mut resolution_table =
+                crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
+            let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
+                external_packages: &mut external_packages,
+                providers: &providers,
+                cache: &mut cache,
+                resolution_table: &mut resolution_table,
+            };
+
+            let Err(error) = super::source_discovery::resolve_structural_provider_reference(
+                &provider,
+                DependencyClauseKind::Namespace,
+                &declaring_source,
+                &resolver,
+                path_fork,
+                &mut external_imports,
+                resolution,
+                string_table,
+            ) else {
+                panic!("source-package @project dependency must be rejected");
+            };
+            let failure = error.into_failure(
+                string_table,
+                std::sync::Arc::new(path_fork.snapshot_table()),
+            );
+            assert_reserved_project_dependency_failure(failure);
+        },
+    );
+}
+
+#[test]
+fn rejects_moth_file_and_folder_collision_in_same_directory() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/UI")).expect("should create src/UI");
+    fs::write(root.join("src/UI/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let result = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_err(),
+        "ui.moth + UI/ collision should be rejected"
+    );
+    let failure = result.expect_err("checked above");
+    assert_config_failure(failure, InvalidConfigCode::SourceFileFolderCollision);
+}
+
+#[test]
+fn rejects_template_file_and_folder_collision_in_same_directory() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/ui")).expect("should create src/ui");
+    fs::write(root.join("src/ui/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let failure = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect_err("ui.mtf + ui/ collision should be rejected");
+
+    assert_config_failure(failure, InvalidConfigCode::SourceFileFolderCollision);
+}
+
+#[test]
+fn allows_same_stem_in_different_directories() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/components")).expect("should create src/components");
+    fs::create_dir_all(root.join("src/pages")).expect("should create src/pages");
+    fs::write(root.join("src/components/card.moth"), "x ~= 1\n").expect("should write card");
+    fs::write(root.join("src/pages/card.moth"), "y ~= 2\n").expect("should write another card");
+    fs::write(root.join("src/@page.moth"), "z ~= 3\n").expect("should write entry");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect("same stem in different directories should be allowed");
+}
+
+#[test]
+fn rejects_collision_with_empty_folder() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
+    fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
+    fs::write(root.join("src/@page.moth"), "y ~= 2\n").expect("should write entry");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    let result = super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_err(),
+        "collision with an empty folder should be rejected"
+    );
+    let failure = result.expect_err("checked above");
+    assert_config_failure(failure, InvalidConfigCode::SourceFileFolderCollision);
+}
+
+#[test]
+fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
+    fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
+    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut string_table = StringTable::new();
+    super::project_roots::build_project_path_resolver(
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut string_table,
+    )
+    .expect(".js file with same stem as folder should not trigger collision");
+}
+
+#[test]
+fn unsupported_js_import_without_provider_reports_moth_import_0021() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    // Entry file imports a .js file explicitly.
+    fs::write(
+        src.join("@page.moth"),
+        "-- é🦋\n@drawing.js as drawing\n#[:ok]\n",
+    )
+    .expect("should write entry");
+
+    fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0021",
+        "expected unsupported external extension diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    let facts = diagnostic
+        .family_view::<UnsupportedExternalExtensionView>()
+        .expect("unsupported external extension should retain typed path facts");
+    let (report, _) = diagnosed_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("unsupported external extension should retain its error report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.render_path(facts.path),
+        "drawing.js",
+        "unexpected path in diagnostic"
+    );
+    assert_eq!(
+        context.string_table.resolve(facts.extension),
+        "js",
+        "unexpected extension in diagnostic"
+    );
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@drawing.js");
+
+    let mut source_string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let empty_providers = ExternalImportProviderRegistry::empty();
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        resolver.source_file_kinds(),
+        &empty_providers,
+        &mut source_string_table,
+    )
+    .expect("source tree index should rebuild for span assertions");
+    let mut source_files =
+        source_database_for_test(&source_tree_index, &resolver, &mut source_string_table);
+    let entry_path =
+        fs::canonicalize(src.join("@page.moth")).expect("entry source path should canonicalize");
+    let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
+    selected_source_texts
+        .load(&entry_path)
+        .expect("entry source snapshot should load");
+    let mut path_fork = source_files.fork_path_interner();
+    selected_source_texts
+        .retain_into(&mut source_files, &mut path_fork)
+        .expect("entry source snapshot should retain");
+    let source_id = source_files
+        .get_by_canonical_path(&entry_path)
+        .expect("entry source should remain in the source database")
+        .id;
+    let span = match diagnostic.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => span,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("provider diagnostic should retain its authored path span")
+        }
+    };
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(&source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("entry source snapshot should remain available");
+    let expected_start = source_text
+        .find("@drawing.js")
+        .expect("fixture should contain the provider path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(
+        range.end(),
+        expected_start + "@drawing.js".len() as u32,
+        "provider span should cover the full UTF-8 path token"
+    );
+}
+
+#[test]
+fn explicit_moth_extension_still_reports_moth_import_0020() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@helper.moth\n#[:ok]\n").expect("should write entry");
+
+    fs::write(
+        src.join("helper.moth"),
+        "greet || -> String:\n    return \"hi\"\n;\n",
+    )
+    .expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0020",
+        "expected explicit .moth extension diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    diagnostic
+        .family_view::<ExplicitMothExtensionView>()
+        .expect("explicit .moth extension should retain typed path facts");
+}
+
+#[test]
+fn unsupported_moth_template_dependency_without_builder_support_reports_moth_import_0025() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0025",
+        "expected unsupported source file kind diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    diagnostic
+        .family_view::<UnsupportedSourceFileKindView>()
+        .expect("unsupported source file kind should retain typed path facts");
+}
+
+#[test]
+fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro.mtf\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0024",
+        "expected explicit source extension diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    diagnostic
+        .family_view::<ExplicitSourceExtensionView>()
+        .expect("explicit source extension should retain typed path facts");
+}
+
+#[test]
+fn moth_template_files_are_reachable_without_dependency_scanning() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.mtf"), "@missing\n").expect("should write moth template file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+
+    let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
+        .collect();
+    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("intro.mtf"));
+    assert!(modules[0].prepared.contains_moth_template);
+}
+
+#[test]
+fn reachable_moth_template_queues_same_directory_root_file() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let docs = src.join("docs");
+    fs::create_dir_all(&docs).expect("should create docs dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@docs\n#[:ok]\n").expect("should write entry");
+    fs::write(docs.join("intro.mtf"), "hello\n").expect("should write moth template file");
+    fs::write(docs.join("@docs.moth"), "@intro\ntitle #= \"Docs\"\n").expect("should write root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+
+    // The entry module depends on a Moth template file from the `docs` module root, so `docs` is its
+    // provider and precedes it in the returned inventory order. Find the entry module by its
+    // root file rather than assuming index 0.
+    let entry_module = modules
+        .iter()
+        .find(|module| {
+            prepared_entry_file_path(&module.prepared.semantic)
+                .expect("prepared module retains its entry file identity")
+                .file_name()
+                .is_some_and(|name| name == "@page.moth")
+        })
+        .expect("entry module should be discovered");
+    let input_paths: HashSet<_> = module_prepared_source_names(entry_module)
+        .into_iter()
+        .collect();
+    assert!(input_paths.contains("@page.moth"));
+    assert!(!input_paths.contains("intro.mtf"));
+    assert!(!input_paths.contains("@docs.moth"));
+
+    let docs_module = modules
+        .iter()
+        .find(|module| {
+            prepared_entry_file_path(&module.prepared.semantic)
+                .expect("prepared module retains its entry file identity")
+                .file_name()
+                .is_some_and(|name| name == "@docs.moth")
+        })
+        .expect("docs provider module should be discovered");
+
+    let docs_input_names: HashSet<_> = module_prepared_source_names(docs_module)
+        .into_iter()
+        .collect();
+    assert!(docs_input_names.contains("intro.mtf"));
+    assert!(docs_input_names.contains("@docs.moth"));
+    assert!(docs_module.prepared.contains_moth_template);
+}
+
+#[test]
+fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+
+    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert!(!modules[0].prepared.contains_moth_template);
+}
+
+#[test]
+fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    // Normal extensionless dependencies still resolve as Moth source files, while virtual package
+    // dependencies continue to stay out of Stage 0 filesystem traversal.
+    fs::write(src.join("@page.moth"), "@helper\n@core/io line\n#[:ok]\n")
+        .expect("should write entry");
+
+    fs::write(
+        src.join("helper.moth"),
+        "greet || -> String:\n    return \"hi\"\n;\n",
+    )
+    .expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+    assert_eq!(modules.len(), 1);
+
+    let discovered: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
+        .collect();
+
+    assert!(discovered.contains("@page.moth"));
+    assert!(discovered.contains("helper.moth"));
+}
+
+#[test]
+fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_body() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.md"), "@missing\n").expect("should write markdown file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+
+    let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
+        .collect();
+    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("intro.md"));
+
+    assert!(!modules[0].prepared.contains_moth_template);
+}
+
+#[test]
+fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("other")).expect("should create other module dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
+    fs::write(src.join("other/@other.moth"), "export:\n    x #= 1\n;\n")
+        .expect("should write other module root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+
+    let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
+        .into_iter()
+        .collect();
+    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("intro.md"));
+    assert!(!input_paths.contains("@other.moth"));
+
+    assert!(!modules[0].prepared.contains_moth_template);
+}
+
+#[test]
+fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+
+    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert!(!modules[0].prepared.contains_moth_template);
+}
+
+#[test]
+fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro.md\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0024",
+        "expected explicit source extension diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    let facts = diagnostic
+        .family_view::<ExplicitSourceExtensionView>()
+        .expect("explicit source extension should retain typed path facts");
+    let (report, _) = diagnosed_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("explicit source extension should retain its error report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.render_path(facts.path),
+        "intro.md",
+        "unexpected dependency path in explicit source extension diagnostic"
+    );
+    assert_eq!(
+        context.string_table.resolve(facts.extension),
+        "md",
+        "unexpected extension in explicit source extension diagnostic"
+    );
+}
+
+#[test]
+fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+
+    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0025",
+        "expected unsupported source file kind diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    let facts = diagnostic
+        .family_view::<UnsupportedSourceFileKindView>()
+        .expect("unsupported source file kind should retain typed path facts");
+    let (report, _) = diagnosed_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("unsupported source file kind should retain its error report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.render_path(facts.path),
+        "intro",
+        "unexpected dependency path in unsupported source file kind diagnostic"
+    );
+    assert_eq!(
+        context.string_table.resolve(facts.extension),
+        "md",
+        "unexpected extension in unsupported source file kind diagnostic"
+    );
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@intro");
+}

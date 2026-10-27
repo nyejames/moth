@@ -196,7 +196,7 @@ Every backend answers to the same validation, and optimisation must preserve obs
 - ABI mismatch
 - unsupported layout
 - invalid selected target input that planning should have rejected
-- internal lowerer failure on the `CompilerError` lane
+- internal lowerer failure on the `InfrastructureFailure` lane
 
 Target validation must diagnose user-facing target failures before lowering starts. Meeting one mid-emission means an earlier owner skipped a check.
 

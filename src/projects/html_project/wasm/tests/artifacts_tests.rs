@@ -64,7 +64,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         StructuralUrlRenderer::new(&output_plan, &resource_url_context, "/");
     let compiled = compile_html_module_wasm(
         &compile_input,
-        &mut string_table,
+        &string_table,
         &route,
         &structural_url_renderer,
     )
@@ -175,7 +175,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         StructuralUrlRenderer::new(&output_plan, &resource_url_context, "/");
     let compiled = compile_html_module_wasm(
         &compile_input,
-        &mut string_table,
+        &string_table,
         &route,
         &structural_url_renderer,
     )

@@ -35,7 +35,7 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Backend representation can't affect `copy`, alias or `~` semantics.
 - Imprecise planning results in conservative retention, never in rejecting legal source.
 - Missing topology proof is not a backend fallback.
-- A missing physical strategy after successful topology validation is `CompilerError`.
+- A missing physical strategy after successful topology validation is `InfrastructureFailure`.
 - Numeric semantics are language-defined and target-independent. The eleven fixed-width identities and `I32`/`F64` defaults are fixed before backend lowering. Lowerers consume canonical types and operation/failure facts from HIR; physical carriers never choose a different width or precision.
 - Scalar storage size, alignment and computation carriers are separate from semantic type (`Scalar storage and carriers`) and move no memory-plan ownership. Scalar width may change concrete layout values inside a `ValidatedMemoryPlan`, but it does not change lifetime-topology legality or let a backend select its own memory strategy.
 
@@ -117,7 +117,7 @@ Final physical ownership decisions and count transitions come only from the `Val
 - Host GC versus affine, inferred-region, declared-region or REC representation is chosen by the compiler-owned planner, and only after target and build-profile information exists.
 - Lowerers receive the already selected plan for their variant.
 - Lowerers do not choose REC, GC, inferred-region or declared-region representation, and do not reconsider the plan.
-- A missing physical strategy after successful planning is `CompilerError`.
+- A missing physical strategy after successful planning is `InfrastructureFailure`.
 - GC-native and collector-free variants share the same mandatory topology result. They differ only in the physical plan built on top of it.
 
 ## ValidatedMemoryPlan contract
@@ -465,7 +465,7 @@ Requirements:
 
 When a backend can't place precise individual cleanup for a value, the allocation remains under its inferred or declared region owner and is reclaimed at that owner's validated exit.
 
-Conservative retention is valid. Semantic divergence isn't. In a capable full-control release build, imprecision must not reintroduce a tracing collector, and unknown external retention is never a collector fallback. A missing physical strategy after successful topology validation is `CompilerError`.
+Conservative retention is valid. Semantic divergence isn't. In a capable full-control release build, imprecision must not reintroduce a tracing collector, and unknown external retention is never a collector fallback. A missing physical strategy after successful topology validation is `InfrastructureFailure`.
 
 ## What backends must not do
 

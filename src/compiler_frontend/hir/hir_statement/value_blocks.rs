@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
     types::{ValueIfBlock, ValueLexicalScope, ValueMatchBlock},
 };
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -20,7 +21,6 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
     // -------------------------
@@ -50,12 +50,12 @@ impl<'a> HirBuilder<'a> {
                     self.lower_expression_results_to_current_block(expressions.view(*expression)?)?;
                 for value in values {
                     let Some(destination) = target.result_locals.get(args.len()).copied() else {
-                        return_hir_transformation_error!(
+                        return Err(InfrastructureFailure::hir_transformation(
                             "ThenValue result count exceeds active value-block target",
-                            self.hir_error_location(span)
-                        );
+                        )
+                        .into());
                     };
-                    let expected_type = self.local_type_id_or_error(destination, span)?;
+                    let expected_type = self.local_type_id_or_error(destination)?;
                     let value = self.wrap_value_to_optional_type(value, expected_type, span)?;
                     let value = self.materialize_value_block_result(value)?;
                     let source = self.allocate_temp_local(expected_type, None)?;
@@ -80,13 +80,13 @@ impl<'a> HirBuilder<'a> {
                 }
             }
             if args.len() != target.result_locals.len() {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "ThenValue result count does not match active value-block target",
-                    self.hir_error_location(span)
-                );
+                )
+                .into());
             }
 
-            let current_block = self.current_block_id_or_error(span)?;
+            let current_block = self.current_block_id_or_error()?;
             self.emit_terminator(
                 current_block,
                 HirTerminator::Jump {
@@ -97,10 +97,10 @@ impl<'a> HirBuilder<'a> {
             )?;
             Ok(())
         } else {
-            return_hir_transformation_error!(
+            Err(InfrastructureFailure::hir_transformation(
                 "ThenValue encountered without active value block target",
-                self.hir_error_location(span)
             )
+            .into())
         }
     }
 
@@ -143,17 +143,16 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         result_type_ids: &[TypeId],
         merge_block: BlockId,
-        span: &Option<SourceSpan>,
     ) -> Result<Vec<LocalId>, HirConstructionFailure> {
-        let source_block = self.current_block_id_or_error(span)?;
-        self.set_current_block(merge_block, span)?;
+        let source_block = self.current_block_id_or_error()?;
+        self.set_current_block(merge_block)?;
         let mut result_locals = Vec::with_capacity(result_type_ids.len());
         for type_id in result_type_ids {
-            let lowered_ty = self.lower_type_id(*type_id, span)?;
+            let lowered_ty = self.lower_type_id(*type_id)?;
             let local = self.allocate_temp_local(lowered_ty, None)?;
             result_locals.push(local);
         }
-        self.set_current_block(source_block, span)?;
+        self.set_current_block(source_block)?;
         Ok(result_locals)
     }
 
@@ -176,25 +175,25 @@ impl<'a> HirBuilder<'a> {
             .expression_constant_bool(expressions.view(value_if.condition)?)
             .is_some()
         {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Stage 4 passed a statically decided value-producing Bool `if` to HIR",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
-        let parent_region = self.current_region_or_error(span)?;
+        let parent_region = self.current_region_or_error()?;
 
-        let merge_block = self.create_block(parent_region, span, "value-if-merge")?;
+        let merge_block = self.create_block(parent_region, span, "value-if-merge");
         let result_locals =
-            self.allocate_value_block_result_locals(result_type_ids, merge_block, span)?;
+            self.allocate_value_block_result_locals(result_type_ids, merge_block)?;
 
         let condition_value =
             self.lower_expression_value_to_current_block(expressions.view(value_if.condition)?)?;
-        let condition_block = self.current_block_id_or_error(span)?;
+        let condition_block = self.current_block_id_or_error()?;
 
         let then_region = self.create_child_region(parent_region);
         let else_region = self.create_child_region(parent_region);
-        let then_block = self.create_block(then_region, span, "value-if-then")?;
-        let else_block = self.create_block(else_region, span, "value-if-else")?;
+        let then_block = self.create_block(then_region, span, "value-if-then");
+        let else_block = self.create_block(else_region, span, "value-if-else");
 
         // Authored value-if header: the condition branch carries the authored
         // condition span. Merge jumps below are generated CFG and stay spanless.
@@ -212,7 +211,7 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(condition_block, then_block, "value-if.true");
         self.log_control_flow_edge(condition_block, else_block, "value-if.false");
 
-        self.set_current_block(then_block, span)?;
+        self.set_current_block(then_block)?;
         self.with_active_value_block_target(
             ValueBlockTarget {
                 result_locals: result_locals.clone(),
@@ -221,13 +220,13 @@ impl<'a> HirBuilder<'a> {
             |builder| builder.lower_statement_sequence(expressions, &value_if.then_body),
         )?;
 
-        let then_tail_block = self.current_block_id_or_error(span)?;
-        let then_terminated = self.block_has_explicit_terminator(then_tail_block, span)?;
+        let then_tail_block = self.current_block_id_or_error()?;
+        let then_terminated = self.block_has_explicit_terminator(then_tail_block)?;
         if !then_terminated {
             self.emit_jump_to(then_tail_block, merge_block, span, "value-if.then.merge")?;
         }
 
-        self.set_current_block(else_block, span)?;
+        self.set_current_block(else_block)?;
         self.with_active_value_block_target(
             ValueBlockTarget {
                 result_locals: result_locals.clone(),
@@ -236,13 +235,13 @@ impl<'a> HirBuilder<'a> {
             |builder| builder.lower_statement_sequence(expressions, &value_if.else_body),
         )?;
 
-        let else_tail_block = self.current_block_id_or_error(span)?;
-        let else_terminated = self.block_has_explicit_terminator(else_tail_block, span)?;
+        let else_tail_block = self.current_block_id_or_error()?;
+        let else_terminated = self.block_has_explicit_terminator(else_tail_block)?;
         if !else_terminated {
             self.emit_jump_to(else_tail_block, merge_block, span, "value-if.else.merge")?;
         }
 
-        self.set_current_block(merge_block, span)?;
+        self.set_current_block(merge_block)?;
 
         let values = self.value_block_result_expressions(
             &result_locals,
@@ -265,16 +264,16 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         result_type_ids: &[TypeId],
     ) -> Result<LoweredResults, HirConstructionFailure> {
-        let entry_block = self.current_block_id_or_error(span)?;
-        let parent_region = self.current_region_or_error(span)?;
+        let entry_block = self.current_block_id_or_error()?;
+        let parent_region = self.current_region_or_error()?;
         let body_region = self.create_child_region(parent_region);
-        let body_block = self.create_block(body_region, span, "static-value-if-body")?;
-        let merge_block = self.create_block(parent_region, span, "static-value-if-merge")?;
+        let body_block = self.create_block(body_region, span, "static-value-if-body");
+        let merge_block = self.create_block(parent_region, span, "static-value-if-merge");
         let result_locals =
-            self.allocate_value_block_result_locals(result_type_ids, merge_block, span)?;
+            self.allocate_value_block_result_locals(result_type_ids, merge_block)?;
 
         self.emit_jump_to(entry_block, body_block, span, "static-value-if.enter")?;
-        self.set_current_block(body_block, span)?;
+        self.set_current_block(body_block)?;
         self.with_active_value_block_target(
             ValueBlockTarget {
                 result_locals: result_locals.clone(),
@@ -283,11 +282,11 @@ impl<'a> HirBuilder<'a> {
             |builder| builder.lower_statement_sequence(expressions, &value_lexical_scope.body),
         )?;
 
-        let body_tail = self.current_block_id_or_error(span)?;
-        if !self.block_has_explicit_terminator(body_tail, span)? {
+        let body_tail = self.current_block_id_or_error()?;
+        if !self.block_has_explicit_terminator(body_tail)? {
             self.emit_jump_to(body_tail, merge_block, span, "static-value-if.exit")?;
         }
-        self.set_current_block(merge_block, span)?;
+        self.set_current_block(merge_block)?;
 
         let values = self.value_block_result_expressions(
             &result_locals,
@@ -320,11 +319,11 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         result_type_ids: &[TypeId],
     ) -> Result<LoweredResults, HirConstructionFailure> {
-        let parent_region = self.current_region_or_error(span)?;
+        let parent_region = self.current_region_or_error()?;
 
-        let merge_block = self.create_block(parent_region, span, "value-match-merge")?;
+        let merge_block = self.create_block(parent_region, span, "value-match-merge");
         let result_locals =
-            self.allocate_value_block_result_locals(result_type_ids, merge_block, span)?;
+            self.allocate_value_block_result_locals(result_type_ids, merge_block)?;
 
         self.with_active_value_block_target(
             ValueBlockTarget {
@@ -346,7 +345,7 @@ impl<'a> HirBuilder<'a> {
             },
         )?;
 
-        self.set_current_block(merge_block, span)?;
+        self.set_current_block(merge_block)?;
 
         let values = self.value_block_result_expressions(
             &result_locals,
@@ -374,14 +373,14 @@ impl<'a> HirBuilder<'a> {
         parent_region: RegionId,
     ) -> Result<Vec<HirValueId>, HirConstructionFailure> {
         if result_locals.len() != result_type_ids.len() {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Value-block destination count does not match result types",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
         let mut values = Vec::with_capacity(result_locals.len());
         for (local, ast_type_id) in result_locals.iter().zip(result_type_ids) {
-            let ty = self.lower_type_id(*ast_type_id, span)?;
+            let ty = self.lower_type_id(*ast_type_id)?;
             values.push(self.make_expression(
                 span,
                 HirExpressionKind::Load(HirPlace::local(*local)),

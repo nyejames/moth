@@ -9,15 +9,19 @@
 //! view is never stored inside it.
 
 use super::model::{PublicBindingExport, PublicDeclarationRecord, PublicSemanticInterface};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
 use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashMap;
 
-fn view_error(detail: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(format!("public semantic interface view: {}", detail.into()))
+fn view_error(detail: impl Into<String>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!("public semantic interface view: {}", detail.into()),
+    )
 }
 
 /// One operation-scoped binding view over a completed provider interface.
@@ -38,7 +42,9 @@ pub(crate) struct ProviderBindingView<'a> {
 }
 
 impl<'a> ProviderBindingView<'a> {
-    pub(crate) fn build(interface: &'a PublicSemanticInterface) -> Result<Self, CompilerError> {
+    pub(crate) fn build(
+        interface: &'a PublicSemanticInterface,
+    ) -> Result<Self, InfrastructureFailure> {
         let mut view = Self {
             interface,
             export_by_name: FxHashMap::default(),
@@ -97,7 +103,7 @@ impl<'a> ProviderBindingView<'a> {
         key: K,
         record_index: usize,
         key_class: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if index.insert(key, record_index).is_some() {
             return Err(view_error(format!(
                 "duplicate {key_class} in provider binding view"

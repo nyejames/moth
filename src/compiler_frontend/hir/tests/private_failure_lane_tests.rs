@@ -73,8 +73,7 @@ fn install_lanes(
     let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
     let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("lane fixtures must pass borrow checking");
-    infer_builtin_failure_summaries(&hir, &mut report)
-        .expect("lane fixture summaries must converge");
+    infer_builtin_failure_summaries(&hir, &mut report);
     let numeric_producers = hir
         .blocks
         .iter()
@@ -176,8 +175,7 @@ fn start_narrowing_drops_only_a_non_escaping_error_channel() {
         );
         let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
             .expect("start fixtures must pass borrow checking");
-        infer_builtin_failure_summaries(&hir, &mut report)
-            .expect("start fixture summaries must converge");
+        infer_builtin_failure_summaries(&hir, &mut report);
         install_private_failure_lanes(&mut hir, &report, &mut type_environment, &registry)
             .expect("start narrowing must leave valid native HIR");
         let function = hir

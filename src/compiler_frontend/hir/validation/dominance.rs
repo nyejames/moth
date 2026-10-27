@@ -5,9 +5,8 @@
 //! destinations cannot expose an earlier execution's stale success or error value.
 
 use super::HirValidator;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
@@ -29,7 +28,7 @@ struct ExpressionReads {
 }
 
 impl HirValidator<'_> {
-    pub(super) fn validate_function_definitions(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_function_definitions(&self) -> Result<(), InfrastructureFailure> {
         let mut incoming: FxHashMap<BlockId, Definitions> = FxHashMap::default();
         let mut pending = VecDeque::new();
         let mut queued = FxHashSet::default();
@@ -112,7 +111,7 @@ impl HirValidator<'_> {
                 self.validate_statement_reads(statement, &defined, &mut reads)?;
                 transfer_statement_definitions(&statement.kind, &mut defined);
             }
-            self.validate_terminator_reads(block.id, &block.terminator, &defined, &mut reads)?;
+            self.validate_terminator_reads(&block.terminator, &defined, &mut reads)?;
         }
         Ok(())
     }
@@ -121,12 +120,10 @@ impl HirValidator<'_> {
         &self,
         local: LocalId,
         defined: &Definitions,
-        anchor: HirLocation,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if !defined.contains(&local) {
             return Err(self.error_with_hir(
                 format!("Local {local} is not definitely defined before this use (definition does not dominate the use)"),
-                Some(anchor),
             ));
         }
         Ok(())
@@ -137,14 +134,13 @@ impl HirValidator<'_> {
         statement: &HirStatement,
         defined: &Definitions,
         reads: &mut ExpressionReads,
-    ) -> Result<(), CompilerError> {
-        let anchor = HirLocation::Statement(statement.id);
-        let mut expression = |value| self.validate_expression_reads(value, defined, anchor, reads);
+    ) -> Result<(), InfrastructureFailure> {
+        let mut expression = |value| self.validate_expression_reads(value, defined, reads);
         match &statement.kind {
             HirStatementKind::Write { target, value } => {
                 expression(*value)?;
                 if let HirWriteTarget::AssignPlace(place) = target {
-                    self.validate_place_reads(*place, defined, anchor, reads)?;
+                    self.validate_place_reads(*place, defined, reads)?;
                 }
             }
             HirStatementKind::Call { args, results, .. } => {
@@ -152,13 +148,13 @@ impl HirValidator<'_> {
                     expression(*argument)?;
                 }
                 for destination in results {
-                    self.validate_destination_reads(*destination, defined, anchor)?;
+                    self.validate_destination_reads(*destination, defined)?;
                 }
             }
             HirStatementKind::Expr(value) => expression(*value)?,
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
                 expression(*value)?;
-                self.require_defined_local(*vec_local, defined, anchor)?;
+                self.require_defined_local(*vec_local, defined)?;
             }
             HirStatementKind::MapOp {
                 receiver,
@@ -171,7 +167,7 @@ impl HirValidator<'_> {
                     expression(*argument)?;
                 }
                 if let Some(destination) = result {
-                    self.validate_destination_reads(*destination, defined, anchor)?;
+                    self.validate_destination_reads(*destination, defined)?;
                 }
             }
             HirStatementKind::NumericOp {
@@ -184,10 +180,10 @@ impl HirValidator<'_> {
                         expression(*right)?;
                     }
                 }
-                self.validate_destination_reads(*result, defined, anchor)?;
+                self.validate_destination_reads(*result, defined)?;
             }
             HirStatementKind::RangeStepFailure { result, .. } => {
-                self.validate_destination_reads(*result, defined, anchor)?
+                self.validate_destination_reads(*result, defined)?
             }
             HirStatementKind::FloatRangeCandidate {
                 current,
@@ -201,13 +197,13 @@ impl HirValidator<'_> {
                 for value in [current, step, end, ascending] {
                     expression(*value)?;
                 }
-                self.validate_destination_reads(*candidate_result, defined, anchor)?;
-                self.validate_destination_reads(*in_range_result, defined, anchor)?;
+                self.validate_destination_reads(*candidate_result, defined)?;
+                self.validate_destination_reads(*in_range_result, defined)?;
             }
             HirStatementKind::FormatFloat { source, result, .. }
             | HirStatementKind::ValidateFloat { source, result, .. } => {
                 expression(*source)?;
-                self.validate_destination_reads(*result, defined, anchor)?;
+                self.validate_destination_reads(*result, defined)?;
             }
         }
         Ok(())
@@ -217,28 +213,25 @@ impl HirValidator<'_> {
         &self,
         destination: HirLocalDestination,
         defined: &Definitions,
-        anchor: HirLocation,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let HirLocalDestination::Update(local) = destination {
-            self.require_defined_local(local, defined, anchor)?;
+            self.require_defined_local(local, defined)?;
         }
         Ok(())
     }
 
     fn validate_terminator_reads(
         &self,
-        block: BlockId,
         terminator: &HirTerminator,
         defined: &Definitions,
         reads: &mut ExpressionReads,
-    ) -> Result<(), CompilerError> {
-        let anchor = HirLocation::Block(block);
-        let mut expression = |value| self.validate_expression_reads(value, defined, anchor, reads);
+    ) -> Result<(), InfrastructureFailure> {
+        let mut expression = |value| self.validate_expression_reads(value, defined, reads);
         match terminator {
             HirTerminator::Jump { args, .. } => {
                 // All sources are read in the incoming state, before any destination exists.
                 for argument in args {
-                    self.require_defined_local(argument.source, defined, anchor)?;
+                    self.require_defined_local(argument.source, defined)?;
                 }
             }
             HirTerminator::If { condition, .. } => expression(*condition)?,
@@ -277,7 +270,7 @@ impl HirValidator<'_> {
             } => {
                 let (RuntimeFailureCause::StoreConversion { error }
                 | RuntimeFailureCause::AuthoredCastConversion { error }) = cause;
-                self.require_defined_local(*error, defined, anchor)?;
+                self.require_defined_local(*error, defined)?;
             }
             HirTerminator::Break { .. }
             | HirTerminator::Continue { .. }
@@ -291,12 +284,11 @@ impl HirValidator<'_> {
         &self,
         place: HirPlace,
         defined: &Definitions,
-        anchor: HirLocation,
         reads: &mut ExpressionReads,
-    ) -> Result<(), CompilerError> {
-        self.require_defined_local(place.root, defined, anchor)?;
+    ) -> Result<(), InfrastructureFailure> {
+        self.require_defined_local(place.root, defined)?;
         for index in self.module.expressions.place_index_values(place) {
-            self.validate_expression_reads(index, defined, anchor, reads)?;
+            self.validate_expression_reads(index, defined, reads)?;
         }
         Ok(())
     }
@@ -305,9 +297,8 @@ impl HirValidator<'_> {
         &self,
         root: HirValueId,
         defined: &Definitions,
-        anchor: HirLocation,
         reads: &mut ExpressionReads,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         reads.pending.clear();
         reads.seen.clear();
         reads.pending.push(root);
@@ -320,7 +311,7 @@ impl HirValidator<'_> {
                 // first. The store's source-order listing would reverse which undefined read is
                 // reported first, so Load and Copy keep the projection push.
                 HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-                    self.require_defined_local(place.root, defined, anchor)?;
+                    self.require_defined_local(place.root, defined)?;
                     let indexes = self.module.expressions.place_index_values(*place);
                     reads.pending.extend(indexes);
                 }

@@ -312,6 +312,24 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         },
         owns: "CLI feature forwarding for the generated Boracle campaign",
     },
+    FeatureLane {
+        name: "compiler-bug-test",
+        package: "moth",
+        features: &["test_compiler_bug"],
+        kind: FeatureLaneKind::OptIn {
+            command: "just compiler-bug-test",
+        },
+        owns: "the structured compiler-bug report trigger used by isolated host subprocess tests",
+    },
+    FeatureLane {
+        name: "cli-compiler-bug-test",
+        package: "moth-cli",
+        features: &["test_compiler_bug"],
+        kind: FeatureLaneKind::OptIn {
+            command: "just compiler-bug-test",
+        },
+        owns: "the CLI compiler-bug exit code and single-render subprocess contract",
+    },
 ];
 
 /// Package manifests and the Rust source/test roots scanned for their `cfg` names.

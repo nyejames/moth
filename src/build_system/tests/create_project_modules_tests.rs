@@ -18,7 +18,8 @@ use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::create_project_modules::source_tree_index::SourceTreeIndex;
 use crate::build_system::project_config::{
-    ProjectConfigParseServices, compile_project_config_file, load_project_config,
+    ProjectConfigFailure, ProjectConfigParseServices, compile_project_config_file,
+    load_project_config,
 };
 use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
@@ -29,12 +30,20 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureFailure, InfrastructureFailureKind,
+};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
-    DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
-    ValueReceiverContext,
+    DependencyClauseKind, DiagnosticBag, InvalidDependencyClauseReason, PathKind, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -61,10 +70,9 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceRegistrationIndex, SourceSpan,
+    LocalSpan, SourceCapacityError, SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError,
+    SourceId, SourceKind, SourceRegistrationIndex, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -82,16 +90,16 @@ mod create_project_modules_benchmark_tests;
 mod create_project_modules_config_tests;
 #[path = "create_project_modules_discovery_tests.rs"]
 mod create_project_modules_discovery_tests;
-#[path = "create_project_modules_phase4_tests.rs"]
-mod create_project_modules_phase4_tests;
-#[path = "create_project_modules_phase5b_tests.rs"]
-mod create_project_modules_phase5b_tests;
-#[path = "create_project_modules_r5c2a_tests.rs"]
-mod create_project_modules_r5c2a_tests;
+#[path = "create_project_modules_module_graph_tests.rs"]
+mod create_project_modules_module_graph_tests;
+#[path = "create_project_modules_package_registry_tests.rs"]
+mod create_project_modules_package_registry_tests;
 #[path = "create_project_modules_source_discovery_tests.rs"]
 mod create_project_modules_source_discovery_tests;
 #[path = "create_project_modules_source_tree_index_tests.rs"]
 mod create_project_modules_source_tree_index_tests;
+#[path = "create_project_modules_structure_collision_tests.rs"]
+mod create_project_modules_structure_collision_tests;
 #[path = "create_project_modules_synthetic_tests.rs"]
 mod create_project_modules_synthetic_tests;
 #[path = "create_project_modules_file_reference_tests.rs"]
@@ -168,7 +176,6 @@ fn configured_resolver_with_source_file_kinds(
             .module_identities()
             .derive_compilation_root_table(),
     )
-    .expect("project path resolver should build")
 }
 
 fn test_style_directives() -> StyleDirectiveRegistry {
@@ -190,41 +197,98 @@ fn source_database_for_test(
     .expect("test source database should build from the indexed canonical inventory")
 }
 
-const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
-
-fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
-    source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
+fn prepared_failure_result<T>(
+    failure: PreparedFailure,
+    source_database: Option<Arc<SourceDatabase>>,
+    root_string_table: &StringTable,
+) -> CompilationResult<T> {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table.clone());
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, source_database.map(|database| (database, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors);
+        }
+    }
+    match accumulator.finish(InstallMode::Unfrozen) {
+        Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+        Err(errors) => Err(errors),
+    }
 }
+
+fn project_config_failure_result(
+    failure: ProjectConfigFailure,
+    source_builder: Option<SourceDatabaseBuilder>,
+    root_string_table: &StringTable,
+) -> CompilationResult<()> {
+    match failure {
+        ProjectConfigFailure::Prepared(failure) => {
+            let source_database = source_builder.map(|mut builder| {
+                builder
+                    .assemble_finalized_tables()
+                    .expect("test config source table should assemble");
+                Arc::new(
+                    builder
+                        .finish()
+                        .expect("test config source builder should satisfy lifecycle invariants"),
+                )
+            });
+            prepared_failure_result(failure, source_database, root_string_table)
+        }
+        ProjectConfigFailure::Diagnosed(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+        ProjectConfigFailure::Infrastructure(errors) => Err(errors),
+    }
+}
+
+type TestSourceLoadFailure = (PreparedFailure, Option<Box<SourceDatabase>>);
 
 fn load_missing_source_path_for_test(
     source_path: PathBuf,
     _source_kind: SourceFileKind,
-    string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), InfrastructureFailure> {
     match super::source_loading::read_source_code(&source_path) {
         Ok(_) => Ok(()),
-        Err(error) => {
-            let error = super::source_loading::source_read_error(&source_path, error);
-            Err(CompilerMessages::from_error_ref(error, string_table))
+        Err(error) => Err(super::source_loading::source_read_error(
+            &source_path,
+            error,
+        )),
+    }
+}
+fn finalize_loaded_source_spans_for_test(
+    source_owner: &mut SourceDatabaseBuilder,
+) -> Result<(), InfrastructureFailure> {
+    let source_ids = source_owner
+        .sources()
+        .iter()
+        .filter_map(|source| {
+            source_owner
+                .sources()
+                .retained_text(source.id)
+                .map(|_| source.id)
+        })
+        .collect::<Vec<_>>();
+    for source_id in source_ids {
+        if !source_owner.is_source_finalized(source_id)? {
+            source_owner.finish_source(source_id)?;
         }
     }
+    source_owner.assemble_finalized_tables()
 }
 
 fn load_missing_source_paths_for_test(
     source_paths: Vec<PathBuf>,
     source_kind: SourceFileKind,
     string_table: &mut StringTable,
-) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), TestSourceLoadFailure> {
     let canonical_paths = source_paths
         .into_iter()
         .map(|path| {
             fs::canonicalize(&path).map_err(|error| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::file_error(
-                        &path,
-                        format!("failed to canonicalize test source path: {error}"),
-                    ),
-                    string_table,
+                (
+                    InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!("failed to canonicalize test source path: {error}"))
+                    .into(),
+                    None,
                 )
             })
         })
@@ -244,11 +308,15 @@ fn load_missing_source_paths_with_registered_paths_for_test(
     source_paths: Vec<PathBuf>,
     source_kind: SourceFileKind,
     string_table: &mut StringTable,
-) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), TestSourceLoadFailure> {
     let entry_path = source_paths.first().ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("test source loading requires at least one path"),
-            string_table,
+        (
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                "test source loading requires at least one path",
+            )
+            .into(),
+            None,
         )
     })?;
     let registration_index = SourceRegistrationIndex::from_rows(
@@ -263,55 +331,84 @@ fn load_missing_source_paths_with_registered_paths_for_test(
         string_table,
     )
     .map_err(|error| match error {
-        SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
-            CompilerDiagnostic::source_table_capacity(capacity.resource()),
-            string_table.clone(),
+        SourceDatabaseError::Capacity(capacity) => (
+            PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
+                    capacity.resource(),
+                    None,
+                )),
+                string_table.clone(),
+                None,
+                None,
+            )),
+            None,
         ),
-        SourceDatabaseError::Infrastructure(error) => {
-            CompilerMessages::from_error_ref(error, string_table)
-        }
+        SourceDatabaseError::Infrastructure(error) => (error.into(), None),
     })?;
 
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let mut first_read_error = None;
     for source_path in &source_paths {
         if let Err(error) = selected_source_texts.load(source_path) {
-            first_read_error.get_or_insert(error);
+            first_read_error.get_or_insert((source_path.clone(), error));
         }
     }
 
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let mut path_fork = source_owner.sources().fork_path_interner();
     let retain_error = selected_source_texts
-        .retain_into(source_owner.sources_mut())
+        .retain_into(source_owner.sources_mut(), &mut path_fork)
         .err();
-    let load_error = first_read_error.or(retain_error);
+    finalize_loaded_source_spans_for_test(&mut source_owner)
+        .map_err(|error| (error.into(), None))?;
+    let load_error = match first_read_error {
+        Some((path, error)) => {
+            let source_id = source_owner
+                .sources()
+                .get_by_canonical_path(&path)
+                .expect("selected source should stay registered")
+                .id;
+            Some(
+                super::source_loading::registered_source_read_error(
+                    error,
+                    source_id,
+                    source_owner.sources(),
+                    &mut path_fork,
+                )
+                .into_failure(string_table, Arc::new(path_fork.shared_table())),
+            )
+        }
+        None => retain_error
+            .map(|error| error.into_failure(string_table, Arc::new(path_fork.shared_table()))),
+    };
     if let Some(error) = load_error {
-        let mut messages = CompilerMessages::from_error_ref(error, string_table);
         let source_files = source_owner
             .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        messages.set_source_database(Arc::new(source_files));
-        return Err(messages);
+            .map_err(|error| (PreparedFailure::from(error), None))?;
+        return Err((error, Some(Box::new(source_files))));
     }
 
     let source_files = source_owner
         .finish()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        .map_err(|error| (error.into(), None))?;
     let mut input_files = Vec::with_capacity(source_paths.len());
     for source_path in &source_paths {
-        let source_id = source_files
+        let Some(source_id) = source_files
             .get_by_canonical_path(source_path)
             .map(|record| record.id)
-            .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error("test source has no registered source identity"),
-                    string_table,
-                )
-            })?;
+        else {
+            return Err((
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "test source has no registered source identity")
+                    .into(),
+                Some(Box::new(source_files)),
+            ));
+        };
         if source_files.retained_text(source_id).is_none() {
-            return Err(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error("test source loading left input slot empty"),
-                string_table,
+            return Err((
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "test source loading left input slot empty").into(),
+                Some(Box::new(source_files)),
             ));
         }
         let source = match source_kind {
@@ -319,11 +416,10 @@ fn load_missing_source_paths_with_registered_paths_for_test(
                 PreparedSourceKind::Deferred
             }
             SourceFileKind::Moth => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "test missing-source helper cannot create an unprepared Moth input",
-                    ),
-                    string_table,
+                return Err((
+                    InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "test missing-source helper cannot create an unprepared Moth input")
+                    .into(),
+                    Some(Box::new(source_files)),
                 ));
             }
         };
@@ -331,6 +427,12 @@ fn load_missing_source_paths_with_registered_paths_for_test(
     }
 
     Ok((source_files, input_files))
+}
+
+const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
+
+fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
+    source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
 }
 
 fn prepared_entry_file_path(
@@ -425,54 +527,83 @@ fn module_source_paths(
         .collect()
 }
 
+fn finish_config_source_for_test(source_files: Option<SourceDatabaseBuilder>) {
+    let mut source_owner =
+        source_files.expect("successful config should retain its source builder");
+    source_owner
+        .assemble_finalized_tables()
+        .expect("config span table should assemble");
+    source_owner
+        .finish()
+        .expect("test config source builder should satisfy lifecycle invariants");
+}
+
 fn parse_project_config_for_test(
     config: &mut Config,
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(), CompilerMessages> {
+) -> CompilationResult<()> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_files = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(
+    let result = compile_project_config_file(
         config,
         config_path,
         &services,
         &mut source_files,
         &mut string_table,
-    )
-    .map(|_| ())
+    );
+    match result {
+        Ok(_) => {
+            finish_config_source_for_test(source_files.take());
+            Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: None,
+            })
+        }
+        Err(failure) => project_config_failure_result(failure, source_files.take(), &string_table),
+    }
 }
 
 fn parse_project_config_for_test_with_html_keys(
     config: &mut Config,
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(), CompilerMessages> {
+) -> CompilationResult<()> {
     let frontend_surface =
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_files = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(
+    let result = compile_project_config_file(
         config,
         config_path,
         &services,
         &mut source_files,
         &mut string_table,
-    )
-    .map(|_| ())
+    );
+    match result {
+        Ok(_) => {
+            finish_config_source_for_test(source_files.take());
+            Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: None,
+            })
+        }
+        Err(failure) => project_config_failure_result(failure, source_files.take(), &string_table),
+    }
 }
 
 fn parse_project_config_for_test_with_packages(
@@ -480,51 +611,63 @@ fn parse_project_config_for_test_with_packages(
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
     frontend_surface: &crate::builder_surface::BuilderSurface,
-) -> Result<(), CompilerMessages> {
+) -> CompilationResult<()> {
     let mut string_table = StringTable::new();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_files = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(
+    let result = compile_project_config_file(
         config,
         config_path,
         &services,
         &mut source_files,
         &mut string_table,
-    )
-    .map(|_| ())
+    );
+    match result {
+        Ok(_) => {
+            finish_config_source_for_test(source_files.take());
+            Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: None,
+            })
+        }
+        Err(failure) => project_config_failure_result(failure, source_files.take(), &string_table),
+    }
 }
 
 fn discover_modules_for_test(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
-    discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
-        .map(|(schedule, _resource_inputs, _source_files)| schedule)
+) -> CompilationResult<ModuleCompilationSchedule> {
+    match discover_modules_for_test_with_resource_inputs(config, resolver, style_directives) {
+        Ok(CompilationOutcome::Success { value, warnings }) => Ok(CompilationOutcome::Success {
+            value: value.0,
+            warnings,
+        }),
+        Ok(CompilationOutcome::Diagnosed(reports)) => Ok(CompilationOutcome::Diagnosed(reports)),
+        Err(errors) => Err(errors),
+    }
 }
 
 fn discover_modules_for_test_with_resource_inputs(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<
-    (
-        ModuleCompilationSchedule,
-        ResourceInputRegistry,
-        SourceDatabase,
-    ),
-    CompilerMessages,
-> {
+) -> CompilationResult<(
+    ModuleCompilationSchedule,
+    ResourceInputRegistry,
+    SourceDatabase,
+)> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
-    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+    let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
             project_root: &project_root,
@@ -535,8 +678,10 @@ fn discover_modules_for_test_with_resource_inputs(
         resolver.source_file_kinds(),
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
-    )
-    .map_err(|failure| failure.into_messages(&string_table))?;
+    ) {
+        Ok(index) => index,
+        Err(failure) => return prepared_failure_result(failure, None, &string_table),
+    };
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
     let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
@@ -550,13 +695,15 @@ fn discover_modules_for_test_with_resource_inputs(
         );
     let mut external_dependency_resolution_table =
         crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
-    let source_package_boundary_indexes = build_source_package_boundary_indexes(
+    let source_package_boundary_indexes = match build_source_package_boundary_indexes(
         &crate::builder_surface::SourcePackageRegistry::default(),
         resolver.source_file_kinds(),
         &external_import_providers,
         &mut string_table,
-    )
-    .map_err(|failure| failure.into_messages(&string_table))?;
+    ) {
+        Ok(indexes) => indexes,
+        Err(failure) => return prepared_failure_result(failure, None, &string_table),
+    };
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -572,8 +719,8 @@ fn discover_modules_for_test_with_resource_inputs(
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let schedule_result = {
+        let path_interner = source_owner.sources_mut().fork_path_builder();
         let (source_files, mut source_spans) = source_owner.split();
-        let mut path_interner = source_files.clone_path_builder();
         discover_all_modules_in_project_with_check_only(
             config,
             resolver,
@@ -591,43 +738,55 @@ fn discover_modules_for_test_with_resource_inputs(
             false,
             &mut selected_source_texts,
             &mut string_table,
-            &mut path_interner,
+            &path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
     };
-    let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
-    source_owner.adopt_pending_span_builders();
-    if let Err(error) = retain_result {
-        let source_files = source_owner
-            .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-        let mut messages = CompilerMessages::from_error_ref(error, &string_table);
-        messages.set_source_database(Arc::new(source_files));
-        return Err(messages);
+    let mut path_fork = source_owner.sources().fork_path_interner();
+    let retain_result =
+        selected_source_texts.retain_into(source_owner.sources_mut(), &mut path_fork);
+    if retain_result.is_ok() {
+        source_owner.adopt_pending_span_builders();
     }
+    if let Err(error) = retain_result {
+        finalize_loaded_source_spans_for_test(&mut source_owner)
+            .expect("source span builders should finalize");
+        let failure = error.into_failure(&mut string_table, Arc::new(path_fork.shared_table()));
+        if let Err(finish_error) = source_owner.finish() {
+            return Err(finish_error.into());
+        }
+        return prepared_failure_result(failure, None, &string_table);
+    }
+    finalize_loaded_source_spans_for_test(&mut source_owner)
+        .expect("source span builders should finalize");
     let schedule = match schedule_result {
         Ok(schedule) => schedule,
         Err(failure) => {
-            let source_files = source_owner
-                .finish()
-                .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-            return Err(failure.into_messages_with_source(&string_table, Arc::new(source_files)));
+            let source_files = source_owner.finish()?;
+            return prepared_failure_result(failure, Some(Arc::new(source_files)), &string_table);
         }
     };
-    let source_files = source_owner
-        .finish()
-        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-    Ok((schedule, resource_inputs, source_files))
+    let source_files = source_owner.finish()?;
+    Ok(CompilationOutcome::Success {
+        value: (schedule, resource_inputs, source_files),
+        warnings: None,
+    })
 }
 
 fn discover_modules_and_source_files_for_test(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(ModuleCompilationSchedule, SourceDatabase), CompilerMessages> {
-    discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
-        .map(|(schedule, _resource_inputs, source_files)| (schedule, source_files))
+) -> CompilationResult<(ModuleCompilationSchedule, SourceDatabase)> {
+    match discover_modules_for_test_with_resource_inputs(config, resolver, style_directives) {
+        Ok(CompilationOutcome::Success { value, warnings }) => Ok(CompilationOutcome::Success {
+            value: (value.0, value.2),
+            warnings,
+        }),
+        Ok(CompilationOutcome::Diagnosed(reports)) => Ok(CompilationOutcome::Diagnosed(reports)),
+        Err(errors) => Err(errors),
+    }
 }
 
 fn discover_modules_for_test_with_providers(
@@ -635,12 +794,12 @@ fn discover_modules_for_test_with_providers(
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+) -> CompilationResult<ModuleCompilationSchedule> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
         fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
-    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+    let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
             project_root: &project_root,
@@ -651,8 +810,10 @@ fn discover_modules_for_test_with_providers(
         resolver.source_file_kinds(),
         external_import_providers,
         &mut string_table,
-    )
-    .map_err(|failure| failure.into_messages(&string_table))?;
+    ) {
+        Ok(index) => index,
+        Err(failure) => return prepared_failure_result(failure, None, &string_table),
+    };
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
     let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
@@ -664,13 +825,15 @@ fn discover_modules_for_test_with_providers(
         );
     let mut external_dependency_resolution_table =
         crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
-    let source_package_boundary_indexes = build_source_package_boundary_indexes(
+    let source_package_boundary_indexes = match build_source_package_boundary_indexes(
         &crate::builder_surface::SourcePackageRegistry::default(),
         resolver.source_file_kinds(),
         external_import_providers,
         &mut string_table,
-    )
-    .map_err(|failure| failure.into_messages(&string_table))?;
+    ) {
+        Ok(indexes) => indexes,
+        Err(failure) => return prepared_failure_result(failure, None, &string_table),
+    };
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -684,11 +847,10 @@ fn discover_modules_for_test_with_providers(
         resolution_table: &mut external_dependency_resolution_table,
     };
     let mut resource_inputs = ResourceInputRegistry::new();
-
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let schedule_result = {
+        let path_interner = source_owner.sources_mut().fork_path_builder();
         let (source_files, mut source_spans) = source_owner.split();
-        let mut path_interner = source_files.clone_path_builder();
         discover_all_modules_in_project_with_check_only(
             config,
             resolver,
@@ -706,28 +868,41 @@ fn discover_modules_for_test_with_providers(
             false,
             &mut selected_source_texts,
             &mut string_table,
-            &mut path_interner,
+            &path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
     };
-    let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
-    source_owner.adopt_pending_span_builders();
-    if let Err(error) = retain_result {
-        let source_files = source_owner
-            .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-        let mut messages = CompilerMessages::from_error_ref(error, &string_table);
-        messages.set_source_database(Arc::new(source_files));
-        return Err(messages);
+    let mut path_fork = source_owner.sources().fork_path_interner();
+    let retain_result =
+        selected_source_texts.retain_into(source_owner.sources_mut(), &mut path_fork);
+    if retain_result.is_ok() {
+        source_owner.adopt_pending_span_builders();
     }
+    if let Err(error) = retain_result {
+        finalize_loaded_source_spans_for_test(&mut source_owner)
+            .expect("source span builders should finalize");
+        let failure = error.into_failure(&mut string_table, Arc::new(path_fork.shared_table()));
+        if let Err(finish_error) = source_owner.finish() {
+            return Err(finish_error.into());
+        }
+        return prepared_failure_result(failure, None, &string_table);
+    }
+    finalize_loaded_source_spans_for_test(&mut source_owner)
+        .expect("source span builders should finalize");
     match schedule_result {
-        Ok(schedule) => Ok(schedule),
+        Ok(schedule) => {
+            if let Err(error) = source_owner.finish() {
+                return Err(error.into());
+            }
+            Ok(CompilationOutcome::Success {
+                value: schedule,
+                warnings: None,
+            })
+        }
         Err(failure) => {
-            let source_files = source_owner
-                .finish()
-                .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-            Err(failure.into_messages_with_source(&string_table, Arc::new(source_files)))
+            let source_files = source_owner.finish()?;
+            prepared_failure_result(failure, Some(Arc::new(source_files)), &string_table)
         }
     }
 }
@@ -1034,7 +1209,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
     )
     .expect("synthetic origin should construct");
     #[cfg(feature = "timers")]
-    let prepared = preparation_context
+    let (prepared, _) = preparation_context
         .prepare_module(
             stable_origin,
             input_files,
@@ -1047,7 +1222,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
         )
         .expect("synthetic outputs should prepare against the retained source table");
     #[cfg(not(feature = "timers"))]
-    let prepared = preparation_context
+    let (prepared, _) = preparation_context
         .prepare_module(
             stable_origin,
             input_files,
@@ -1128,8 +1303,8 @@ fn discover_modules_and_graph_for_test(
 
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     let modules = {
+        let path_interner = source_owner.sources_mut().fork_path_builder();
         let (source_files, mut source_spans) = source_owner.split();
-        let mut path_interner = source_files.clone_path_builder();
         discover_all_modules_in_project_with_check_only(
             config,
             resolver,
@@ -1147,15 +1322,19 @@ fn discover_modules_and_graph_for_test(
             false,
             &mut selected_source_texts,
             &mut string_table,
-            &mut path_interner,
+            &path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
     }
     .expect("module discovery should pass for focused graph-edge tests");
-    let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
+    let mut path_fork = source_owner.sources().fork_path_interner();
+    let retain_result =
+        selected_source_texts.retain_into(source_owner.sources_mut(), &mut path_fork);
     source_owner.adopt_pending_span_builders();
     retain_result.expect("selected source snapshots should retain");
+    finalize_loaded_source_spans_for_test(&mut source_owner)
+        .expect("discovery span builders should finalize");
     let source_files = source_owner
         .finish()
         .expect("discovery source tables should finalize");
@@ -1169,68 +1348,83 @@ fn discover_modules_and_graph_for_test(
     )
 }
 
-fn assert_has_config_error(messages: &CompilerMessages) {
-    assert!(
-        messages
-            .error_diagnostics()
-            .any(|diagnostic| diagnostic.kind.category() == DiagnosticCategory::Config),
-        "expected config-classified diagnostic"
-    );
+pub(super) fn diagnosed_reports<T>(
+    result: &CompilationResult<T>,
+) -> &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("expected a diagnosed compilation result")
+        }
+        Err(errors) => panic!("expected diagnostics, got infrastructure errors: {errors:?}"),
+    }
 }
 
-fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("expected one diagnostic");
+pub(super) fn successful_compilation_value<T>(result: CompilationResult<T>) -> T {
+    match result {
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("expected compilation success, got diagnostics: {reports:?}")
+        }
+        Err(errors) => {
+            panic!("expected compilation success, got infrastructure errors: {errors:?}")
+        }
+    }
+}
 
-    let DiagnosticPayload::InvalidConfig { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected invalid config diagnostic, got {:?}",
-            diagnostic.payload
-        );
-    };
-
-    reason
+fn first_invalid_config<T>(result: &CompilationResult<T>) -> InvalidConfigView {
+    let diagnostic = first_error_diagnostic(result);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected typed invalid-config facts")
 }
 
 fn discover_modules_for_test_messages(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+) -> CompilationResult<ModuleCompilationSchedule> {
     discover_modules_for_test(config, resolver, style_directives)
 }
 
-fn first_error_diagnostic(messages: &CompilerMessages) -> &CompilerDiagnostic {
-    messages
-        .error_diagnostics()
+fn first_error_diagnostic<T>(result: &CompilationResult<T>) -> DiagnosticView<'_> {
+    diagnosed_reports(result)
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
+        .map(|(_, diagnostic)| diagnostic)
         .expect("expected at least one typed error diagnostic")
 }
 
-fn assert_primary_span_text(messages: &CompilerMessages, source_path: &Path, expected_text: &str) {
-    let diagnostic = first_error_diagnostic(messages);
-    let source_files = messages
-        .source_database_for_diagnostic(0)
-        .expect("diagnostic should retain its source database");
+fn assert_primary_span_text<T>(
+    result: &CompilationResult<T>,
+    source_path: &Path,
+    expected_text: &str,
+) {
+    let (report, diagnostic) = diagnosed_reports(result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected a typed error diagnostic with a source owner");
+    let site = diagnostic.primary_site();
+    let span = match site {
+        SiteRef::Absent => panic!("diagnostic should retain its exact primary span"),
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+    };
+    let context = DiagnosticRenderContext::for_report(report);
+    let position = context
+        .site_position(site)
+        .expect("diagnostic should retain its exact source owner");
     let source_path = fs::canonicalize(source_path).expect("diagnostic source path should resolve");
-    let source_id = source_files
-        .get_by_canonical_path(&source_path)
-        .expect("diagnostic source should remain in the source database")
-        .id;
-    let span = diagnostic
-        .primary_span
-        .expect("diagnostic should retain its exact primary span");
-    assert_eq!(span.source(), source_id);
-    let range = span.byte_range(source_files);
-    let source_text = source_files
-        .retained_text(source_id)
-        .expect("diagnostic source snapshot should remain available");
-    assert_eq!(
-        &source_text[range.start() as usize..range.end() as usize],
-        expected_text
-    );
+    assert_eq!(position.source, span.source());
+    assert_eq!(position.host_path, Some(source_path.as_path()));
+    assert_eq!(position.start.line, position.end.line);
+    let excerpt = position
+        .line
+        .chars()
+        .skip(position.start.column as usize)
+        .take((position.end.column - position.start.column) as usize)
+        .collect::<String>();
+    assert_eq!(excerpt, expected_text);
 }
 
 #[derive(Debug)]
@@ -1268,7 +1462,7 @@ impl ExternalImportProvider for RecordingExternalImportProvider {
         &self,
         request: ExternalImportRequest,
         _context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.canonical_paths
             .lock()
             .expect("recorded provider paths lock poisoned")
@@ -1304,7 +1498,7 @@ impl ExternalImportProvider for CanonicalPathPackageProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         let package_path = format!(
             "@test/{}",
             request
@@ -1321,7 +1515,6 @@ impl ExternalImportProvider for CanonicalPathPackageProvider {
             exported_types: vec![ExternalTypeId(package_id.0)],
             exported_free_functions: vec![ExternalFunctionId::Synthetic(package_id.0)],
             runtime_asset: None,
-            diagnostics: vec![],
             required_runtime_imports: vec![],
         }))
     }
@@ -1349,7 +1542,7 @@ impl ExternalImportProvider for CountingExternalImportProvider {
         &self,
         _request: ExternalImportRequest,
         _context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         Ok(None)
     }
@@ -1404,7 +1597,7 @@ impl ExternalImportProvider for ResolvingCountingProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let package_id = context
             .package_registry
@@ -1415,7 +1608,6 @@ impl ExternalImportProvider for ResolvingCountingProvider {
             exported_types: vec![ExternalTypeId(package_id.0)],
             exported_free_functions: vec![ExternalFunctionId::Synthetic(package_id.0)],
             runtime_asset: Some(fixture_js_runtime_asset(request.canonical_source_path)),
-            diagnostics: vec![],
             required_runtime_imports: vec![RequiredRuntimeImport {
                 module_name: "@moth/runtime".to_owned(),
                 imported_names: vec!["mothOk".to_owned()],
@@ -1472,7 +1664,7 @@ fn write_cross_module_project(
     )
 }
 
-fn compiled_package(prefix: &str) -> CompiledSourcePackage {
+pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
     };
@@ -1547,7 +1739,6 @@ fn empty_module() -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity:
                 crate::compiler_frontend::module_compilation::ModuleRootActivity::default(),
@@ -1688,5 +1879,55 @@ fn direct_selection_resolves_source_package_facade() {
                 other => panic!("expected SourcePackageSurface, got {:?}", other),
             }
         },
+    );
+}
+
+#[test]
+fn authored_oversized_snapshot_is_named_by_its_logical_path() {
+    // WHAT: an authored source past the u32 snapshot bound reaches the user as a path-level
+    //       source-span capacity diagnostic, never as a path-less capacity error.
+    // WHY: the rejection belongs to one user file, so the message must name the file to shorten.
+    let source_path = PathBuf::from("/project/huge.moth");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(
+        std::iter::once(&source_path),
+        &source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identities should build");
+    let source_id = database
+        .get_by_canonical_path(&source_path)
+        .expect("the authored source should be registered")
+        .id;
+    let mut path_fork = database.fork_path_interner();
+    let failure = super::source_loading::retained_source_error(
+        SourceDatabaseError::Capacity(SourceCapacityError::SourceSnapshotTooLarge),
+        source_id,
+        &database,
+        &mut path_fork,
+    )
+    .into_failure(&mut string_table, Arc::new(path_fork.shared_table()));
+    let PreparedFailure::Diagnosed(batch) = failure else {
+        panic!("an oversized authored source must produce a diagnosed failure");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let reports = accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("the diagnosed source should freeze");
+    assert_eq!(reports.counts().errors, 1);
+    let (report, diagnostic) = reports
+        .iter()
+        .next()
+        .expect("the oversized source should diagnose once");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0036");
+    let rendered = terse::format_terse_diagnostic_view(
+        diagnostic,
+        DiagnosticRenderContext::for_report(report),
+    );
+    assert!(
+        rendered.contains("Source 'huge.moth' is at least 4294967295 bytes"),
+        "the oversize diagnostic must name the logical path: {rendered}"
     );
 }

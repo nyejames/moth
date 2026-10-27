@@ -1,4 +1,4 @@
--- Plan section 3B: the existing fatal versus source-declared Error! integrity routes, including
+-- The existing fatal versus source-declared Error! integrity routes, including
 -- synthetic start. A fallible external float whose successful payload is non-finite is a fatal
 -- integrity guard in the synthetic entry: the legally placed catch below recovers declared errors,
 -- not the guard, so page execution stops with no output. The binary64 destination delivers the

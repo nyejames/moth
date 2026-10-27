@@ -5,8 +5,11 @@
 //!      valid across growth and before immutable HIR publication.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, HirCapacityResource};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::HirCapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::compiler_capacity_exceeded;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, HirVariantField,
 };
@@ -16,21 +19,21 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 
-/// A source-caused HIR capacity diagnostic or an infrastructure/invariant failure.
+/// A source-caused HIR capacity draft or an infrastructure/invariant failure.
 #[derive(Debug)]
 pub(crate) enum HirConstructionFailure {
-    Diagnosed(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnosed(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
-impl From<CompilerDiagnostic> for HirConstructionFailure {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for HirConstructionFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnosed(diagnostic)
     }
 }
 
-impl From<CompilerError> for HirConstructionFailure {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for HirConstructionFailure {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
@@ -296,10 +299,10 @@ impl HirExpressionStore {
         region: RegionId,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let Some(expression) = self.get_expression(id) else {
-            return Err(Self::infrastructure_failure(
-                format!("HIR expression ID {:?} is outside its dense row store", id),
-                span,
-            ));
+            return Err(Self::infrastructure_failure(format!(
+                "HIR expression ID {:?} is outside its dense row store",
+                id
+            )));
         };
         if expression.span == span && expression.ty == ty && expression.region == region {
             return Ok(id);
@@ -307,15 +310,15 @@ impl HirExpressionStore {
 
         let row_id = self.prepare_expression_append(span)?;
         let Some(mut replacement) = self.get_expression(id).cloned() else {
-            return Err(Self::infrastructure_failure(
-                format!("HIR expression ID {:?} is outside its dense row store", id),
-                span,
-            ));
+            return Err(Self::infrastructure_failure(format!(
+                "HIR expression ID {:?} is outside its dense row store",
+                id
+            )));
         };
         replacement.span = span;
         replacement.ty = ty;
         replacement.region = region;
-        self.building_mut(span)?.rows.push(replacement);
+        self.building_mut()?.rows.push(replacement);
         Ok(row_id)
     }
 
@@ -457,7 +460,7 @@ impl HirExpressionStore {
         row: HirExpression,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let row_id = self.prepare_expression_append(row.span)?;
-        self.building_mut(row.span)?.rows.push(row);
+        self.building_mut()?.rows.push(row);
         Ok(row_id)
     }
 
@@ -468,7 +471,6 @@ impl HirExpressionStore {
         if self.is_frozen() {
             return Err(Self::infrastructure_failure(
                 "attempted to append to a frozen HIR expression store".to_owned(),
-                span,
             ));
         }
         let row_id = HirValueId(
@@ -486,14 +488,11 @@ impl HirExpressionStore {
             ));
         }
 
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.rows.capacity();
         building.rows.try_reserve(1).map_err(|error| {
-            Self::infrastructure_failure(
-                format!("could not reserve a HIR expression row: {error}"),
-                span,
-            )
+            Self::infrastructure_failure(format!("could not reserve a HIR expression row: {error}"))
         })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.rows.capacity() > old_capacity {
@@ -515,14 +514,11 @@ impl HirExpressionStore {
             span,
             self.test_limit(resource),
         )?;
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.values.capacity();
         building.values.try_reserve(values.len()).map_err(|error| {
-            Self::infrastructure_failure(
-                format!("could not reserve HIR value edges: {error}"),
-                span,
-            )
+            Self::infrastructure_failure(format!("could not reserve HIR value edges: {error}"))
         })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.values.capacity() > old_capacity {
@@ -545,17 +541,16 @@ impl HirExpressionStore {
             span,
             self.test_limit(resource),
         )?;
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.struct_fields.capacity();
         building
             .struct_fields
             .try_reserve(fields.len())
             .map_err(|error| {
-                Self::infrastructure_failure(
-                    format!("could not reserve HIR struct fields: {error}"),
-                    span,
-                )
+                Self::infrastructure_failure(format!(
+                    "could not reserve HIR struct fields: {error}"
+                ))
             })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.struct_fields.capacity() > old_capacity {
@@ -578,17 +573,16 @@ impl HirExpressionStore {
             span,
             self.test_limit(resource),
         )?;
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.variant_fields.capacity();
         building
             .variant_fields
             .try_reserve(fields.len())
             .map_err(|error| {
-                Self::infrastructure_failure(
-                    format!("could not reserve HIR variant fields: {error}"),
-                    span,
-                )
+                Self::infrastructure_failure(format!(
+                    "could not reserve HIR variant fields: {error}"
+                ))
             })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.variant_fields.capacity() > old_capacity {
@@ -611,17 +605,14 @@ impl HirExpressionStore {
             span,
             self.test_limit(resource),
         )?;
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.map_entries.capacity();
         building
             .map_entries
             .try_reserve(entries.len())
             .map_err(|error| {
-                Self::infrastructure_failure(
-                    format!("could not reserve HIR map entries: {error}"),
-                    span,
-                )
+                Self::infrastructure_failure(format!("could not reserve HIR map entries: {error}"))
             })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.map_entries.capacity() > old_capacity {
@@ -644,17 +635,16 @@ impl HirExpressionStore {
             span,
             self.test_limit(resource),
         )?;
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.string_pieces.capacity();
         building
             .string_pieces
             .try_reserve(pieces.len())
             .map_err(|error| {
-                Self::infrastructure_failure(
-                    format!("could not reserve HIR string pieces: {error}"),
-                    span,
-                )
+                Self::infrastructure_failure(format!(
+                    "could not reserve HIR string pieces: {error}"
+                ))
             })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.string_pieces.capacity() > old_capacity {
@@ -677,17 +667,16 @@ impl HirExpressionStore {
             span,
             self.test_limit(resource),
         )?;
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.projections.capacity();
         building
             .projections
             .try_reserve(projections.len())
             .map_err(|error| {
-                Self::infrastructure_failure(
-                    format!("could not reserve HIR place projections: {error}"),
-                    span,
-                )
+                Self::infrastructure_failure(format!(
+                    "could not reserve HIR place projections: {error}"
+                ))
             })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.projections.capacity() > old_capacity {
@@ -711,13 +700,11 @@ impl HirExpressionStore {
         let Some(prefix_end) = prefix.start.checked_add(prefix.length) else {
             return Err(Self::infrastructure_failure(
                 "trusted HIR projection range overflowed".to_owned(),
-                span,
             ));
         };
         if self.get_projections(prefix).is_none() {
             return Err(Self::infrastructure_failure(
                 "trusted HIR projection range is outside its side store".to_owned(),
-                span,
             ));
         }
 
@@ -751,17 +738,16 @@ impl HirExpressionStore {
             appended_range
         };
 
-        let building = self.building_mut(span)?;
+        let building = self.building_mut()?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.projections.capacity();
         building
             .projections
             .try_reserve(appended_length)
             .map_err(|error| {
-                Self::infrastructure_failure(
-                    format!("could not reserve HIR place projections: {error}"),
-                    span,
-                )
+                Self::infrastructure_failure(format!(
+                    "could not reserve HIR place projections: {error}"
+                ))
             })?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         if building.projections.capacity() > old_capacity {
@@ -954,7 +940,6 @@ impl HirExpressionStore {
         if self.is_frozen() {
             return Err(Self::infrastructure_failure(
                 "attempted to append to a frozen HIR expression store".to_owned(),
-                span,
             ));
         }
         let Some(end) = current_len.checked_add(append_len) else {
@@ -976,15 +961,11 @@ impl HirExpressionStore {
         Ok(R::from_checked_parts(start, length))
     }
 
-    fn building_mut(
-        &mut self,
-        span: Option<SourceSpan>,
-    ) -> Result<&mut BuildingHirExpressionStore, HirConstructionFailure> {
+    fn building_mut(&mut self) -> Result<&mut BuildingHirExpressionStore, HirConstructionFailure> {
         match &mut self.storage {
             HirExpressionStoreStorage::Building(store) => Ok(store),
             HirExpressionStoreStorage::Frozen(_) => Err(Self::infrastructure_failure(
                 "attempted to append to a frozen HIR expression store".to_owned(),
-                span,
             )),
         }
     }
@@ -993,11 +974,11 @@ impl HirExpressionStore {
         resource: HirCapacityResource,
         span: Option<SourceSpan>,
     ) -> HirConstructionFailure {
-        CompilerDiagnostic::compiler_capacity_exceeded(resource, span).into()
+        compiler_capacity_exceeded(resource, span).into()
     }
 
-    fn infrastructure_failure(message: String, span: Option<SourceSpan>) -> HirConstructionFailure {
-        CompilerError::new(message, span, ErrorType::Compiler).into()
+    fn infrastructure_failure(message: String) -> HirConstructionFailure {
+        InfrastructureFailure::internal(CompilerStage::HirConstruction, message).into()
     }
 
     fn row_slice(&self) -> &[HirExpression] {

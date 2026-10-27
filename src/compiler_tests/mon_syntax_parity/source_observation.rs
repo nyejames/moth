@@ -170,13 +170,7 @@ pub(super) fn observe_start_body_call_arguments(
     function_name: &str,
 ) -> Vec<ObservedCallArgument> {
     let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
-        .unwrap_or_else(|diagnostic| {
-            panic!(
-                "source call fixture could not be compiled: {} {:?}",
-                diagnostic.identity().code,
-                diagnostic.payload
-            )
-        });
+        .unwrap_or_else(|failure| panic!("source call fixture could not be compiled: {failure:?}"));
     let ast = &build_result.ast;
     let context = ObservationContext {
         ast,

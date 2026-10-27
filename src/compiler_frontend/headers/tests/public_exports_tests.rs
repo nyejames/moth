@@ -6,8 +6,10 @@
 //! without storing test-only logic in the production collector module.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::headers::types::HeaderParseFailure;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::DuplicatePublicExportView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -55,10 +57,30 @@ fn duplicate_public_export_retains_first_owner_span_across_passes() {
         panic!("duplicate public export must be a source diagnostic");
     };
 
-    assert_eq!(diagnostic.primary_span, Some(duplicate_span));
-    assert_eq!(diagnostic.labels[0].span, Some(first_span));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::DuplicatePublicExport { .. }
-    ));
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected duplicate export diagnostic");
+    assert_eq!(
+        match diagnostic.primary_site() {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        },
+        Some(duplicate_span)
+    );
+    assert_eq!(
+        diagnostic
+            .durable_labels()
+            .next()
+            .and_then(|label| match label.site {
+                SiteRef::Absent => None,
+                SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+            }),
+        Some(first_span)
+    );
+    assert!(
+        diagnostic
+            .family_view::<DuplicatePublicExportView>()
+            .is_some()
+    );
 }

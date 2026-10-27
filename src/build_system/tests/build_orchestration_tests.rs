@@ -5,8 +5,7 @@
 use super::*;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildResult, DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder,
-    build_project,
+    DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder, build_project,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 #[cfg(unix)]
@@ -18,76 +17,85 @@ use crate::build_system::output::{
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
-#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
+    DiagnosticBag, DiagnosticCategory, DiagnosticSeverity,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
 };
-use crate::compiler_tests::test_diagnostics::{
-    assert_no_infrastructure_errors, assert_output_rejection,
-};
+use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
-    messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|(diagnostic_index, diagnostic)| {
-            terse::format_terse_diagnostic_with_context(
-                diagnostic,
-                messages.diagnostic_render_context(diagnostic_index),
-            )
+fn rendered_error_messages<T>(messages: &CompilationResult<T>) -> Vec<String> {
+    diagnosed_reports(messages)
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| {
+            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report))
         })
         .collect()
 }
 
-fn assert_has_config_error(messages: &CompilerMessages) {
+fn assert_has_config_error<T>(messages: &CompilationResult<T>) {
     assert!(
-        messages
-            .error_diagnostics()
-            .any(|diagnostic| diagnostic.kind.category() == DiagnosticCategory::Config),
+        diagnosed_reports(messages)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.category() == DiagnosticCategory::Config),
         "expected config-classified diagnostic"
     );
 }
 
-fn assert_invalid_project_setting(
-    messages: &CompilerMessages,
-    expected_key: &str,
-    expected_value: &str,
-) {
-    let has_expected_diagnostic = messages.error_diagnostics().any(|diagnostic| {
-        let DiagnosticPayload::InvalidConfig {
-            key: Some(key),
-            reason: InvalidConfigReason::InvalidProjectSettingValue { value, .. },
-        } = &diagnostic.payload
-        else {
-            return false;
-        };
-
-        messages.string_table.resolve(*key) == expected_key
-            && messages.string_table.resolve(*value) == expected_value
-    });
-
-    assert!(
-        has_expected_diagnostic,
-        "expected invalid project setting diagnostic for {expected_key}={expected_value}"
-    );
+fn prepared_warning_accumulator(
+    diagnostic: DiagnosticDraft,
+    root_string_table: crate::compiler_frontend::symbols::string_interning::StringTable,
+    source_database: Arc<SourceDatabase>,
+    domain: StablePackageIdentity,
+    project_source_database: Arc<SourceDatabase>,
+) -> BoundaryAccumulator {
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from(diagnostic),
+        &root_string_table,
+        None,
+        || None,
+    )
+    .expect("fixture warning should capture in the build root string domain");
+    let donor_batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::new(),
+        &root_string_table,
+        None,
+        || None,
+    )
+    .expect("empty donor batch should capture in the build root string domain");
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
+    accumulator.append_prepared(batch, None);
+    accumulator.append_prepared(donor_batch, Some((source_database, Some(domain))));
+    accumulator.set_project_source_database(project_source_database);
+    accumulator
+}
+fn successful_warning_compilation(warning_owner: BoundaryAccumulator) -> CompilationResult<()> {
+    warning_owner
+        .finish(InstallMode::Frozen)
+        .map(|warnings| CompilationOutcome::Success {
+            value: (),
+            warnings: Some(warnings),
+        })
 }
 
 #[test]
-fn build_project_returns_result_without_writing_files() {
+fn build_project_returns_staged_result_before_writing_files() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -95,60 +103,88 @@ fn build_project_returns_result_without_writing_files() {
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
     let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-    let mut result = build_project(
+    let result = build_project(
         &builder,
         entry_file
             .to_str()
             .expect("temp file path should be valid UTF-8 for this test"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("build should succeed");
+    );
+    let Ok(CompilationOutcome::Success {
+        value: result,
+        warnings,
+    }) = result
+    else {
+        panic!("clean build should succeed without diagnostics");
+    };
 
     assert!(!result.project.output_files.is_empty());
     assert_path_missing(&root.join("index.html"));
     assert!(
-        result.take_warning_messages().is_none(),
-        "clean build should publish no warning report"
-    );
-    assert_eq!(
-        result.string_table.len(),
-        0,
-        "clean build should release its compiler identity table at the report boundary"
+        warnings.is_none(),
+        "the core build boundary should leave warning publication to its command owner"
     );
     assert!(
-        result.source_database.is_none(),
-        "clean build should not retain a source database"
+        result.source_database.is_some(),
+        "the output owner needs source context until its final diagnostic boundary"
     );
+    let Ok(CompilationOutcome::Success {
+        value: final_result,
+        warnings: final_warnings,
+    }) = result.finish_output(Ok(()))
+    else {
+        panic!("clean output finalization should succeed without diagnostics");
+    };
+    assert!(final_result.source_database.is_none());
+    assert!(final_warnings.is_none());
 }
-
 #[test]
-fn build_project_preserves_builder_warnings_in_build_result() {
+fn build_output_owner_preserves_frontend_warnings_in_success_outcome() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
+    let entry_file = root.join("main.moth");
+    fs::write(
+        &entry_file,
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write source with a frontend warning");
 
-    fs::write(root.join("main.moth"), "value = 1\n").expect("should write source file");
+    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let result = build_project(
+        &builder,
+        entry_file
+            .to_str()
+            .expect("temp file path should be valid UTF-8 for this test"),
+        &[],
+        &BuildConfigInputSet::new(),
+    );
+    let Ok(CompilationOutcome::Success {
+        value: build_result,
+        warnings: None,
+    }) = result
+    else {
+        panic!("core build should stage frontend warnings without freezing them");
+    };
+    let Ok(CompilationOutcome::Success {
+        value: build_result,
+        warnings: Some(warnings),
+    }) = build_result.finish_output(Ok(()))
+    else {
+        panic!("output owner should freeze the successful frontend warning");
+    };
 
-    {
-        let _cwd_guard = CurrentDirGuard::set_to(&root);
-
-        let result = build_project(
-            &ProjectBuilder::new(WarningBuilder),
-            "main.moth",
-            &[],
-            &BuildConfigInputSet::new(),
-        )
-        .expect("build should succeed");
-
-        assert!(
-            result.warnings.len() == 1,
-            "build result should include backend warnings"
-        );
-    }
+    assert_eq!(warnings.counts().warnings, 1);
+    assert!(build_result.source_database.is_none());
+    let warning_codes = warnings
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(warning_codes, vec!["MOTH-RULE-0022".to_owned()]);
 }
 
 #[test]
-fn build_result_warning_handoff_resolves_generated_donor_source_context() {
+fn successful_compilation_warning_resolves_generated_donor_source_context() {
     let project_temp = tempfile::tempdir().expect("should create project temp dir");
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let project_root = project_temp.path().join("src");
@@ -204,7 +240,7 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span =
         LocalSpan::exact(0, 1, &mut span_builder).expect("warning span should fit inline");
-    let warning = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+    let warning = choices_control_flow::unreachable_match_arm(Some(SourceSpan::new(
         package_source_id,
         local_span,
     )))
@@ -212,44 +248,30 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
         package_identity.clone(),
     ));
 
-    let mut result = BuildResult {
-        project: Project {
-            output_files: Vec::new(),
-            entry_page_rel: None,
-            cleanup_policy: generic_cleanup_policy(),
-            warnings: Vec::new(),
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        },
-        config: Config::new(project_temp.path().to_path_buf()),
-        warnings: vec![warning],
+    let warning_owner = prepared_warning_accumulator(
+        warning,
         string_table,
-        warning_source_contexts: vec![RenderSourceContext {
-            diagnostic_range: 0..0,
-            source_database: Arc::clone(&package_database),
-            domain: Some(package_identity),
-        }],
-        source_database: Some(Arc::clone(&project_database)),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Test,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    };
+        Arc::clone(&package_database),
+        package_identity,
+        Arc::clone(&project_database),
+    );
     drop(package_database);
     drop(project_database);
+    let result = successful_warning_compilation(warning_owner);
 
-    let messages = result
-        .take_warning_messages()
-        .expect("spanful warning should produce a report");
-    assert!(!messages.has_infrastructure_error(), "{messages:?}");
-    let diagnostic = messages
-        .diagnostics()
+    let Ok(CompilationOutcome::Success {
+        warnings: Some(reports),
+        ..
+    }) = &result
+    else {
+        panic!("warning handoff should remain a successful compilation: {result:?}");
+    };
+    let (report, view) = reports
+        .iter()
         .next()
         .expect("warning report should retain its diagnostic");
-    let position = messages
-        .diagnostic_render_context(0)
-        .primary_position(diagnostic)
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("donor warning should resolve through its package identity");
     assert_eq!(position.host_path, Some(package_path.as_path()));
     assert!(
@@ -265,7 +287,7 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
 }
 
 #[test]
-fn build_result_warning_handoff_keeps_related_package_label_out_of_default_context() {
+fn successful_compilation_warning_keeps_related_package_label_out_of_default_context() {
     let project_temp = tempfile::tempdir().expect("should create project temp dir");
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let project_root = project_temp.path().join("src");
@@ -322,54 +344,41 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
     let local_span =
         LocalSpan::exact(0, 1, &mut span_builder).expect("diagnostic span should fit inline");
     let package_handle = FrozenIdentityHandle::for_domain(package_identity.clone());
-    let diagnostic = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+    let diagnostic = choices_control_flow::unreachable_match_arm(Some(SourceSpan::new(
         project_source_id,
         local_span,
     )))
-    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+    .with_label(
         Some(SourceSpan::new(package_source_id, local_span)),
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-        package_handle,
-    )]);
+        Some(LabelDraftMessage::GenericInstantiationBodySite),
+    )
+    .with_label_frozen_identity_handle(0, package_handle);
 
-    let mut result = BuildResult {
-        project: Project {
-            output_files: Vec::new(),
-            entry_page_rel: None,
-            cleanup_policy: generic_cleanup_policy(),
-            warnings: Vec::new(),
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        },
-        config: Config::new(project_temp.path().to_path_buf()),
-        warnings: vec![diagnostic],
+    let warning_owner = prepared_warning_accumulator(
+        diagnostic,
         string_table,
-        warning_source_contexts: vec![RenderSourceContext {
-            diagnostic_range: 0..0,
-            source_database: Arc::clone(&package_database),
-            domain: Some(package_identity),
-        }],
-        source_database: Some(Arc::clone(&project_database)),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Test,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    };
+        Arc::clone(&package_database),
+        package_identity,
+        Arc::clone(&project_database),
+    );
     drop(package_database);
     drop(project_database);
+    let result = successful_warning_compilation(warning_owner);
 
-    let messages = result
-        .take_warning_messages()
-        .expect("spanful warning should produce a report");
-    assert!(!messages.has_infrastructure_error(), "{messages:?}");
-    let diagnostic = messages
-        .diagnostics()
+    let Ok(CompilationOutcome::Success {
+        warnings: Some(reports),
+        ..
+    }) = &result
+    else {
+        panic!("warning handoff should remain a successful compilation: {result:?}");
+    };
+    let (report, view) = reports
+        .iter()
         .next()
         .expect("warning report should retain its diagnostic");
-    let context = messages.diagnostic_render_context(0);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("ownerless primary should use the project default context");
     assert_eq!(primary.host_path, Some(project_path.as_path()));
     assert!(
@@ -377,76 +386,18 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
         "ownerless primary should render the project snapshot: {}",
         primary.line
     );
+    let label = view
+        .durable_labels()
+        .next()
+        .expect("package-owned secondary label should remain");
     let label = context
-        .label_position(&diagnostic.labels[0])
+        .site_position(label.site)
         .expect("package-owned secondary label should resolve through its explicit owner");
     assert_eq!(label.host_path, Some(package_path.as_path()));
     assert!(
         label.line.contains("package_snapshot"),
         "package-owned secondary label should render the package snapshot: {}",
         label.line
-    );
-}
-
-#[test]
-fn build_project_preserves_package_warnings_on_late_backend_failure() {
-    let _temp = tempfile::tempdir().expect("should create temporary project");
-    let root = _temp.path().to_path_buf();
-    let package = root.join("packages/warnpkg");
-    let src = root.join("src");
-    fs::create_dir_all(&package).expect("should create package root");
-    fs::create_dir_all(&src).expect("should create project source root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"late_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write project config");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
-    fs::write(
-        package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
-    )
-    .expect("should write warning package root");
-
-    let builder = ProjectBuilder::new(LateFailureBuilder {
-        package_root: package,
-    });
-    let Err(messages) = build_project(
-        &builder,
-        root.to_str().expect("project path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    ) else {
-        panic!("late backend failure should return compiler messages");
-    };
-
-    assert!(messages.has_infrastructure_error());
-    assert!(
-        messages.warning_count() >= 1,
-        "frontend package warnings must survive a late backend failure"
-    );
-    let warning_contexts_are_frozen = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Warning)
-        .map(|(index, diagnostic)| {
-            (
-                messages
-                    .diagnostic_render_context(index)
-                    .frozen_identity
-                    .is_some(),
-                terse::format_terse_diagnostic_with_context(
-                    diagnostic,
-                    messages.diagnostic_render_context(index),
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        warning_contexts_are_frozen
-            .iter()
-            .any(|(frozen, rendered)| *frozen && rendered.contains("@mod.moth")),
-        "package warning should retain a frozen package source owner: {warning_contexts_are_frozen:?}"
     );
 }
 
@@ -467,8 +418,12 @@ fn build_project_calls_validate_project_config() {
             built: built.clone(),
         });
 
-        build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-            .expect("build should succeed");
+        successful_compilation_value(build_project(
+            &builder,
+            "main.moth",
+            &[],
+            &BuildConfigInputSet::new(),
+        ));
 
         assert!(
             validated.load(std::sync::atomic::Ordering::SeqCst),
@@ -502,13 +457,12 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
         entry_count: entry_count.clone(),
     });
 
-    build_project(
+    successful_compilation_value(build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("directory frontend and test backend should succeed");
+    ));
 
     assert_eq!(module_count.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert_eq!(entry_count.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -545,10 +499,8 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("diagnosed module should fail project compilation");
-    };
-    assert_no_infrastructure_errors(&messages);
+    let reports = diagnosed_reports(&result);
+    assert_eq!(reports.counts().errors, 1);
     assert!(validated.load(std::sync::atomic::Ordering::SeqCst));
     assert!(
         !built.load(std::sync::atomic::Ordering::SeqCst),
@@ -583,13 +535,14 @@ fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
         ],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
 
-    let summary = write_project_outputs(&project, &always_write_options(root.clone(), None))
-        .expect("writer should succeed");
+    let summary = successful_compilation_value(write_project_outputs(
+        &project,
+        &always_write_options(root.clone(), None),
+    ));
 
     // The reported destinations are the writer's own account of what it emitted, in preparation
     // order. The `NotBuilt` entry is deliberately absent rather than reported as an empty write.
@@ -641,7 +594,6 @@ fn write_project_outputs_rejects_invalid_paths() {
             )],
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
@@ -652,7 +604,6 @@ fn write_project_outputs_rejects_invalid_paths() {
             )],
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
@@ -663,7 +614,6 @@ fn write_project_outputs_rejects_invalid_paths() {
             )],
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
@@ -674,7 +624,6 @@ fn write_project_outputs_rejects_invalid_paths() {
             )],
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
@@ -685,7 +634,7 @@ fn write_project_outputs_rejects_invalid_paths() {
         let Err(messages) = result else {
             panic!("invalid output path should be rejected");
         };
-        assert_output_rejection(&messages, "invalid-relative-output-path");
+        assert_output_rejection(&Err(messages), "invalid-relative-output-path");
     }
 }
 
@@ -707,7 +656,6 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         ],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -718,7 +666,7 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("reserved manifest destination should be rejected");
     };
-    assert_output_rejection(&messages, "reserved-manifest-destination");
+    assert_output_rejection(&Err(messages), "reserved-manifest-destination");
     assert_path_missing(&collision_root.join("index.html"));
     assert_path_missing(&collision_root.join(".moth_manifest"));
 
@@ -741,7 +689,6 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
             ],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         };
@@ -752,7 +699,7 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
         let Err(messages) = result else {
             panic!("reserved manifest descendant should be rejected");
         };
-        assert_output_rejection(&messages, "reserved-manifest-destination");
+        assert_output_rejection(&Err(messages), "reserved-manifest-destination");
         assert_path_missing(&descendant_root.join("index.html"));
         assert_path_missing(&descendant_root.join(".moth_manifest"));
 
@@ -777,7 +724,7 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("reserved manifest directory should be rejected");
     };
-    assert_output_rejection(&messages, "manifest-not-regular-file");
+    assert_output_rejection(&Err(messages), "manifest-not-regular-file");
     assert_path_missing(&directory_root.join("index.html"));
     assert_directory(&directory_root.join(".moth_manifest"));
 }
@@ -821,7 +768,7 @@ fn manifest_symlink_destinations_are_rejected_before_emission() {
         let Err(messages) = result else {
             panic!("manifest symlink destination should be rejected");
         };
-        assert_output_rejection(&messages, "manifest-not-regular-file");
+        assert_output_rejection(&Err(messages), "manifest-not-regular-file");
         assert_path_missing(&root.join("index.html"));
         assert!(
             fs::symlink_metadata(root.join(".moth_manifest"))
@@ -889,7 +836,6 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             ],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         };
@@ -904,7 +850,7 @@ fn output_alias_to_manifest_destination_is_rejected_before_emission() {
             "descendant_literal_backslash" => "non-lossless-canonical-path",
             _ => unreachable!("unexpected case: {case_name}"),
         };
-        assert_output_rejection(&messages, expected_reason);
+        assert_output_rejection(&Err(messages), expected_reason);
         assert_path_missing(&root.join("index.html"));
         assert_eq!(
             fs::read(&target).expect("case-variant target should remain unchanged"),
@@ -977,7 +923,6 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
             ],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         };
@@ -985,7 +930,7 @@ fn non_portable_canonical_aliases_are_rejected_before_emission() {
         let Err(messages) = result else {
             panic!("non-portable canonical aliases must be rejected before emission: {case_name}");
         };
-        assert_output_rejection(&messages, "non-lossless-canonical-path");
+        assert_output_rejection(&Err(messages), "non-lossless-canonical-path");
         assert_path_missing(&root.join("index.html"));
         assert_eq!(
             fs::read(&target).expect("non-portable target should remain unchanged"),
@@ -1022,7 +967,6 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
         ],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1031,7 +975,7 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("invalid UTF-8 output paths must be rejected before emission");
     };
-    assert_output_rejection(&messages, "invalid-relative-output-path");
+    assert_output_rejection(&Err(messages), "invalid-relative-output-path");
     assert_path_missing(&root.join("index.html"));
     assert_path_missing(&root.join("safe-�-file.js"));
     assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
@@ -1071,7 +1015,6 @@ fn canonical_case_collisions_are_rejected_before_emission() {
         ],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1080,7 +1023,7 @@ fn canonical_case_collisions_are_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("canonical case-only aliases must be rejected before emission");
     };
-    assert_output_rejection(&messages, "canonical-destination-collision");
+    assert_output_rejection(&Err(messages), "canonical-destination-collision");
     assert_path_missing(&root.join("index.html"));
     assert_eq!(
         fs::read(&lower_target).expect("lower target should remain unchanged"),
@@ -1148,7 +1091,6 @@ fn hard_linked_outputs_are_rejected_before_emission() {
             output_files,
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: html_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         };
@@ -1163,7 +1105,7 @@ fn hard_linked_outputs_are_rejected_before_emission() {
             "output_to_manifest" | "output_to_outside" => "hard-linked-destination",
             _ => unreachable!("unexpected case: {case_name}"),
         };
-        assert_output_rejection(&messages, expected_reason);
+        assert_output_rejection(&Err(messages), expected_reason);
         assert_path_missing(&root.join("index.html"));
         match case_name {
             "output_to_manifest" => {
@@ -1224,7 +1166,6 @@ fn file_output_to_existing_directory_is_rejected_before_emission() {
         ],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1233,7 +1174,7 @@ fn file_output_to_existing_directory_is_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("file outputs must reject existing directories before emission");
     };
-    assert_output_rejection(&messages, "file-destination-exists-as-non-file");
+    assert_output_rejection(&Err(messages), "file-destination-exists-as-non-file");
     assert_path_missing(&root.join("index.html"));
     assert_directory(&root.join("occupied"));
     assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
@@ -1258,14 +1199,14 @@ fn skip_unchanged_mode_reports_an_identical_destination_as_skipped() {
     );
     let options = skip_unchanged_options(root.clone(), None);
 
-    let first = write_project_outputs(&project, &options).expect("first write should succeed");
+    let first = successful_compilation_value(write_project_outputs(&project, &options));
     assert_eq!(
         first.outcome_for(Path::new("index.html")),
         Some(OutputWriteOutcome::Written),
         "the first write has nothing to compare against and must emit the file"
     );
 
-    let second = write_project_outputs(&project, &options).expect("second write should succeed");
+    let second = successful_compilation_value(write_project_outputs(&project, &options));
     assert_eq!(
         second.outcome_for(Path::new("index.html")),
         Some(OutputWriteOutcome::SkippedUnchanged),
@@ -1300,11 +1241,10 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
         ],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &initial_project,
         &skip_unchanged_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("initial write should succeed");
+    ));
 
     let follow_up_project = html_project(
         vec![OutputFile::new(
@@ -1313,11 +1253,10 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    let follow_up = write_project_outputs(
+    let follow_up = successful_compilation_value(write_project_outputs(
         &follow_up_project,
         &skip_unchanged_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("follow-up write should succeed");
+    ));
 
     assert_eq!(
         follow_up.outcome_for(Path::new("index.html")),
@@ -1328,7 +1267,7 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
 }
 
 #[test]
-fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() {
+fn build_project_preserves_frontend_signature_diagnostic_source_position() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1341,37 +1280,20 @@ fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() 
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
         let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-        let Err(messages) = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-        else {
-            panic!("build should fail with a frontend signature diagnostic");
-        };
-        let errors = messages.error_diagnostics().collect::<Vec<_>>();
-
-        assert!(
-            errors
-                .iter()
-                .any(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035"),
-            "expected the named-type diagnostic to be preserved"
-        );
-        let identity = messages
-            .frozen_identity_context_for_diagnostic(0)
-            .expect("frontend diagnostics should retain their frozen identity context");
-        let diagnostic = errors
+        let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new());
+        let (report, view) = diagnosed_reports(&result)
             .iter()
-            .find(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035")
+            .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0035")
             .expect("named-type diagnostic should be retained");
-        let source_span = diagnostic
-            .primary_span
-            .expect("frontend diagnostic should retain its authored span");
-        let source = identity
-            .get(source_span.source())
-            .expect("frozen identity should resolve the diagnostic source");
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
+            .expect("frontend diagnostic should retain its authored source position");
         let canonical_path =
             fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize");
         assert_eq!(
-            source.canonical_os_path.as_deref(),
+            position.host_path,
             Some(canonical_path.as_path()),
-            "frozen identity should retain the diagnostic source's canonical path"
+            "frontend diagnostic should retain its source path"
         );
     }
 }
@@ -1389,12 +1311,9 @@ fn config_validation_failure_returns_config_error_before_compilation() {
         let builder = ProjectBuilder::new(FailingValidationBuilder);
         let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new());
 
-        let Err(messages) = result else {
-            panic!("build_project should fail when config validation fails");
-        };
-        assert_has_config_error(&messages);
+        assert_has_config_error(&result);
         assert!(
-            rendered_error_messages(&messages)
+            rendered_error_messages(&result)
                 .iter()
                 .any(|message| message.contains("fake_config_error")),
             "expected fake config validation message"
@@ -1407,10 +1326,13 @@ fn validated_output_settings_select_default_profile_roots() {
     let root = unused_temp_path("output_defaults");
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
-    let settings = crate::build_system::project_config::validate_directory_output_settings(
-        &config,
-        &mut string_table,
-    )
+    let settings = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        crate::build_system::project_config::validate_directory_output_settings(
+            &config,
+            &mut diagnostic_strings,
+        )
+    }
     .expect("default output folders should validate");
 
     assert_eq!(settings.dev.resolved_path, root.join("dev"));
@@ -1439,10 +1361,13 @@ fn validated_output_settings_preserve_configured_profile_roots() {
     config.html_section.dev_output = Some("preview".to_owned());
     config.html_section.release_output = Some("public".to_owned());
     let mut string_table = StringTable::new();
-    let settings = crate::build_system::project_config::validate_directory_output_settings(
-        &config,
-        &mut string_table,
-    )
+    let settings = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        crate::build_system::project_config::validate_directory_output_settings(
+            &config,
+            &mut diagnostic_strings,
+        )
+    }
     .expect("configured output folders should validate");
 
     assert_eq!(settings.dev.resolved_path, root.join("preview"));
@@ -1485,13 +1410,7 @@ html #= (
         &BuildConfigInputSet::new(),
     );
 
-    assert!(
-        result.is_ok(),
-        "Stage 0 must skip the normalized output root instead of compiling stale output: {:?}",
-        result
-            .err()
-            .map(|messages| rendered_error_messages(&messages))
-    );
+    successful_compilation_value(result);
 }
 
 #[cfg(unix)]
@@ -1535,13 +1454,7 @@ html #= (
         &BuildConfigInputSet::new(),
     );
 
-    assert!(
-        result.is_ok(),
-        "Stage 0 must skip the output root reached through a symlink ancestor: {:?}",
-        result
-            .err()
-            .map(|messages| rendered_error_messages(&messages))
-    );
+    successful_compilation_value(result);
 }
 
 #[cfg(unix)]
@@ -1587,18 +1500,13 @@ html #= (
         &BuildConfigInputSet::new(),
     );
 
-    assert!(
-        result.is_ok(),
-        "Stage 0 must skip symlink aliases that target output descendants: {:?}",
-        result
-            .err()
-            .map(|messages| rendered_error_messages(&messages))
-    );
+    successful_compilation_value(result);
 }
 
 #[cfg(unix)]
 #[test]
 fn validated_output_settings_reject_canonical_root_aliases() {
+    use crate::compiler_frontend::compiler_messages::PreparedFailure;
     use std::os::unix::fs::symlink;
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -1615,45 +1523,61 @@ fn validated_output_settings_reject_canonical_root_aliases() {
     config.html_section.dev_output = Some("dev-alias".to_owned());
     config.html_section.release_output = Some("release-alias".to_owned());
     let mut string_table = StringTable::new();
-    let errors = crate::build_system::project_config::validate_directory_output_settings(
-        &config,
-        &mut string_table,
-    )
+    let errors = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        crate::build_system::project_config::validate_directory_output_settings(
+            &config,
+            &mut diagnostic_strings,
+        )
+    }
     .expect_err("canonical output-root aliases must be rejected");
 
-    let diagnostic = errors
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(errors),
+        &string_table,
+        None,
+        || None,
+    )
+    .expect("output settings should capture in the build root string domain");
+    let failure = freeze_prepared_failure::<()>(PreparedFailure::Diagnosed(batch), string_table);
+    let (report, view) = diagnosed_reports(&failure)
         .iter()
-        .find(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::OutputFoldersNotDistinct { .. },
-                    ..
-                }
-            )
+        .find(|(_, view)| {
+            view.family_view::<InvalidConfigView>()
+                .is_some_and(|facts| facts.reason == InvalidConfigCode::OutputFoldersNotDistinct)
         })
-        .expect("canonical alias should produce an output-folder collision diagnostic");
-    let DiagnosticPayload::InvalidConfig {
-        reason:
-            InvalidConfigReason::OutputFoldersNotDistinct {
-                dev_folder,
-                release_folder,
-            },
-        ..
-    } = &diagnostic.payload
-    else {
-        unreachable!("the diagnostic was matched above");
-    };
-    assert_eq!(string_table.resolve(*dev_folder), "dev-alias");
-    assert_eq!(string_table.resolve(*release_folder), "release-alias");
+        .expect("output-folder collision should remain in the boundary report");
+    let facts = view
+        .family_view::<InvalidConfigView>()
+        .expect("output-folder collision should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::OutputFoldersNotDistinct);
+    let strings = view.string_ids();
     assert_eq!(
-        diagnostic.primary_span, None,
-        "synthetic Config values have no authored source span",
+        DiagnosticRenderContext::for_report(report)
+            .string_table
+            .resolve(*strings.first().expect("dev output fact should be retained")),
+        "dev-alias",
     );
-    let rendered = terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        DiagnosticRenderContext::new(&string_table),
+    assert_eq!(
+        DiagnosticRenderContext::for_report(report)
+            .string_table
+            .resolve(
+                *strings
+                    .get(1)
+                    .expect("release output fact should be retained")
+            ),
+        "release-alias",
     );
+    assert!(matches!(
+        view.primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+    ));
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_config.output_folders_not_distinct")
+    );
+    let rendered =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
     assert!(
         rendered.contains("resolve to the same output root and must be distinct"),
         "canonical-alias rejection should explain the physical output-root conflict: {rendered}"
@@ -1683,14 +1607,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("missing root homepage should fail");
-    };
-    assert_has_config_error(&messages);
-    assert!(
-        messages.infrastructure_errors().is_none(),
-        "missing homepage should stay as a typed config diagnostic"
-    );
+    assert_has_config_error(&result);
 }
 
 #[test]
@@ -1714,11 +1631,32 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("invalid page URL style should fail build");
-    };
-    assert_has_config_error(&messages);
-    assert_invalid_project_setting(&messages, "page_url_style", "slashy");
+    let (report, view) = diagnosed_reports(&result)
+        .iter()
+        .find(|(_, view)| {
+            view.family_view::<InvalidConfigView>()
+                .is_some_and(|facts| facts.reason == InvalidConfigCode::InvalidProjectSettingValue)
+        })
+        .expect("invalid page_url_style should remain a typed config diagnostic");
+    let facts = view
+        .family_view::<InvalidConfigView>()
+        .expect("invalid page_url_style should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidProjectSettingValue);
+    let strings = view.string_ids();
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.string_table.resolve(strings[0]),
+        "slashy",
+        "page_url_style rejection should report the exact invalid value",
+    );
+    assert_eq!(
+        context.string_table.resolve(
+            *strings
+                .last()
+                .expect("page_url_style key should be present")
+        ),
+        "page_url_style",
+    );
 }
 
 // -------------------------
@@ -1743,7 +1681,6 @@ fn duplicate_output_destination_causes_zero_files_written() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1752,7 +1689,7 @@ fn duplicate_output_destination_causes_zero_files_written() {
     let Err(messages) = result else {
         panic!("duplicate output path should be rejected");
     };
-    assert_output_rejection(&messages, "duplicate-destination");
+    assert_output_rejection(&Err(messages), "duplicate-destination");
 
     assert_path_missing(&root.join("index.html"));
 }
@@ -1775,7 +1712,6 @@ fn windows_ambiguous_output_aliases_fail_before_emission() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1784,7 +1720,7 @@ fn windows_ambiguous_output_aliases_fail_before_emission() {
     let Err(messages) = result else {
         panic!("Windows-normalized output aliases must fail during preflight");
     };
-    assert_output_rejection(&messages, "invalid-relative-output-path");
+    assert_output_rejection(&Err(messages), "invalid-relative-output-path");
     assert_path_missing(&root.join("page.js"));
     assert_path_missing(&root.join("page.js."));
 }
@@ -1807,7 +1743,6 @@ fn file_ancestor_conflict_causes_zero_files_written() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1816,7 +1751,7 @@ fn file_ancestor_conflict_causes_zero_files_written() {
     let Err(messages) = result else {
         panic!("a file cannot contain a child output");
     };
-    assert_output_rejection(&messages, "file-ancestor-conflict");
+    assert_output_rejection(&Err(messages), "file-ancestor-conflict");
     assert_path_missing(&root.join("assets"));
 }
 
@@ -1842,7 +1777,6 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
             output_files,
             entry_page_rel: None,
             cleanup_policy: generic_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         };
@@ -1851,7 +1785,7 @@ fn file_ancestor_conflict_uses_component_boundaries_before_emission() {
         let Err(messages) = result else {
             panic!("a file ancestor must be rejected regardless of lexical sibling ordering");
         };
-        assert_output_rejection(&messages, "file-ancestor-conflict");
+        assert_output_rejection(&Err(messages), "file-ancestor-conflict");
         assert!(
             fs::read_dir(&root)
                 .expect("output root should remain readable")
@@ -1883,7 +1817,6 @@ fn deferred_resource_file_ancestor_conflict_stays_unhashed() {
         )],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: vec![DeferredResourceOutput {
             relative_output_path: PathBuf::from("assets/app.js/logo.bin"),
             source_id,
@@ -1901,6 +1834,7 @@ fn deferred_resource_file_ancestor_conflict_stays_unhashed() {
         panic!("a deferred resource below a file output must be rejected");
     };
 
+    let messages = freeze_prepared_failure(messages, string_table);
     assert_output_rejection(&messages, "file-ancestor-conflict");
     assert_eq!(
         project.resource_inputs.records()[0].content(),
@@ -1935,7 +1869,6 @@ fn deferred_resource_symlink_destination_conflict_stays_unhashed() {
         )],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: vec![DeferredResourceOutput {
             relative_output_path: PathBuf::from("alias/logo.bin"),
             source_id,
@@ -1953,6 +1886,7 @@ fn deferred_resource_symlink_destination_conflict_stays_unhashed() {
         panic!("canonical aliases must reject a deferred resource before emission");
     };
 
+    let messages = freeze_prepared_failure(messages, string_table);
     assert_output_rejection(&messages, "canonical-destination-collision");
     assert_eq!(
         project.resource_inputs.records()[0].content(),
@@ -1977,7 +1911,6 @@ fn explicit_directory_output_may_contain_child_files() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2006,7 +1939,6 @@ fn file_and_directory_same_destination_is_rejected_before_writing() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2015,7 +1947,7 @@ fn file_and_directory_same_destination_is_rejected_before_writing() {
     let Err(messages) = result else {
         panic!("a file and directory cannot claim one destination");
     };
-    assert_output_rejection(&messages, "duplicate-destination");
+    assert_output_rejection(&Err(messages), "duplicate-destination");
     assert_path_missing(&root.join("assets"));
 }
 
@@ -2037,7 +1969,6 @@ fn case_only_output_collision_causes_zero_files_written() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2046,7 +1977,7 @@ fn case_only_output_collision_causes_zero_files_written() {
     let Err(messages) = result else {
         panic!("case-only output collisions must be rejected");
     };
-    assert_output_rejection(&messages, "duplicate-destination");
+    assert_output_rejection(&Err(messages), "duplicate-destination");
     assert_path_missing(&root.join("Pages"));
     assert_path_missing(&root.join("pages"));
 }
@@ -2070,7 +2001,6 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
         )],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2079,7 +2009,7 @@ fn symlinked_output_ancestor_escape_causes_zero_files_written() {
     let Err(messages) = result else {
         panic!("symlink escapes must be rejected before writes");
     };
-    assert_output_rejection(&messages, "escapes-output-root");
+    assert_output_rejection(&Err(messages), "escapes-output-root");
     assert_path_missing(&outside.join("escape.js"));
 }
 
@@ -2108,7 +2038,6 @@ fn symlink_alias_destinations_are_rejected_before_writing() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2117,7 +2046,7 @@ fn symlink_alias_destinations_are_rejected_before_writing() {
     let Err(messages) = result else {
         panic!("distinct relative paths that alias one canonical file must be rejected");
     };
-    assert_output_rejection(&messages, "canonical-destination-collision");
+    assert_output_rejection(&Err(messages), "canonical-destination-collision");
     assert_path_missing(&real.join("app.js"));
 }
 
@@ -2138,7 +2067,6 @@ fn nested_explicit_directory_outputs_may_contain_child_files() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2176,7 +2104,6 @@ fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2185,7 +2112,7 @@ fn symlink_alias_file_ancestor_conflict_is_rejected_before_writing() {
     let Err(messages) = result else {
         panic!("a symlinked path below a canonical file ancestor must fail preflight");
     };
-    assert_output_rejection(&messages, "dangling-symlink-in-destination");
+    assert_output_rejection(&Err(messages), "dangling-symlink-in-destination");
     assert_eq!(
         fs::read(&real_file).expect("existing file should remain"),
         b"existing"
@@ -2214,7 +2141,6 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2222,7 +2148,7 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("dangling symlink should be rejected");
     };
-    assert_output_rejection(&messages, "dangling-symlink-in-destination");
+    assert_output_rejection(&Err(messages), "dangling-symlink-in-destination");
     assert_path_missing(&root.join("real/app.js"));
 
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -2242,7 +2168,6 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2250,7 +2175,7 @@ fn dangling_symlink_aliases_are_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("dangling symlink directory should be rejected");
     };
-    assert_output_rejection(&messages, "dangling-symlink-in-destination");
+    assert_output_rejection(&Err(messages), "dangling-symlink-in-destination");
     assert_path_missing(&root.join("real"));
 }
 
@@ -2285,7 +2210,6 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: generic_cleanup_policy(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         };
@@ -2306,7 +2230,7 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
                 "directory output roots must reject symlink targets outside their validated boundary"
             );
         };
-        assert_output_rejection(&messages, "output-root-not-inside-project");
+        assert_output_rejection(&Err(messages), "output-root-not-inside-project");
         assert_path_missing(&outside.join("index.html"));
         assert_path_missing(&entry_root.join("index.html"));
         assert!(
@@ -2338,7 +2262,6 @@ fn invalid_later_output_path_causes_zero_files_written() {
         ],
         entry_page_rel: None,
         cleanup_policy: generic_cleanup_policy(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -2347,7 +2270,7 @@ fn invalid_later_output_path_causes_zero_files_written() {
     let Err(messages) = result else {
         panic!("invalid later path should be rejected");
     };
-    assert_output_rejection(&messages, "invalid-relative-output-path");
+    assert_output_rejection(&Err(messages), "invalid-relative-output-path");
 
     assert_path_missing(&root.join("index.html"));
 }
@@ -2373,10 +2296,7 @@ fn empty_directory_output_setting_is_rejected() {
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("empty dev_folder should fail build");
-    };
-    assert_has_config_error(&messages);
+    assert_has_config_error(&result);
 }
 
 #[test]
@@ -2400,10 +2320,7 @@ fn absolute_output_setting_is_rejected() {
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("absolute dev_folder should fail build");
-    };
-    assert_has_config_error(&messages);
+    assert_has_config_error(&result);
 }
 
 #[test]
@@ -2427,10 +2344,7 @@ fn output_folder_inside_entry_root_is_rejected() {
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("output folder inside entry_root should fail build");
-    };
-    assert_has_config_error(&messages);
+    assert_has_config_error(&result);
 }
 
 #[test]
@@ -2454,10 +2368,7 @@ fn identical_dev_and_release_folders_are_rejected() {
         &BuildConfigInputSet::new(),
     );
 
-    let Err(messages) = result else {
-        panic!("identical dev and release folders should fail build");
-    };
-    assert_has_config_error(&messages);
+    assert_has_config_error(&result);
 }
 
 #[test]
@@ -2474,13 +2385,12 @@ fn valid_distinct_output_folders_resolve_unchanged() {
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-    let build_result = build_project(
+    let build_result = successful_compilation_value(build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("valid distinct folders should build");
+    ));
 
     assert_eq!(
         build_result
@@ -2504,17 +2414,27 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
         "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(source_root.join("@page.moth"), "#[:<h1>Home</h1>]\n")
-        .expect("should write home page");
+    fs::write(
+        source_root.join("@page.moth"),
+        "value ~= \"hello\"\n\
+         result ~= \"unset\"\n\
+         \n\
+         if value is:\n\
+             \"one\" => result = \"one\"\n\
+             \"one\" => result = \"one\"\n\
+             else => result = \"other\"\n\
+         ;\n\
+         #[:<h1>Home</h1>]\n",
+    )
+    .expect("should write warning-producing home page");
 
     let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-    let first_build = build_project(
+    let first_build = successful_compilation_value(build_project(
         &builder,
         root.to_str().expect("project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("first build should compile");
+    ));
     let first_plan = first_build
         .directory_output_plan
         .clone()
@@ -2527,14 +2447,24 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
         },
     )
     .expect("first build should create its manifest");
+    let Ok(CompilationOutcome::Success {
+        warnings: Some(warnings),
+        ..
+    }) = first_build.finish_output(Ok(()))
+    else {
+        panic!("the source should stage a warning before output finalization");
+    };
+    assert!(
+        warnings.counts().warnings > 0,
+        "the source fixture must produce a warning before output failure is tested"
+    );
 
-    let mut second_build = build_project(
+    let mut second_build = successful_compilation_value(build_project(
         &builder,
         root.to_str().expect("project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("second build should compile");
+    ));
     let second_plan = second_build
         .directory_output_plan
         .clone()
@@ -2542,8 +2472,9 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     let setting_span = second_plan
         .setting_span
         .expect("validated output plan should retain its authored setting span");
-    let late_messages = write_project_outputs(
-        &second_build.project,
+    let mut output_string_table = StringTable::new();
+    let late_messages = write_project_outputs_with_table(
+        &mut second_build.project,
         &WriteOptions {
             output_plan: OutputPlan::Directory(ValidatedOutputPlan {
                 output_root: second_plan.output_root.clone(),
@@ -2557,25 +2488,53 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
             }),
             write_mode: WriteMode::AlwaysWrite,
         },
+        &mut output_string_table,
     )
     .expect_err("a foreign output owner should produce a late diagnostic");
 
-    let messages = second_build.take_output_failure_messages(late_messages);
-    assert!(!messages.has_infrastructure_error(), "{messages:?}");
-    let diagnostic = messages
-        .error_diagnostics()
+    let reports = match second_build.finish_output(Err(late_messages)) {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("late output diagnostic unexpectedly finalized successfully")
+        }
+        Err(errors) => panic!("late output diagnostic should not be infrastructure: {errors:?}"),
+    };
+    assert_eq!(
+        reports.counts().warnings,
+        0,
+        "late output failure must discard staged frontend warnings"
+    );
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("late output diagnostic should remain");
-    assert_eq!(diagnostic.primary_span, Some(setting_span));
-    let context = messages.diagnostic_render_context(0);
+
     assert!(
-        context.frozen_identity.is_some(),
-        "late output diagnostic should retain the project source owner"
+        matches!(
+            view.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+                if span == setting_span
+        ),
+        "late output diagnostic should retain the authored setting span"
     );
-    let rendered = terse::format_terse_diagnostic_with_context(diagnostic, context);
+    let context = DiagnosticRenderContext::for_report(report);
+    let position = context
+        .site_position(view.primary_site())
+        .expect("late output diagnostic should retain its project source owner");
     assert!(
-        rendered.contains("config.moth"),
-        "late output diagnostic should render its authored config path: {rendered}"
+        position.path.ends_with("config.moth"),
+        "late output diagnostic should render its authored config path: {:?}",
+        position.path
+    );
+    let result: CompilationResult<()> = Ok(CompilationOutcome::Diagnosed(reports));
+    let rendered = terse::format_terse_compilation_result(&result);
+    assert!(
+        rendered.iter().all(|line| !line.contains("MOTH-RULE-0022")),
+        "late output failure must not render the staged warning: {rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("config.moth")),
+        "late output diagnostic should render its authored config path: {rendered:?}"
     );
 }
 
@@ -2594,13 +2553,12 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
         .expect("should write home page");
 
     let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-    let dev_build = build_project(
+    let dev_build = successful_compilation_value(build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("first dev build should compile");
+    ));
     let dev_plan = dev_build
         .directory_output_plan
         .clone()
@@ -2619,13 +2577,12 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     assert!(dev_manifest.contains("# profile: dev"));
     assert_path_missing(&root.join("release/.moth_manifest"));
 
-    let release_build = build_project(
+    let release_build = successful_compilation_value(build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[Flag::Release],
         &BuildConfigInputSet::new(),
-    )
-    .expect("first release build should compile");
+    ));
     let release_plan = release_build
         .directory_output_plan
         .clone()

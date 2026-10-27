@@ -8,7 +8,7 @@
 //! syntax; AST type resolution later turns that syntax into typed declarations.
 
 use super::DeclarationCursor;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
@@ -21,7 +21,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// WHAT: mirrors `RecordBodyParseResult` so the thin `parse_struct_shell` wrapper
 ///       propagates both lanes from `parse_record_body` directly.
 /// WHY: struct shell parsing is a delegation layer; the two-lane boundary belongs to
-///      record-body parsing, and plain-`CompilerDiagnostic` callers extract their inline lane once.
+///      record-body parsing, and draft-returning callers extract their inline lane once.
 type StructShellResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailure>;
 
 /// Parse a struct field-list shell from `| field Type [= default], ... |` syntax.
@@ -33,7 +33,7 @@ type StructShellResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailure>;
 pub fn parse_struct_shell(
     token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     owner_path: PathId,
     path_fork: &mut PathInternerFork,
 ) -> StructShellResult {

@@ -281,7 +281,7 @@ impl ExpressionStore {
     }
 }
 impl<'a> ExpressionView<'a> {
-    pub(crate) fn value_type_id(self) -> Result<TypeId, CompilerError> {
+    pub(crate) fn value_type_id(self) -> Result<TypeId, InfrastructureFailure> {
         match self.row().success {
             SuccessShape::One(id) => Ok(id),
             _ => Err(invariant(
@@ -289,7 +289,7 @@ impl<'a> ExpressionView<'a> {
             )),
         }
     }
-    pub(crate) fn bind(self, id: ExprId) -> Result<ExpressionView<'a>, CompilerError> {
+    pub(crate) fn bind(self, id: ExprId) -> Result<ExpressionView<'a>, InfrastructureFailure> {
         self.owner.view(id)
     }
     pub(crate) fn operation(self) -> ExpressionOperationView<'a> {
@@ -304,7 +304,7 @@ impl<'a> ExpressionView<'a> {
     pub(crate) fn to_completed_input(
         self,
         builder: &AstExpressionBuilder,
-    ) -> Result<CompletedExpressionInput, CompilerError> {
+    ) -> Result<CompletedExpressionInput, InfrastructureFailure> {
         builder.store().check_owner_token(self.owner_token())?;
         Ok(CompletedExpressionInput {
             operation: self.operation_id().map_edges(|id| builder.own(id)),
@@ -319,7 +319,7 @@ impl<'a> ExpressionView<'a> {
     }
 }
 impl ExpressionStore {
-    pub(crate) fn place(&self, id: PlaceId) -> Result<PlaceView<'_>, CompilerError> {
+    pub(crate) fn place(&self, id: PlaceId) -> Result<PlaceView<'_>, InfrastructureFailure> {
         let record = self
             .places
             .get(id.index())
@@ -447,13 +447,13 @@ impl ExpressionStore {
     }
 }
 impl AstExpressionBuilder {
-    pub(crate) fn place(&self, id: PlaceId) -> Result<PlaceView<'_>, CompilerError> {
+    pub(crate) fn place(&self, id: PlaceId) -> Result<PlaceView<'_>, InfrastructureFailure> {
         self.storage.place(id)
     }
     pub(crate) fn operation_view(
         &self,
         operation: ExpressionOp,
-    ) -> Result<ExpressionOperationView<'_>, CompilerError> {
+    ) -> Result<ExpressionOperationView<'_>, InfrastructureFailure> {
         self.visit_operation_children(operation, |_| ())?;
         Ok(self.storage.operation_view(operation))
     }
@@ -461,7 +461,7 @@ impl AstExpressionBuilder {
         &'a self,
         operation: ExpressionOp,
         mut visit: impl FnMut(ExpressionView<'a>),
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let owner = &self.storage;
         let mut error = None;
         owner.visit_operation_edges(operation, &mut |id| match owner.view(id) {

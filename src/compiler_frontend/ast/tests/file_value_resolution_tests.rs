@@ -21,9 +21,15 @@ use crate::compiler_frontend::ast::{
     Ast, ContextKind, FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts,
     TopLevelDeclarationTable,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidCompileTimePathCode, InvalidCompileTimePathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidExpressionView, InvalidPathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidCompileTimePathReason,
-    InvalidExpressionReason, PathKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    DiagnosticBag, InvalidCompileTimePathReason, InvalidExpressionReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -37,8 +43,9 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
 };
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::paths::file_references::{
-    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
-    ResolvedFileReferenceTable, ResolvedFileReferenceTarget, ResourceSourceId,
+    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceFailure,
+    ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+    ResourceSourceId,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -48,7 +55,9 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -188,16 +197,12 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
         }
     };
 
-    assert_eq!(
-        error.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidPath)
-    );
-    assert_eq!(
-        error.payload,
-        DiagnosticPayload::InvalidPath {
-            path_kind: PathKind::OnlyRootSlashSupported,
-        }
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact.first().expect("tokenizer emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidPathView>()
+        .expect("root-path suffix should retain its typed path fact");
+    assert_eq!(facts.path_kind, PathKind::OnlyRootSlashSupported);
 }
 
 #[test]
@@ -305,13 +310,15 @@ fn content_file_value_behind_child_module_boundary_surfaces_stage0_diagnostic() 
     let result = resolve_file_value_fixture(
         "@child/existing.mtf",
         PreparedFileReferenceClass::ContentSource,
-        ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
-            path_fork
-                .try_intern_portable_path("child/existing.mtf", &mut boundary_strings)
-                .expect("test path fits"),
-            InvalidCompileTimePathReason::EscapesModuleBoundary,
-            None,
-        )),
+        ResolvedFileReferenceOutcome::Diagnostic(
+            ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: path_fork
+                    .try_intern_portable_path("child/existing.mtf", &mut boundary_strings)
+                    .expect("test path fits"),
+                reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            },
+        ),
     );
 
     assert_surfaced_stage0_boundary_diagnostic(
@@ -327,13 +334,15 @@ fn resource_file_value_behind_support_facade_surfaces_stage0_diagnostic() {
     let result = resolve_file_value_fixture(
         "@support/existing.svg",
         PreparedFileReferenceClass::ResourceFile,
-        ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
-            path_fork
-                .try_intern_portable_path("support/existing.svg", &mut boundary_strings)
-                .expect("test path fits"),
-            InvalidCompileTimePathReason::EscapesModuleBoundary,
-            None,
-        )),
+        ResolvedFileReferenceOutcome::Diagnostic(
+            ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: path_fork
+                    .try_intern_portable_path("support/existing.svg", &mut boundary_strings)
+                    .expect("test path fits"),
+                reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            },
+        ),
     );
 
     assert_surfaced_stage0_boundary_diagnostic(
@@ -533,7 +542,11 @@ fn compile_fixture(
     let prepared_syntax = prepare_header_syntax(
         &mut prepared_outputs,
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut path_fork,
     )
     .expect("header syntax preparation should succeed");
@@ -793,16 +806,14 @@ fn assert_invalid_expression_reason(
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidExpression)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidExpression {
-            reason: expected_reason,
-        }
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("invalid file value emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidExpressionView>()
+        .expect("invalid file value should retain typed expression facts");
+    assert_eq!(facts.reason, expected_reason);
 }
 
 fn test_module_origin() -> StableModuleOriginIdentity {
@@ -821,16 +832,17 @@ fn assert_surfaced_stage0_boundary_diagnostic(
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("Stage 0 boundary failure emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidCompileTimePathView>()
+        .expect("Stage 0 failure should retain typed compile-time path facts");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCompileTimePath)
+        facts.reason,
+        InvalidCompileTimePathCode::of(&expected_reason)
     );
-    match diagnostic.payload {
-        DiagnosticPayload::InvalidCompileTimePath { reason, .. } => {
-            assert_eq!(reason, expected_reason);
-        }
-        other => panic!("the value site must surface Stage 0's retained diagnostic, got {other:?}"),
-    }
 }
 
 fn portable_resource_path(path: &str) -> PortableResourcePath {

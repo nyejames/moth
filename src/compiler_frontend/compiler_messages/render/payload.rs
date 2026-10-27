@@ -4,12 +4,41 @@
 //! WHY: terminal, terse, and dev-server renderers should differ only in output format. The
 //! payload facts themselves must become user-facing text through one dispatch path.
 
+use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
+    InvalidTraitConformanceNames, InvalidTraitConformanceShape, InvalidTraitConformanceView,
+    InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView,
+    TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView, UnknownTraitView,
+    UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
+    DependencyAliasCaseMismatchView, DirectSpecialFileImportView, ImportNameCollisionView,
+    MissingModuleRootPublicSurfaceView, MissingPackageSymbolView, NotExportedByPublicSurfaceView,
+    NotExportedBySourceFileView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::LegacyDependencyClauseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::UnescapedImplicitTemplateCloseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidCharacterView, MissingClosingDelimiterView, UnexpectedTrailingCommaView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    NonUtf8SourceView, SourceSpanCapacityView, UnexpectedEndOfFileView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    EmptyCollectionTypeAmbiguityView, TypeMismatchView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
-    ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner,
+    DiagnosticCapacityResource, InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, TypeMismatchContext, ValueReceiverContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -17,580 +46,285 @@ pub(crate) struct RenderedPayload {
     pub(crate) guidance: Vec<String>,
 }
 
-pub(crate) fn render_payload(
-    payload: &DiagnosticPayload,
+fn invalid_value_receiver_message(
+    receiver: ValueReceiverContext,
+    target_count: usize,
+    produced_count: usize,
+) -> String {
+    let receiver_name = value_receiver_context_name(receiver);
+    format!(
+        "Invalid {receiver_name} receiver: expected {target_count} success slot(s), but this expression produces {produced_count}."
+    )
+}
+
+/// WHAT: renders a value-receiver arity error and its actionable guidance.
+/// WHY: the compact facts retain the receiving context and both success-slot counts.
+pub(crate) fn render_invalid_value_receiver(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidValueReceiverView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let guidance = if view.produced_count > 1 {
+        "Use a multi-bind with one target per success slot."
+    } else {
+        "Use an expression that produces the required success values."
+    };
+    RenderedPayload {
+        message: invalid_value_receiver_message(
+            view.receiver,
+            view.target_count,
+            view.produced_count,
+        ),
+        guidance: vec![guidance.to_owned()],
+    }
+}
+
+/// WHAT: renders a capacity diagnostic from its compact facts.
+/// WHY: the record carries the resource, which is everything the message needs.
+pub(crate) fn render_compiler_capacity_exceeded(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CompilerCapacityExceededView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: capacity_message(facts.resource),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders the fixed unexpected-trailing-comma message.
+/// WHY: the row carries no facts, so the message is constant.
+pub(crate) fn render_unexpected_trailing_comma(
+    _diagnostic: &DiagnosticView<'_>,
+    _view: &UnexpectedTrailingCommaView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: "Unexpected trailing comma".to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an invalid character from its compact fact.
+/// WHY: the character is the whole message.
+pub(crate) fn render_invalid_character(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidCharacterView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!("Invalid character: '{}'", view.character),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders a missing closing delimiter from its compact fact.
+/// WHY: the delimiter text is the only variable part of the message.
+pub(crate) fn render_missing_closing_delimiter(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MissingClosingDelimiterView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    let message = render_payload_message(payload, context);
-    let guidance = match payload {
-        DiagnosticPayload::CommonSyntaxMistake { reason } => {
-            vec![format!(
-                "Suggestion: {}",
-                common_syntax_mistake_suggestion(reason)
-            )]
-        }
-        DiagnosticPayload::UnescapedImplicitTemplateClose { .. } => vec![
-            "Insert a literal closing bracket through a nested string expression such as `[\"]\"]`.".to_owned(),
-        ],
-        DiagnosticPayload::InvalidValueReceiver { produced_count, .. } => {
-            if *produced_count > 1 {
-                vec!["Use a multi-bind with one target per success slot.".to_owned()]
-            } else {
-                vec!["Use an expression that produces the required success values.".to_owned()]
-            }
-        }
-        DiagnosticPayload::TypeMismatch {
-            expected, found, ..
-        } => vec![
-            format!("Expected: {}", diagnostic_type_name(*expected, context)),
-            format!("Found: {}", diagnostic_type_name(*found, context)),
-        ],
-        DiagnosticPayload::CompileTimeEvaluationError { reason, .. } => {
-            vec![compile_time_evaluation_error_suggestion(*reason).to_owned()]
-        }
-        DiagnosticPayload::InvalidGenericInstantiation {
-            reason:
-                crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason::CannotInferFunctionArguments {
-                    ..
-                },
-            ..
-        } => {
-            vec![
-                "Add a type annotation to the receiving declaration, for example `value I32 = ...`."
-                    .to_owned(),
-            ]
-        }
-        DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
-            vec![
-                "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
-            ]
-        }
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnknownDirective,
-            ..
-        } => {
-            vec![
-                "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$insert`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
-            ]
-        }
-        _ => Vec::new(),
-    };
+    RenderedPayload {
+        message: format!(
+            "Missing closing delimiter '{}'",
+            context.string_table.resolve(view.expected_delimiter)
+        ),
+        guidance: Vec::new(),
+    }
+}
 
-    RenderedPayload { message, guidance }
+/// WHAT: renders a type mismatch from its compact facts.
+/// WHY: type spellings come from the owning site's captured snapshot; unresolved roots retain
+/// their stable `TypeId(N)` spelling.
+pub(crate) fn render_type_mismatch(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &TypeMismatchView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let expected = diagnostic.types().display_for_render(
+        facts.expected,
+        context.string_table,
+        context.path_table(),
+    );
+    let found = diagnostic.types().display_for_render(
+        facts.found,
+        context.string_table,
+        context.path_table(),
+    );
+    RenderedPayload {
+        message: type_mismatch_message(facts.context, &expected, &found),
+        guidance: type_mismatch_guidance(&expected, &found),
+    }
+}
+
+fn type_mismatch_message(
+    mismatch_context: TypeMismatchContext,
+    expected: &str,
+    found: &str,
+) -> String {
+    format!(
+        "Type mismatch in {}: expected {}, found {}",
+        type_mismatch_context_name(mismatch_context),
+        expected,
+        found
+    )
+}
+
+fn type_mismatch_guidance(expected: &str, found: &str) -> Vec<String> {
+    vec![format!("Expected: {expected}"), format!("Found: {found}")]
 }
 
 /// WHAT: guarantees every terse record carries a non-empty message.
-/// WHY: descriptor-only diagnostics use `DiagnosticPayload::None`, which renders an empty
-/// payload message. The descriptor title is always present and provides useful context.
-pub(crate) fn terse_payload_message(
-    payload: &DiagnosticPayload,
-    kind: DiagnosticKind,
+/// WHY: rows without message facts render empty prose, so the descriptor title supplies context.
+pub(crate) fn terse_diagnostic_message(
+    subject: &DiagnosticSubject<'_>,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let rendered = render_payload(payload, context);
+    let rendered = subject.payload(context);
     if rendered.message.is_empty() {
-        kind.descriptor().title.to_owned()
+        subject.descriptor().title.to_owned()
     } else {
         rendered.message
     }
 }
 
-fn render_payload_message(
-    payload: &DiagnosticPayload,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let string_table = context.string_table;
+fn unknown_trait_message(name: StringId, string_table: &dyn StringTableResolver) -> String {
+    format!("Unknown trait '{}'.", string_table.resolve(name))
+}
 
-    match payload {
-        DiagnosticPayload::ExpectedToken { expected, found } => {
-            expected_token_message(expected, found.as_ref(), string_table)
-        }
-        DiagnosticPayload::UnexpectedToken { found } => {
-            unexpected_token_message(found, string_table)
-        }
-        DiagnosticPayload::UnexpectedTrailingComma => "Unexpected trailing comma".to_owned(),
-        DiagnosticPayload::UnescapedImplicitTemplateClose { source_kind } => {
-            format!(
-                "{} starts inside an implicit template body, so an unescaped `]` would close a template that is not written in the source file.",
-                source_kind_name(*source_kind)
-            )
-        }
-        DiagnosticPayload::UnknownName { name, namespace } => {
-            unknown_name_message(*name, *namespace, string_table)
-        }
-        DiagnosticPayload::TypeMismatch {
-            expected,
-            found,
-            context: mismatch_context,
-        } => format!(
-            "Type mismatch in {}: expected {}, found {}",
-            type_mismatch_context_name(*mismatch_context),
-            diagnostic_type_name(*expected, context),
-            diagnostic_type_name(*found, context)
+/// WHAT: renders an unknown trait from its compact name fact.
+/// WHY: the name is the only variable part of this message.
+pub(crate) fn render_unknown_trait(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownTraitView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unknown_trait_message(facts.name, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+fn duplicate_trait_requirement_message(
+    trait_name: StringId,
+    requirement_name: StringId,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Trait '{}' declares duplicate requirement '{}'. Trait requirements cannot be overloaded in v1.",
+        string_table.resolve(trait_name),
+        string_table.resolve(requirement_name)
+    )
+}
+
+/// WHAT: renders a duplicate trait requirement from its two names.
+/// WHY: its label is stored separately from its message facts.
+pub(crate) fn render_duplicate_trait_requirement(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &DuplicateTraitRequirementView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_trait_requirement_message(
+            facts.trait_name,
+            facts.requirement_name,
+            context.string_table,
         ),
-        DiagnosticPayload::DuplicateDeclaration { name } => {
-            duplicate_declaration_message(*name, string_table)
-        }
-        DiagnosticPayload::MissingImportTarget { .. }
-        | DiagnosticPayload::AmbiguousImportTarget { .. }
-        | DiagnosticPayload::BareFileImport { .. }
-        | DiagnosticPayload::DirectSpecialFileImport { .. }
-        | DiagnosticPayload::ImportNameCollision { .. }
-        | DiagnosticPayload::NotExportedBySourceFile { .. }
-        | DiagnosticPayload::NotExportedByPublicSurface { .. }
-        | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
-        | DiagnosticPayload::MissingPackageSymbol { .. }
-        | DiagnosticPayload::CrossModuleImportNotExported { .. }
-        | DiagnosticPayload::InvalidImportPath { .. }
-        | DiagnosticPayload::DirectSymbolPathImport { .. }
-        | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
-        | DiagnosticPayload::DuplicateImportSurfaceMember { .. }
-        | DiagnosticPayload::ExplicitMothExtension { .. }
-        | DiagnosticPayload::ExplicitSourceExtension { .. }
-        | DiagnosticPayload::UnsupportedSourceFileKind { .. }
-        | DiagnosticPayload::InvalidSourceFileEntry { .. }
-        | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
-        | DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
-        | DiagnosticPayload::UnsupportedExternalExtension { .. }
-        | DiagnosticPayload::InvalidExternalModule { .. } => {
-            import_payload_message(payload, context)
-        }
-        DiagnosticPayload::BorrowConflict { .. }
-        | DiagnosticPayload::MultipleMutableBorrows { .. }
-        | DiagnosticPayload::SharedMutableConflict { .. }
-        | DiagnosticPayload::UseAfterPossibleMove { .. }
-        | DiagnosticPayload::MoveWhileBorrowed { .. }
-        | DiagnosticPayload::WholeObjectBorrowConflict { .. }
-        | DiagnosticPayload::InvalidMutableAccess { .. }
-        | DiagnosticPayload::UseOfUninitializedLocal { .. } => {
-            borrow_payload_message(payload, context)
-        }
-        DiagnosticPayload::InvalidConfig { key, reason } => {
-            invalid_config_message(*key, reason, string_table)
-        }
-        DiagnosticPayload::DeferredFeature { reason } => {
-            deferred_feature_message(reason, string_table)
-        }
-        DiagnosticPayload::UnsupportedExternalFunction {
-            function_name,
-            package_path,
-            backend_name,
-        } => unsupported_external_function_message(
-            *function_name,
-            *package_path,
-            *backend_name,
-            string_table,
+        guidance: Vec::new(),
+    }
+}
+
+fn trait_private_surface_leak_message(
+    trait_name: StringId,
+    surface_type: &str,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Exported trait '{}' exposes private type {} in its requirement surface.",
+        string_table.resolve(trait_name),
+        surface_type
+    )
+}
+
+/// WHAT: renders a trait surface leak from its trait name and type display.
+/// WHY: compaction stores a `TypeDisplayId`, not a raw `TypeId`.
+pub(crate) fn render_trait_private_surface_leak(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &TraitPrivateSurfaceLeakView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let surface_type = diagnostic.types().display_for_render(
+        facts.surface_type,
+        context.string_table,
+        context.path_table(),
+    );
+    RenderedPayload {
+        message: trait_private_surface_leak_message(
+            facts.trait_name,
+            &surface_type,
+            context.string_table,
         ),
-        DiagnosticPayload::ReservedBuiltinName { name } => {
-            format!("Reserved builtin name '{}'", string_table.resolve(*name))
-        }
-        DiagnosticPayload::UnreachableMatchArm => "Unreachable match arm".to_owned(),
-        DiagnosticPayload::IdentifierNamingConvention {
-            name,
-            expected_style,
-        } => {
-            let style_name = match expected_style {
-                NamingConvention::CamelCase => "CamelCase",
-                NamingConvention::LowercaseWithUnderscores => "lowercase_with_underscores",
-                NamingConvention::UppercaseWithUnderscores => "UPPER_CASE_WITH_UNDERSCORES",
-                NamingConvention::LowercaseOrUppercaseWithUnderscores => {
-                    "lowercase_with_underscores or UPPER_CASE_WITH_UNDERSCORES"
-                }
-            };
-            format!(
-                "Identifier '{}' should use {}",
-                string_table.resolve(*name),
-                style_name
-            )
-        }
-        DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol } => format!(
-            "Dependency alias '{}' case mismatch with symbol '{}'",
-            string_table.resolve(*alias),
-            string_table.resolve(*symbol)
+        guidance: Vec::new(),
+    }
+}
+fn circular_dependency_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!("Circular dependency at '{}'", context.render_path(path))
+}
+
+/// WHAT: renders a circular dependency from its compact path fact.
+/// WHY: the path is the only variable part of this diagnostic's message.
+pub(crate) fn render_circular_dependency(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CircularDependencyView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: circular_dependency_message(facts.path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn non_utf8_source_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!("Source '{}' is not valid UTF-8", context.render_path(path))
+}
+
+/// WHAT: names the interned source path that failed UTF-8 decoding.
+/// WHY: a title-only row cannot tell two invalid files apart.
+pub(crate) fn render_non_utf8_source(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &NonUtf8SourceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: non_utf8_source_message(facts.path, context),
+        guidance: Vec::new(),
+    }
+}
+fn legacy_dependency_clause_message(
+    replacement: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    match replacement {
+        Some(replacement) => format!(
+            "Source dependency clauses no longer use `import`. Write `{}`.",
+            string_table.resolve(replacement)
         ),
-        DiagnosticPayload::MalformedTemplate { reason } => {
-            malformed_template_message(*reason, string_table)
-        }
-        DiagnosticPayload::InvalidCharacter { character } => {
-            format!("Invalid character: '{character}'")
-        }
-        DiagnosticPayload::SourceSpanCapacity {
-            start,
-            length,
-            resource,
-        } => source_span_capacity_message(*start, *length, *resource),
-        DiagnosticPayload::CompilerCapacityExceeded { resource } => capacity_message(*resource),
-        DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
-        DiagnosticPayload::InvalidNumberLiteral {
-            literal_text,
-            reason,
-        } => invalid_number_literal_message(*literal_text, *reason, string_table),
-        DiagnosticPayload::InvalidStyleDirective {
-            directive_name,
-            supported_directives,
-        } => invalid_style_directive_message(*directive_name, *supported_directives, string_table),
-        DiagnosticPayload::MissingClosingDelimiter { expected_delimiter } => {
-            format!(
-                "Missing closing delimiter '{}'",
-                string_table.resolve(*expected_delimiter)
-            )
-        }
-        DiagnosticPayload::InvalidGenericApplication { reason } => {
-            invalid_generic_application_message(*reason).to_owned()
-        }
-        DiagnosticPayload::InvalidParameterContract { reason } => {
-            invalid_parameter_contract_message(*reason)
-        }
-        DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } => {
-            if let Some(expected_delimiter) = expected_delimiter {
-                format!(
-                    "Unexpected end of file, expected '{}'",
-                    string_table.resolve(*expected_delimiter)
-                )
-            } else {
-                "Unexpected end of file".to_owned()
-            }
-        }
-        DiagnosticPayload::InvalidPath { path_kind } => invalid_path_message(*path_kind).to_owned(),
-        DiagnosticPayload::InvalidDependencyClause { reason, .. } => {
-            invalid_dependency_clause_message(*reason).to_owned()
-        }
-        DiagnosticPayload::LegacyDependencyClause { replacement, .. } => match replacement {
-            Some(replacement) => format!(
-                "Source dependency clauses no longer use `import`. Write `{}`.",
-                string_table.resolve(*replacement)
-            ),
-            None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
-        },
-        DiagnosticPayload::InvalidTypeAnnotation { reason, .. } => {
-            invalid_type_annotation_message(reason, string_table)
-        }
-        DiagnosticPayload::InvalidCollectionType { reason } => {
-            invalid_collection_type_message(*reason).to_owned()
-        }
-        DiagnosticPayload::InvalidMapType { reason } => invalid_map_type_message(*reason, context),
-        DiagnosticPayload::InvalidMapLiteral { reason } => {
-            invalid_map_literal_message(*reason).to_owned()
-        }
-        DiagnosticPayload::InvalidGenericParameter { reason } => {
-            invalid_generic_parameter_message(reason, string_table)
-        }
-        DiagnosticPayload::InvalidTemplateDirective {
-            directive_name,
-            reason,
-        } => invalid_template_directive_message(*directive_name, *reason, string_table),
-        DiagnosticPayload::InvalidTemplateStructure { reason } => {
-            invalid_template_structure_message(*reason, context)
-        }
-        DiagnosticPayload::InvalidSignatureMember { reason } => {
-            invalid_signature_member_message(*reason)
-        }
-        DiagnosticPayload::InvalidFunctionSignature { reason } => {
-            invalid_function_signature_message(reason, string_table)
-        }
-        DiagnosticPayload::InvalidChoiceVariant {
-            reason,
-            choice_name,
-            variant_name,
-            available_variants,
-        } => invalid_choice_variant_message(
-            *reason,
-            *choice_name,
-            *variant_name,
-            available_variants,
-            string_table,
-        ),
-        DiagnosticPayload::InvalidStructDefaultValue => "Invalid struct default value".to_owned(),
-        DiagnosticPayload::MissingDeclarationInitializer { name } => {
-            format!(
-                "Declaration '{}' requires '=' followed by an initializer expression.",
-                string_table.resolve(*name)
-            )
-        }
-        DiagnosticPayload::CircularDependency { path } => {
-            format!("Circular dependency at '{}'", context.render_path(*path))
-        }
-        DiagnosticPayload::NamespaceMisuse {
-            name,
-            expected,
-            found,
-        } => namespace_misuse_message(*name, *expected, *found, string_table),
-        DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name } => {
-            dependency_namespace_used_as_value_message(*record_name, string_table)
-        }
-        DiagnosticPayload::ConstRecordUsedAsValue { record_name } => {
-            const_record_used_as_value_message(*record_name, string_table)
-        }
-        DiagnosticPayload::NestedDependencyTraversal { record_name } => {
-            nested_dependency_traversal_message(*record_name, string_table)
-        }
-        DiagnosticPayload::NamespaceTypeValueMisuse {
-            name,
-            expected,
-            found,
-        } => namespace_type_value_misuse_message(*name, *expected, *found, string_table),
-        DiagnosticPayload::UnknownTrait { name } => {
-            format!("Unknown trait '{}'.", string_table.resolve(*name))
-        }
-        DiagnosticPayload::DuplicateTraitRequirement {
-            trait_name,
-            requirement_name,
-        } => format!(
-            "Trait '{}' declares duplicate requirement '{}'. Trait requirements cannot be overloaded in v1.",
-            string_table.resolve(*trait_name),
-            string_table.resolve(*requirement_name)
-        ),
-        DiagnosticPayload::TraitPrivateSurfaceLeak {
-            trait_name,
-            surface_type,
-        } => format!(
-            "Exported trait '{}' exposes private type {} in its requirement surface.",
-            string_table.resolve(*trait_name),
-            diagnostic_type_name(*surface_type, context)
-        ),
-        DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-            owner_kind,
-            owner_name,
-            trait_name,
-        } => {
-            let (owner_label, kept_private) = match owner_kind {
-                PublicGenericOwnerKind::Function => ("function", "the function"),
-                PublicGenericOwnerKind::ReceiverMethod => ("receiver method", "the receiver type"),
-                PublicGenericOwnerKind::Struct => ("struct", "the struct"),
-                PublicGenericOwnerKind::Choice => ("choice", "the choice"),
-            };
-            format!(
-                "Public generic {} '{}' exposes private trait bound '{}'. Make the trait public in the module that declares it, or keep {} private.",
-                owner_label,
-                string_table.resolve(*owner_name),
-                string_table.resolve(*trait_name),
-                kept_private
-            )
-        }
-        DiagnosticPayload::PrivateTypeInExportedApi {
-            exported_name,
-            private_type,
-        } => format!(
-            "Exported declaration '{}' exposes private type {}. Export that type through the same public surface or hide it behind a public wrapper.",
-            string_table.resolve(*exported_name),
-            diagnostic_type_name(*private_type, context)
-        ),
-        DiagnosticPayload::ProjectContextEscape { reason } => {
-            project_context_escape_message(*reason)
-        },
-        DiagnosticPayload::UnsupportedTraitFeature {
-            trait_name,
-            feature,
-        } => format!(
-            "Trait '{}' uses unsupported feature '{}'.",
-            string_table.resolve(*trait_name),
-            string_table.resolve(*feature)
-        ),
-        DiagnosticPayload::InvalidTraitKeywordUsage { reason } => {
-            invalid_trait_keyword_usage_message(*reason).to_owned()
-        }
-        DiagnosticPayload::DuplicatePublicExport { name } => format!(
-            "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
-            string_table.resolve(*name)
-        ),
-        DiagnosticPayload::InvalidTraitConformance {
-            target_name,
-            trait_name,
-            reason,
-        } => invalid_trait_conformance_message(*target_name, *trait_name, reason, context),
-        DiagnosticPayload::InvalidTraitIncompatibility {
-            subject_name,
-            incompatible_trait_name,
-            reason,
-        } => invalid_trait_incompatibility_message(
-            *subject_name,
-            *incompatible_trait_name,
-            reason,
-            context,
-        ),
-        DiagnosticPayload::TraitNameUsedAsType { trait_name } => {
-            trait_name_used_as_type_message(*trait_name, context)
-        }
-        DiagnosticPayload::ShadowedName { name } => {
-            format!("Shadowed name '{}'", string_table.resolve(*name))
-        }
-        DiagnosticPayload::ReservedNameCollision { name, reserved_by } => {
-            let owner = match reserved_by {
-                ReservedNameOwner::BuiltinType => "builtin type",
-                ReservedNameOwner::Keyword => "keyword",
-                ReservedNameOwner::CoreTrait => "core trait",
-                ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
-                ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
-            };
-            format!(
-                "Reserved name collision: '{}' is a reserved {}",
-                string_table.resolve(*name),
-                owner
-            )
-        }
-        DiagnosticPayload::InvalidThisUsage { reason } => {
-            invalid_this_usage_message(*reason, string_table)
-        }
-        DiagnosticPayload::InvalidReceiverDeclaration { reason } => {
-            invalid_receiver_declaration_message(*reason, context)
-        }
-        DiagnosticPayload::InvalidControlFlowStatement { reason } => {
-            invalid_control_flow_statement_message(*reason)
-        }
-        DiagnosticPayload::InvalidDeclaration { reason, name } => {
-            invalid_declaration_message(reason.clone(), *name, string_table)
-        }
-        DiagnosticPayload::InvalidAssignmentTarget {
-            reason,
-            target_name,
-            target_type,
-            field_name,
-            root_binding_name,
-        } => invalid_assignment_target_message(
-            *reason,
-            *target_name,
-            *target_type,
-            *field_name,
-            *root_binding_name,
-            context,
-        ),
-        DiagnosticPayload::InvalidValueReceiver {
-            receiver,
-            target_count,
-            produced_count,
-        } => {
-            let receiver_name = value_receiver_context_name(*receiver);
-            format!(
-                "Invalid {receiver_name} receiver: expected {target_count} success slot(s), but this expression produces {produced_count}."
-            )
-        }
-        DiagnosticPayload::InvalidMultiBind {
-            reason,
-            target_name,
-        } => invalid_multi_bind_message(*reason, *target_name, string_table),
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason,
-            builtin_name,
-        } => invalid_builtin_call_message(*reason, *builtin_name, string_table),
-        DiagnosticPayload::InvalidCast {
-            reason,
-            source_type,
-            target_type,
-        } => invalid_cast_message(*reason, *source_type, *target_type, context),
-        DiagnosticPayload::InvalidReceiverCall {
-            reason,
-            receiver_type,
-            method_name,
-            receiver_kind,
-            receiver_binding_name,
-        } => invalid_receiver_call_message(
-            *reason,
-            *receiver_type,
-            *method_name,
-            *receiver_kind,
-            *receiver_binding_name,
-            string_table,
-        ),
-        DiagnosticPayload::InvalidCopyTarget { reason } => invalid_copy_target_message(*reason),
-        DiagnosticPayload::InvalidFieldAccess {
-            reason,
-            field_name,
-            receiver_type,
-            known_fields,
-        } => invalid_field_access_message(
-            *reason,
-            *field_name,
-            *receiver_type,
-            known_fields,
-            context,
-        ),
-        DiagnosticPayload::InvalidMatchPattern {
-            reason,
-            variant_name,
-            ..
-        } => invalid_match_pattern_message(*reason, *variant_name, string_table),
-        DiagnosticPayload::NonExhaustiveMatch {
-            reason,
-            missing_variants,
-            ..
-        } => non_exhaustive_match_message(*reason, missing_variants, string_table),
-        DiagnosticPayload::InvalidFallibleHandling { reason } => {
-            invalid_fallible_handling_message(reason, context)
-        }
-        DiagnosticPayload::InvalidTemplateSlot { reason, slot_name } => {
-            invalid_template_slot_message(*reason, *slot_name, string_table)
-        }
-        DiagnosticPayload::CompileTimeEvaluationError {
-            reason,
-            operation,
-        } => compile_time_evaluation_error_message(
-            *reason,
-            *operation,
-            string_table,
-        ),
-        DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
-            "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation."
-                .to_owned()
-        }
-        DiagnosticPayload::UnsupportedOperatorTypes { operator, lhs, rhs } => {
-            unsupported_operator_types_message(*operator, *lhs, *rhs, context)
-        }
-        DiagnosticPayload::IncompatibleChoiceComparison { reason, lhs, rhs } => {
-            incompatible_choice_comparison_message(reason, *lhs, *rhs, context)
-        }
-        DiagnosticPayload::InvalidRouteOutput { reason, output } => {
-            invalid_route_output_message(reason, *output, context)
-        }
-        DiagnosticPayload::InvalidCallShape {
-            reason,
-            callee_name,
-        } => invalid_call_shape_message(reason.clone(), *callee_name, string_table),
-        DiagnosticPayload::InvalidReturnShape { reason } => invalid_return_shape_message(*reason),
-        DiagnosticPayload::InvalidGenericInstantiation { type_name, reason } => {
-            invalid_generic_instantiation_message(*type_name, reason, context)
-        }
-        DiagnosticPayload::InvalidRangeOperand {
-            operand,
-            found_type,
-            reason,
-        } => invalid_range_operand_message(*operand, *found_type, *reason, context),
-        DiagnosticPayload::UnsupportedBuilderPackage { package_path } => {
-            unsupported_builder_package_message(*package_path, string_table)
-        }
-        DiagnosticPayload::UnsupportedBackendFeature {
-            backend_name,
-            reason,
-        } => format!(
-            "Backend '{}' does not support {} yet.",
-            string_table.resolve(*backend_name),
-            reason.feature_name()
-        ),
-        DiagnosticPayload::InvalidPageMetadata { key, reason } => {
-            invalid_page_metadata_message(*key, *reason, string_table)
-        }
-        DiagnosticPayload::InvalidCompileTimePath { path, reason } => {
-            invalid_compile_time_path_message(*path, *reason, context)
-        }
-        DiagnosticPayload::InvalidExpression { reason } => invalid_expression_message(*reason),
-        DiagnosticPayload::CommonSyntaxMistake { reason } => {
-            common_syntax_mistake_message(reason, string_table)
-        }
-        DiagnosticPayload::MissingOperatorOperand { operator, position } => {
-            missing_operator_operand_message(*operator, *position, string_table)
-        }
-        DiagnosticPayload::InvalidStandaloneStatement { reason } => {
-            invalid_standalone_statement_message(*reason)
-        }
-        DiagnosticPayload::ExpectedSymbolStatement => expected_symbol_statement_message(),
-        DiagnosticPayload::MissingCollectionItem => missing_collection_item_message(),
-        DiagnosticPayload::InvalidMatchArm { reason } => invalid_match_arm_message(*reason),
-        DiagnosticPayload::InvalidLoopHeader { reason } => {
-            invalid_loop_header_message(*reason, context)
-        }
-        DiagnosticPayload::InvalidStatementPosition { reason } => {
-            invalid_statement_position_message(*reason)
-        }
-        DiagnosticPayload::None => String::new(),
+        None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
+    }
+}
+
+/// WHAT: renders a legacy dependency clause from its compact replacement fact.
+/// WHY: the legacy reason is fixed to the import keyword, and its replacement is the only message fact.
+pub(crate) fn render_legacy_dependency_clause(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &LegacyDependencyClauseView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _ = facts.reason;
+    RenderedPayload {
+        message: legacy_dependency_clause_message(facts.replacement, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
@@ -598,6 +332,7 @@ fn source_span_capacity_message(
     start: u32,
     length: u32,
     resource: SourceSpanCapacityResource,
+    path: Option<&str>,
 ) -> String {
     match resource {
         SourceSpanCapacityResource::ExtendedSpan => format!(
@@ -624,6 +359,62 @@ fn source_span_capacity_message(
             "This source contains more than {length} tokens; the compact \
              source-owned token store cannot address another token."
         ),
+        SourceSpanCapacityResource::SourceSnapshot => match path {
+            Some(path) => format!(
+                "Source '{path}' is at least {length} bytes; a source must be shorter than {length} bytes \
+                 so u32 offsets can address it."
+            ),
+            None => format!(
+                "This source is at least {length} bytes; a source must be shorter than {length} bytes \
+                 so u32 offsets can address it."
+            ),
+        },
+    }
+}
+
+/// WHAT: renders source-span capacity facts without widening the durable record.
+/// WHY: the rejected range and exhausted resource are the message facts that
+/// `source_span_capacity_message` takes.
+pub(crate) fn render_source_span_capacity(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &SourceSpanCapacityView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let start = u32::try_from(facts.start)
+        .expect("stored source-span capacity starts originated as u32 values");
+    let length = u32::try_from(facts.length)
+        .expect("stored source-span capacity lengths originated as u32 values");
+    let path = facts.path.map(|id| context.render_path(id));
+    RenderedPayload {
+        message: source_span_capacity_message(start, length, facts.resource, path.as_deref()),
+        guidance: Vec::new(),
+    }
+}
+
+fn unexpected_end_of_file_message(
+    expected_delimiter: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    if let Some(expected_delimiter) = expected_delimiter {
+        format!(
+            "Unexpected end of file, expected '{}'",
+            string_table.resolve(expected_delimiter)
+        )
+    } else {
+        "Unexpected end of file".to_owned()
+    }
+}
+
+/// WHAT: renders an optional expected delimiter from the compact EOF row.
+/// WHY: the reason text is the same regardless of whether the parser named a delimiter.
+pub(crate) fn render_unexpected_end_of_file(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnexpectedEndOfFileView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unexpected_end_of_file_message(facts.expected_delimiter, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
@@ -631,6 +422,10 @@ fn capacity_message(resource: CapacityResource) -> String {
     match resource {
         CapacityResource::Hir(resource) => hir_capacity_message(resource),
         CapacityResource::Ast(resource) => ast_capacity_message(resource),
+        CapacityResource::PathNodes => {
+            "This source exceeds the compiler's capacity for path nodes.".into()
+        }
+        CapacityResource::Store(resource) => store_capacity_message(resource),
     }
 }
 
@@ -645,6 +440,22 @@ fn hir_capacity_message(resource: HirCapacityResource) -> String {
         HirCapacityResource::PlaceProjections => "place projections",
     };
     format!("This source exceeds the compiler's capacity for HIR {resource_name}.")
+}
+
+fn store_capacity_message(resource: DiagnosticCapacityResource) -> String {
+    let resource_name = match resource {
+        DiagnosticCapacityResource::Records => "records",
+        DiagnosticCapacityResource::Extras => "extra data rows",
+        DiagnosticCapacityResource::Labels => "secondary labels",
+        DiagnosticCapacityResource::LabelData => "label data rows",
+        DiagnosticCapacityResource::StringIds => "string id lists",
+        DiagnosticCapacityResource::Substitutions => "generic substitution rows",
+        DiagnosticCapacityResource::ForeignSites => "foreign diagnostic sites",
+        DiagnosticCapacityResource::IdentityContexts => "identity contexts",
+        DiagnosticCapacityResource::FactValue => "fact values",
+        DiagnosticCapacityResource::TypeDisplays => "type displays",
+    };
+    format!("This source exceeds the compiler's capacity for diagnostic {resource_name}.")
 }
 
 fn ast_capacity_message(resource: AstCapacityResource) -> String {
@@ -675,6 +486,25 @@ fn source_kind_name(source_kind: SourceFileKind) -> &'static str {
     }
 }
 
+/// WHAT: renders the implicit-template-close diagnostic from its compact source-kind fact.
+/// WHY: the source kind is the only message fact; the guidance is fixed text.
+pub(crate) fn render_unescaped_implicit_template_close(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnescapedImplicitTemplateCloseView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!(
+            "{} starts inside an implicit template body, so an unescaped `]` would close a template that is not written in the source file.",
+            source_kind_name(facts.source_kind)
+        ),
+        guidance: vec![
+            "Insert a literal closing bracket through a nested string expression such as `[\"]\"]`."
+                .to_owned(),
+        ],
+    }
+}
+
 fn project_context_escape_message(reason: ProjectContextEscapeReason) -> String {
     match reason {
         ProjectContextEscapeReason::ExportedDeclaration => {
@@ -687,156 +517,156 @@ fn project_context_escape_message(reason: ProjectContextEscapeReason) -> String 
         }
     }
 }
+/// WHAT: renders a project-context escape from its compact reason code.
+/// WHY: the reason selects one of the fixed messages in `project_context_escape_message`.
+pub(crate) fn render_project_context_escape(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ProjectContextEscapeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: project_context_escape_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
 
 fn invalid_trait_conformance_message(
-    target_name: StringId,
-    trait_name: Option<StringId>,
-    reason: &InvalidTraitConformanceReason,
+    shape: &InvalidTraitConformanceShape<TypeDisplayId>,
+    names: InvalidTraitConformanceNames,
+    types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
+    use InvalidTraitConformanceShape as Shape;
     let string_table = context.string_table;
-    let target = string_table.resolve(target_name);
-    let trait_text = trait_name
+    let target = string_table.resolve(names.target_name);
+    let trait_text = names
+        .trait_name
         .map(|name| format!(" to '{}'", string_table.resolve(name)))
         .unwrap_or_default();
+    let reason_name = || {
+        string_table.resolve(
+            names
+                .reason_name
+                .expect("reason-shaped conformance facts carry their name"),
+        )
+    };
 
-    match reason {
-        InvalidTraitConformanceReason::ImportedModuleRoot => {
+    match shape {
+        Shape::ImportedModuleRoot => {
             "Trait conformance declarations are not allowed in imported module root files."
                 .to_owned()
         }
-        InvalidTraitConformanceReason::AliasTarget => {
+        Shape::AliasTarget => {
             format!(
                 "Type alias '{target}' cannot declare trait conformance. Use the underlying nominal type."
             )
         }
-        InvalidTraitConformanceReason::NonCanonicalTarget => {
+        Shape::NonCanonicalTarget => {
             format!(
                 "'{target}' cannot produce trait evidence{trait_text}. User-authored conformance targets must be a user-defined struct, choice, or generic type constructor declared in the same file."
             )
         }
-        InvalidTraitConformanceReason::NonlocalSourceTarget => {
+        Shape::NonlocalSourceTarget => {
             format!(
                 "User-authored trait conformance for '{target}'{trait_text} is allowed only when the type is declared in the same file. Use a local wrapper choice or struct when adapting an imported type."
             )
         }
-        InvalidTraitConformanceReason::BuiltinTarget => {
+        Shape::BuiltinTarget => {
             format!(
                 "Builtin type '{target}' cannot declare user-authored trait conformance{trait_text}. Use a local wrapper choice or struct when adapting a builtin value."
             )
         }
-        InvalidTraitConformanceReason::ExternalOpaqueTarget => {
+        Shape::ExternalOpaqueTarget => {
             format!(
                 "External opaque type '{target}' cannot declare user-authored trait conformance{trait_text}. Use a local wrapper choice or struct when adapting an external type."
             )
         }
-        InvalidTraitConformanceReason::DuplicateCanonicalEvidence => {
+        Shape::DuplicateCanonicalEvidence => {
             format!("Duplicate canonical trait evidence for '{target}'{trait_text}.")
         }
-        InvalidTraitConformanceReason::BuiltinEvidenceOverride => {
+        Shape::BuiltinEvidenceOverride => {
             format!(
                 "User-authored trait evidence for '{target}'{trait_text} cannot override compiler-owned builtin evidence."
             )
         }
-        InvalidTraitConformanceReason::IncompatibleTraitEvidence {
-            incompatible_trait_name,
-        } => {
+        Shape::IncompatibleTraitEvidence => {
             format!(
                 "Type '{target}' cannot conform{trait_text} because it is incompatible with existing evidence for trait '{}'.",
-                string_table.resolve(*incompatible_trait_name)
+                reason_name()
             )
         }
-        InvalidTraitConformanceReason::MissingMethod { requirement_name } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because same-file receiver method '{}' is missing.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ReceiverMutabilityMismatch { requirement_name } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because receiver mutability for '{}' does not match the trait requirement.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterCountMismatch {
-            requirement_name,
-            expected,
-            found,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because '{}' expects {expected} non-receiver parameter(s) but the method has {found}.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterModeMismatch {
-            requirement_name,
-            parameter_index,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has a different value mode.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterContractMismatch {
-            requirement_name,
-            parameter_index,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' uses a different parameter contract; a Wire, Route or value parameter must match the trait requirement exactly.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterTypeMismatch {
-            requirement_name,
+        Shape::MissingMethod => format!(
+            "'{target}' cannot conform{trait_text} because same-file receiver method '{}' is missing.",
+            reason_name()
+        ),
+        Shape::ReceiverMutabilityMismatch => format!(
+            "'{target}' cannot conform{trait_text} because receiver mutability for '{}' does not match the trait requirement.",
+            reason_name()
+        ),
+        Shape::ParameterCountMismatch { expected, found } => format!(
+            "'{target}' cannot conform{trait_text} because '{}' expects {expected} non-receiver parameter(s) but the method has {found}.",
+            reason_name()
+        ),
+        Shape::ParameterModeMismatch { parameter_index } => format!(
+            "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has a different value mode.",
+            reason_name()
+        ),
+        Shape::ParameterContractMismatch { parameter_index } => format!(
+            "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' uses a different parameter contract; a Wire, Route or value parameter must match the trait requirement exactly.",
+            reason_name()
+        ),
+        Shape::ParameterTypeMismatch {
             parameter_index,
             expected_type,
             found_type,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has type {}, expected {}.",
-                string_table.resolve(*requirement_name),
-                diagnostic_type_name(*found_type, context),
-                diagnostic_type_name(*expected_type, context)
-            )
-        }
-        InvalidTraitConformanceReason::ReturnCountMismatch {
-            requirement_name,
-            expected,
-            found,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because '{}' expects {expected} return slot(s) but the method has {found}.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ReturnTypeMismatch {
-            requirement_name,
+        } => format!(
+            "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has type {}, expected {}.",
+            reason_name(),
+            diagnostic_type_display_name(types, *found_type, context),
+            diagnostic_type_display_name(types, *expected_type, context)
+        ),
+        Shape::ReturnCountMismatch { expected, found } => format!(
+            "'{target}' cannot conform{trait_text} because '{}' expects {expected} return slot(s) but the method has {found}.",
+            reason_name()
+        ),
+        Shape::ReturnTypeMismatch {
             return_index,
             expected_type,
             found_type,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because return {return_index} of '{}' has type {}, expected {}.",
-                string_table.resolve(*requirement_name),
-                diagnostic_type_name(*found_type, context),
-                diagnostic_type_name(*expected_type, context)
-            )
-        }
-        InvalidTraitConformanceReason::ReturnChannelMismatch {
-            requirement_name,
-            return_index,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::InferredFailureInInfallibleCast { requirement_name } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
-                string_table.resolve(*requirement_name)
-            )
-        }
+        } => format!(
+            "'{target}' cannot conform{trait_text} because return {return_index} of '{}' has type {}, expected {}.",
+            reason_name(),
+            diagnostic_type_display_name(types, *found_type, context),
+            diagnostic_type_display_name(types, *expected_type, context)
+        ),
+        Shape::ReturnChannelMismatch { return_index } => format!(
+            "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
+            reason_name()
+        ),
+        Shape::InferredFailureInInfallibleCast => format!(
+            "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
+            reason_name()
+        ),
+    }
+}
+
+/// WHAT: renders trait conformance facts from the compact reason shape and its ordered names.
+/// WHY: the shared message helper is the single owner of the prose for each conformance reason.
+pub(crate) fn render_invalid_trait_conformance(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidTraitConformanceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let names = decode_invalid_trait_conformance_names(facts.shape.code(), diagnostic.string_ids())
+        .expect("trait-conformance shape code and StringIds agree");
+    RenderedPayload {
+        message: invalid_trait_conformance_message(
+            &facts.shape,
+            names,
+            diagnostic.types(),
+            context,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -848,6 +678,18 @@ fn invalid_trait_keyword_usage_message(reason: InvalidTraitKeywordUsageReason) -
         InvalidTraitKeywordUsageReason::ThisOutsideTraitSyntax => {
             "Keyword 'This' is trait-local syntax and cannot be used here."
         }
+    }
+}
+/// WHAT: renders a trait-keyword misuse from its compact reason code.
+/// WHY: each keyword's message is fixed text selected by its compact reason code.
+pub(crate) fn render_invalid_trait_keyword_usage(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidTraitKeywordUsageView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_trait_keyword_usage_message(view.reason).to_owned(),
+        guidance: Vec::new(),
     }
 }
 
@@ -884,6 +726,62 @@ fn invalid_trait_incompatibility_message(
         }
     }
 }
+/// WHAT: renders trait incompatibility facts through `invalid_trait_incompatibility_message`.
+/// WHY: the reason and names are the complete message input.
+pub(crate) fn render_invalid_trait_incompatibility(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidTraitIncompatibilityView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_trait_incompatibility_message(
+            view.subject_name,
+            view.incompatible_trait_name,
+            &view.reason,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn generic_bound_private_surface_leak_message(
+    owner_kind: PublicGenericOwnerKind,
+    owner_name: StringId,
+    trait_name: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let (owner_label, kept_private) = match owner_kind {
+        PublicGenericOwnerKind::Function => ("function", "the function"),
+        PublicGenericOwnerKind::ReceiverMethod => ("receiver method", "the receiver type"),
+        PublicGenericOwnerKind::Struct => ("struct", "the struct"),
+        PublicGenericOwnerKind::Choice => ("choice", "the choice"),
+    };
+    format!(
+        "Public generic {} '{}' exposes private trait bound '{}'. Make the trait public in the module that declares it, or keep {} private.",
+        owner_label,
+        context.string_table.resolve(owner_name),
+        context.string_table.resolve(trait_name),
+        kept_private
+    )
+}
+
+/// WHAT: renders a generic-bound visibility leak from its compact owner and name facts.
+/// WHY: the owner kind selects the wording in `generic_bound_private_surface_leak_message`.
+pub(crate) fn render_generic_bound_private_surface_leak(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &GenericBoundPrivateSurfaceLeakView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: generic_bound_private_surface_leak_message(
+            view.owner_kind,
+            view.owner_name,
+            view.trait_name,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
 fn trait_name_used_as_type_message(
     trait_name: StringId,
@@ -894,178 +792,348 @@ fn trait_name_used_as_type_message(
         "Trait '{trait_text}' is a static contract and cannot be used as a value type. Use `type T is {trait_text}` for static reuse or a choice for runtime heterogeneity."
     )
 }
-
-fn import_payload_message(
-    payload: &DiagnosticPayload,
+/// WHAT: renders a trait-as-type diagnostic from its compact trait-name fact.
+/// WHY: `trait_name_used_as_type_message` owns the message text.
+pub(crate) fn render_trait_name_used_as_type(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &TraitNameUsedAsTypeView,
     context: DiagnosticRenderContext<'_>,
-) -> String {
-    let string_table = context.string_table;
-    match payload {
-        DiagnosticPayload::MissingImportTarget { path } => {
-            format!(
-                "Cannot resolve dependency '{}'.",
-                context.render_path(*path)
-            )
-        }
-        DiagnosticPayload::AmbiguousImportTarget { path } => format!(
-            "Ambiguous dependency target '{}'. Use a more specific path.",
-            context.render_path(*path)
-        ),
-        DiagnosticPayload::BareFileImport { path } => format!(
-            "Bare file dependency clauses are not supported; select an exported symbol from the file '{}'.",
-            context.render_path(*path)
-        ),
-        DiagnosticPayload::DirectSpecialFileImport { path } => {
-            let special_file = special_file_name_from_path(*path, context);
-            let path_text = context.render_path(*path);
-            // Guide the author toward the support package directory dependency rather than the root filename.
-            let suggestion = support_root_import_suggestion(*path, context);
-            format!(
-                "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
-            )
-        }
-        DiagnosticPayload::ImportNameCollision { name } => {
-            format!(
-                "Dependency binding name collision: '{}' is already visible in this file.",
-                string_table.resolve(*name)
-            )
-        }
-        DiagnosticPayload::NotExportedBySourceFile { symbol_path } => {
-            format!(
-                "Cannot bind '{}' because it is not exported.",
-                context.render_path(*symbol_path)
-            )
-        }
-        DiagnosticPayload::NotExportedByPublicSurface {
-            requested_path,
-            public_surface_name,
-            public_surface_type,
-        } => {
-            let path_text = context.render_path(*requested_path);
-            let public_surface_name = string_table.resolve(*public_surface_name);
-            match public_surface_type {
-                crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::SourcePackage => {
-                    format!(
-                        "Cannot bind '{path_text}' from source-backed package '@{public_surface_name}' because it is not exported by the package public surface."
-                    )
-                }
-                crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::ModuleRoot => {
-                    format!(
-                        "Cannot bind '{path_text}' from module '{public_surface_name}' because it is not exported by the module's public surface."
-                    )
-                }
-            }
-        }
-        DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path } => format!(
-            "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
-            context.render_path(*symbol_path)
-        ),
-        DiagnosticPayload::MissingPackageSymbol {
-            symbol,
-            package_path,
-        } => format!(
-            "Cannot bind '{}' from package '{}': symbol not found.",
-            string_table.resolve(*symbol),
-            string_table.resolve(*package_path)
-        ),
-        DiagnosticPayload::CrossModuleImportNotExported { symbol_path } => format!(
-            "Cannot bind '{}' because it is not exported by the target module's public surface.",
-            context.render_path(*symbol_path)
-        ),
-        DiagnosticPayload::InvalidImportPath { path, reason } => {
-            invalid_import_path_message(*path, *reason, context)
-        }
-        DiagnosticPayload::DirectSymbolPathImport { path } => {
-            direct_symbol_path_import_message(*path, context)
-        }
-        DiagnosticPayload::InvalidNamespaceDefaultName { path } => {
-            invalid_namespace_default_name_message(*path, context)
-        }
-        DiagnosticPayload::DuplicateImportSurfaceMember {
-            surface_path,
-            member_name,
-        } => duplicate_import_surface_member_message(*surface_path, *member_name, context),
-        DiagnosticPayload::ExplicitMothExtension { path } => {
-            explicit_moth_extension_message(*path, context)
-        }
-        DiagnosticPayload::ExplicitSourceExtension { path, extension } => {
-            explicit_source_extension_message(*path, *extension, context)
-        }
-        DiagnosticPayload::UnsupportedSourceFileKind { path, extension } => {
-            unsupported_source_file_kind_message(*path, *extension, context)
-        }
-        DiagnosticPayload::InvalidSourceFileEntry { path, extension } => {
-            invalid_source_file_entry_message(*path, *extension, context)
-        }
-        DiagnosticPayload::DuplicateMothTemplateInputPath { path, .. } => {
-            duplicate_moth_template_input_path_message(*path, context)
-        }
-        DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
-            first_path,
-            second_path,
-        } => moth_template_inputs_share_no_common_ancestor_message(
-            *first_path,
-            *second_path,
-            context,
-        ),
-        DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
-            unsupported_external_extension_message(*path, *extension, context)
-        }
-        DiagnosticPayload::InvalidExternalModule { path, reason } => {
-            invalid_external_module_message(*path, reason, context)
-        }
-        _ => String::new(),
+) -> RenderedPayload {
+    RenderedPayload {
+        message: trait_name_used_as_type_message(view.trait_name, context),
+        guidance: Vec::new(),
     }
 }
 
-fn borrow_payload_message(
-    payload: &DiagnosticPayload,
+fn unsupported_trait_feature_message(
+    trait_name: StringId,
+    feature: StringId,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    match payload {
-        DiagnosticPayload::BorrowConflict {
-            place,
-            existing_access,
-            requested_access,
-            ..
-        } => borrow_conflict_message(place, *existing_access, *requested_access, context),
-        DiagnosticPayload::MultipleMutableBorrows {
-            place,
-            conflicting_place,
-        } => multiple_mutable_borrows_message(place, conflicting_place.as_ref(), context),
-        DiagnosticPayload::SharedMutableConflict {
-            place,
-            existing_access,
-            requested_access,
-            conflicting_place,
-        } => shared_mutable_conflict_message(
-            place,
-            *existing_access,
-            *requested_access,
-            conflicting_place.as_ref(),
+    format!(
+        "Trait '{}' uses unsupported feature '{}'.",
+        context.string_table.resolve(trait_name),
+        context.string_table.resolve(feature)
+    )
+}
+
+/// WHAT: renders an unsupported trait feature from its compact string facts.
+/// WHY: both names are the complete input to `unsupported_trait_feature_message`.
+pub(crate) fn render_unsupported_trait_feature(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &UnsupportedTraitFeatureView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_trait_feature_message(view.trait_name, view.feature, context),
+        guidance: Vec::new(),
+    }
+}
+fn duplicate_public_export_message(name: StringId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
+        context.string_table.resolve(name)
+    )
+}
+
+/// WHAT: renders duplicate public exports from the compact exported-name fact.
+/// WHY: `duplicate_public_export_message` builds the message from the exported name.
+pub(crate) fn render_duplicate_public_export(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DuplicatePublicExportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_public_export_message(view.name, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn private_type_in_exported_api_message(exported_name: &str, private_type: &str) -> String {
+    format!(
+        "Exported declaration '{}' exposes private type {}. Export that type through the same public surface or hide it behind a public wrapper.",
+        exported_name, private_type
+    )
+}
+
+/// WHAT: renders an exported-API visibility leak from its name and type facts.
+/// WHY: the diagnostic type snapshot spells the type after the live type environment is gone.
+pub(crate) fn render_private_type_in_exported_api(
+    diagnostic: &DiagnosticView<'_>,
+    view: &PrivateTypeInExportedApiView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let private_type = diagnostic.types().display_for_render(
+        view.private_type,
+        context.string_table,
+        context.path_table(),
+    );
+    let exported_name = context.string_table.resolve(view.exported_name);
+    RenderedPayload {
+        message: private_type_in_exported_api_message(exported_name, &private_type),
+        guidance: Vec::new(),
+    }
+}
+
+fn missing_package_symbol_message(
+    symbol: StringId,
+    package_path: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' from package '{}': symbol not found.",
+        context.string_table.resolve(symbol),
+        context.string_table.resolve(package_path)
+    )
+}
+
+/// Renders a missing package symbol from its compact string facts.
+pub(crate) fn render_missing_package_symbol(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MissingPackageSymbolView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_package_symbol_message(view.symbol, view.package_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn cross_module_import_not_exported_message(
+    symbol_path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' because it is not exported by the target module's public surface.",
+        context.render_path(symbol_path)
+    )
+}
+
+/// Renders a cross-module export failure from its compact path fact.
+pub(crate) fn render_cross_module_import_not_exported(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &CrossModuleImportNotExportedView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: cross_module_import_not_exported_message(view.symbol_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn not_exported_by_source_file_message(
+    symbol_path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' because it is not exported.",
+        context.render_path(symbol_path)
+    )
+}
+
+/// Renders an unexported source-file symbol from its compact path fact.
+pub(crate) fn render_not_exported_by_source_file(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &NotExportedBySourceFileView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: not_exported_by_source_file_message(view.symbol_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn not_exported_by_public_surface_message(
+    requested_path: PathId,
+    public_surface_name: StringId,
+    public_surface_type: crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let path_text = context.render_path(requested_path);
+    let public_surface_name = context.string_table.resolve(public_surface_name);
+    match public_surface_type {
+        crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::SourcePackage => {
+            format!(
+                "Cannot bind '{path_text}' from source-backed package '@{public_surface_name}' because it is not exported by the package public surface."
+            )
+        }
+        crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::ModuleRoot => {
+            format!(
+                "Cannot bind '{path_text}' from module '{public_surface_name}' because it is not exported by the module's public surface."
+            )
+        }
+    }
+}
+
+/// Renders a public-surface export failure from its path, name and typed surface facts.
+pub(crate) fn render_not_exported_by_public_surface(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &NotExportedByPublicSurfaceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: not_exported_by_public_surface_message(
+            view.requested_path,
+            view.public_surface_name,
+            view.public_surface_type,
             context,
         ),
-        DiagnosticPayload::UseAfterPossibleMove { place, .. } => {
-            use_after_possible_move_message(place, context)
-        }
-        DiagnosticPayload::MoveWhileBorrowed {
-            place,
-            existing_access,
-            ..
-        } => move_while_borrowed_message(place, *existing_access, context),
-        DiagnosticPayload::WholeObjectBorrowConflict {
-            whole_place,
-            part_place,
-            ..
-        } => whole_object_borrow_conflict_message(whole_place, part_place, context),
-        DiagnosticPayload::InvalidMutableAccess {
-            place,
-            reason,
-            conflicting_place,
-        } => invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), context),
-        DiagnosticPayload::UseOfUninitializedLocal { place } => {
-            use_of_uninitialized_local_message(place, context)
-        }
-        _ => String::new(),
+        guidance: Vec::new(),
+    }
+}
+
+fn missing_module_root_public_surface_message(
+    symbol_path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
+        context.render_path(symbol_path)
+    )
+}
+
+/// Renders the missing module-root surface message from its compact path fact.
+pub(crate) fn render_missing_module_root_public_surface(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MissingModuleRootPublicSurfaceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_module_root_public_surface_message(view.symbol_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn dependency_alias_case_mismatch_message(
+    alias: StringId,
+    symbol: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Dependency alias '{}' case mismatch with symbol '{}'",
+        context.string_table.resolve(alias),
+        context.string_table.resolve(symbol)
+    )
+}
+
+/// Renders the dependency alias's case mismatch from its compact name facts.
+pub(crate) fn render_dependency_alias_case_mismatch(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DependencyAliasCaseMismatchView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: dependency_alias_case_mismatch_message(view.alias, view.symbol, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn import_name_collision_message(name: StringId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Dependency binding name collision: '{}' is already visible in this file.",
+        context.string_table.resolve(name)
+    )
+}
+
+/// Renders a colliding import binding from its compact name fact.
+pub(crate) fn render_import_name_collision(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &ImportNameCollisionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: import_name_collision_message(view.name, context),
+        guidance: Vec::new(),
+    }
+}
+fn ambiguous_import_target_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Ambiguous dependency target '{}'. Use a more specific path.",
+        context.render_path(path)
+    )
+}
+
+/// Renders an ambiguous dependency target from its compact path fact.
+pub(crate) fn render_ambiguous_import_target(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &AmbiguousImportTargetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: ambiguous_import_target_message(view.path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn direct_special_file_import_message(
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let special_file = special_file_name_from_path(path, context);
+    let path_text = context.render_path(path);
+    let suggestion = support_root_import_suggestion(path, context);
+    format!(
+        "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
+    )
+}
+
+/// Renders a direct special-file dependency from its compact path fact.
+pub(crate) fn render_direct_special_file_import(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DirectSpecialFileImportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: direct_special_file_import_message(view.path, context),
+        guidance: Vec::new(),
+    }
+}
+fn bare_file_import_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Bare file dependency clauses are not supported; select an exported symbol from the file '{}'.",
+        context.render_path(path)
+    )
+}
+
+/// Renders the bare-file import message from the compact path fact.
+pub(crate) fn render_bare_file_import(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &BareFileImportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: bare_file_import_message(view.path, context),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders a family that carries no message text.
+/// WHY: an empty message leaves the descriptor title as the only text.
+pub(crate) fn render_title_only<V>(
+    _diagnostic: &DiagnosticView<'_>,
+    _view: &V,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: String::new(),
+        guidance: Vec::new(),
+    }
+}
+
+fn empty_collection_type_ambiguity_message() -> String {
+    "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation.".to_owned()
+}
+
+/// Renders the fixed empty-collection message and its explicit-type guidance.
+pub(crate) fn render_empty_collection_type_ambiguity(
+    _diagnostic: &DiagnosticView<'_>,
+    _view: &EmptyCollectionTypeAmbiguityView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: empty_collection_type_ambiguity_message(),
+        guidance: vec![
+            "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
+        ],
     }
 }

@@ -8,8 +8,13 @@ use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
@@ -124,8 +129,9 @@ pub struct Config {
     /// Exact authored source spans for config keys when the key came from retained source.
     ///
     /// Path-only and synthetic settings deliberately have no entry here rather than acquiring
-    /// a fabricated span from their display path.
-    pub setting_spans: HashMap<String, SourceSpan>,
+    /// a fabricated span from their display path. Crate-private: the spans resolve only under the
+    /// build owner that retains the project source database.
+    pub(crate) setting_spans: HashMap<String, SourceSpan>,
 
     /// Validated results of the grouped `html` builder section when one was authored.
     pub html_section: HtmlSectionConfig,
@@ -173,7 +179,7 @@ impl Config {
     }
 
     /// Return the exact authored span for a config key, if the setting came from retained source.
-    pub fn setting_span(&self, key: &str) -> Option<SourceSpan> {
+    pub(crate) fn setting_span(&self, key: &str) -> Option<SourceSpan> {
         self.setting_spans.get(key).copied()
     }
 
@@ -184,10 +190,10 @@ impl Config {
         &self,
         key: &str,
         reason: InvalidConfigReason,
-        string_table: &mut StringTable,
-    ) -> CompilerDiagnostic {
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> DiagnosticDraft {
         let key_id = string_table.intern(key);
-        CompilerDiagnostic::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
+        project_config::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
     }
 
     pub fn config_file_path(&self) -> PathBuf {
@@ -201,26 +207,31 @@ impl Config {
 /// narrow escape hatch for filesystem/tooling failures discovered during validation.
 /// WHY: `BackendBuilder::validate_project_config` is a build boundary, so callers need one result
 /// type that can still distinguish normal user config feedback from internal failures.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProjectConfigError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(Box<InfrastructureFailure>),
 }
 
 impl ProjectConfigError {
-    pub fn into_messages(self, string_table: StringTable) -> CompilerMessages {
+    pub fn into_prepared_failure(self, root_string_table: &StringTable) -> PreparedFailure {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic(diagnostic, string_table)
+                PreparedDiagnosticBatch::capture_from_root_string_table(
+                    DiagnosticBag::from(diagnostic),
+                    root_string_table,
+                    None,
+                    || None,
+                )
+                .map(PreparedFailure::Diagnosed)
+                .unwrap_or_else(PreparedFailure::from)
             }
-            ProjectConfigError::Infrastructure(error) => {
-                CompilerMessages::from_error(*error, string_table)
-            }
+            ProjectConfigError::Infrastructure(error) => PreparedFailure::from(*error),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
+    pub(crate) fn into_diagnostic(self) -> Option<DiagnosticDraft> {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => Some(diagnostic),
             ProjectConfigError::Infrastructure(_) => None,
@@ -228,14 +239,14 @@ impl ProjectConfigError {
     }
 }
 
-impl From<CompilerDiagnostic> for ProjectConfigError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for ProjectConfigError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         ProjectConfigError::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for ProjectConfigError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for ProjectConfigError {
+    fn from(error: InfrastructureFailure) -> Self {
         ProjectConfigError::Infrastructure(Box::new(error))
     }
 }

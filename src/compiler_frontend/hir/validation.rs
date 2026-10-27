@@ -20,7 +20,7 @@ mod support;
 #[path = "tests/hir_validation_walk_tests.rs"]
 mod tests;
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -35,7 +35,7 @@ pub(crate) fn validate_hir_module(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     external_packages: &ExternalPackageRegistry,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut validator = HirValidator::new(module, type_environment, external_packages);
     validator.validate()
 }
@@ -102,7 +102,7 @@ impl<'a> HirValidator<'a> {
     //  Main Validation Pipeline
     // -------------------------
 
-    fn validate(&mut self) -> Result<(), CompilerError> {
+    fn validate(&mut self) -> Result<(), InfrastructureFailure> {
         // 1. Collect all definition IDs to build lookup tables.
         self.collect_definition_ids()?;
 

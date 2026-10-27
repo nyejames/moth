@@ -12,7 +12,6 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallParameterAccess, PublicCallParameterSummary,
     PublicCallTransferEffect,
 };
-use crate::compiler_frontend::source::SourceSpan;
 
 use super::BorrowTransferContext;
 
@@ -39,19 +38,15 @@ pub(super) fn resolve_call_semantics(
     context: &BorrowTransferContext<'_>,
     target: &CallTarget,
     arg_len: usize,
-    span: Option<SourceSpan>,
 ) -> Result<CallSemantics, BorrowCheckError> {
     match target {
         CallTarget::Local(function_id) => {
             let function_id = *function_id;
             let Some(summary) = context.public_call_summaries.get(&function_id) else {
-                return Err(context.diagnostics.internal_error(
-                    format!(
-                        "Borrow checker is missing the public call summary for function '{}'",
-                        context.diagnostics.function_name(function_id)
-                    ),
-                    context.diagnostics.function_error_span(function_id),
-                ));
+                return Err(context.diagnostics.internal_error(format!(
+                    "Borrow checker is missing the public call summary for function '{}'",
+                    context.diagnostics.function_name(function_id)
+                )));
             };
 
             if summary.parameters.len() != arg_len {
@@ -62,7 +57,6 @@ pub(super) fn resolve_call_semantics(
                         summary.parameters.len(),
                         arg_len
                     ),
-                    span,
                 ));
             }
 
@@ -70,7 +64,6 @@ pub(super) fn resolve_call_semantics(
                 context,
                 &summary.return_alias,
                 arg_len,
-                span,
                 &format!(
                     "user function '{}'",
                     context.diagnostics.function_name(function_id)
@@ -95,7 +88,6 @@ pub(super) fn resolve_call_semantics(
                     format!(
                         "Borrow checker is missing the provider call summary for imported function {origin:?}"
                     ),
-                    span,
                 ));
             };
 
@@ -106,7 +98,6 @@ pub(super) fn resolve_call_semantics(
                         summary.parameters.len(),
                         arg_len
                     ),
-                    span,
                 ));
             }
 
@@ -114,7 +105,6 @@ pub(super) fn resolve_call_semantics(
                 context,
                 &summary.return_alias,
                 arg_len,
-                span,
                 &format!("imported function {origin:?}"),
             )?;
 
@@ -134,7 +124,6 @@ pub(super) fn resolve_call_semantics(
                     format!(
                         "Borrow checker is missing the call summary for module-private function {identity:?}"
                     ),
-                    span,
                 ));
             };
 
@@ -145,7 +134,6 @@ pub(super) fn resolve_call_semantics(
                         summary.parameters.len(),
                         arg_len
                     ),
-                    span,
                 ));
             }
 
@@ -153,7 +141,6 @@ pub(super) fn resolve_call_semantics(
                 context,
                 &summary.return_alias,
                 arg_len,
-                span,
                 &format!("module-private function {identity:?}"),
             )?;
 
@@ -169,12 +156,9 @@ pub(super) fn resolve_call_semantics(
 
         CallTarget::Generated(identity) => {
             let Some(summary) = context.generated_call_summaries.get(identity.as_ref()) else {
-                return Err(context.diagnostics.internal_error(
-                    format!(
-                        "Borrow checker is missing the call summary for generated function {identity:?}"
-                    ),
-                    span,
-                ));
+                return Err(context.diagnostics.internal_error(format!(
+                    "Borrow checker is missing the call summary for generated function {identity:?}"
+                )));
             };
 
             if summary.parameters.len() != arg_len {
@@ -184,7 +168,6 @@ pub(super) fn resolve_call_semantics(
                         summary.parameters.len(),
                         arg_len
                     ),
-                    span,
                 ));
             }
 
@@ -192,7 +175,6 @@ pub(super) fn resolve_call_semantics(
                 context,
                 &summary.return_alias,
                 arg_len,
-                span,
                 &format!("generated function {identity:?}"),
             )?;
 
@@ -207,7 +189,7 @@ pub(super) fn resolve_call_semantics(
         }
 
         CallTarget::External(id) => {
-            let host_def = resolve_host_definition(context, *id, span)?;
+            let host_def = resolve_host_definition(context, *id)?;
             if host_def.parameters.len() != arg_len {
                 return Err(context.diagnostics.internal_error(
                     format!(
@@ -216,7 +198,6 @@ pub(super) fn resolve_call_semantics(
                         host_def.parameters.len(),
                         arg_len
                     ),
-                    span,
                 ));
             }
 
@@ -236,7 +217,6 @@ pub(super) fn resolve_call_semantics(
                         context,
                         indices,
                         arg_len,
-                        span,
                         &format!("host function '{}'", host_def.name),
                     )?;
                     FunctionReturnAliasSummary::AliasParams(indices.to_vec())
@@ -255,7 +235,6 @@ pub(super) fn resolve_call_semantics(
 fn resolve_host_definition<'a>(
     context: &'a BorrowTransferContext<'_>,
     id: ExternalFunctionId,
-    span: Option<SourceSpan>,
 ) -> Result<&'a ExternalFunctionDef, BorrowCheckError> {
     // Host metadata is keyed by the stable ExternalFunctionId emitted into HIR.
     // Borrow checking should not silently reinterpret a missing symbol through a
@@ -264,20 +243,16 @@ fn resolve_host_definition<'a>(
         return Ok(definition);
     }
 
-    Err(context.diagnostics.internal_error(
-        format!(
-            "Borrow checker could not resolve host call target '{}'",
-            id.name()
-        ),
-        span,
-    ))
+    Err(context.diagnostics.internal_error(format!(
+        "Borrow checker could not resolve host call target '{}'",
+        id.name()
+    )))
 }
 
 fn validate_alias_indices(
     context: &BorrowTransferContext<'_>,
     indices: &[usize],
     arg_len: usize,
-    span: Option<SourceSpan>,
     callee_name: &str,
 ) -> Result<(), BorrowCheckError> {
     for index in indices {
@@ -285,13 +260,10 @@ fn validate_alias_indices(
             continue;
         }
 
-        return Err(context.diagnostics.internal_error(
-            format!(
-                "Borrow checker found out-of-range return-alias index {} for {} with {} argument(s)",
-                index, callee_name, arg_len
-            ),
-            span,
-        ));
+        return Err(context.diagnostics.internal_error(format!(
+            "Borrow checker found out-of-range return-alias index {} for {} with {} argument(s)",
+            index, callee_name, arg_len
+        )));
     }
 
     Ok(())
@@ -314,11 +286,10 @@ fn validate_return_alias_summary(
     context: &BorrowTransferContext<'_>,
     return_alias: &FunctionReturnAliasSummary,
     arg_len: usize,
-    span: Option<SourceSpan>,
     callee_name: &str,
 ) -> Result<(), BorrowCheckError> {
     if let FunctionReturnAliasSummary::AliasParams(indices) = return_alias {
-        validate_alias_indices(context, indices, arg_len, span, callee_name)?;
+        validate_alias_indices(context, indices, arg_len, callee_name)?;
     }
     Ok(())
 }

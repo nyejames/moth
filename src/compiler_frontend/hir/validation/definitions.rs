@@ -6,38 +6,33 @@
 //! frontend-type links for layout identity.
 
 use super::HirValidator;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 impl<'a> HirValidator<'a> {
     // -------------------------
     //  Definition Collection
     // -------------------------
 
-    pub(super) fn collect_definition_ids(&mut self) -> Result<(), CompilerError> {
+    pub(super) fn collect_definition_ids(&mut self) -> Result<(), InfrastructureFailure> {
         for region in &self.module.regions {
             let id = region.id();
             if !self.region_ids.insert(id) {
-                return Err(self.error_with_hir(format!("Duplicate HIR region id {id:?}"), None));
+                return Err(self.error_with_hir(format!("Duplicate HIR region id {id:?}")));
             }
         }
 
         for block in &self.module.blocks {
             if !self.block_ids.insert(block.id) {
-                return Err(self.error_with_hir(
-                    format!("Duplicate HIR block id {:?}", block.id),
-                    Some(HirLocation::Block(block.id)),
-                ));
+                return Err(self.error_with_hir(format!("Duplicate HIR block id {:?}", block.id)));
             }
             self.block_index_by_id
                 .insert(block.id, self.block_index_by_id.len());
 
             for local in &block.locals {
                 if self.local_types.insert(local.id, local.ty).is_some() {
-                    return Err(self.error_with_hir(
-                        format!("Duplicate HIR local id {:?}", local.id),
-                        Some(HirLocation::Block(block.id)),
-                    ));
+                    return Err(
+                        self.error_with_hir(format!("Duplicate HIR local id {:?}", local.id))
+                    );
                 }
                 self.local_block_by_id.insert(local.id, block.id);
             }
@@ -48,20 +43,15 @@ impl<'a> HirValidator<'a> {
                     .insert(statement.id, block.id)
                     .is_some()
                 {
-                    return Err(self.error_with_hir(
-                        format!("Duplicate HIR statement id {:?}", statement.id),
-                        Some(HirLocation::Block(block.id)),
-                    ));
+                    return Err(self
+                        .error_with_hir(format!("Duplicate HIR statement id {:?}", statement.id)));
                 }
             }
             if let crate::compiler_frontend::hir::terminators::HirTerminator::Invoke { id, .. } =
                 &block.terminator
                 && self.statement_block_by_id.insert(*id, block.id).is_some()
             {
-                return Err(self.error_with_hir(
-                    format!("Duplicate HIR operation node id {id:?}"),
-                    Some(HirLocation::Terminator(block.id)),
-                ));
+                return Err(self.error_with_hir(format!("Duplicate HIR operation node id {id:?}")));
             }
         }
 
@@ -71,18 +61,16 @@ impl<'a> HirValidator<'a> {
                 .insert(hir_struct.id, hir_struct.frontend_type_id)
                 .is_some()
             {
-                return Err(self.error_with_hir(
-                    format!("Duplicate HIR struct id {:?}", hir_struct.id),
-                    Some(HirLocation::Struct(hir_struct.id)),
-                ));
+                return Err(
+                    self.error_with_hir(format!("Duplicate HIR struct id {:?}", hir_struct.id))
+                );
             }
 
             for field in &hir_struct.fields {
                 if !self.field_ids.insert(field.id) {
-                    return Err(self.error_with_hir(
-                        format!("Duplicate HIR field id {:?}", field.id),
-                        Some(HirLocation::Struct(hir_struct.id)),
-                    ));
+                    return Err(
+                        self.error_with_hir(format!("Duplicate HIR field id {:?}", field.id))
+                    );
                 }
 
                 self.field_types.insert(field.id, field.ty);
@@ -92,10 +80,9 @@ impl<'a> HirValidator<'a> {
 
         for function in &self.module.functions {
             if !self.function_ids.insert(function.id) {
-                return Err(self.error_with_hir(
-                    format!("Duplicate HIR function id {:?}", function.id),
-                    Some(HirLocation::Function(function.id)),
-                ));
+                return Err(
+                    self.error_with_hir(format!("Duplicate HIR function id {:?}", function.id))
+                );
             }
             self.parameter_local_ids
                 .extend(function.params.iter().copied());
@@ -114,27 +101,21 @@ impl<'a> HirValidator<'a> {
     /// WHY: `frontend_type_id` is the canonical link from lowering-local layout
     ///      back to semantic type identity. If it is orphan or zero, backend
     ///      type lookups can silently produce wrong layouts.
-    pub(super) fn validate_frontend_type_ids(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_frontend_type_ids(&self) -> Result<(), InfrastructureFailure> {
         for hir_struct in &self.module.structs {
-            self.require_type_id(
-                hir_struct.frontend_type_id,
-                Some(HirLocation::Struct(hir_struct.id)),
-            )?;
+            self.require_type_id(hir_struct.frontend_type_id)?;
 
             for field in &hir_struct.fields {
-                self.require_type_id(field.ty, Some(HirLocation::Struct(hir_struct.id)))?;
+                self.require_type_id(field.ty)?;
             }
         }
 
         for choice in &self.module.choices {
-            self.require_type_id(
-                choice.frontend_type_id,
-                Some(HirLocation::Choice(choice.id)),
-            )?;
+            self.require_type_id(choice.frontend_type_id)?;
 
             for variant in &choice.variants {
                 for field in &variant.fields {
-                    self.require_type_id(field.ty, Some(HirLocation::Choice(choice.id)))?;
+                    self.require_type_id(field.ty)?;
                 }
             }
         }

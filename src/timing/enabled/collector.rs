@@ -6,6 +6,8 @@
 //! lifecycle and metadata registration remain serialized while global and
 //! attributed totals use schema-indexed atomic slots.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+
 #[cfg(feature = "benchmark_counters")]
 use super::BenchmarkObservationMetric;
 use super::attribution::{
@@ -540,7 +542,9 @@ fn validate_snapshot_invariants(
         aggregate.metric.descriptor().attribution != TimingAttributionKind::None
     }) {
         let (total, samples) = match aggregate.metric.descriptor().attribution {
-            TimingAttributionKind::None => unreachable!("filtered un-attributed metric"),
+            TimingAttributionKind::None => {
+                crate::compiler_bug!(CompilerStage::Timing, "filtered un-attributed metric")
+            }
             TimingAttributionKind::Boundary => sum_attributed_rows(
                 snapshot
                     .boundaries

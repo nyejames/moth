@@ -6,6 +6,7 @@
 //! WHY: both authored bodies finish frontend validation before selection, while terminality,
 //! generated materialisation and HIR consume active executable control flow only.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -30,7 +31,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -177,10 +178,11 @@ impl StaticIfSpecialization {
         self,
         mut slots: Vec<GenericRequestSlot>,
         assertion_validation_paths: &FxHashSet<PathId>,
-    ) -> Result<CommittedGenericRequests, CompilerError> {
+    ) -> Result<CommittedGenericRequests, InfrastructureFailure> {
         for range in &self.inactive_generic_requests {
             let inactive = slots.get_mut(range.start..range.end).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "static-if inactive generic request range falls outside the request ledger",
                 )
             })?;
@@ -738,8 +740,9 @@ impl StaticIfSpecializer<'_> {
 }
 
 /// Error for a ledger slot that survived body completion without publishing its request.
-fn pending_generic_request_error() -> CompilerError {
-    CompilerError::compiler_error(
+fn pending_generic_request_error() -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
         "generic request ledger kept a pending call after body completion",
     )
 }
@@ -752,7 +755,7 @@ fn take_terminal_receiver_body(
     kind: &NodeKind,
     builder: &AstExpressionBuilder,
     constants: &ConstValueStore,
-) -> Result<Option<(Vec<AstNode>, PathId)>, CompilerError> {
+) -> Result<Option<(Vec<AstNode>, PathId)>, InfrastructureFailure> {
     let expression = match kind {
         NodeKind::VariableDeclaration(declaration) => declaration.value.initializer(),
         NodeKind::Assignment { value, .. }
@@ -771,7 +774,7 @@ fn take_terminal_value_body(
     expression: ExprId,
     builder: &AstExpressionBuilder,
     constants: &ConstValueStore,
-) -> Result<Option<(Vec<AstNode>, PathId)>, CompilerError> {
+) -> Result<Option<(Vec<AstNode>, PathId)>, InfrastructureFailure> {
     match builder.view(expression)?.operation() {
         ExpressionOperationView::ValueBlock(ValueBlock::LexicalScope(scope)) => {
             let exits = analyze_branch_exits(&scope.body, builder, constants);

@@ -106,13 +106,4 @@ fn counter_modes_extend_the_session_channel_matrix() {
     assert!(counter_only.channels().counters());
     assert!(counter_only.channels().human_summary());
     assert!(!counter_only.channels().attribution());
-
-    let full = TimingSessionConfiguration::for_test_with_counters(
-        TimerOutputMode::Silent,
-        CounterOutputMode::Full,
-    );
-    assert!(!full.channels().metrics());
-    assert!(full.channels().counters());
-    assert!(full.channels().human_summary());
-    assert_eq!(full.counter_mode(), CounterOutputMode::Full);
 }

@@ -4,7 +4,7 @@
 //! active-root public declarations, retains every required root category with resolved
 //! `TypeId` facts, keeps deterministic sorted-header order, selects receiver methods in a
 //! separate pass by public nominal receiver ownership (ignoring the method's own export
-//! mode), and reports missing resolved facts as internal `CompilerError` invariants.
+//! mode), and reports missing resolved facts as internal `InfrastructureFailure` invariants.
 //! WHY: the root table is a hidden side-table consumed immediately before HIR lowering;
 //! integration output cannot expose its contents or ordering.
 
@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, StructTypeDefinition,
@@ -65,8 +65,7 @@ fn header(
     _string_table: &mut StringTable,
     _path_fork: &mut PathInternerFork,
 ) -> Header {
-    let token_index =
-        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
+    let token_index = TokenIndex::from_raw(0);
     Header {
         kind,
         file_role,
@@ -213,7 +212,7 @@ fn build_table(
     trait_environment: &TraitEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<ResolvedPublicTypeRootTable, CompilerError> {
+) -> Result<ResolvedPublicTypeRootTable, InfrastructureFailure> {
     let declaration_table = TopLevelDeclarationTable::new(declarations, path_fork);
     build_resolved_public_type_roots(BuildResolvedPublicTypeRootsInput {
         sorted_headers: &headers,
@@ -645,11 +644,11 @@ fn missing_alias_entry_is_internal_error() {
         Err(error) => error,
         Ok(_) => panic!("a public alias without a completed alias fact must be an internal error"),
     };
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("active-root transparent alias"),
+        error.message.contains("active-root transparent alias"),
         "the error must name the missing fact, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -685,7 +684,7 @@ fn missing_resolved_function_signature_is_internal_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
+        matches!(result, Err(InfrastructureFailure { .. })),
         "a public function without a resolved signature must be an internal error"
     );
 }
@@ -722,7 +721,7 @@ fn missing_nominal_type_id_is_internal_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
+        matches!(result, Err(InfrastructureFailure { .. })),
         "a public struct without a canonical TypeId must be an internal error"
     );
 }
@@ -759,7 +758,7 @@ fn missing_resolved_constant_is_internal_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
+        matches!(result, Err(InfrastructureFailure { .. })),
         "a public constant without a resolved declaration must be an internal error"
     );
 }
@@ -826,7 +825,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
+        matches!(result, Err(InfrastructureFailure { .. })),
         "a receiver method missing from the catalog must be an internal error"
     );
 }
@@ -904,7 +903,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
+        matches!(result, Err(InfrastructureFailure { .. })),
         "an active-root function missing its resolved signature in the method pass must be an internal error, not skipped"
     );
 }
@@ -1093,7 +1092,7 @@ fn retains_core_trait_fact_for_generic_struct_bound() {
 }
 
 #[test]
-fn missing_trait_definition_for_bound_is_compiler_error() {
+fn missing_trait_definition_for_bound_is_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
@@ -1145,8 +1144,8 @@ fn missing_trait_definition_for_bound_is_compiler_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
-        "a bound TraitId with no trait definition and no core classification must be a CompilerError"
+        matches!(result, Err(InfrastructureFailure { .. })),
+        "a bound TraitId with no trait definition and no core classification must be an InfrastructureFailure"
     );
 }
 
@@ -1195,14 +1194,16 @@ fn missing_resolved_struct_fields_is_internal_error() {
         &path_fork,
     );
 
-    let CompilerError { msg, .. } = match result {
+    let InfrastructureFailure { message, .. } = match result {
         Err(error) => error,
         Ok(_) => {
-            panic!("a public struct missing resolved field declarations must be a CompilerError")
+            panic!(
+                "a public struct missing resolved field declarations must be an InfrastructureFailure"
+            )
         }
     };
     assert!(
-        msg.contains("struct field declarations") && msg.contains("was not published"),
-        "expected a missing-struct-fields diagnostic, got: {msg}"
+        message.contains("struct field declarations") && message.contains("was not published"),
+        "expected a missing-struct-fields diagnostic, got: {message}"
     );
 }

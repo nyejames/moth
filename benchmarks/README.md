@@ -332,11 +332,10 @@ MOTH_TIMERS=off       # disable ordinary command timing and timing output
 
 MOTH_COUNTERS=off     # default
 MOTH_COUNTERS=summary # stable counter lines plus grouped summary
-MOTH_COUNTERS=full    # stable counter lines plus full legacy counter dump
 ```
 
 Counter lines are emitted when the compiler has `benchmark_counters` and
-`MOTH_COUNTERS=summary` or `MOTH_COUNTERS=full`. With `timers`, those lines are
+`MOTH_COUNTERS=summary`. With `timers`, those lines are
 backed by the shared timing session; without `timers`, they are direct output
 from counter logging call sites and no timer aggregate is collected. In-process
 frontend collection uses an explicit caller-owned session configuration rather

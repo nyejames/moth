@@ -3,19 +3,24 @@
 //! Owns panic bookkeeping and the synthetic-start contract across frontend, target validation
 //! and emitted projects. Backend-local bootstrap shape tests remain with the HTML builder.
 
-use super::super::FailureKind;
 use super::super::assertions::{
     RuntimeEvent, execute_html_harness_for_test, validate_success_result,
 };
-use super::super::execution::execute_test_case;
-use super::super::execution::panic_case_result;
+use super::super::execution::{
+    execute_test_case, execute_test_case_with_completion_hook, panic_case_result,
+};
 use super::super::types::{GoldenExpectation, RenderedOutputExpectation};
-use super::super::{BackendId, SuccessExpectation, WarningExpectation};
+use super::super::{
+    BackendId, CaseExecutionResult, FailureKind, SuccessExpectation, TestCaseSpec,
+    WarningExpectation,
+};
 use super::synthetic_build_results::success_test_case;
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
+use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::build_system::build::{
-    BackendBuilder, BuildResult, FileKind, ProjectBuilder, build_project,
+    BackendBuilder, BuildResult, FileKind, Project, ProjectBuilder, ProjectCompilation,
+    build_project,
 };
 use crate::build_system::create_project_modules::{
     ProjectFrontendCompilation, compile_project_frontend,
@@ -23,11 +28,17 @@ use crate::build_system::create_project_modules::{
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, InvalidFallibleHandlingReason,
-    UnsupportedBackendFeatureReason,
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext,
+    dev_server::render_compilation_result_html,
+    terse::{self, format_terse_diagnostic_reports},
 };
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -35,20 +46,50 @@ use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::js_path::RELEASE_ENTRY_FAILURE_NOTICE;
-use crate::projects::settings::Config;
+use crate::projects::settings::{Config, ProjectConfigError};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tempfile::TempDir;
 
+fn expect_success_with_warnings<T>(
+    result: CompilationResult<T>,
+) -> (T, Option<DiagnosticReportSet>) {
+    match result {
+        Ok(CompilationOutcome::Success { value, warnings }) => (value, warnings),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!(
+                "expected successful compilation:\n{}",
+                format_terse_diagnostic_reports(&reports).join("\n")
+            )
+        }
+        Err(errors) => panic!("compilation infrastructure failed: {errors:?}"),
+    }
+}
+
+fn expect_diagnosed<T>(result: CompilationResult<T>) -> DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => panic!("expected diagnosed compilation"),
+        Err(errors) => panic!("compilation infrastructure failed: {errors:?}"),
+    }
+}
+
 #[test]
-fn panic_execution_results_are_always_failures() {
+fn panic_execution_results_use_generic_compiler_bug_text_for_unknown_payloads() {
     let result = panic_case_result(Box::new("boom".to_string()));
     assert!(!result.passed);
-    assert_eq!(result.panic_message.as_deref(), Some("boom"));
+    let panic_message = result
+        .panic_message
+        .expect("panic result should include a message");
+    assert!(panic_message.contains("Compiler bug"), "{panic_message}");
+    assert!(!panic_message.contains("boom"), "{panic_message}");
     assert!(result.failure_reason.is_some());
 }
 
@@ -57,6 +98,176 @@ fn panic_execution_result_has_harness_failed_kind() {
     let result = panic_case_result(Box::new("boom".to_string()));
     assert!(!result.passed);
     assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
+}
+
+#[derive(Clone, Copy)]
+enum BuilderPanic {
+    CompilerBug,
+    Plain,
+}
+
+struct PanickingBackendBuilder {
+    panic: BuilderPanic,
+    surface_reached: Arc<AtomicBool>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl Drop for PanickingBackendBuilder {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::Release);
+    }
+}
+
+impl BackendBuilder for PanickingBackendBuilder {
+    fn build_backend(
+        &self,
+        _project_compilation: ProjectCompilation,
+        _config: &Config,
+        _build_profile: BuildProfile,
+        _flags: &[Flag],
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, PreparedFailure> {
+        unreachable!("frontend_surface panics before backend construction")
+    }
+
+    fn validate_project_config(
+        &self,
+        _config: &Config,
+        _strings: &mut DiagnosticStringBuilder<'_>,
+    ) -> Result<(), ProjectConfigError> {
+        unreachable!("frontend_surface panics before project-config validation")
+    }
+
+    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
+        unreachable!("frontend_surface is the first backend-builder method")
+    }
+
+    fn frontend_surface(&self) -> BuilderSurface {
+        self.surface_reached.store(true, Ordering::Release);
+        match self.panic {
+            BuilderPanic::CompilerBug => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "integration test backend builder panic marker"
+            ),
+            BuilderPanic::Plain => panic!("plain integration test backend builder panic"),
+        }
+    }
+}
+
+struct PanickingBuilderObservations {
+    surface_reached: Arc<AtomicBool>,
+    builder_dropped: Arc<AtomicBool>,
+    after_drop_hook_observed_drop: Arc<AtomicBool>,
+}
+
+fn execute_with_panicking_builder(
+    case: &TestCaseSpec,
+    panic: BuilderPanic,
+) -> (CaseExecutionResult, PanickingBuilderObservations) {
+    let surface_reached = Arc::new(AtomicBool::new(false));
+    let builder_dropped = Arc::new(AtomicBool::new(false));
+    let after_drop_hook_observed_drop = Arc::new(AtomicBool::new(false));
+    let project_builder = ProjectBuilder::new(PanickingBackendBuilder {
+        panic,
+        surface_reached: Arc::clone(&surface_reached),
+        dropped: Arc::clone(&builder_dropped),
+    });
+    let result = execute_test_case_with_completion_hook(case, project_builder, {
+        let builder_dropped = Arc::clone(&builder_dropped);
+        let after_drop_hook_observed_drop = Arc::clone(&after_drop_hook_observed_drop);
+        move || {
+            after_drop_hook_observed_drop
+                .store(builder_dropped.load(Ordering::Acquire), Ordering::Release);
+        }
+    });
+
+    (
+        result,
+        PanickingBuilderObservations {
+            surface_reached,
+            builder_dropped,
+            after_drop_hook_observed_drop,
+        },
+    )
+}
+
+#[test]
+fn backend_builder_panics_become_harness_failures_after_worker_drop() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let fixture = EntryFixture::new("#[:static-entry]\n", true);
+    let mut case = success_test_case(BackendId::Html, output_expectation("unused"));
+    case.entry_path = fixture.entry.clone();
+    case.fixture_root = fixture.directory.path().to_path_buf();
+
+    let (compiler_bug_result, compiler_bug_observations) =
+        execute_with_panicking_builder(&case, BuilderPanic::CompilerBug);
+    assert!(!compiler_bug_result.passed);
+    assert_eq!(
+        compiler_bug_result.failure_kind,
+        Some(FailureKind::HarnessFailed)
+    );
+    let compiler_bug_message = compiler_bug_result
+        .panic_message
+        .as_deref()
+        .expect("compiler-bug panic should have a structured rendering");
+    assert!(compiler_bug_message.contains("Stage: Backend lowering"));
+    assert!(
+        compiler_bug_message.contains("integration test backend builder panic marker"),
+        "{compiler_bug_message}"
+    );
+    assert_eq!(
+        compiler_bug_result.failure_reason.as_deref(),
+        Some("The compiler panicked while running this case.")
+    );
+    assert!(
+        compiler_bug_observations
+            .surface_reached
+            .load(Ordering::Acquire),
+        "the test backend's earliest builder method must be reached"
+    );
+    assert!(
+        compiler_bug_observations
+            .builder_dropped
+            .load(Ordering::Acquire),
+        "the worker-owned backend builder must be dropped before returning"
+    );
+    assert!(
+        compiler_bug_observations
+            .after_drop_hook_observed_drop
+            .load(Ordering::Acquire),
+        "the completion hook must observe the dropped builder"
+    );
+
+    let (plain_panic_result, plain_panic_observations) =
+        execute_with_panicking_builder(&case, BuilderPanic::Plain);
+    assert!(!plain_panic_result.passed);
+    assert_eq!(
+        plain_panic_result.failure_kind,
+        Some(FailureKind::HarnessFailed)
+    );
+    assert_eq!(
+        plain_panic_result.panic_message.as_deref(),
+        Some("Compiler bug while running this case; details were emitted by the panic hook.")
+    );
+    assert_eq!(
+        plain_panic_result.failure_reason.as_deref(),
+        Some("The compiler panicked while running this case.")
+    );
+    assert!(
+        plain_panic_observations
+            .surface_reached
+            .load(Ordering::Acquire)
+    );
+    assert!(
+        plain_panic_observations
+            .builder_dropped
+            .load(Ordering::Acquire)
+    );
+    assert!(
+        plain_panic_observations
+            .after_drop_hook_observed_drop
+            .load(Ordering::Acquire)
+    );
 }
 
 /// The same root body is compiled as a directory module or an explicitly selected single file.
@@ -105,34 +316,29 @@ impl EntryFixture {
             config.entry_root = PathBuf::from("src");
         }
 
-        let mut string_table = StringTable::new();
-        let mut frontend = compile_project_frontend(
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+        let result = compile_project_frontend(
             &mut config,
             BuildProfile::Dev,
             None,
             &frontend_test_style_directives(),
             &mut BuilderSurface::with_mandatory_core(),
-            &mut string_table,
-        )
-        .expect("entry frontend should complete without infrastructure failure");
-        if frontend.has_diagnosed_or_blocked() {
-            let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                source_database,
-                None,
-            );
-            let rendered = crate::compiler_frontend::compiler_messages::render::terse::
-                format_terse_compiler_messages(&messages);
-            let source = fs::read_to_string(&self.root_source).expect("fixture source must exist");
-            panic!(
-                "entry source must compile: {}\nsource:\n{source}\ndiagnostics:\n{}\nstructured: {:?}",
-                self.entry.display(),
-                rendered.join("\n"),
-                messages.error_diagnostics().collect::<Vec<_>>(),
-            );
+            &mut warning_owner,
+        );
+        match result {
+            Ok(CompilationOutcome::Success { value, .. }) => value,
+            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                let rendered = terse::format_terse_diagnostic_reports(&reports);
+                let source =
+                    fs::read_to_string(&self.root_source).expect("fixture source must exist");
+                panic!(
+                    "entry source must compile: {}\nsource:\n{source}\ndiagnostics:\n{}",
+                    self.entry.display(),
+                    rendered.join("\n"),
+                );
+            }
+            Err(errors) => panic!("entry frontend infrastructure failure: {errors:?}"),
         }
-        frontend
     }
 
     fn html_frontend(&self) -> ProjectFrontendCompilation {
@@ -146,47 +352,47 @@ impl EntryFixture {
         let style_directives = StyleDirectiveRegistry::merged(&builder.frontend_style_directives())
             .expect("HTML style directives should merge");
         let mut builder_surface = builder.frontend_surface();
-        let mut string_table = StringTable::new();
-        let mut frontend = compile_project_frontend(
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+        let result = compile_project_frontend(
             &mut config,
             BuildProfile::Dev,
             None,
             &style_directives,
             &mut builder_surface,
-            &mut string_table,
-        )
-        .expect("HTML entry frontend should complete without infrastructure failure");
-        if frontend.has_diagnosed_or_blocked() {
-            let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                source_database,
-                None,
-            );
-            let rendered = crate::compiler_frontend::compiler_messages::render::terse::
-                format_terse_compiler_messages(&messages);
-            panic!(
-                "HTML entry source must compile: {}\ndiagnostics:\n{}\nstructured: {:?}",
-                self.entry.display(),
-                rendered.join("\n"),
-                messages.error_diagnostics().collect::<Vec<_>>(),
-            );
+            &mut warning_owner,
+        );
+        match result {
+            Ok(CompilationOutcome::Success { value, .. }) => value,
+            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                let rendered = terse::format_terse_diagnostic_reports(&reports);
+                panic!(
+                    "HTML entry source must compile: {}\ndiagnostics:\n{}",
+                    self.entry.display(),
+                    rendered.join("\n"),
+                );
+            }
+            Err(errors) => panic!("HTML entry frontend infrastructure failure: {errors:?}"),
         }
-        frontend
     }
 
-    fn build_result(&self, flags: &[Flag]) -> Result<BuildResult, CompilerMessages> {
-        build_project(
+    fn build_result(&self, flags: &[Flag]) -> CompilationResult<BuildResult> {
+        match build_project(
             &ProjectBuilder::new(HtmlProjectBuilder::new()),
             self.entry.to_str().expect("fixture entry should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
-        )
+        ) {
+            Ok(CompilationOutcome::Success { value, .. }) => value.finish_output(Ok(())),
+            result => result,
+        }
+    }
+
+    fn build_with_warnings(&self, flags: &[Flag]) -> (BuildResult, Option<DiagnosticReportSet>) {
+        expect_success_with_warnings(self.build_result(flags))
     }
 
     fn build(&self, flags: &[Flag]) -> BuildResult {
-        self.build_result(flags)
-            .expect("entry project should build")
+        self.build_with_warnings(flags).0
     }
 }
 
@@ -196,10 +402,9 @@ fn start_function(module: &Module) -> Option<&HirFunction> {
         hir.function_origins.get(&function.id) == Some(&HirFunctionOrigin::EntryStart)
     })
 }
-
 #[track_caller]
 fn assert_start_result(module: &Module, fallible: bool) {
-    let start = start_function(module).expect("runtime root must retain start");
+    let start = start_function(module).expect("successful frontend should contain entry start");
     let types = &module.executable.type_environment;
     assert_eq!(start.error_return.is_some(), fallible);
     assert_eq!(start.returns.len(), 1);
@@ -208,7 +413,6 @@ fn assert_start_result(module: &Module, fallible: bool) {
         types.collection_element_type(success_type),
         Some(builtin_type_ids::STRING)
     );
-
     let hir = &module.executable.hir;
     let mut pending = vec![start.entry];
     let mut visited = Vec::new();
@@ -474,25 +678,20 @@ fn assert_ambiguous_package_diagnostic(
     dependency_path: &str,
     scenario: &str,
 ) {
-    let messages = match fixture.build_result(&[]) {
-        Err(messages) => messages,
-        Ok(_) => panic!("{scenario}: conflicting local target unexpectedly built"),
-    };
-    assert!(
-        !messages.has_infrastructure_error(),
-        "{scenario}: {messages:?}"
-    );
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    let messages = expect_diagnosed(fixture.build_result(&[]));
+    let diagnostics = messages
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1, "{scenario}: {messages:?}");
+    let (report, view) = diagnostics[0];
     assert_eq!(
-        diagnostics[0].kind.code(),
+        view.descriptor().code,
         "MOTH-IMPORT-0006",
         "{scenario}: {messages:?}"
     );
 
-    let position = messages
-        .diagnostic_render_context(0)
-        .primary_position(diagnostics[0])
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("ambiguous package diagnostic should retain its authored span");
     assert_eq!(position.line, dependency_clause, "{scenario}");
     assert_eq!(
@@ -618,18 +817,15 @@ fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
             &format!("{import_clause}\n[:missing dependency reproduction]\n"),
             directory_entry,
         );
-        let messages = match fixture.build_result(&[]) {
-            Err(messages) => messages,
-            Ok(_) => panic!("unregistered source package unexpectedly built"),
-        };
-        assert!(!messages.has_infrastructure_error(), "{messages:?}");
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1, "{messages:?}");
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-IMPORT-0005");
+        let failure = expect_diagnosed(fixture.build_result(&[]));
+        let diagnostics = failure
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        let (report, diagnostic) = diagnostics[0];
+        assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0005");
 
-        let position = messages
-            .diagnostic_render_context(0)
-            .primary_position(diagnostics[0])
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(diagnostic.primary_site())
             .expect("missing package diagnostic should retain its authored span");
         assert_eq!(position.line, import_clause);
         assert_eq!(position.start, LinePosition { line: 0, column: 0 });
@@ -641,8 +837,9 @@ fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
             }
         );
 
-        let rendered = crate::compiler_frontend::compiler_messages::render::dev_server::
-            render_compiler_messages_html(&messages, fixture.directory.path());
+        let render_result: CompilationResult<BuildResult> =
+            Ok(CompilationOutcome::Diagnosed(failure));
+        let rendered = render_compilation_result_html(&render_result, fixture.directory.path());
         assert!(rendered.contains("data-diagnostic-code=\"MOTH-IMPORT-0005\""));
         assert!(rendered.contains(&format!(
             "<span class=\"source-line\">{import_clause}</span>"
@@ -719,7 +916,7 @@ fn synthetic_start_local_catch_narrows_and_executes_directory_and_single_file() 
                 .expect("entry must compile");
             assert_start_result(module, false);
 
-            let built = fixture.build(&[]);
+            let (built, warnings) = fixture.build_with_warnings(&[]);
             let html = built
                 .project
                 .output_files
@@ -742,14 +939,15 @@ fn synthetic_start_local_catch_narrows_and_executes_directory_and_single_file() 
             );
             let expectation = output_expectation(expected);
             let case = success_test_case(BackendId::Html, expectation.clone());
-            let result = validate_success_result(&case, built, &expectation);
+            let result = validate_success_result(&case, built, warnings, &expectation);
             assert!(result.passed, "{:?}", result.failure_reason);
         }
     }
 }
 
+/// Frozen diagnostic reports must remain renderable after the worker and build state are gone.
 #[test]
-fn synthetic_start_custom_error_propagation_is_a_source_diagnostic() {
+fn synthetic_start_custom_error_diagnostics_render_after_worker_drop() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
         let fixture = EntryFixture::new(
@@ -764,27 +962,50 @@ fn synthetic_start_custom_error_propagation_is_a_source_diagnostic() {
         let result = execute_test_case(&case);
         assert!(!result.passed);
         assert_eq!(result.failure_kind, Some(FailureKind::ExpectationViolation));
-        assert!(
-            result.build_result.is_none(),
-            "source diagnostics must precede runtime execution"
-        );
-        let messages = result
-            .messages
-            .expect("source rejection must retain compiler diagnostics");
-        assert!(!messages.has_infrastructure_error(), "{messages:?}");
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+        let failure = match result.messages.as_ref() {
+            Some(Ok(CompilationOutcome::Diagnosed(reports))) => reports,
+            _ => panic!("source rejection must retain compiler diagnostics"),
+        };
+        let diagnostics = failure
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0051");
-        assert!(matches!(
-            diagnostics[0].payload,
-            DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::EntryHasIncompatibleError {
-                    produced_error_type,
-                    entry_error_type,
-                },
-            } if produced_error_type != entry_error_type
-        ));
-        assert!(diagnostics[0].primary_span.is_some());
+        let (report, diagnostic) = diagnostics[0];
+        assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0051");
+        assert_eq!(
+            diagnostic.reason_key(),
+            Some("invalid_fallible_handling.entry_has_incompatible_error")
+        );
+        let context = DiagnosticRenderContext::for_report(report);
+        assert!(context.site_position(diagnostic.primary_site()).is_some());
+
+        let rendered = terse::format_terse_diagnostic_view(diagnostic, context);
+        let (_, types) = rendered
+            .split_once("produces `")
+            .expect("incompatible-error rendering should name the produced type");
+        let (produced_type, types) = types
+            .split_once("!`, which is incompatible with the entry's built-in `start` `")
+            .expect("incompatible-error rendering should name the entry boundary type");
+        let (entry_type, _) = types
+            .split_once("!` boundary")
+            .expect("entry boundary type should be followed by the boundary explanation");
+        assert_ne!(
+            produced_type, entry_type,
+            "custom error propagation should keep its type distinct from the entry error"
+        );
+        drop(diagnostics);
+        let mut summary = super::super::SummaryCounts::default();
+        summary.record(&case, &result);
+        let output = super::super::reporting::format_terse_run_output(
+            &[(case, result)],
+            summary,
+            std::time::Duration::from_secs(1),
+            false,
+        );
+        assert!(
+            output.iter().any(|line| line.contains("MOTH-RULE-0051")),
+            "runner reporting should render frozen compiler diagnostics: {output:?}"
+        );
     }
 }
 
@@ -807,25 +1028,15 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
                 &[],
                 &BuildConfigInputSet::new(),
             );
-            let messages = match result {
-                Err(messages) => messages,
-                Ok(_) => {
-                    panic!("authored return must not become a synthetic start return: {source}")
-                }
-            };
-            assert!(
-                !messages.has_infrastructure_error(),
-                "{source}: {messages:?}"
+            let messages = expect_diagnosed(result);
+            let diagnostics = messages
+                .iter_severity(DiagnosticSeverity::Error)
+                .collect::<Vec<_>>();
+            assert_eq!(diagnostics[0].1.descriptor().code, "MOTH-RULE-0042");
+            assert_eq!(
+                diagnostics[0].1.reason_key(),
+                Some("invalid_control_flow_statement.return_outside_function")
             );
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-            assert_eq!(diagnostics.len(), 1, "{source}: {messages:?}");
-            assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0042");
-            assert!(matches!(
-                diagnostics[0].payload,
-                DiagnosticPayload::InvalidControlFlowStatement {
-                    reason: InvalidControlFlowStatementReason::ReturnOutsideFunction,
-                }
-            ));
         }
     }
 }
@@ -863,15 +1074,15 @@ fn synthetic_start_preserves_nested_returns_inside_authored_functions() {
 fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
-        for (source, expected_reason) in [
+        for (source, expected_reason_key) in [
             (
                 "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
                  value = load()!\n[:[value]]\n",
-                UnsupportedBackendFeatureReason::ErrorValues,
+                "unsupported_backend_feature.error_values",
             ),
             (
                 "left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n",
-                UnsupportedBackendFeatureReason::RecoverableNumericFailure,
+                "unsupported_backend_feature.recoverable_numeric_failure",
             ),
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
@@ -884,22 +1095,13 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
                 &[Flag::HtmlWasm],
                 &BuildConfigInputSet::new(),
             );
-            let messages = match result {
-                Err(messages) => messages,
-                Ok(_) => panic!("Wasm must retain its reachable failure target gate"),
-            };
-            assert!(
-                !messages.has_infrastructure_error(),
-                "must diagnose before LIR: {messages:?}"
-            );
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+            let messages = expect_diagnosed(result);
+            let diagnostics = messages
+                .iter_severity(DiagnosticSeverity::Error)
+                .collect::<Vec<_>>();
             assert_eq!(diagnostics.len(), 1);
-            assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0064");
-            assert!(matches!(
-                diagnostics[0].payload,
-                DiagnosticPayload::UnsupportedBackendFeature { reason, .. }
-                    if reason == expected_reason
-            ));
+            assert_eq!(diagnostics[0].1.descriptor().code, "MOTH-RULE-0064");
+            assert_eq!(diagnostics[0].1.reason_key(), Some(expected_reason_key));
         }
     }
 }
@@ -916,7 +1118,7 @@ fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
             .expect("entry must compile");
         assert_start_result(module, false);
 
-        let built = fixture.build(&[Flag::HtmlWasm]);
+        let (built, warnings) = fixture.build_with_warnings(&[Flag::HtmlWasm]);
         let mut saw_wasm = false;
         let mut saw_bootstrap = false;
         for output in &built.project.output_files {
@@ -943,7 +1145,7 @@ fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
         );
         let expectation = output_expectation("plain-vector");
         let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
-        let result = validate_success_result(&case, built, &expectation);
+        let result = validate_success_result(&case, built, warnings, &expectation);
         assert!(result.passed, "{:?}", result.failure_reason);
     }
 }
@@ -1171,7 +1373,7 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
             ),
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
-            let mut built = fixture.build(&[]);
+            let (mut built, warnings) = fixture.build_with_warnings(&[]);
             let html = built
                 .project
                 .output_files
@@ -1223,7 +1425,7 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
 
             let expectation = output_expectation("before-failure");
             let case = success_test_case(BackendId::Html, expectation.clone());
-            let result = validate_success_result(&case, built, &expectation);
+            let result = validate_success_result(&case, built, warnings, &expectation);
             assert!(
                 !result.passed,
                 "a failed start must not satisfy a success expectation"
@@ -1256,7 +1458,7 @@ fn synthetic_start_dynamic_zero_range_step_is_entry_failure_without_body_output(
              ;\n",
             directory_entry,
         );
-        let mut built = fixture.build(&[]);
+        let (mut built, warnings) = fixture.build_with_warnings(&[]);
         let rendered = execute_html_harness_for_test(&mut built)
             .expect("zero range step must produce a valid entry failure summary");
         assert_eq!(
@@ -1279,7 +1481,7 @@ fn synthetic_start_dynamic_zero_range_step_is_entry_failure_without_body_output(
 
         let expectation = output_expectation("range-body-ran");
         let case = success_test_case(BackendId::Html, expectation.clone());
-        let result = validate_success_result(&case, built, &expectation);
+        let result = validate_success_result(&case, built, warnings, &expectation);
         assert!(
             !result.passed,
             "a zero-step start must not satisfy a success expectation"
@@ -1359,7 +1561,7 @@ fn synthetic_start_root_assertion_remains_an_unexpected_runtime_error() {
              assert(false, \"root invariant failed\")\n",
             directory_entry,
         );
-        let mut built = fixture.build(&[]);
+        let (mut built, warnings) = fixture.build_with_warnings(&[]);
         let rendered = execute_html_harness_for_test(&mut built)
             .expect("root assertion must retain the uncaught Error protocol");
         assert_eq!(rendered.combined_output(), "before-assertion");
@@ -1371,7 +1573,7 @@ fn synthetic_start_root_assertion_remains_an_unexpected_runtime_error() {
 
         let expectation = output_expectation("unreachable");
         let case = success_test_case(BackendId::Html, expectation.clone());
-        let result = validate_success_result(&case, built, &expectation);
+        let result = validate_success_result(&case, built, warnings, &expectation);
         assert!(!result.passed);
         assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
         assert!(
@@ -1397,7 +1599,7 @@ fn synthetic_start_stack_overflow_is_a_host_fault_not_a_caught_failure() {
              ;\n",
             directory_entry,
         );
-        let mut built = fixture.build(&[]);
+        let (mut built, warnings) = fixture.build_with_warnings(&[]);
         let harness_error = match execute_html_harness_for_test(&mut built) {
             Ok(rendered) => panic!(
                 "stack exhaustion must not produce a classified render; events: {:?}",
@@ -1415,7 +1617,7 @@ fn synthetic_start_stack_overflow_is_a_host_fault_not_a_caught_failure() {
 
         let expectation = output_expectation("before-overflow");
         let case = success_test_case(BackendId::Html, expectation.clone());
-        let result = validate_success_result(&case, built, &expectation);
+        let result = validate_success_result(&case, built, warnings, &expectation);
         assert!(!result.passed);
         assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
         assert_ne!(result.failure_kind, Some(FailureKind::EntryFailed));

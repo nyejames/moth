@@ -11,7 +11,8 @@
 //! byte sources and output placement belong to the build system, and dense module-local handles
 //! belong to `module_resources`.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity, portable_relative_logical_path_from,
 };
@@ -37,22 +38,28 @@ impl PortableResourcePath {
     ///
     /// Only normal relative UTF-8 components are accepted, so `CurDir`, `ParentDir`, `RootDir`
     /// and `Prefix` components cannot collapse two different inputs onto one identity.
-    pub(crate) fn from_relative_logical_path(relative: &Path) -> Result<Self, CompilerError> {
+    pub(crate) fn from_relative_logical_path(
+        relative: &Path,
+    ) -> Result<Self, InfrastructureFailure> {
         let spelling = portable_relative_logical_path_from(relative)?;
 
         if spelling.is_empty() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
                 "a resource path identity cannot be built from an empty owner-relative path; a \
                  resource always names one file inside its owner",
             ));
         }
 
         if !has_explicit_extension(&spelling) {
-            return Err(CompilerError::compiler_error(format!(
-                "resource path {spelling:?} has no explicit extension on its final component; \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "resource path {spelling:?} has no explicit extension on its final component; \
                  extension validation is a file-reference diagnostic that runs before identity \
                  construction"
-            )));
+                ),
+            ));
         }
 
         Ok(Self { spelling })
@@ -68,7 +75,7 @@ impl PortableResourcePath {
     /// Persistent generic materialisation has no filesystem path to pass back through the
     /// resolver. Reusing the canonical relative-path validation keeps the rebuilt identity subject
     /// to the same component and extension invariants as Stage 0.
-    pub(crate) fn from_portable_spelling(spelling: String) -> Result<Self, CompilerError> {
+    pub(crate) fn from_portable_spelling(spelling: String) -> Result<Self, InfrastructureFailure> {
         Self::from_relative_logical_path(Path::new(&spelling))
     }
 }

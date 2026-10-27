@@ -46,10 +46,12 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchArmReason,
-    ValueReceiverContext,
+    DiagnosticBag, InvalidControlFlowStatementReason, InvalidMatchArmReason, ValueReceiverContext,
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -66,7 +68,7 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 /// emission boundary instead of being recast as authored control-flow diagnostics.
 type BranchingResult<T> = Result<T, ExpressionParseError>;
 
-fn branching_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
+fn branching_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
 }
 
@@ -140,7 +142,8 @@ impl ParsedMatchArm {
     /// Build the concrete arm of a fully materialised match.
     fn into_ready(self, position: &str) -> BranchingResult<MatchArm> {
         let DeferredArmPattern::Ready(pattern) = self.pattern else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a retained match pattern reached the concrete arm construction",
             )
             .into());
@@ -149,7 +152,8 @@ impl ParsedMatchArm {
             None => None,
             Some(StatementExpression::Built(guard)) => Some(guard),
             Some(StatementExpression::Retained(_)) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained match guard reached the concrete arm construction",
                 )
                 .into());
@@ -259,7 +263,7 @@ fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
     // `if` remains available as the first statement inside a separate `else` body.
     if next_tag == TokenTag::IF {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ElseIfUnsupported,
                 else_span,
             ),
@@ -287,7 +291,7 @@ pub fn create_branch(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -350,7 +354,7 @@ pub fn create_branch(
     ast_log!("Creating If Statement");
     if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             ),
@@ -361,7 +365,8 @@ pub fn create_branch(
     // Both bodies publish provisional generic requests into the shared sink. Finalisation owns
     // selection, so retain the exact parser boundaries without rescanning calls later.
     let then_request_start = context.generic_request_checkpoint();
-    let then_context = context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+    let then_context =
+        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
     let then_scope = then_context.scope;
     let then_body = MatchBody::from_parsed(
         parse_function_body_statements(
@@ -382,7 +387,7 @@ pub fn create_branch(
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context =
-            context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+            context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
         let else_scope = else_context.scope;
         let else_body = MatchBody::from_parsed(
             parse_function_body_statements(
@@ -438,7 +443,8 @@ pub fn create_branch(
     }
 
     let StatementExpression::Built(condition) = condition else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "an if condition was retained after the branch decided it needs no numeric completion",
         )
         .into());
@@ -473,7 +479,7 @@ fn create_option_present_capture_branch(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -487,7 +493,7 @@ fn create_option_present_capture_branch(
 
     if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             ),
@@ -495,7 +501,7 @@ fn create_option_present_capture_branch(
     }
     token_stream.advance();
     let body_context =
-        then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+        then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
     let body_scope = body_context.scope;
     let body = MatchBody::from_parsed(
         parse_function_body_statements(
@@ -515,7 +521,7 @@ fn create_option_present_capture_branch(
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context =
-            context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+            context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
         let else_scope = else_context.scope;
         Some(MatchBody::from_parsed(
             parse_function_body_statements(
@@ -628,7 +634,7 @@ fn create_match_node(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -689,7 +695,7 @@ pub(crate) fn parse_match_block(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     active_value_target: Option<ActiveValueProductionTarget>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -698,7 +704,7 @@ pub(crate) fn parse_match_block(
 
     if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             ),
@@ -707,7 +713,7 @@ pub(crate) fn parse_match_block(
 
     token_stream.advance();
     let mut match_context =
-        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
     if let Some(active_value_target) = active_value_target {
         match_context.active_value_target = Some(active_value_target);
     }
@@ -754,7 +760,7 @@ pub(crate) fn parse_match_block(
                     });
 
                 if semicolon_separates_same_level_arms {
-                    return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+                    return Err(branching_error(choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::SemicolonDelimiter,
                         Some(token_stream.current_span()),
                     )));
@@ -765,7 +771,7 @@ pub(crate) fn parse_match_block(
 
             TokenTag::EOF => {
                 return Err(branching_error(
-                    CompilerDiagnostic::invalid_control_flow_statement(
+                    choices_control_flow::invalid_control_flow_statement(
                         InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch,
                         Some(token_stream.current_span()),
                     ),
@@ -775,7 +781,7 @@ pub(crate) fn parse_match_block(
             TokenTag::ELSE => {
                 if arms.is_empty() {
                     return Err(branching_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::CaseRequiredBeforeElse,
                             Some(token_stream.current_span()),
                         ),
@@ -784,7 +790,7 @@ pub(crate) fn parse_match_block(
 
                 if seen_else {
                     return Err(branching_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::DuplicateElseArm,
                             Some(token_stream.current_span()),
                         ),
@@ -823,7 +829,7 @@ pub(crate) fn parse_match_block(
                     )?;
 
                     if seen_else {
-                        warnings.push(CompilerDiagnostic::unreachable_match_arm(
+                        warnings.push(choices_control_flow::unreachable_match_arm(
                             parsed.pattern_span,
                         ));
                     } else {
@@ -835,7 +841,7 @@ pub(crate) fn parse_match_block(
                         );
 
                         if coverage.unreachable {
-                            warnings.push(CompilerDiagnostic::unreachable_match_arm(
+                            warnings.push(choices_control_flow::unreachable_match_arm(
                                 parsed.pattern_span,
                             ));
                         }
@@ -847,12 +853,12 @@ pub(crate) fn parse_match_block(
                 if token_is_line_initial(token_stream, token_stream.position())
                     && current_line_contains_top_level_colon(token_stream)
                 {
-                    return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+                    return Err(branching_error(choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::LegacyColonSyntax,
                         Some(token_stream.current_span()),
                     )));
                 }
-                return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+                return Err(branching_error(choices_control_flow::invalid_match_arm(
                     InvalidMatchArmReason::ExpectedArmHeader,
                     Some(token_stream.current_span()),
                 )));
@@ -954,7 +960,8 @@ fn build_parsed_match_block(
     }
 
     let StatementExpression::Built(scrutinee) = scrutinee else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained match subject reached the concrete match construction",
         )
         .into());
@@ -1085,7 +1092,7 @@ pub(crate) fn resume_deferred_match<'env>(
                 let services = completion.session_services();
                 services
                     .context
-                    .emit_warning(CompilerDiagnostic::unreachable_match_arm(pattern.span()));
+                    .emit_warning(choices_control_flow::unreachable_match_arm(pattern.span()));
             }
         }
 
@@ -1131,7 +1138,7 @@ fn parse_else_arm(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<MatchBody> {
@@ -1139,14 +1146,14 @@ fn parse_else_arm(
     token_stream.skip_newlines();
 
     if token_stream.current_tag() == TokenTag::COLON {
-        return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+        return Err(branching_error(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::LegacyElseSyntax,
             Some(token_stream.current_span()),
         )));
     }
 
     if token_stream.current_tag() == TokenTag::ARROW {
-        return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+        return Err(branching_error(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
         )));
@@ -1154,7 +1161,7 @@ fn parse_else_arm(
 
     if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
                 Some(token_stream.current_span()),
             ),
@@ -1162,7 +1169,7 @@ fn parse_else_arm(
     }
 
     token_stream.advance();
-    let arm_context = new_match_arm_body_context(match_context, string_table, path_fork);
+    let arm_context = new_match_arm_body_context(match_context, string_table, path_fork)?;
     let arm_scope = arm_context.scope;
     Ok(MatchBody::from_parsed(
         parse_function_body_statements(
@@ -1199,7 +1206,7 @@ fn parse_match_arm(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<ParsedMatchArm> {
@@ -1223,7 +1230,7 @@ fn parse_match_arm(
 
     if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
                 Some(token_stream.current_span()),
             ),
@@ -1231,7 +1238,7 @@ fn parse_match_arm(
     }
 
     token_stream.advance();
-    let arm_body_context = new_match_arm_body_context(&arm_scope, string_table, path_fork);
+    let arm_body_context = new_match_arm_body_context(&arm_scope, string_table, path_fork)?;
     let arm_body_scope = arm_body_context.scope;
     let body = MatchBody::from_parsed(
         parse_function_body_statements(
@@ -1260,12 +1267,12 @@ fn new_match_arm_body_context(
     match_context: &ScopeContext,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> ScopeContext {
+) -> Result<ScopeContext, crate::compiler_frontend::compiler_messages::DiagnosticDraft> {
     let active_value_target = match_context.active_value_target.clone();
     let mut arm_context =
-        match_context.new_child_control_flow(ContextKind::MatchArm, string_table, path_fork);
+        match_context.new_child_control_flow(ContextKind::MatchArm, string_table, path_fork)?;
     arm_context.active_value_target = active_value_target;
-    arm_context
+    Ok(arm_context)
 }
 
 #[cfg(test)]

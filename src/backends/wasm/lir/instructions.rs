@@ -126,7 +126,6 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         value: i64,
     },
-    #[allow(dead_code)] // Wasm roadmap: f32 literals are emitter-tested before HIR maps to them.
     ConstF32 {
         dst: WasmLirLocalId,
         value: f32,
@@ -135,12 +134,12 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         value: f64,
     },
-    #[allow(dead_code)] // Wasm roadmap: static-data pointer materialization.
+    #[allow(dead_code)] // Reserved for static-data pointer materialization.
     ConstStaticPtr {
         dst: WasmLirLocalId,
         data: WasmStaticDataId,
     },
-    #[allow(dead_code)] // Wasm roadmap: static-data byte-length materialization.
+    #[allow(dead_code)] // Reserved for static-data byte-length materialization.
     ConstLength {
         dst: WasmLirLocalId,
         value: u32,
@@ -205,8 +204,8 @@ pub(crate) enum WasmLirStmt {
     DropIfOwned {
         value: WasmLirLocalId,
     },
-    /// Reserved for future ownership tuning.
-    #[allow(dead_code)] // Memory model roadmap: explicit handle-retain operations.
+    /// Handle-retain operation; the Wasm emitter emits no instructions for it.
+    #[allow(dead_code)] // Reserved for explicit handle-retain operations.
     RetainHandle {
         value: WasmLirLocalId,
     },

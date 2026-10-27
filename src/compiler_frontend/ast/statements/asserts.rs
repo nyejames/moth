@@ -41,9 +41,11 @@ use crate::compiler_frontend::ast::numeric_construction::{
 };
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason, ValueReceiverContext,
+    InvalidFallibleHandlingReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -147,7 +149,8 @@ pub(crate) fn finish_assert_statement(
     let condition = resolved_arguments
         .next()
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Assertion call resolution did not produce a condition argument",
             )
         })?
@@ -155,7 +158,8 @@ pub(crate) fn finish_assert_statement(
     let mut message = resolved_arguments
         .next()
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Assertion call resolution did not produce a message argument",
             )
         })?
@@ -337,7 +341,7 @@ pub(crate) fn parse_assert_statement(
 ///      must reject them before it records a continuation instead of re-reading tokens later.
 fn reject_assert_fallible_suffix(token_stream: &AstCursor) -> Result<(), ExpressionParseError> {
     if token_stream.current_tag() == TokenTag::BANG {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::BangOnNonFallible,
             Some(token_stream.current_span()),
         )
@@ -345,7 +349,7 @@ fn reject_assert_fallible_suffix(token_stream: &AstCursor) -> Result<(), Express
     }
 
     if token_stream.current_tag() == TokenTag::CATCH {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOnNonFallible,
             Some(token_stream.current_span()),
         )

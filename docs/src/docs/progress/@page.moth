@@ -29,7 +29,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     checker implementation and Boracle work, use @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/production-borrow-checker.md (the production borrow checker tracker)
     rather than maintaining a second status inventory here.
 
-    Exact numeric types are delivered. The integration suite, harness, benchmarks, first-party sources and executable documentation use exact numeric types, and the harness rejects the retired `numeric_profile` key. The delivered cast and external-boundary contracts use one plain `cast` spelling, exact source/target evidence, occurrence-local authored safety catches and precision-aware foreign float validation. The frontend and HTML-JS use exact-width numeric identities, I32/F64 defaults, type-preserving equal-width arithmetic and body-local numeric constraints through known shapes, generic signatures and direct generic constructors. Receiver conflicts report their witnesses in authored order. Handler fallback constraints participate before defaulting, while every authored group receives validation without dead groups contributing to inference. Core Math, Random and Text registrations use exact F64/I32 types, and numeric proofs carry no profile stamp. Build inputs accept every fixed integer and binary-float contract and keep command numbers as literals until the exact contract materialises them; MON exposes only exact-width values; no numeric profile selection remains. HTML-Wasm rejects every user aggregate holding a fixed-width scalar before lowering, and it cannot yet interpolate a runtime Bool into a template.
+    Exact numeric types are delivered. The integration suite, harness, benchmarks, first-party sources and executable documentation use exact numeric types, and the harness rejects the retired `numeric_profile` key. The delivered cast and external-boundary contracts use one plain `cast` spelling, exact source/target evidence, occurrence-local authored safety catches and precision-aware foreign float validation. The frontend and HTML-JS use exact-width numeric identities, I32/F64 defaults, type-preserving equal-width arithmetic and body-local numeric constraints through known shapes, generic signatures and direct generic constructors. Receiver conflicts report their witnesses in authored order. Handler fallback constraints participate before defaulting, while every authored group receives validation without dead groups contributing to inference. Core Math, Random and Text registrations use exact F64/I32 types, and numeric proofs carry no profile stamp. Build inputs accept every fixed integer and binary-float contract and keep command numbers as literals until the exact contract materialises them; MON exposes only exact-width values; no numeric profile selection remains. HTML-Wasm rejects every user aggregate holding a fixed-width scalar before lowering, and it cannot interpolate a runtime Bool into a template.
 
     JS/HTML delivers most of the accepted implicit-failure and entry [$html:<code>Error!</code>]
     contract: private propagation, expression-wide catches, eligible authored safety catches,
@@ -40,16 +40,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     domains with full-range containment; other domains are
     excluded from that discharge; the @../numbers/#checked-arithmetic (checked-arithmetic reference) states which operations can fail.
 
-    The compact typed-expression foundation is complete and squash-merged into main from
-    `expression-refactor` source `534aea1a5`, retaining accepted R1, R2.0–R2.4 and P2 test isolation.
-    Historical review `1343c64ec` retains its original scope. R2.4 evidence qualifies
-    compiler source `6b855aab9`, not the main squash tree. Its matched standard/focused
-    comparisons and local `just validate-full` cover 6,105 primary units, 2,784
-    integration target results, ten feature lanes and all 14 scaling series.
-    Grouped-not dev HIR fits n^0.88 under n^1.25 in that evidence.
-    Fresh Windows Canvas/frontend proof remains pending.
-    Type and folding reductions, the bounded Wiring foundation, trusted Core constant
-    evaluation, owner hardening and the permanent-documentation handoff are complete.
+    The compact typed-expression foundation, type and folding reductions, bounded Wiring foundation,
+    trusted Core constant evaluation and owner hardening are implemented. Fresh Windows Canvas/frontend proof remains pending.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
 
@@ -154,15 +146,15 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad dependency, config, project-structure, syntax, type, rule, borrow, backend-feature and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions. Synthetic discovery failures retain earlier and failed source snapshots under final identities without repeating preparation. Targeted mixed-cause transport, source/frozen ownership, failed-freeze retention and terminal/terse/dev classification coverage.]
             [: Frontend]
-            [: User-facing failures use typed [$html:<code>CompilerDiagnostic</code>] payloads with stable codes, optional qualified reason keys and fixture-relative source expectations. Type diagnostics remain [$html:<code>TypeId</code>]-first. The cold infrastructure aggregate in [$html:<code>CompilerMessages</code>] preserves each [$html:<code>CompilerError</code>]'s type, message, host path, span and metadata with explicit source/frozen owner ranges. Render finalisation preserves the original report and appends any freeze failure. Terminal, five-field terse [$html:<code>MOTH-INFRA-0001</code>] and dev renderers preserve one infrastructure event and distinguish operational failures from compiler defects, requesting bug reports only for defects. The final panic and host-isolation migration remains undelivered.]
+            [: User-facing failures are produced as typed [$html:<code>DiagnosticDraft</code>] values and accumulated in [$html:<code>DiagnosticBag</code>]. Boundary freezing builds compact [$html:<code>DiagnosticStore</code>] records and [$html:<code>TypeDisplaySnapshot</code>] data in reports, with read-only [$html:<code>DiagnosticView</code>] family views. Foreign-site references use report-owned frozen identity-context references indexed by [$html:<code>ForeignSiteRecord</code>]. Diagnostic codes and reason keys are stable identifiers, and each family descriptor declares its default severity. The three failure lanes are user-facing diagnostic reports, infrastructure failures and compiler-bug reports. Infrastructure uses [$html:<code>InfrastructureFailure</code>] / [$html:<code>InfrastructureErrors</code>]. The owning host renders each compiler-bug report once. Fatal CLI [$html:<code>build</code>], [$html:<code>check</code>] and [$html:<code>Boracle</code>] commands exit with status 2. [$html:<code>moth dev</code>] renders the report, publishes the failed-build page and keeps watching. No legacy diagnostic model or adapter remains.]
         ]
 
         [data:
             [: Variables, assignment and lexical scope]
             [: Partial]
-            [: Broad declaration, reassignment, mutability, structured-control-flow scope, shadowing, undefined-mutation and diagnostic coverage. Targeted new-binding collision cases cover parameters, range and collection bindings, position indices, option and choice captures and inline catches. R1 adds local, parameter and capture matrices for file-visible aliases, traits, forward declarations and Core reservations, plus hidden-name and mutable-update positives. Concrete choice, pending generic-choice and pending optional-field captures have exact rejection sites and distinct checked owners. Focused CLI checks and all 2784 integration target results pass. Block catches and template binders share checked owners without dedicated collision cases. Explicit HIR definitions and updates cover place/value initialisers, caller-result binding freshness and all-results-before-writes multi-bind staging. Re-entered loop binders and body-local aliases have HTML runtime coverage.]
+            [: Broad declaration, reassignment, mutability, structured-control-flow scope, shadowing, undefined-mutation and diagnostic coverage. Targeted new-binding collision cases cover parameters, range and collection bindings, position indices, option and choice captures and inline catches. Coverage includes local, parameter and capture matrices for file-visible aliases, traits, forward declarations and Core reservations, plus hidden-name and mutable-update positives. Concrete choice, pending generic-choice and pending optional-field captures have exact rejection sites and distinct checked owners. Focused CLI checks and all 2784 integration target results pass. Block catches and template binders share checked owners without dedicated collision cases. Explicit HIR definitions and updates cover place/value initialisers, caller-result binding freshness and all-results-before-writes multi-bind staging. Re-entered loop binders and body-local aliases have HTML runtime coverage.]
             [: JS / HTML]
-            [: New-binding checks cover locals, source-visible values and nominal types, type aliases, traits, builtins, dependency bindings, prelude symbols, namespaces and reserved names. R1 corrects the reviewed alias/trait gap through the existing guard and bound visibility, including forward declarations and Core traits, without another name registry. Hidden original names and namespace members remain unavailable as bare names. Existing mutable parameter and local updates remain assignments, not declarations. Source/import collisions use MOTH-RULE-0038 at the authored name without an invented previous-declaration label. Core trait reservations use MOTH-RULE-0039. Syntax-accepted multi-bind collisions reach semantic validation. Structured control flow owns lexical scope, and statically selected Bool branches retain their authored child scope before HIR. There is no general lexical-block construct or control-flow label.]
+            [: New-binding checks cover locals, source-visible values and nominal types, type aliases, traits, builtins, dependency bindings, prelude symbols, namespaces and reserved names. The existing guard and binding visibility cover aliases and traits, including forward declarations and Core traits, without a separate name registry. Hidden original names and namespace members remain unavailable as bare names. Existing mutable parameter and local updates remain assignments, not declarations. Source/import collisions use MOTH-RULE-0038 at the authored name without an invented previous-declaration label. Core trait reservations use MOTH-RULE-0039. Syntax-accepted multi-bind collisions reach semantic validation. Structured control flow owns lexical scope, and statically selected Bool branches retain their authored child scope before HIR. There is no general lexical-block construct or control-flow label.]
         ]
 
         [data:
@@ -256,7 +248,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Results, options, multiple returns and multi-bind]
             [: Supported]
-            [$md: Broad options, propagation, catches, value blocks, multiple returns, multi-bind and diagnostics coverage. Single-value receivers reject zero or multiple success slots with factual arity diagnostics. @https://github.com/nyejames/moth/tree/main/tests/cases/success_shape_matching_multi_bind_runtime (success_shape_matching_multi_bind_runtime) covers ordered, exactly-once production before target writes. @https://github.com/nyejames/moth/tree/main/tests/cases/grouped_multi_bind_call_group_runtime (grouped_multi_bind_call_group_runtime) covers a parenthesised pending call accepted by a matching multi-bind. @https://github.com/nyejames/moth/tree/main/tests/cases/optional_propagation_contract_runtime (optional_propagation_contract_runtime) covers HTML execution and pins the existing HTML-Wasm mutable-local-binding-alias gate's exact reason and source site. Both target assertions pass in the 0b99f7470 integrated gate. @https://github.com/nyejames/moth/tree/main/tests/cases/catch_fallback_u64_constrains_pending_arithmetic_runtime (catch_fallback_u64_constrains_pending_arithmetic_runtime) covers handler constraints. @https://github.com/nyejames/moth/tree/main/tests/cases/value_catch_unreachable_map_fallback_runtime (value_catch_unreachable_map_fallback_runtime) covers HTML-Wasm handler pruning.]
+            [$md: Broad options, propagation, catches, value blocks, multiple returns, multi-bind and diagnostics coverage. Single-value receivers reject zero or multiple success slots with factual arity diagnostics. @https://github.com/nyejames/moth/tree/main/tests/cases/success_shape_matching_multi_bind_runtime (success_shape_matching_multi_bind_runtime) covers ordered, exactly-once production before target writes. @https://github.com/nyejames/moth/tree/main/tests/cases/grouped_multi_bind_call_group_runtime (grouped_multi_bind_call_group_runtime) covers a parenthesised pending call accepted by a matching multi-bind. @https://github.com/nyejames/moth/tree/main/tests/cases/optional_propagation_contract_runtime (optional_propagation_contract_runtime) covers HTML execution and pins the existing HTML-Wasm mutable-local-binding-alias gate's exact reason and source site. Both target assertions pass in the integrated gate. @https://github.com/nyejames/moth/tree/main/tests/cases/catch_fallback_u64_constrains_pending_arithmetic_runtime (catch_fallback_u64_constrains_pending_arithmetic_runtime) covers handler constraints. @https://github.com/nyejames/moth/tree/main/tests/cases/value_catch_unreachable_map_fallback_runtime (value_catch_unreachable_map_fallback_runtime) covers HTML-Wasm handler pruning.]
             [: Frontend / HIR / JS / HTML]
             [$md: HTML-JS delivers typed errors, options, private inferred failure lanes and authored safety catches with expression-wide recovery. HIR uses native ordered result slots and edge-defined success/error destinations rather than semantic tuples or fallible carriers. JavaScript packing stays at ABI boundaries. Postfix propagation keeps the enclosing callable contract in nested branches. Optional [$html:<code>?</code>] rejects multiple success returns with their authored count, separately from a missing optional return. Entry [$html:<code>!</code>] rejects an incompatible custom error separately from a function without an error slot. Handlers contribute constraints and undergo source validation before unreachable handlers disappear. Eligibility and delivery follow @../errors/#catch-and-recovery (Catch and recovery). Value-producing if and match work at declaration, assignment, return and multi-bind receivers. Nested then receivers remain deferred. HTML-Wasm rejects recoverable numeric failure but a pruned handler adds no target requirement.]
         ]
@@ -346,7 +338,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted design only. Covers retention domains, edge creation, whole-domain kill effects and path-sensitive final cleanup frontiers. Builtin collections do not yet expose [$html:<code>clear</code>] or compiler-known retention effects outside maps. Complete when whole-domain effects, frontiers and epochs are implemented.]
+            [: Accepted design only. Covers retention domains, edge creation, whole-domain kill effects and path-sensitive final cleanup frontiers. Builtin collections do not expose [$html:<code>clear</code>] or compiler-known retention effects outside maps. Complete when whole-domain effects, frontiers and epochs are implemented.]
         ]
 
         [data:
@@ -386,7 +378,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted design only. A distinct compiler-owned planner must select stack, inline, affine, inferred-region, declared-region, REC or host garbage-collected representation per allocation family after topology is proven, and must also produce the concrete per-family obligation transitions the backend encodes. A missing strategy after successful validation is a [$html:<code>CompilerError</code>] in the accepted design. No [$html:<code>ValidatedMemoryPlan</code>] implementation owner exists yet. Complete when the planner owns every strategy decision and its plan is validated before lowering.]
+            [: Accepted design only. A distinct compiler-owned planner must select stack, inline, affine, inferred-region, declared-region, REC or host garbage-collected representation per allocation family after topology is proven, and must also produce the concrete per-family obligation transitions the backend encodes. A missing strategy after successful validation is a [$html:<code>InfrastructureFailure</code>] in the accepted design. No [$html:<code>ValidatedMemoryPlan</code>] implementation owner exists. Complete when the planner owns every strategy decision and its plan is validated before lowering.]
         ]
 
         [data:
@@ -466,7 +458,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Broad JS pipeline coverage; no cross-backend memory parity suite.]
             [: JS / host GC]
-            [: The JS backend uses host collection for already-legal topology, which is accepted behaviour for a GC-native target. Accepted incomplete work: parity currently rests on borrow validation alone because lifetime-topology validation is deferred, so the shared legality guarantee is not yet fully enforced. Complete when debug, GC-native and collector-free paths demonstrably share source legality and observable behaviour.]
+            [: The JS backend uses host collection for already-legal topology, which is accepted behaviour for a GC-native target. Accepted incomplete work: parity currently rests on borrow validation alone because lifetime-topology validation is deferred, so the shared legality guarantee is not fully enforced. Complete when debug, GC-native and collector-free paths demonstrably share source legality and observable behaviour.]
         ]
 
         [data:
@@ -570,7 +562,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Frontend / build system]
-            [: Accepted direction, not ordinary static [$html:<code>if</code>]. Pre-graph source selection and config-only feature declarations wait for their TODO plan. Multi-builder projects depend on this.]
+            [: Accepted direction, not ordinary static [$html:<code>if</code>]. Pre-graph source selection and config-only feature declarations wait for a separate design. Multi-builder projects depend on this.]
         ]
 
         [data:
@@ -742,7 +734,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Dev entry-error reporting]
             [: Supported]
-            [: Dev-server and generated-bootstrap tests cover returned Errors including code 0, assertion and unexpected startup-fault categories for JS and HTML-Wasm, hostile text, stale, duplicate, malformed, oversized and cross-origin reports, origin prefixes, unavailable transport and isolated pages. A release case proves output has no dev reporting dependency. Barrier tests cover output publication against concurrent requests, companion requests spanning a rebuild and write failure. A real rebuild/write/serve sequence over one output directory proves current output freshness through private-body entry-outcome changes, an invalidated success-only export and unchanged writer skips. Cache-reuse invalidation remains untested because no semantic or physical artefact cache exists yet.]
+            [: Dev-server and generated-bootstrap tests cover returned Errors including code 0, assertion and unexpected startup-fault categories for JS and HTML-Wasm, hostile text, stale, duplicate, malformed, oversized and cross-origin reports, origin prefixes, unavailable transport and isolated pages. A release case proves output has no dev reporting dependency. Barrier tests cover output publication against concurrent requests, companion requests spanning a rebuild and write failure. A real rebuild/write/serve sequence over one output directory proves current output freshness through private-body entry-outcome changes, an invalidated success-only export and unchanged writer skips. Cache-reuse invalidation remains untested because no cross-build semantic or physical artefact cache exists.]
             [: In [$html:<code>moth dev</code>], a returned [$html:<code>start</code>] Error covers its page with a runtime view that keeps hot reload, logs to the console and reports once to the server terminal. A successful build stays successful for every page. Assertion failures are identified structurally and other faults escaping the generated startup wrapper are reported as unexpected startup faults. Later callbacks and unrelated scripts are not intercepted. Each served response comes from one completed output generation; a page whose companions load after a rebuild has its reports rejected as stale and reloads normally.]
         ]
 
@@ -756,8 +748,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: [$html:<code>Range</code>] values outside loop headers]
             [: Deferred]
-            [: Loop-header ranges are covered with the loop surface. One targeted case pins that a folded [$html:<code>Range</code>] constant survives to HIR; the operations a range would need are not covered because they do not exist yet.]
-            [: [$html:<code>start to end</code>] is a loop-header form today. A [$html:<code>Range</code>] can be bound, including as a [$html:<code>#</code>] constant, which folds and lowers, but the bound value is inert: it is not a collection-loop source, exposes no [$html:<code>start</code>] / [$html:<code>end</code>] members and is not renderable in a template head. First-class range values are intended but not designed or implemented, so do not add coverage for range operations until the surface is shaped.]
+            [: Loop-header ranges are covered with the loop surface. One targeted case pins that a folded [$html:<code>Range</code>] constant survives to HIR; the operations a range would need are not covered because they are not implemented.]
+            [: [$html:<code>start to end</code>] is a loop-header form. A [$html:<code>Range</code>] can be bound, including as a [$html:<code>#</code>] constant, which folds and lowers, but the bound value is inert: it is not a collection-loop source, exposes no [$html:<code>start</code>] / [$html:<code>end</code>] members and is not renderable in a template head. First-class range values are intended but not designed or implemented, so do not add coverage for range operations until the surface is shaped.]
         ]
 
         [data:
@@ -771,7 +763,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Choice nested payload patterns and richer exhaustiveness]
             [: Deferred]
             [: Targeted nested-pattern deferred diagnostics.]
-            [: Exhaustiveness is tag-level for now. General pattern binding renames are also deferred outside choice payload capture renames.]
+            [: Exhaustiveness is checked at tag level. General pattern binding renames are also deferred outside choice payload capture renames.]
         ]
 
         [data:

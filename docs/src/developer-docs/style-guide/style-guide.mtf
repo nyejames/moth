@@ -21,12 +21,13 @@ Priorities:
 
 ### Diagnostics
 
-- Use plain `CompilerDiagnostic` values for normal user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics.
-- Use `CompilerError` only for internal compiler, filesystem, backend, dev-server and tooling infrastructure failures.
-- Diagnostic payloads and reason enums should carry typed `DiagnosticPayload` facts and stable diagnostic codes, not pre-rendered prose.
-- Include an exact `SourceSpan` when authored source owns the diagnostic and preserve source labels wherever they add useful context.
-- Type diagnostics should carry semantic `TypeId`s and context enums and render through `DiagnosticRenderContext`, not cloned type syntax or formatted type names.
-- Use `DiagnosticBag` for stage-local accumulation and `CompilerMessages` only at build/render boundaries.
+- Construct user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics as typed `DiagnosticDraft` values through the owning family constructors.
+- Use `compiler_bug!` for proven internal invariants. Operational failures and internal cases not proven impossible are typed `InfrastructureFailure` causes returned in the ordered `InfrastructureErrors` result.
+- Diagnostic family constructors should carry typed facts and stable codes, not pre-rendered prose.
+- Include an exact `SourceSpan` when authored source owns the diagnostic and preserve related-site context wherever it adds useful information.
+- Type diagnostics should carry semantic `TypeId`s and context enums. Capture display facts in `TypeDisplaySnapshot` and render through typed family views, not cloned type syntax or formatted type names.
+- Use `DiagnosticBag` for stage-local draft accumulation; capture with `PreparedDiagnosticBatch` or `PreparedFailure` at the owning boundary, then freeze once into report-owned compact stores and typed views.
+- Keep `SourceDatabase` snapshots and line indexes alive through their last source-position use; freeze report-owned identity and type-display context before releasing the source database.
 - Never suggest wrapping arithmetic, an unchecked mode, resource recovery, a grouped `if:` handler or a public `fails` marker.
 - Treat an assertion as an explicit user choice, never the default repair suggestion.
 - Never advise adding `Error!` beside an existing custom `E!` slot; that would create two error channels.
@@ -230,7 +231,7 @@ Prefer named types and straightforward flow:
 Instead of:
 
 [codeblock, $code("rust"):
-    Result<(ResolvedDependencyTarget, StringId, SourceSpan), CompilerDiagnostic>
+    Result<(ResolvedDependencyTarget, StringId, SourceSpan), DiagnosticDraft>
 ]
 
 A few more lines are fine when the result is easier to inspect and harder to misuse.
@@ -250,32 +251,27 @@ Avoid creating procedural macros unless they measurably improve performance and 
 
 The diagnostic lane rules above apply to every local error boundary.
 
-- New user-facing diagnostics must use typed `CompilerDiagnostic` constructors in `compiler_diagnostic.rs`. Do not add `CompilerError` variants for syntax, type, rule, import, borrow or config failures.
-- Use `return_compiler_error!` only for internal compiler bugs or broken invariants.
-- Keep diagnosed failures as plain `CompilerDiagnostic` values at local `Result` boundaries; keep infrastructure failures in their typed `CompilerError` lane. Do not box the common diagnostic or add a lint-specific local workaround.
-- Keep `DiagnosticBag` and `CompilerMessages` owning plain `CompilerDiagnostic` values at accumulation and render/build boundaries.
-- Prefer `Option<CompilerDiagnostic>` over `Result<(), CompilerDiagnostic>` for predicate-only validators that report one diagnostic or continue.
-- Prefer explicit loops when iterator closures would infer `Result<_, CompilerDiagnostic>`.
+- New user-facing diagnostics must use typed family constructors in `compiler_messages/diagnostics/families/`, which return `DiagnosticDraft`. Do not add `InfrastructureFailure` variants for syntax, type, rule, import, borrow or config failures.
+- Return `CompilationResult<T>` from owning compilation boundaries: success carries warnings, `Diagnosed` carries frozen reports and the outer `Err` carries `InfrastructureErrors`. Stage-local helpers keep `Result<T, DiagnosticDraft>`.
+- Keep `DiagnosticBag` owning drafts during accumulation; capture them as `PreparedDiagnosticBatch` or `PreparedFailure`, and render only frozen report views.
+- Prefer `Option<DiagnosticDraft>` over `Result<(), DiagnosticDraft>` for predicate-only validators that report one diagnostic or continue.
+- Prefer explicit loops when iterator closures would infer `Result<_, DiagnosticDraft>`.
 - Keep paths interned until render time. Do not duplicate them as owned `PathBuf`s.
 - Centralise repeated diagnostic construction in the owning typed constructor or narrow helper instead of duplicating it across branches.
 - Include exact tokens, types or names and suggest practical corrections where possible.
 
 [codeblock, $code("rust"):
-    // Typed diagnostic constructor.
-    return Err(CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableVariable,
-        variable_name,
-        location,
+    // Typed diagnostic family constructor.
+    return Err(names_declarations::invalid_assignment_target(
+        InvalidAssignmentTargetReason::ImmutableBinding,
+        Some(variable_name),
+        None,
+        None,
+        Some(location),
     ));
 
-    // Internal bug path.
-    return_compiler_error!(
-        "Unsupported AST node type: {:?}",
-        node_type; {
-            CompilationStage => "AST Processing",
-            PrimarySuggestion => "This is a compiler bug - please report it"
-        }
-    );
+    // Proven compiler invariant.
+    compiler_bug!(CompilerStage::AstConstruction, "Unsupported AST node type: {:?}", node_type);
 ]
 
 ### Codebase documentation

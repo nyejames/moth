@@ -19,12 +19,13 @@
 
 use super::line_index::LineIndex;
 use super::{FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
-use crate::compiler_frontend::symbols::string_interning::{
-    FrozenStringTable, StringId, StringTable,
-};
+#[cfg(test)]
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringId};
 use std::sync::Arc;
 
 /// Late-bound owner for one generic body or scope chain's final frozen identity.
@@ -75,17 +76,21 @@ impl FrozenIdentityHandle {
     pub(crate) fn install(
         &self,
         identity: Arc<FrozenIdentityContext>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let Some(existing) = self.identity.get() {
             if Arc::ptr_eq(existing, &identity) {
                 return Ok(());
             }
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
                 "frozen identity handle was assigned two different contexts",
             ));
         }
         self.identity.set(identity).map_err(|_| {
-            CompilerError::compiler_error("frozen identity handle was assigned concurrently")
+            InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                "frozen identity handle was assigned concurrently",
+            )
         })
     }
 
@@ -95,6 +100,11 @@ impl FrozenIdentityHandle {
     /// reinterpret its source IDs through the requester's context.
     pub(crate) fn get(&self) -> Option<&FrozenIdentityContext> {
         self.identity.get().map(Arc::as_ref)
+    }
+
+    /// Clone the installed owner for a frozen diagnostic report's foreign-site context list.
+    pub(crate) fn shared_context(&self) -> Option<Arc<FrozenIdentityContext>> {
+        self.identity.get().cloned()
     }
 }
 
@@ -119,6 +129,7 @@ impl FrozenIdentityContext {
     /// text or span storage is cloned, and no independent path table is created. The frozen
     /// string allocation is placed behind a shared owner so later package domains can reuse it
     /// through [`Self::from_shared_strings`] without copying.
+    #[cfg(test)]
     pub(crate) fn from_parts(strings: StringTable, sources: SourceDatabase) -> Self {
         Self {
             sources: sources.freeze(),
@@ -145,31 +156,25 @@ impl FrozenIdentityContext {
         }
     }
 
+    /// Wraps an already-frozen source database for a domain with no loaded sources, such as a
+    /// path trie. The string table must be the one that issued the trie's `StringId` components.
+    pub(crate) fn from_frozen_sources(
+        strings: Arc<FrozenStringTable>,
+        sources: FrozenSourceDatabase,
+    ) -> Self {
+        Self { sources, strings }
+    }
+
     /// Borrow the immutable string table used by compact string IDs.
     #[inline]
     pub(crate) fn strings(&self) -> &FrozenStringTable {
         &self.strings
     }
 
-    /// Share this context's frozen string allocation with another project/package domain.
-    ///
-    /// Cloning the shared owner reuses the one merged root allocation; no string storage is
-    /// copied. Pass the result to [`Self::from_shared_strings`].
-    #[inline]
-    pub(crate) fn shared_strings(&self) -> Arc<FrozenStringTable> {
-        Arc::clone(&self.strings)
-    }
-
     /// Borrow the source owner's immutable parent-linked path table.
     #[inline]
     pub(crate) fn paths(&self) -> &PathTable {
         self.sources.paths()
-    }
-
-    /// Fallibly resolve a string ID in this identity context for source/diagnostic model tests.
-    #[cfg(test)]
-    pub(crate) fn try_resolve_string(&self, id: StringId) -> Option<&str> {
-        self.strings.try_resolve(id)
     }
 
     /// Render a path using this context's frozen source path and string tables.
@@ -203,6 +208,12 @@ impl FrozenIdentityContext {
     #[inline]
     pub(crate) fn source_record(&self, id: SourceId) -> &SourceRecord {
         self.sources.source_record(id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
+        self.sources.line_index(id)?;
+        Some(self.sources.source_record(id).text.as_ref())
     }
 
     #[cfg(feature = "data_layout_memory_probe")]

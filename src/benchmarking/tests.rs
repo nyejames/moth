@@ -1,4 +1,6 @@
 use crate::benchmarking::FrontendBenchmarkOutcome;
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::benchmarking::frontend::run_frontend_benchmark_with_record_limit;
 use crate::benchmarking::frontend::{
     FrontendBenchmarkBuildProfile, FrontendBenchmarkFailureKind, FrontendBenchmarkInput,
     FrontendBenchmarkInputValue, FrontendBenchmarkOptions, run_frontend_benchmark,
@@ -202,6 +204,50 @@ if value is:
     assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
     assert_eq!(report.error_count, 0);
 }
+#[cfg(feature = "data_layout_memory_probe")]
+#[test]
+fn frontend_benchmark_warning_capacity_failure_retains_diagnosed_reports() {
+    let _guard = benchmark_test_guard();
+    #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
+
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let file_path = temp_dir.path().join("warning_capacity.moth");
+    let warning_source = "\
+value ~= \"hello\"
+result ~= \"unset\"
+
+if value is:
+    \"one\" => result = \"one\"
+    \"one\" => result = \"one\"
+    \"one\" => result = \"one\"
+    \"one\" => result = \"one\"
+    else => result = \"other\"
+;
+";
+    std::fs::write(&file_path, warning_source).expect("should write warning source");
+
+    let report = run_frontend_benchmark_with_record_limit(
+        FrontendBenchmarkOptions {
+            entry_path: file_path,
+            build_profile: FrontendBenchmarkBuildProfile::Dev,
+            build_config_inputs: Vec::new(),
+        },
+        2,
+    )
+    .expect("warning capacity should be a diagnosed benchmark outcome");
+
+    assert_eq!(report.outcome, FrontendBenchmarkOutcome::Diagnosed);
+    assert_eq!(report.error_count, 1);
+    assert_eq!(report.warning_count, 0);
+    assert_eq!(report.diagnostic_codes, vec!["MOTH-SYNTAX-0037"]);
+    assert_eq!(report.retention.diagnostic_records, 1);
+    assert!(
+        report.retention.retained_identity_contexts > 0,
+        "diagnosed capacity reports must retain their identity context: {:?}",
+        report.retention
+    );
+}
 
 #[test]
 fn frontend_benchmark_retains_source_package_warning() {
@@ -300,6 +346,29 @@ fn frontend_benchmark_fails_for_missing_file() {
         vec!["MOTH-INFRA-0001".to_owned()],
         "missing-file benchmark should report an infrastructure diagnostic code"
     );
+}
+#[test]
+fn frontend_benchmark_converts_failed_directory_compilation() {
+    let _guard = benchmark_test_guard();
+    let temp_dir = tempfile::tempdir().expect("should create temp directory");
+    let source_root = temp_dir.path().join("src");
+    std::fs::create_dir_all(&source_root).expect("should create the configured entry root");
+    std::fs::write(
+        temp_dir.path().join("config.moth"),
+        "project #= (name = \"empty\", entry_root = \"src\")\nhtml #= ()\n",
+    )
+    .expect("should write the project config");
+
+    let report = run_frontend_benchmark(FrontendBenchmarkOptions {
+        entry_path: temp_dir.path().to_path_buf(),
+        build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
+    })
+    .expect("a diagnosed empty directory should produce a benchmark report");
+
+    assert_eq!(report.outcome, FrontendBenchmarkOutcome::Diagnosed);
+    assert!(report.error_count > 0);
+    assert!(!report.diagnostic_codes.is_empty());
 }
 
 /// A frontend benchmark must acquire its raw session before it validates the entry path,

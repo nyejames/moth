@@ -13,7 +13,7 @@ use super::frozen_body_tests::{
 use super::preparation_freeze::ModuleMaterialisationPreparationBuilder;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
@@ -140,7 +140,6 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         .get_mut(&alias_path)
         .expect("the alias row should be present");
     alias.target_type_id = TypeId(u32::MAX);
-    let alias_declaration_span = alias.declaration_span;
 
     let detach_result = prepared.preparation.detach(
         &prepared.const_values,
@@ -153,20 +152,14 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         panic!("an unprojectable alias target must not detach");
     };
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     // The message renders the alias path through PathId's debug form (the fixture has no
     // production path-name spelling at the detach boundary), so assert the message identifies
     // the exact retained alias row this test corrupted.
     assert!(
-        error.msg.contains("completed-target invariant")
-            && error.msg.contains(&format!("{alias_path:?}")),
+        error.message.contains("completed-target invariant")
+            && error.message.contains(&format!("{alias_path:?}")),
         "unexpected alias detachment error: {error:?}"
-    );
-    // The alias declaration retains authored provenance rather than falling back to file start:
-    // the transported span must be exactly the alias's declaration span.
-    assert_eq!(
-        error.source_span, alias_declaration_span,
-        "the alias declaration span must survive transport unchanged",
     );
 }
 

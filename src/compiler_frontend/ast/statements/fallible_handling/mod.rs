@@ -55,8 +55,8 @@ pub(crate) fn token_stream_starts_typed_propagation_suffix(token_stream: &AstCur
 ///
 /// WHAT: maps the authored handler (`!` vs `catch`) and whether the operand carries an
 ///       optional value to the matching `InvalidFallibleHandlingReason` case.
-/// WHY: the old umbrella `NotResultExpression` reason hardcoded `!` wording and called every
-///      carrier a result, so each construction site needs the exact handler and carrier pair.
+/// WHY: a single umbrella reason would hardcode `!` wording and call every carrier a result, so
+///      each construction site needs the exact handler and carrier pair.
 pub(crate) fn non_fallible_handler_reason(
     handler_tag: TokenTag,
     operand_is_optional: bool,

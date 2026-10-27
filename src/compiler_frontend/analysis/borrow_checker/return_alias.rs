@@ -381,7 +381,6 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while classifying a return",
                             function_id.name()
                         ),
-                        self.diagnostics.function_error_span(function.id),
                     ));
                 };
                 self.project_external_return_alias(
@@ -411,7 +410,6 @@ impl<'a> BorrowChecker<'a> {
                     "Borrow checker is missing the public call summary for function '{}' while classifying a forwarded return",
                     self.diagnostics.function_name(callee_id)
                 ),
-                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -445,7 +443,6 @@ impl<'a> BorrowChecker<'a> {
                 format!(
                     "Borrow checker is missing the provider call summary for imported function {origin:?} while classifying a forwarded return"
                 ),
-                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -476,7 +473,6 @@ impl<'a> BorrowChecker<'a> {
                 format!(
                     "Borrow checker is missing the call summary for generated function {identity:?} while classifying a forwarded return"
                 ),
-                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -507,7 +503,6 @@ impl<'a> BorrowChecker<'a> {
                 format!(
                     "Borrow checker is missing the call summary for module-private function {identity:?} while classifying a forwarded return"
                 ),
-                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -584,7 +579,6 @@ impl<'a> BorrowChecker<'a> {
                         arg_index,
                         args.len()
                     ),
-                    self.diagnostics.function_error_span(function.id),
                 ));
             };
 

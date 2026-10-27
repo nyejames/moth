@@ -17,7 +17,8 @@ use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrNodeId, TemplateSlotPlanId};
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::source::SourceSpan;
 
 /// TIR side-table entry for a slot-routing plan.
@@ -26,9 +27,8 @@ use crate::compiler_frontend::source::SourceSpan;
 /// a runtime slot application. The wrapper plan itself is the owning
 /// `TemplateIr` root that references this side-table entry through
 /// `TemplateIr::runtime_slot_plan`.
-/// WHY: this is the first TIR-owned slot-plan handoff. TIR no longer carries a
-/// raw runtime-slot planner object; later HIR handoff can consume this route
-/// view without re-running AST slot routing.
+/// WHY: AST handoff materialization turns this routed plan into the owned slot-application
+///      handoff HIR consumes, without re-running slot routing.
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateSlotPlan {
     /// TIR-rendered contribution source plans, one per runtime contribution.
@@ -77,9 +77,10 @@ pub(crate) struct TemplateSlotSitePlan {
 pub(crate) fn runtime_slot_plan_roots<'store>(
     store: &'store TemplateIrStore,
     slot_plan_id: TemplateSlotPlanId,
-) -> Result<impl Iterator<Item = TemplateIrNodeId> + 'store, CompilerError> {
+) -> Result<impl Iterator<Item = TemplateIrNodeId> + 'store, InfrastructureFailure> {
     let slot_plan = store.get_slot_plan(slot_plan_id).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR runtime slot-plan root lookup referenced a missing slot plan.",
         )
     })?;
@@ -156,7 +157,8 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
     let node_kind = store
         .get_node(root_node_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR active-slot conversion: node ID was not present in the store.",
             )
         })?
@@ -172,7 +174,7 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                     slot_sites,
                 )
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "TIR active-slot conversion: no matching site found for a slot placeholder.",
                     )
                 })?;
@@ -205,7 +207,7 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
             let child_root = store
                 .get_template(child_template_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "TIR active-slot conversion: child template ID was not present in the store.",
                     )
                 })?
@@ -223,7 +225,7 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                 let child_root = store
                     .get_template(child_template_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "TIR active-slot conversion: child template ID was not present in the store.",
                         )
                     })?

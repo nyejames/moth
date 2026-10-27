@@ -40,6 +40,8 @@ boracle = []
 boracle_campaign = ["boracle"]
 checked_blocks = []
 async_blocks = []
+# Test-only structured panic trigger for the CLI host-isolation subprocess gate.
+test_compiler_bug = []
 
 [[bin]]
 name = "data_layout_memory_probe"
@@ -89,7 +91,7 @@ incremental = true
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 strip = true
 
 [profile.profiling]
@@ -98,7 +100,7 @@ debug = true
 strip = false
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 
 [profile.dev.package."*"]
 opt-level = 3  # Optimize dependencies in dev

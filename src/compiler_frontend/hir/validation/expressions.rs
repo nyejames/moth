@@ -7,7 +7,7 @@
 
 use super::HirValidator;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
@@ -40,83 +40,78 @@ impl<'a> HirValidator<'a> {
     pub(super) fn expression_row(
         &self,
         expression_id: HirValueId,
-        anchor: Option<HirLocation>,
-    ) -> Result<&crate::compiler_frontend::hir::expressions::HirExpression, CompilerError> {
+    ) -> Result<&crate::compiler_frontend::hir::expressions::HirExpression, InfrastructureFailure>
+    {
         self.module
             .expressions
             .get_expression(expression_id)
-            .ok_or_else(|| {
-                self.error_with_hir(format!("Invalid expression id {expression_id:?}"), anchor)
-            })
+            .ok_or_else(|| self.error_with_hir(format!("Invalid expression id {expression_id:?}")))
     }
 
     pub(super) fn value_ids(
         &self,
         range: crate::compiler_frontend::hir::expression_store::HirValueRange,
-        anchor: Option<HirLocation>,
-    ) -> Result<&[HirValueId], CompilerError> {
+    ) -> Result<&[HirValueId], InfrastructureFailure> {
         self.module
             .expressions
             .get_values(range)
-            .ok_or_else(|| self.error_with_hir("Invalid HIR expression-value range", anchor))
+            .ok_or_else(|| self.error_with_hir("Invalid HIR expression-value range"))
     }
 
     pub(super) fn struct_fields(
         &self,
         range: crate::compiler_frontend::hir::expression_store::HirStructFieldRange,
-        anchor: Option<HirLocation>,
-    ) -> Result<&[(crate::compiler_frontend::hir::ids::FieldId, HirValueId)], CompilerError> {
+    ) -> Result<&[(crate::compiler_frontend::hir::ids::FieldId, HirValueId)], InfrastructureFailure>
+    {
         self.module
             .expressions
             .get_struct_fields(range)
-            .ok_or_else(|| self.error_with_hir("Invalid HIR struct-field range", anchor))
+            .ok_or_else(|| self.error_with_hir("Invalid HIR struct-field range"))
     }
 
     pub(super) fn variant_fields(
         &self,
         range: crate::compiler_frontend::hir::expression_store::HirVariantFieldRange,
-        anchor: Option<HirLocation>,
-    ) -> Result<&[crate::compiler_frontend::hir::expressions::HirVariantField], CompilerError> {
+    ) -> Result<&[crate::compiler_frontend::hir::expressions::HirVariantField], InfrastructureFailure>
+    {
         self.module
             .expressions
             .get_variant_fields(range)
-            .ok_or_else(|| self.error_with_hir("Invalid HIR variant-field range", anchor))
+            .ok_or_else(|| self.error_with_hir("Invalid HIR variant-field range"))
     }
 
     pub(super) fn map_entries(
         &self,
         range: crate::compiler_frontend::hir::expression_store::HirMapEntryRange,
-        anchor: Option<HirLocation>,
-    ) -> Result<&[crate::compiler_frontend::hir::expressions::HirMapEntry], CompilerError> {
+    ) -> Result<&[crate::compiler_frontend::hir::expressions::HirMapEntry], InfrastructureFailure>
+    {
         self.module
             .expressions
             .get_map_entries(range)
-            .ok_or_else(|| self.error_with_hir("Invalid HIR map-entry range", anchor))
+            .ok_or_else(|| self.error_with_hir("Invalid HIR map-entry range"))
     }
 
     pub(super) fn string_pieces(
         &self,
         range: crate::compiler_frontend::hir::expression_store::HirStringPieceRange,
-        anchor: Option<HirLocation>,
     ) -> Result<
         &[crate::compiler_frontend::ast::const_values::store::ConstStringPiece],
-        CompilerError,
+        InfrastructureFailure,
     > {
         self.module
             .expressions
             .get_string_pieces(range)
-            .ok_or_else(|| self.error_with_hir("Invalid HIR structural-string piece range", anchor))
+            .ok_or_else(|| self.error_with_hir("Invalid HIR structural-string piece range"))
     }
 
     pub(super) fn projections(
         &self,
         range: crate::compiler_frontend::hir::expression_store::HirProjectionRange,
-        anchor: Option<HirLocation>,
-    ) -> Result<&[HirProjection], CompilerError> {
+    ) -> Result<&[HirProjection], InfrastructureFailure> {
         self.module
             .expressions
             .get_projections(range)
-            .ok_or_else(|| self.error_with_hir("Invalid HIR place-projection range", anchor))
+            .ok_or_else(|| self.error_with_hir("Invalid HIR place-projection range"))
     }
 
     pub(super) fn validate_match_arm(
@@ -125,15 +120,15 @@ impl<'a> HirValidator<'a> {
         arm: &HirMatchArm,
         pattern_subject_type_id: TypeId,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.validate_pattern(&arm.pattern, pattern_subject_type_id, anchor)?;
 
         if let Some(guard) = arm.guard {
             self.validate_expression(guard, anchor)?;
         }
 
-        self.require_block_id(arm.body, anchor)?;
-        self.require_same_function_cfg_owner(source_block_id, arm.body, anchor)?;
+        self.require_block_id(arm.body)?;
+        self.require_same_function_cfg_owner(source_block_id, arm.body)?;
         Ok(())
     }
 
@@ -142,7 +137,7 @@ impl<'a> HirValidator<'a> {
         pattern: &HirPattern,
         pattern_subject_type_id: TypeId,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match pattern {
             HirPattern::Literal(value) => {
                 self.validate_literal_pattern_expression(*value, pattern_subject_type_id, anchor)?;
@@ -156,22 +151,21 @@ impl<'a> HirValidator<'a> {
 
             HirPattern::OptionRelational { value, .. } => {
                 self.validate_literal_pattern_expression(*value, pattern_subject_type_id, anchor)?;
-                self.validate_relational_pattern_expression(*value, anchor)?;
+                self.validate_relational_pattern_expression(*value)?;
             }
 
             HirPattern::Wildcard => {}
 
             HirPattern::Relational { value, .. } => {
                 self.validate_literal_pattern_expression(*value, pattern_subject_type_id, anchor)?;
-                self.validate_relational_pattern_expression(*value, anchor)?;
+                self.validate_relational_pattern_expression(*value)?;
             }
 
             HirPattern::ChoiceVariant { choice_id, .. } => {
                 if self.module.choices.get(choice_id.0 as usize).is_none() {
-                    return Err(self.error_with_hir(
-                        format!("Invalid ChoiceId {choice_id:?} in pattern"),
-                        anchor,
-                    ));
+                    return Err(
+                        self.error_with_hir(format!("Invalid ChoiceId {choice_id:?} in pattern"))
+                    );
                 }
             }
 
@@ -190,9 +184,8 @@ impl<'a> HirValidator<'a> {
     pub(super) fn validate_relational_pattern_expression(
         &self,
         expression_id: HirValueId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
-        let expression = self.expression_row(expression_id, anchor)?;
+    ) -> Result<(), InfrastructureFailure> {
+        let expression = self.expression_row(expression_id)?;
         if !matches!(
             expression.kind,
             HirExpressionKind::FixedScalar(_)
@@ -201,7 +194,6 @@ impl<'a> HirValidator<'a> {
         ) {
             return Err(self.error_with_hir(
                 "Match relational pattern must be int/float/fixed-scalar/dec/char",
-                anchor,
             ));
         }
 
@@ -217,14 +209,12 @@ impl<'a> HirValidator<'a> {
         expression_id: HirValueId,
         pattern_subject_type_id: TypeId,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.validate_expression(expression_id, anchor)?;
-        let expression = self.expression_row(expression_id, anchor)?;
+        let expression = self.expression_row(expression_id)?;
 
         if expression.value_kind != ValueKind::Const {
-            return Err(
-                self.error_with_hir("Match literal pattern must have ValueKind::Const", anchor)
-            );
+            return Err(self.error_with_hir("Match literal pattern must have ValueKind::Const"));
         }
 
         if !matches!(
@@ -237,13 +227,11 @@ impl<'a> HirValidator<'a> {
         ) {
             return Err(self.error_with_hir(
                 "Match literal pattern must be int/float/fixed-scalar/number/bool/char/string",
-                anchor,
             ));
         }
         if expression.ty != pattern_subject_type_id {
             return Err(self.error_with_hir(
                 "Match pattern value type does not match the direct scrutinee type",
-                anchor,
             ));
         }
 
@@ -252,7 +240,6 @@ impl<'a> HirValidator<'a> {
         {
             return Err(self.error_with_hir(
                 "HIR fixed-scalar pattern value does not match its direct scrutinee type",
-                anchor,
             ));
         }
 
@@ -266,7 +253,7 @@ impl<'a> HirValidator<'a> {
         &self,
         expression_id: HirValueId,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         // Taking the buffer leaves an empty Vec behind. Putting it back keeps its capacity, so
         // leaf and single-child rows allocate nothing after the first walk.
         let mut frames = self.expression_frames.take();
@@ -289,14 +276,14 @@ impl<'a> HirValidator<'a> {
         &self,
         frames: &mut Vec<ExpressionFrame>,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         while let Some(frame) = frames.pop() {
             match frame {
                 ExpressionFrame::Enter(expression_id) => {
                     self.enter_expression(expression_id, anchor, frames)?;
                 }
                 ExpressionFrame::Exit(expression_id) => {
-                    self.exit_expression(expression_id, anchor)?;
+                    self.exit_expression(expression_id)?;
                 }
             }
         }
@@ -309,14 +296,13 @@ impl<'a> HirValidator<'a> {
         expression_id: HirValueId,
         anchor: Option<HirLocation>,
         frames: &mut Vec<ExpressionFrame>,
-    ) -> Result<(), CompilerError> {
-        let expression = self.expression_row(expression_id, anchor)?;
+    ) -> Result<(), InfrastructureFailure> {
+        let expression = self.expression_row(expression_id)?;
         let expression_index = expression_id.0 as usize;
         if self.active_expression_rows[expression_index].replace(true) {
-            return Err(self.error_with_hir(
-                format!("HIR expression graph contains a cycle at {expression_id:?}"),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!(
+                "HIR expression graph contains a cycle at {expression_id:?}"
+            )));
         }
         // Queued before any fallible check, so an error in this row still clears its mark.
         frames.push(ExpressionFrame::Exit(expression_id));
@@ -345,28 +331,24 @@ impl<'a> HirValidator<'a> {
     }
 
     /// Clears one row's active mark, then runs the checks that read its validated children.
-    fn exit_expression(
-        &self,
-        expression_id: HirValueId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
-        // The exit frame is already popped, so an error below would no longer unwind this mark.
+    fn exit_expression(&self, expression_id: HirValueId) -> Result<(), InfrastructureFailure> {
+        // The exit frame is already popped, so an error below would not unwind this mark.
         // Clear it first.
         self.active_expression_rows[expression_id.0 as usize].set(false);
-        let expression = self.expression_row(expression_id, anchor)?;
-        self.validate_expression_after_children(expression, anchor)
+        let expression = self.expression_row(expression_id)?;
+        self.validate_expression_after_children(expression)
     }
 
     /// Runs the checks for one row that precede its children.
     ///
-    /// WHY: a row's own diagnostics come before any child's, as in the earlier recursive walk.
+    /// WHY: a row's own diagnostics come before any child's, so reports follow pre-order.
     /// Checks that need validated children live in `validate_expression_after_children`.
     fn validate_expression_contents(
         &self,
         expression_id: HirValueId,
         expression: &HirExpression,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         // A value's source span lives on its row; the side table maps only AST spans.
         let value_location = HirLocation::Value(expression_id);
         if expression.span.is_some()
@@ -376,38 +358,31 @@ impl<'a> HirValidator<'a> {
                 .ast_span_for_hir(value_location)
                 .is_none()
         {
-            return Err(self.error_with_hir(
-                format!(
-                    "Value {} is missing AST->HIR side-table mapping",
-                    expression_id
-                ),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!(
+                "Value {} is missing AST->HIR side-table mapping",
+                expression_id
+            )));
         }
 
-        self.require_type_id(expression.ty, anchor)?;
-        self.require_region_id(expression.region, anchor)?;
+        self.require_type_id(expression.ty)?;
+        self.require_region_id(expression.region)?;
 
         if expression.value_kind == ValueKind::Place
             && !matches!(&expression.kind, HirExpressionKind::Load(_))
         {
             return Err(self.error_with_hir(
                 "ValueKind::Place is only valid for a direct HirExpressionKind::Load",
-                anchor,
             ));
         }
 
         match &expression.kind {
             HirExpressionKind::Number(value) => {
                 if self.type_environment.number_scale(expression.ty) != Some(value.scale()) {
-                    return Err(self.error_with_hir(
-                        format!(
-                            "HIR Dec literal scale {} does not match expression type {:?}",
-                            value.scale(),
-                            expression.ty
-                        ),
-                        anchor,
-                    ));
+                    return Err(self.error_with_hir(format!(
+                        "HIR Dec literal scale {} does not match expression type {:?}",
+                        value.scale(),
+                        expression.ty
+                    )));
                 }
             }
 
@@ -420,7 +395,7 @@ impl<'a> HirValidator<'a> {
             | HirExpressionKind::StringLiteral(_) => {}
 
             HirExpressionKind::StructuralString { pieces } => {
-                let _ = self.string_pieces(*pieces, anchor)?;
+                let _ = self.string_pieces(*pieces)?;
             }
 
             HirExpressionKind::VariantConstruct {
@@ -428,15 +403,14 @@ impl<'a> HirValidator<'a> {
                 variant_index,
                 fields: field_range,
             } => {
-                let fields = self.variant_fields(*field_range, anchor)?;
+                let fields = self.variant_fields(*field_range)?;
                 // Validate variant-index bounds and field arity per carrier kind.
                 match carrier {
                     HirVariantCarrier::Choice { choice_id } => {
                         let Some(choice) = self.module.choices.get(choice_id.0 as usize) else {
-                            return Err(self.error_with_hir(
-                                format!("Invalid ChoiceId {choice_id:?} in VariantConstruct"),
-                                anchor,
-                            ));
+                            return Err(self.error_with_hir(format!(
+                                "Invalid ChoiceId {choice_id:?} in VariantConstruct"
+                            )));
                         };
                         if *variant_index >= choice.variants.len() {
                             return Err(self.error_with_hir(
@@ -444,7 +418,6 @@ impl<'a> HirValidator<'a> {
                                     "Variant index {variant_index} out of range for choice {choice_id:?} with {} variants",
                                     choice.variants.len()
                                 ),
-                                anchor,
                             ));
                         }
                         let variant = &choice.variants[*variant_index];
@@ -455,7 +428,6 @@ impl<'a> HirValidator<'a> {
                                     fields.len(),
                                     variant.fields.len()
                                 ),
-                                anchor,
                             ));
                         }
                         for (actual, expected) in fields.iter().zip(variant.fields.iter()) {
@@ -465,18 +437,14 @@ impl<'a> HirValidator<'a> {
                                         "VariantConstruct field name {:?} does not match declared name {:?}",
                                         actual.name, expected.name
                                     ),
-                                    anchor,
                                 ));
                             }
-                            let actual_value = self.expression_row(actual.value, anchor)?;
+                            let actual_value = self.expression_row(actual.value)?;
                             if actual_value.ty != expected.ty {
-                                return Err(self.error_with_hir(
-                                    format!(
-                                        "VariantConstruct field type mismatch for field {:?}",
-                                        expected.name
-                                    ),
-                                    anchor,
-                                ));
+                                return Err(self.error_with_hir(format!(
+                                    "VariantConstruct field type mismatch for field {:?}",
+                                    expected.name
+                                )));
                             }
                         }
                     }
@@ -486,7 +454,6 @@ impl<'a> HirValidator<'a> {
                                 format!(
                                     "VariantConstruct(Option) variant index {variant_index} out of range (valid: 0..=1)"
                                 ),
-                                anchor,
                             ));
                         }
                         let expected = if *variant_index == 0 { 0 } else { 1 };
@@ -496,7 +463,6 @@ impl<'a> HirValidator<'a> {
                                     "VariantConstruct(Option) field count {} does not match expected {} for variant index {}",
                                     fields.len(), expected, variant_index
                                 ),
-                                anchor,
                             ));
                         }
                         if *variant_index == 1 {
@@ -505,14 +471,12 @@ impl<'a> HirValidator<'a> {
                             else {
                                 return Err(self.error_with_hir(
                                     "VariantConstruct(Option) expression type is not an option",
-                                    anchor,
                                 ));
                             };
-                            let some_value = self.expression_row(fields[0].value, anchor)?;
+                            let some_value = self.expression_row(fields[0].value)?;
                             if some_value.ty != inner_type {
                                 return Err(self.error_with_hir(
                                     "VariantConstruct(Option) some-value type does not match option inner type",
-                                    anchor,
                                 ));
                             }
                         }
@@ -526,17 +490,15 @@ impl<'a> HirValidator<'a> {
                 fields: field_range,
                 future_input,
             } => {
-                let fields = self.variant_fields(*field_range, anchor)?;
+                let fields = self.variant_fields(*field_range)?;
                 let Some(choice) = self.module.choices.get(choice_id.0 as usize) else {
-                    return Err(self.error_with_hir(
-                        format!("Invalid ChoiceId {choice_id:?} in RouteConstruct"),
-                        anchor,
-                    ));
+                    return Err(self.error_with_hir(format!(
+                        "Invalid ChoiceId {choice_id:?} in RouteConstruct"
+                    )));
                 };
                 if choice.id != *choice_id || choice.frontend_type_id != expression.ty {
                     return Err(self.error_with_hir(
                         "RouteConstruct choice identity does not match its expression type",
-                        anchor,
                     ));
                 }
                 let Some(variant) = choice.variants.get(*variant_index) else {
@@ -544,7 +506,6 @@ impl<'a> HirValidator<'a> {
                         format!(
                             "RouteConstruct variant index {variant_index} is out of range for choice {choice_id:?}"
                         ),
-                        anchor,
                     ));
                 };
                 // One future input supplies exactly the trailing field, so captures fill every
@@ -552,7 +513,6 @@ impl<'a> HirValidator<'a> {
                 if fields.len() + usize::from(*future_input) != variant.fields.len() {
                     return Err(self.error_with_hir(
                         "RouteConstruct captures must fill every variant field except the one future input",
-                        anchor,
                     ));
                 }
                 for (actual, expected) in fields.iter().zip(variant.fields.iter()) {
@@ -562,18 +522,14 @@ impl<'a> HirValidator<'a> {
                                 "RouteConstruct field name {:?} does not match declared prefix name {:?}",
                                 actual.name, expected.name
                             ),
-                            anchor,
                         ));
                     }
-                    let actual_value = self.expression_row(actual.value, anchor)?;
+                    let actual_value = self.expression_row(actual.value)?;
                     if actual_value.ty != expected.ty {
-                        return Err(self.error_with_hir(
-                            format!(
-                                "RouteConstruct field type mismatch for prefix field {:?}",
-                                expected.name
-                            ),
-                            anchor,
-                        ));
+                        return Err(self.error_with_hir(format!(
+                            "RouteConstruct field type mismatch for prefix field {:?}",
+                            expected.name
+                        )));
                     }
                 }
             }
@@ -581,7 +537,7 @@ impl<'a> HirValidator<'a> {
             // malformed place fails here. The type resolves after the indexes validate.
             HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
                 self.require_local_for_anchor(place.root, anchor)?;
-                let _ = self.projections(place.projections, anchor)?;
+                let _ = self.projections(place.projections)?;
             }
 
             HirExpressionKind::BinOp { op, left, right } => {
@@ -595,8 +551,8 @@ impl<'a> HirValidator<'a> {
                         | HirBinOp::Ge
                 );
                 if is_comparison {
-                    let left_expression = self.expression_row(*left, anchor)?;
-                    let right_expression = self.expression_row(*right, anchor)?;
+                    let left_expression = self.expression_row(*left)?;
+                    let right_expression = self.expression_row(*right)?;
                     let left_scalar =
                         NumericScalar::from_type_id(left_expression.ty, self.type_environment);
                     let right_scalar =
@@ -615,7 +571,6 @@ impl<'a> HirValidator<'a> {
                     {
                         return Err(self.error_with_hir(
                             "Dec comparison integer operands must be explicitly converted to the same Dec scale",
-                            anchor,
                         ));
                     }
 
@@ -624,25 +579,20 @@ impl<'a> HirValidator<'a> {
                     {
                         return Err(self.error_with_hir(
                             "HirBinOp comparison operands have incompatible types",
-                            anchor,
                         ));
                     }
 
                     if expression.ty != self.type_environment.builtins().bool {
-                        return Err(
-                            self.error_with_hir("HirBinOp comparison must produce Bool", anchor)
-                        );
+                        return Err(self.error_with_hir("HirBinOp comparison must produce Bool"));
                     }
                 }
 
                 if *op == HirBinOp::StringAppend {
                     let string_type = self.type_environment.builtins().string;
-                    if expression.ty != string_type
-                        || self.expression_row(*left, anchor)?.ty != string_type
+                    if expression.ty != string_type || self.expression_row(*left)?.ty != string_type
                     {
                         return Err(self.error_with_hir(
                             "HirBinOp::StringAppend must produce a String from a String accumulator",
-                            anchor,
                         ));
                     }
                 }
@@ -652,7 +602,6 @@ impl<'a> HirValidator<'a> {
                 if *op == HirUnaryOp::Neg {
                     return Err(self.error_with_hir(
                         "Plain HirUnaryOp::Neg must be lowered through HirStatementKind::NumericOp",
-                        anchor,
                     ));
                 }
             }
@@ -662,9 +611,9 @@ impl<'a> HirValidator<'a> {
                 fields: field_range,
             } => {
                 // Validate struct existence and field ownership, then field sub-expressions.
-                self.require_struct_id(*struct_id, anchor)?;
-                for (field_id, _) in self.struct_fields(*field_range, anchor)? {
-                    self.require_field_owned_by(*field_id, *struct_id, anchor)?;
+                self.require_struct_id(*struct_id)?;
+                for (field_id, _) in self.struct_fields(*field_range)? {
+                    self.require_field_owned_by(*field_id, *struct_id)?;
                 }
             }
 
@@ -677,11 +626,10 @@ impl<'a> HirValidator<'a> {
                 {
                     return Err(self.error_with_hir(
                         "HirExpressionKind::Collection expression type is not a collection type",
-                        anchor,
                     ));
                 }
                 // The checked range read reports a malformed range before the listing reads it.
-                self.value_ids(*element_range, anchor)?;
+                self.value_ids(*element_range)?;
             }
 
             // Map literals: validate type is a map and validate key/value sub-expressions.
@@ -689,11 +637,10 @@ impl<'a> HirValidator<'a> {
                 if self.type_environment.map_shape(expression.ty).is_none() {
                     return Err(self.error_with_hir(
                         "HirExpressionKind::MapLiteral expression type is not a map type",
-                        anchor,
                     ));
                 }
                 // The checked range read reports a malformed range before the listing reads it.
-                self.map_entries(*entry_range, anchor)?;
+                self.map_entries(*entry_range)?;
             }
 
             // Payload and cast checks read their validated source, so they run after the walk.
@@ -711,26 +658,23 @@ impl<'a> HirValidator<'a> {
     fn validate_expression_after_children(
         &self,
         expression: &HirExpression,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match &expression.kind {
             HirExpressionKind::Load(place) => {
-                let place_type = self.resolve_place_type(place, anchor)?;
+                let place_type = self.resolve_place_type(place)?;
                 if expression.ty != place_type {
-                    return Err(self.error_with_hir(
-                        "Load expression type does not match its place type",
-                        anchor,
-                    ));
+                    return Err(
+                        self.error_with_hir("Load expression type does not match its place type")
+                    );
                 }
             }
 
             HirExpressionKind::Copy(place) => {
-                let place_type = self.resolve_place_type(place, anchor)?;
+                let place_type = self.resolve_place_type(place)?;
                 if expression.ty != place_type {
-                    return Err(self.error_with_hir(
-                        "Copy expression type does not match its place type",
-                        anchor,
-                    ));
+                    return Err(
+                        self.error_with_hir("Copy expression type does not match its place type")
+                    );
                 }
             }
 
@@ -743,10 +687,9 @@ impl<'a> HirValidator<'a> {
             } => match carrier {
                 HirVariantCarrier::Choice { choice_id } => {
                     let Some(choice) = self.module.choices.get(choice_id.0 as usize) else {
-                        return Err(self.error_with_hir(
-                            format!("Invalid ChoiceId {choice_id:?} in VariantPayloadGet"),
-                            anchor,
-                        ));
+                        return Err(self.error_with_hir(format!(
+                            "Invalid ChoiceId {choice_id:?} in VariantPayloadGet"
+                        )));
                     };
                     if *variant_index >= choice.variants.len() {
                         return Err(self.error_with_hir(
@@ -754,7 +697,6 @@ impl<'a> HirValidator<'a> {
                                     "VariantPayloadGet variant index {variant_index} out of range for choice {choice_id:?} with {} variants",
                                     choice.variants.len()
                                 ),
-                                anchor,
                             ));
                     }
                     let variant = &choice.variants[*variant_index];
@@ -764,7 +706,6 @@ impl<'a> HirValidator<'a> {
                                     "VariantPayloadGet field index {field_index} out of range for variant with {} fields",
                                     variant.fields.len()
                                 ),
-                                anchor,
                             ));
                     }
                 }
@@ -774,7 +715,6 @@ impl<'a> HirValidator<'a> {
                                 format!(
                                     "VariantPayloadGet variant index {variant_index} out of range for Option (valid: 0..=1)",
                                 ),
-                                anchor,
                             ));
                     }
                     let max_fields = if *variant_index == 0 { 0 } else { 1 };
@@ -783,7 +723,6 @@ impl<'a> HirValidator<'a> {
                                 format!(
                                     "VariantPayloadGet field index {field_index} out of range for Option variant {variant_index} with {max_fields} fields",
                                 ),
-                                anchor,
                             ));
                     }
                 }
@@ -791,19 +730,14 @@ impl<'a> HirValidator<'a> {
 
             HirExpressionKind::Cast { source, policy } => {
                 if let Some(policy_target_type) =
-                    self.validate_numeric_cast_source_type(*policy, *source, anchor)?
+                    self.validate_numeric_cast_source_type(*policy, *source)?
                     && expression.ty != policy_target_type
                 {
                     return Err(self.error_with_hir(
                         "Cast expression type does not match the policy target type",
-                        anchor,
                     ));
                 }
-                self.validate_number_cast_policy(
-                    *policy,
-                    BuiltinCastFallibility::Infallible,
-                    anchor,
-                )?;
+                self.validate_number_cast_policy(*policy, BuiltinCastFallibility::Infallible)?;
             }
 
             _ => {}
@@ -820,80 +754,71 @@ impl<'a> HirValidator<'a> {
         &self,
         place: &HirPlace,
         anchor: Option<HirLocation>,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, InfrastructureFailure> {
         self.require_local_for_anchor(place.root, anchor)?;
         // Flat projections are stored root-outward. Validate index expressions in reverse to
         // preserve the former outermost-first diagnostic order, then resolve types root-outward.
-        let projections = self.projections(place.projections, anchor)?;
+        let projections = self.projections(place.projections)?;
         for projection in projections.iter().rev() {
             if let HirProjection::Index(index) = projection {
                 self.validate_expression(*index, anchor)?;
             }
         }
-        self.resolve_place_type(place, anchor)
+        self.resolve_place_type(place)
     }
 
     /// Resolves a place's type root-outward from its root local.
     ///
     /// WHY: a Load or Copy validates its index children during the walk, then resolves the type.
     /// Keeping the type chain separate lets the walk and `validate_place` share it.
-    fn resolve_place_type(
-        &self,
-        place: &HirPlace,
-        anchor: Option<HirLocation>,
-    ) -> Result<TypeId, CompilerError> {
-        let projections = self.projections(place.projections, anchor)?;
+    fn resolve_place_type(&self, place: &HirPlace) -> Result<TypeId, InfrastructureFailure> {
+        let projections = self.projections(place.projections)?;
 
-        let mut current_type = self.local_types.get(&place.root).copied().ok_or_else(|| {
-            self.error_with_hir(format!("Unknown local id {:?}", place.root), anchor)
-        })?;
+        let mut current_type = self
+            .local_types
+            .get(&place.root)
+            .copied()
+            .ok_or_else(|| self.error_with_hir(format!("Unknown local id {:?}", place.root)))?;
         for projection in projections {
-            self.require_type_id(current_type, anchor)?;
+            self.require_type_id(current_type)?;
             current_type = match projection {
                 HirProjection::Field(field) => {
                     if !self.is_struct_type(current_type) {
-                        return Err(self.error_with_hir(
-                            "Field place base does not resolve to struct type",
-                            anchor,
-                        ));
+                        return Err(
+                            self.error_with_hir("Field place base does not resolve to struct type")
+                        );
                     }
                     let owner_struct_id =
                         self.field_owner.get(field).copied().ok_or_else(|| {
-                            self.error_with_hir(format!("Unknown field id {field:?}"), anchor)
+                            self.error_with_hir(format!("Unknown field id {field:?}"))
                         })?;
-                    self.require_field_owned_by(*field, owner_struct_id, anchor)?;
+                    self.require_field_owned_by(*field, owner_struct_id)?;
                     let owner_type = self
                         .struct_types
                         .get(&owner_struct_id)
                         .copied()
                         .ok_or_else(|| {
-                            self.error_with_hir(
-                                format!(
-                                    "Field {field:?} has no owning struct type in HIR metadata"
-                                ),
-                                anchor,
-                            )
+                            self.error_with_hir(format!(
+                                "Field {field:?} has no owning struct type in HIR metadata"
+                            ))
                         })?;
                     if current_type != owner_type {
                         return Err(self.error_with_hir(
                             format!(
                                 "Field {field:?} owner type {owner_type:?} does not match place base type {current_type:?}"
                             ),
-                            anchor,
                         ));
                     }
-                    self.field_types.get(field).copied().ok_or_else(|| {
-                        self.error_with_hir(format!("Unknown field id {field:?}"), anchor)
-                    })?
+                    self.field_types
+                        .get(field)
+                        .copied()
+                        .ok_or_else(|| self.error_with_hir(format!("Unknown field id {field:?}")))?
                 }
                 HirProjection::Index(_) => self
                     .type_environment
                     .collection_element_type(current_type)
                     .ok_or_else(|| {
-                        self.error_with_hir(
-                            "Index place base does not resolve to collection type",
-                            anchor,
-                        )
+                        self.error_with_hir("Index place base does not resolve to collection type")
                     })?,
             };
         }

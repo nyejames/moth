@@ -6,6 +6,10 @@
 //! module-wide header parsing and dependency sorting consume them.
 
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::headers::SourceTokenOwner;
+use crate::compiler_frontend::headers::parse_file_headers::{
+    HeaderParseOptions, parse_file_headers_with_table,
+};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::test_support::TestSourceContext;
@@ -16,6 +20,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringT
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRef, TokenTag, TokenizerEntryMode,
 };
+use std::path::Path;
 use std::sync::Arc;
 
 fn path_strings(fork: &PathInternerFork, path: PathId, strings: &StringTable) -> Vec<String> {
@@ -270,6 +275,121 @@ fn canonical_tokens_remap_src_path_and_payloads_preserving_source_spans() {
     let numeric = remapped_numeric(second_token, &remap);
     assert_eq!(global_table.resolve(numeric.source_text), "7");
     assert_eq!(global_table.resolve(numeric.normalized_text), "7");
+}
+
+#[test]
+fn prepared_output_merge_remaps_canonical_token_payloads() {
+    let source = "@core/math sin\nvalue #= 42\n";
+    let source_path = Path::new("src/main.moth");
+    let mut context = TestSourceContext::new(source_path);
+    let mut local_paths = PathInternerFork::empty();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let lexed = context
+        .tokenize(
+            source,
+            &mut local_paths,
+            &style_directives,
+            TokenizerEntryMode::SourceFile,
+        )
+        .expect("source should tokenize");
+    let source_file = lexed.logical_path;
+    let owner = SourceTokenOwner::new(lexed.tokens);
+    let (local_strings, span_builder) = context.preparation_parts();
+    let mut prepared = parse_file_headers_with_table(
+        owner,
+        source_file,
+        lexed.path_syntax,
+        source_path,
+        &HeaderParseOptions::default(),
+        local_strings,
+        &mut local_paths,
+        0,
+        0,
+        span_builder,
+    )
+    .expect("source should prepare");
+
+    let (symbol_index, numeric_index, path_index) = {
+        let (local_strings, _) = context.preparation_parts();
+        let canonical = prepared
+            .source_token_stream
+            .as_ref()
+            .expect("prepared output should retain its canonical source owner");
+        let symbol_index = (0..canonical.len())
+            .find(|index| {
+                let token = token_at(canonical, *index);
+                token.tag() == TokenTag::SYMBOL
+                    && token
+                        .string_id()
+                        .is_some_and(|id| local_strings.resolve(id) == "sin")
+            })
+            .expect("source owner should retain the imported symbol token");
+        let numeric_index = (0..canonical.len())
+            .find(|index| token_at(canonical, *index).tag() == TokenTag::NUMERIC_LITERAL)
+            .expect("source owner should retain the numeric token");
+        let path_index = (0..canonical.len())
+            .find(|index| token_at(canonical, *index).tag() == TokenTag::PATH)
+            .expect("source owner should retain the path token");
+        (symbol_index, numeric_index, path_index)
+    };
+
+    let mut global_strings = StringTable::new();
+    global_strings.intern("preexisting");
+    let mut global_paths = PathInternerFork::empty();
+    global_paths
+        .try_intern_portable_path("preexisting/path", &mut global_strings)
+        .expect("preexisting path should intern");
+    let string_remap = {
+        let (local_strings, _) = context.preparation_parts();
+        global_strings.merge_from(local_strings)
+    };
+    assert!(
+        !string_remap.is_identity(),
+        "the prepared output merge must move source string IDs"
+    );
+    let path_remap = global_paths
+        .merge_delta_from(&local_paths, &string_remap)
+        .expect("source paths should merge into the global path table");
+    assert!(
+        !path_remap.is_identity(),
+        "the prepared output merge must move source path IDs"
+    );
+    prepared
+        .remap_string_ids(&string_remap)
+        .expect("prepared strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("prepared paths should remap");
+    prepared
+        .freeze_path_syntax(&global_strings, &mut global_paths)
+        .expect("prepared path syntax should freeze after remapping");
+
+    let canonical = prepared
+        .source_token_stream
+        .as_ref()
+        .expect("prepared output should retain its canonical source owner");
+    let symbol = token_at(canonical, symbol_index);
+    assert_eq!(symbol.tag(), TokenTag::SYMBOL);
+    assert_eq!(
+        global_strings.resolve(symbol.string_id().expect("symbol payload should exist")),
+        "sin"
+    );
+
+    let numeric = token_at(canonical, numeric_index)
+        .numeric_literal()
+        .expect("numeric payload should resolve")
+        .expect("numeric token should carry a literal");
+    assert_eq!(global_strings.resolve(numeric.source_text), "42");
+    assert_eq!(global_strings.resolve(numeric.normalized_text), "42");
+
+    let path = token_at(canonical, path_index)
+        .path_syntax()
+        .expect("canonical path payload should resolve")
+        .expect("path token should carry syntax data");
+    assert_eq!(
+        path_strings(&global_paths, path.root, &global_strings),
+        vec!["core", "math"]
+    );
 }
 
 #[test]

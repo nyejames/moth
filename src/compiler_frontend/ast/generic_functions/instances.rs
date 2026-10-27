@@ -6,7 +6,9 @@
 //! `TypeId` arguments, not by rendered names or local dependency aliases.
 
 use crate::compiler_frontend::ast::generic_bounds::BoundEvidenceSelection;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -53,14 +55,12 @@ impl GenericFunctionInstantiationRequest {
         path_fork: &mut PathInternerFork,
         string_table: &mut StringTable,
         call_span: Option<SourceSpan>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, DiagnosticDraft> {
         let instance_component = string_table.intern("__generated_instance");
         let instance_path = path_fork
             .try_intern_child(function_path, instance_component)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "path table exhausted while creating generated generic function instance",
-                )
+                token_lexical::compiler_capacity_exceeded(CapacityResource::PathNodes, call_span)
             })?;
         Ok(Self {
             declaration_identity: Some(declaration_identity.clone()),

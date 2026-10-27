@@ -37,13 +37,13 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, finalized_tir_view_for_template, walk_tir_view_expression_payloads,
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
-use crate::compiler_frontend::source::SourceSpan;
 
 /// Context shared by every check in this type-boundary validation pass.
 ///
@@ -66,7 +66,7 @@ impl AstFinalizer<'_, '_> {
         &self,
         ast: &[AstNode],
         const_values: &ConstValueStore,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let template_ir_store = self.context.template_ir_store.borrow();
         let context = TypeValidationContext {
             expression_builder: &self.context.expression_builder,
@@ -109,7 +109,7 @@ enum Work<'a> {
     Expression(ExprId),
     /// A check that failed. Queued beneath the children its expansion produced first, so those
     /// children report their errors before this one, as the recursive order did.
-    Failed(Box<CompilerError>),
+    Failed(Box<InfrastructureFailure>),
 }
 
 /// Bits in the per-row visited flags. A row is validated once for each recovery context.
@@ -134,9 +134,9 @@ const VISITED_RECOVERING: u8 = 2;
 /// expanded, because a duplicate inside that row's own subtree would make the row its own child.
 fn validate_roots<'a>(
     context: TypeValidationContext<'a>,
-    expand_roots: impl FnOnce(&mut Vec<Step<'a>>) -> Result<(), CompilerError>,
+    expand_roots: impl FnOnce(&mut Vec<Step<'a>>) -> Result<(), InfrastructureFailure>,
     count_expression: &mut impl FnMut(),
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut visited = vec![0u8; context.expression_builder.len()];
     let mut stack: Vec<Step<'a>> = Vec::new();
     let mut children: Vec<Step<'a>> = Vec::new();
@@ -182,7 +182,7 @@ fn enter_expression<'a>(
     context: &TypeValidationContext<'a>,
     visited: &mut [u8],
     count_expression: &mut impl FnMut(),
-) -> Result<Option<ExpressionView<'a>>, CompilerError> {
+) -> Result<Option<ExpressionView<'a>>, InfrastructureFailure> {
     let builder: &'a AstExpressionBuilder = context.expression_builder;
     let expression = builder.view(id)?;
     let flag = if context.recovery_allowed {
@@ -202,7 +202,7 @@ fn enter_expression<'a>(
 /// Counts one unique expression expansion in the frontend census when benchmark counters are on.
 ///
 /// WHAT: the census records unique (row, recovery context) expansions rather than raw reads.
-/// WHY: a shared row is now validated once per context, so counting raw reads would report
+/// WHY: a shared row is validated once per context, so counting raw reads would report
 ///      duplicate walk work that the visited key removes.
 fn count_expression_census() {
     #[cfg(feature = "benchmark_counters")]
@@ -248,7 +248,7 @@ fn expand_node<'a>(
     node: &'a AstNode,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match &node.kind {
         // Control flow with nested statement bodies.
         NodeKind::If(condition, then_body, else_body, _) => {
@@ -312,7 +312,6 @@ fn expand_node<'a>(
             push_nodes(body, context, out);
         }
 
-        // Terminal expressions that carry a single value.
         NodeKind::Return(values) => push_expressions(values, context, out),
 
         NodeKind::ReturnError(value)
@@ -340,7 +339,7 @@ fn expand_node<'a>(
         NodeKind::StructDefinition(_, fields) => expand_declarations(fields, context, out)?,
 
         NodeKind::Function(_, signature, body) => {
-            validate_signature(signature, node.span, context)?;
+            validate_signature(signature, context)?;
             push_nodes(body, context, out);
         }
 
@@ -375,25 +374,27 @@ fn expand_expression<'a>(
     expression: ExpressionView<'a>,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
-    let span = expression.span();
-    validate_type_ids(expression.success_types(), span, context)?;
+) -> Result<(), InfrastructureFailure> {
+    validate_type_ids(expression.success_types(), context)?;
     if let Some(type_id) = expression.error_type() {
-        validate_type_id(type_id, span, context)?;
+        validate_type_id(type_id, context)?;
     }
 
     use ExpressionOperationView as Operation;
     match expression.operation() {
         Operation::Constant(id) => {
             context.const_values.value(id).ok_or_else(|| {
-                CompilerError::new("Constant ID outside owner", span, ErrorType::Compiler)
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Constant ID outside owner",
+                )
             })?;
         }
         Operation::Reference(_) => {}
         Operation::Copy(place) => expand_place(place, context, out)?,
         Operation::FieldAccess { base, .. } => push_expression(base.id(), context, out),
         Operation::NumericUnary { operand, facts } => {
-            validate_type_ids(&[facts.result_type, facts.left_type], facts.span, context)?;
+            validate_type_ids(&[facts.result_type, facts.left_type], context)?;
             push_expression(operand.id(), context, out);
         }
         Operation::NumericBinary { left, right, facts }
@@ -403,9 +404,9 @@ fn expand_expression<'a>(
             end: right,
             facts,
         } => {
-            validate_type_ids(&[facts.result_type, facts.left_type], facts.span, context)?;
+            validate_type_ids(&[facts.result_type, facts.left_type], context)?;
             if let Some(type_id) = facts.right_type {
-                validate_type_id(type_id, facts.span, context)?;
+                validate_type_id(type_id, context)?;
             }
             push_expression(left.id(), context, out);
             push_expression(right.id(), context, out);
@@ -417,20 +418,20 @@ fn expand_expression<'a>(
         }
         Operation::Call(call) => {
             if let Some(type_id) = call.metadata().error_type {
-                validate_type_id(type_id, span, context)?;
+                validate_type_id(type_id, context)?;
             }
             if let Some(handling) = call.handling() {
-                validate_handling(handling, span, context)?;
+                validate_handling(handling, context)?;
             }
             push_call_arguments(call.arguments(), context, out);
         }
         Operation::MethodCall { receiver, call } => {
             push_expression(receiver.id(), context, out);
             if let Some(type_id) = call.metadata().error_type {
-                validate_type_id(type_id, span, context)?;
+                validate_type_id(type_id, context)?;
             }
             if let Some(handling) = call.handling() {
-                validate_handling(handling, span, context)?;
+                validate_handling(handling, context)?;
             }
             push_call_arguments(call.arguments(), context, out);
         }
@@ -448,22 +449,17 @@ fn expand_expression<'a>(
             push_call_arguments(arguments, context, out);
         }
         Operation::Cast { source, facts } => {
-            validate_type_ids(
-                &[facts.source_type_id, facts.target_type_id],
-                facts.span,
-                context,
-            )?;
+            validate_type_ids(&[facts.source_type_id, facts.target_type_id], context)?;
             if facts.handling == CastHandling::Recover && !context.recovery_allowed {
-                return Err(CompilerError::new(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Recovering cast reached finalization outside ValueBlock::Catch",
-                    span,
-                    ErrorType::Compiler,
                 ));
             }
             push_expression(source.id(), context, out);
         }
         Operation::HandleFallible { value, handling } => {
-            validate_handling(handling, span, context)?;
+            validate_handling(handling, context)?;
             push_expression(value.id(), context, out);
         }
         Operation::PropagateOption { value } => push_expression(value.id(), context, out),
@@ -471,7 +467,7 @@ fn expand_expression<'a>(
             value,
             operation: CoercionOperation::ToType(type_id),
         } => {
-            validate_type_id(type_id, span, context)?;
+            validate_type_id(type_id, context)?;
             push_expression(value.id(), context, out);
         }
         Operation::Collection(items) => {
@@ -499,7 +495,7 @@ fn expand_expression<'a>(
         Operation::RuntimeSlotApplication(handoff) => {
             expand_owned_runtime_slot_application_handoff(handoff, context, out)?
         }
-        Operation::ValueBlock(block) => expand_value_block(block, span, context, out)?,
+        Operation::ValueBlock(block) => expand_value_block(block, context, out)?,
     }
 
     Ok(())
@@ -507,10 +503,9 @@ fn expand_expression<'a>(
 
 fn expand_value_block<'a>(
     block: &'a ValueBlock,
-    span: Option<SourceSpan>,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match block {
         ValueBlock::If(value) => {
             push_expression(value.condition, context, out);
@@ -518,7 +513,7 @@ fn expand_value_block<'a>(
             push_nodes(&value.else_body, context, out);
         }
         ValueBlock::LexicalScope(value) => {
-            validate_type_ids(&value.result_type_ids, span, context)?;
+            validate_type_ids(&value.result_type_ids, context)?;
             push_nodes(&value.body, context, out);
         }
         ValueBlock::Match(value) => {
@@ -537,10 +532,9 @@ fn expand_value_block<'a>(
         ValueBlock::Catch(value) => {
             let subject = context.expression_builder.view(value.handled_value)?;
             if !matches!(value.handler, FallibleHandling::Handler { .. }) {
-                return Err(CompilerError::new(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "ValueBlock::Catch carried non-handler handling",
-                    span,
-                    ErrorType::Compiler,
                 ));
             }
             validate_catch_subject(subject, context)?;
@@ -569,7 +563,7 @@ fn expand_place_expression<'a>(
     place: PlaceId,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     expand_place(context.expression_builder.place(place)?, context, out)
 }
 
@@ -577,17 +571,17 @@ fn expand_place<'a>(
     place: PlaceView<'_>,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let metadata = place.metadata();
-    validate_type_id(metadata.root_type_id, metadata.span, context)?;
-    validate_type_id(metadata.type_id, metadata.span, context)?;
+    validate_type_id(metadata.root_type_id, context)?;
+    validate_type_id(metadata.type_id, context)?;
     for projection in place.projections() {
         match projection {
             PlaceProjectionView::Field { result_type, .. } => {
-                validate_type_id(result_type, metadata.span, context)?
+                validate_type_id(result_type, context)?
             }
             PlaceProjectionView::Index { index, result_type } => {
-                validate_type_id(result_type, metadata.span, context)?;
+                validate_type_id(result_type, context)?;
                 push_expression(index.id(), context, out);
             }
         }
@@ -607,17 +601,15 @@ fn push_call_arguments<'a>(
 
 fn validate_handling(
     handling: &HandlingRecord,
-    span: Option<SourceSpan>,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if let Some(type_id) = handling.error_type {
-        validate_type_id(type_id, span, context)?;
+        validate_type_id(type_id, context)?;
     }
     if handling.handling == FallibleExpressionHandling::Recover && !context.recovery_allowed {
-        return Err(CompilerError::new(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Recovering expression reached finalization outside ValueBlock::Catch",
-            span,
-            ErrorType::Compiler,
         ));
     }
     Ok(())
@@ -641,7 +633,7 @@ fn expand_template<'a>(
     template: &Template,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let view = finalized_tir_view_for_template(template, context.template_ir_store)?;
 
     walk_tir_view_expression_payloads(&view, context.expression_builder, &mut |expression| {
@@ -654,7 +646,7 @@ fn expand_owned_runtime_template_handoff<'a>(
     handoff: &OwnedRuntimeTemplateHandoff,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     runtime_handoff::walk_owned_runtime_template_handoff(handoff, &mut |node| {
         expand_owned_runtime_template_node(node, context, out)
     })
@@ -664,7 +656,7 @@ fn expand_owned_runtime_slot_application_handoff<'a>(
     handoff: &OwnedRuntimeSlotApplicationHandoff,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     runtime_handoff::walk_owned_runtime_slot_application_handoff(handoff, &mut |node| {
         expand_owned_runtime_template_node(node, context, out)
     })
@@ -680,7 +672,7 @@ fn expand_owned_runtime_template_node<'a>(
     node: &OwnedRuntimeTemplateNode,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
             push_expression(*expression, context, out);
@@ -710,7 +702,7 @@ fn expand_template_branch_selector<'a>(
     selector: &TemplateBranchSelector,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match selector {
         TemplateBranchSelector::Bool(condition) => {
             push_expression(*condition, context, out);
@@ -727,7 +719,7 @@ fn expand_template_loop_header<'a>(
     header: &TemplateLoopHeader,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match header {
         TemplateLoopHeader::Conditional { condition } => {
             push_expression(*condition, context, out);
@@ -752,20 +744,19 @@ fn expand_match_pattern<'a>(
     pattern: &MatchPattern,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match pattern {
         MatchPattern::Literal(value)
         | MatchPattern::OptionValue { value, .. }
         | MatchPattern::Relational { value, .. } => {
-            validate_type_id(value.type_id, value.span, context)?;
+            validate_type_id(value.type_id, context)?;
             match value.kind {
                 PatternValueKind::Runtime(id) => push_expression(id, context, out),
                 PatternValueKind::Constant(id) => {
                     context.const_values.value(id).map(|_| ()).ok_or_else(|| {
-                        CompilerError::new(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Pattern constant ID outside owner",
-                            value.span,
-                            ErrorType::Compiler,
                         )
                     })?;
                 }
@@ -773,15 +764,13 @@ fn expand_match_pattern<'a>(
         }
         MatchPattern::ChoiceVariant { captures, .. } => {
             for capture in captures {
-                validate_type_id(capture.type_id, capture.span, context)?;
+                validate_type_id(capture.type_id, context)?;
             }
         }
         MatchPattern::OptionNone { .. } => {}
-        MatchPattern::OptionPresentCapture {
-            inner_type_id,
-            binding_span,
-            ..
-        } => validate_type_id(*inner_type_id, *binding_span, context)?,
+        MatchPattern::OptionPresentCapture { inner_type_id, .. } => {
+            validate_type_id(*inner_type_id, context)?
+        }
     }
     Ok(())
 }
@@ -794,7 +783,7 @@ fn expand_loop_bindings<'a>(
     bindings: &LoopBindings,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if let Some(item) = &bindings.item {
         expand_declaration(item, context, out)?;
     }
@@ -810,7 +799,7 @@ fn expand_declarations<'a>(
     declarations: &[Declaration],
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for declaration in declarations {
         expand_declaration(declaration, context, out)?;
     }
@@ -821,8 +810,8 @@ fn expand_declaration<'a>(
     declaration: &Declaration,
     context: &TypeValidationContext<'a>,
     out: &mut Vec<Step<'a>>,
-) -> Result<(), CompilerError> {
-    validate_type_id(declaration.type_id, declaration.binding_span, context)?;
+) -> Result<(), InfrastructureFailure> {
+    validate_type_id(declaration.type_id, context)?;
     if let Some(initializer) = declaration.value.initializer() {
         push_expression(initializer, context, out);
     }
@@ -832,30 +821,28 @@ fn expand_declaration<'a>(
 fn validate_multi_bind_target(
     target: &MultiBindTarget,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
-    validate_type_id(target.type_id, target.span, context)
+) -> Result<(), InfrastructureFailure> {
+    validate_type_id(target.type_id, context)
 }
 
 fn validate_signature(
     signature: &FunctionSignature,
-    span: Option<SourceSpan>,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for parameter in &signature.parameters {
-        validate_type_id(parameter.type_id, parameter.binding_span, context)?;
+        validate_type_id(parameter.type_id, context)?;
         if let Some(id) = parameter.default {
             context.const_values.value(id).ok_or_else(|| {
-                CompilerError::new(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Default constant ID outside owner",
-                    parameter.binding_span,
-                    ErrorType::Compiler,
                 )
             })?;
         }
     }
-    validate_type_ids(&signature.success_return_type_ids(), span, context)?;
+    validate_type_ids(&signature.success_return_type_ids(), context)?;
     if let Some(error_return_type_id) = signature.error_return_type_id() {
-        validate_type_id(error_return_type_id, span, context)?;
+        validate_type_id(error_return_type_id, context)?;
     }
     Ok(())
 }
@@ -866,11 +853,10 @@ fn validate_signature(
 
 fn validate_type_ids(
     type_ids: &[TypeId],
-    span: Option<SourceSpan>,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for type_id in type_ids {
-        validate_type_id(*type_id, span, context)?;
+        validate_type_id(*type_id, context)?;
     }
     Ok(())
 }
@@ -882,9 +868,8 @@ fn validate_type_ids(
 /// invariant, not a user-facing diagnostic.
 fn validate_type_id(
     type_id: TypeId,
-    span: Option<SourceSpan>,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if context
         .type_environment
         .get(type_id)
@@ -893,13 +878,12 @@ fn validate_type_id(
         return Ok(());
     }
 
-    Err(CompilerError::new(
+    Err(InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
         format!(
             "Resolved TypeId({}) reached executable AST without a matching TypeEnvironment entry.",
             type_id.0
         ),
-        span,
-        ErrorType::Compiler,
     ))
 }
 
@@ -913,26 +897,25 @@ mod validate_types_tests;
 fn validate_catch_subject(
     expression: ExpressionView<'_>,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if catch_subject_recovers(expression, context)? {
         return Ok(());
     }
-    Err(CompilerError::new(
+    Err(InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
         "ValueBlock::Catch subject lacks compatible completed recovery facts",
-        expression.span(),
-        ErrorType::Compiler,
     ))
 }
 
 fn catch_subject_recovers(
     expression: ExpressionView<'_>,
     context: &TypeValidationContext,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     let operation = expression.operation();
     if let Some(facts) = expression.failure_facts()
         && let FailureDisposition::HandledByCatch { error_type_id } = facts.disposition
     {
-        validate_type_id(error_type_id, expression.span(), context)?;
+        validate_type_id(error_type_id, context)?;
         let builtin_error = context.type_environment.type_id_for_canonical_identity(
             &crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::Builtin(
                 crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType::Error,
@@ -996,7 +979,7 @@ pub(super) fn validate_debug_roots(
     types: &TypeEnvironment,
     tir: &TemplateIrStore,
     builder: &AstExpressionBuilder,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let context = TypeValidationContext {
         type_environment: types,
         template_ir_store: tir,

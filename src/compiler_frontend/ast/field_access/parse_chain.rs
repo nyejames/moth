@@ -20,10 +20,13 @@ use crate::compiler_frontend::ast::place_access::{
 };
 use crate::compiler_frontend::ast::templates::tir::public_const_rebuild::rebuild_const_template_reference;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFieldAccessReason,
-    InvalidReceiverCallReason, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidFieldAccessReason, InvalidReceiverCallReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -73,10 +76,6 @@ pub(super) fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<Source
     })
 }
 
-pub(super) fn current_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
-}
-
 fn next_token_tag(token_stream: &AstCursor<'_>) -> Option<TokenTag> {
     token_stream.token_ref_at_offset(1).map(|token| token.tag())
 }
@@ -114,7 +113,10 @@ pub(crate) fn reference_expression_from_declaration(
             const_values
                 .metadata(id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("declaration default outside constant owner")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "declaration default outside constant owner",
+                    )
                 })?
                 .const_record_state
         }
@@ -236,10 +238,10 @@ fn receiver_node_type_id(
     expression_builder: &AstExpressionBuilder,
 ) -> Result<TypeId, ExpressionParseError> {
     let NodeKind::ExpressionStatement(expression) = &node.kind else {
-        return Err(CompilerError::compiler_error(
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "postfix receiver must be an expression statement",
-        )
-        .into());
+        );
     };
     Ok(expression_builder
         .view(*expression)?
@@ -305,10 +307,10 @@ pub(crate) fn expression_from_postfix_node(
     match &postfix_node.kind {
         NodeKind::ExpressionStatement(expression) => Ok(*expression),
 
-        unexpected_kind => Err(CompilerError::compiler_error(format!(
-            "Expected postfix expression node, found {unexpected_kind:?}"
-        ))
-        .into()),
+        unexpected_kind => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "Expected postfix expression node, found {unexpected_kind:?}",
+        ),
     }
 }
 
@@ -349,7 +351,7 @@ fn parse_postfix_chain_typed(
             || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
-            return Err(CompilerDiagnostic::invalid_field_access(
+            return Err(calls_data::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
                 None,
@@ -361,7 +363,7 @@ fn parse_postfix_chain_typed(
 
         let member_name = parse_member_name_typed(token_stream, &mut *string_table)?;
         let receiver_type_id = receiver_node_type_id(&receiver_node, expression_builder)?;
-        let member_span = current_token_span(token_stream);
+        let member_span = Some(token_stream.current_span());
         let member_context = MemberStepContext {
             receiver_node: &receiver_node,
             receiver_type_id,
@@ -509,7 +511,7 @@ fn parse_postfix_chain_typed(
         };
 
         let known_fields = collect_known_member_names(receiver_type_id, type_interner, path_fork);
-        return Err(CompilerDiagnostic::invalid_field_access(
+        return Err(calls_data::invalid_field_access(
             reason,
             Some(member_name),
             Some(receiver_type_id),
@@ -531,14 +533,11 @@ fn parse_postfix_chain_typed(
             ),
             ReceiverSourceState::Temporary
         ) {
-            let diagnostic = CompilerDiagnostic::invalid_assignment_target(
+            expression_builder
+                .view(receiver_expression)?
+                .require_single(ValueReceiverContext::ReceiverBase)?;
+            let diagnostic = names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                None,
-                Some(
-                    expression_builder
-                        .view(receiver_expression)?
-                        .require_single(ValueReceiverContext::ReceiverBase)?,
-                ),
                 None,
                 None,
                 None,
@@ -556,10 +555,8 @@ fn parse_postfix_chain_typed(
         // When the chain is followed by an assignment operator, the author wrote `~place = ...`
         // and intended an assignment target, not a receiver call.
         if token_stream.current_tag().is_assignment_operator() {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
+            return Err(names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -567,7 +564,7 @@ fn parse_postfix_chain_typed(
             )
             .into());
         }
-        return Err(CompilerDiagnostic::invalid_receiver_call(
+        return Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
             None,
             None,
@@ -708,7 +705,7 @@ fn parse_field_access_with_receiver_access(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixChain, ExpressionParseError> {
-    let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
+    let base_span = previous_token_span(token_stream).or_else(|| Some(token_stream.current_span()));
 
     // `parse_field_access` completes the chain at the expression-statement boundary, which allows
     // an authored boundary catch there.
@@ -750,7 +747,7 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixExpression, ExpressionParseError> {
-    let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
+    let base_span = previous_token_span(token_stream).or_else(|| Some(token_stream.current_span()));
 
     let receiver_expression = reference_expression_from_declaration(
         base_arg,
@@ -803,7 +800,7 @@ pub(crate) fn pending_numeric_member_access_error(
             || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
-            return CompilerDiagnostic::invalid_field_access(
+            return calls_data::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
                 None,
@@ -813,9 +810,9 @@ pub(crate) fn pending_numeric_member_access_error(
             .into();
         }
 
-        let member_span = current_token_span(token_stream);
+        let member_span = Some(token_stream.current_span());
         return match parse_member_name_typed(token_stream, string_table) {
-            Ok(member_name) => CompilerDiagnostic::invalid_field_access(
+            Ok(member_name) => calls_data::invalid_field_access(
                 InvalidFieldAccessReason::UnknownMember,
                 Some(member_name),
                 None,
@@ -827,10 +824,10 @@ pub(crate) fn pending_numeric_member_access_error(
         };
     }
 
-    CompilerError::compiler_error(
+    crate::compiler_bug!(
+        CompilerStage::AstConstruction,
         "a pending numeric receiver entered member parsing without an authored dot",
     )
-    .into()
 }
 
 /// Collect known struct field names and choice variant names for a receiver type.

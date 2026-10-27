@@ -1,0 +1,7 @@
+Shape ::
+    Circle | label String |,
+    Square,
+;
+
+shape = Shape::Circle("ok")
+[:variant_payload made]

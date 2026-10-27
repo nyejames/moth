@@ -33,9 +33,11 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
     register_shape_witness, union_shape_classes,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidGenericInstantiationReason, ValueReceiverContext,
+    InvalidGenericInstantiationReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -414,10 +416,13 @@ pub(crate) fn link_generic_nominal_result_shape(
         .environment()
         .canonical_parameters_for_nominal(nominal_path)
     else {
-        return Err(CompilerError::compiler_error(format!(
-            "Generic nominal '{}' has no canonical parameter list after registration",
-            diagnostic_name.rendered_callee_name(string_table)
-        ))
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            format!(
+                "Generic nominal '{}' has no canonical parameter list after registration",
+                diagnostic_name.rendered_callee_name(string_table)
+            ),
+        )
         .into());
     };
     let parameters: Vec<(GenericParameterId, StringId)> = canonical_parameters
@@ -429,7 +434,7 @@ pub(crate) fn link_generic_nominal_result_shape(
         .environment()
         .nominal_id_for_path(nominal_path)
     else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
             "a retained generic nominal constructor's declaration was missing from the type environment",
         )
         .into());
@@ -440,7 +445,8 @@ pub(crate) fn link_generic_nominal_result_shape(
             .environment()
             .type_id_for_generic_parameter(*parameter_id)
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "a retained generic nominal constructor's parameter had no canonical TypeId",
             )
             .into());
@@ -493,8 +499,8 @@ pub(crate) fn link_generic_nominal_result_shape(
     // Missing parameters are the ordinary inference error, matching the immediate constructor lane.
     let missing = linker.unbound_parameter_names();
     if !missing.is_empty() {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
-            diagnostic_name.diagnostic_callee_name(string_table),
+        return Err(invalid_generic_instantiation(
+            Some(diagnostic_name.diagnostic_callee_name(string_table)),
             InvalidGenericInstantiationReason::CannotInferArguments {
                 missing_parameters: missing,
             },
@@ -1369,5 +1375,7 @@ fn declared_route_input_type(
 }
 
 fn infrastructure(message: &str) -> ExpressionParseError {
-    ExpressionParseError::Infrastructure(CompilerError::compiler_error(message).into())
+    ExpressionParseError::Infrastructure(
+        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation, message).into(),
+    )
 }

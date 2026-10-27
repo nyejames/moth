@@ -7,13 +7,14 @@
 //!      treats every binary-float value as finite and checked failures use the numeric trap path.
 
 use crate::backends::wasm::emit::instructions::{
-    LirBodyEmitContext, ensure_local_abi, helper_index, local_index, wasm_generation_error,
+    LirBodyEmitContext, ensure_local_abi, helper_index, local_index,
 };
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::lir::instructions::WasmNumericOperationOperands;
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use wasm_encoder::{BlockType, Function, Instruction};
@@ -24,15 +25,14 @@ pub(super) fn emit_validate_float(
     source: WasmLirLocalId,
     precision: BinaryFloatPrecision,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let abi_type = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => {
-            return Err(wasm_generation_error(
-                "Wasm binary-float validation does not support F16".to_owned(),
-            ));
-        }
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm binary-float validation does not support F16"
+        ),
     };
     ensure_local_abi(source, abi_type, context, "binary-float validation source")?;
     ensure_local_abi(
@@ -54,15 +54,14 @@ pub(super) fn emit_checked_float_operation(
     operands: WasmNumericOperationOperands,
     context: &LirBodyEmitContext<'_>,
     plan: &WasmEmitPlan,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let abi_type = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => {
-            return Err(wasm_generation_error(
-                "Wasm checked float operations do not support F16".to_owned(),
-            ));
-        }
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm checked float operations do not support F16"
+        ),
     };
     ensure_local_abi(destination, abi_type, context, "checked float destination")?;
 
@@ -73,7 +72,10 @@ pub(super) fn emit_checked_float_operation(
             function.instruction(match precision {
                 BinaryFloatPrecision::Binary32 => &Instruction::F32Neg,
                 BinaryFloatPrecision::Binary64 => &Instruction::F64Neg,
-                BinaryFloatPrecision::Binary16 => unreachable!("F16 was rejected above"),
+                BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm checked float operations already rejected Binary16 at the abi_type match above this negate emit"
+                ),
             });
         }
         (
@@ -92,7 +94,7 @@ pub(super) fn emit_checked_float_operation(
 
             function.instruction(&Instruction::LocalGet(local_index(left, context)?));
             function.instruction(&Instruction::LocalGet(local_index(right, context)?));
-            function.instruction(native_binary_opcode(operator, precision)?);
+            function.instruction(native_binary_opcode(operator, precision));
         }
         (
             NumericOperator::Remainder | NumericOperator::Power,
@@ -108,15 +110,17 @@ pub(super) fn emit_checked_float_operation(
             let helper = match operator {
                 NumericOperator::Remainder => WasmRuntimeHelper::FloatRemainder,
                 NumericOperator::Power => WasmRuntimeHelper::FloatPower,
-                _ => unreachable!("the helper arm only matches remainder or power"),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "the helper arm only matches remainder or power"
+                ),
             };
             emit_float_helper_call(function, helper, left, right, precision, context, plan)?;
         }
-        _ => {
-            return Err(wasm_generation_error(format!(
-                "Wasm checked float operation has an invalid operand shape for {operator:?}"
-            )));
-        }
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm checked float operation has an invalid operand shape for {operator:?}"
+        ),
     }
 
     // Native F32 operations and helper-result demotion have already rounded at the semantic
@@ -129,12 +133,12 @@ fn emit_finite_float_check(
     destination: WasmLirLocalId,
     precision: BinaryFloatPrecision,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let destination_index = local_index(destination, context)?;
     // Store the original scalar before using abs only for the finite comparison. In particular,
     // the destination retains the source sign bit when the validated value is negative zero.
     function.instruction(&Instruction::LocalTee(destination_index));
-    emit_finite_float_predicate(function, precision)?;
+    emit_finite_float_predicate(function, precision);
     function.instruction(&Instruction::I32Eqz);
     function.instruction(&Instruction::If(BlockType::Empty));
     function.instruction(&Instruction::Unreachable);
@@ -147,7 +151,7 @@ fn emit_finite_float_check(
 pub(super) fn emit_finite_float_predicate(
     function: &mut Function,
     precision: BinaryFloatPrecision,
-) -> Result<(), CompilerError> {
+) {
     match precision {
         BinaryFloatPrecision::Binary32 => {
             function.instruction(&Instruction::F32Abs);
@@ -159,21 +163,18 @@ pub(super) fn emit_finite_float_predicate(
             function.instruction(&Instruction::F64Const(f64::MAX.into()));
             function.instruction(&Instruction::F64Le);
         }
-        BinaryFloatPrecision::Binary16 => {
-            return Err(wasm_generation_error(
-                "Wasm finite binary-float checks do not support F16".to_owned(),
-            ));
-        }
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm finite binary-float checks do not support F16"
+        ),
     }
-
-    Ok(())
 }
 
 fn native_binary_opcode(
     operator: NumericOperator,
     precision: BinaryFloatPrecision,
-) -> Result<&'static Instruction<'static>, CompilerError> {
-    let opcode = match (operator, precision) {
+) -> &'static Instruction<'static> {
+    match (operator, precision) {
         (NumericOperator::Add, BinaryFloatPrecision::Binary32) => &Instruction::F32Add,
         (NumericOperator::Subtract, BinaryFloatPrecision::Binary32) => &Instruction::F32Sub,
         (NumericOperator::Multiply, BinaryFloatPrecision::Binary32) => &Instruction::F32Mul,
@@ -182,14 +183,11 @@ fn native_binary_opcode(
         (NumericOperator::Subtract, BinaryFloatPrecision::Binary64) => &Instruction::F64Sub,
         (NumericOperator::Multiply, BinaryFloatPrecision::Binary64) => &Instruction::F64Mul,
         (NumericOperator::Divide, BinaryFloatPrecision::Binary64) => &Instruction::F64Div,
-        (operator, precision) => {
-            return Err(wasm_generation_error(format!(
-                "Wasm checked float operation cannot emit {operator:?} at {precision:?}"
-            )));
-        }
-    };
-
-    Ok(opcode)
+        (operator, precision) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm checked float operation cannot emit {operator:?} at {precision:?}"
+        ),
+    }
 }
 
 fn emit_zero_divisor_trap(
@@ -197,7 +195,7 @@ fn emit_zero_divisor_trap(
     divisor: WasmLirLocalId,
     precision: BinaryFloatPrecision,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(divisor, context)?));
     match precision {
         BinaryFloatPrecision::Binary32 => {
@@ -208,11 +206,10 @@ fn emit_zero_divisor_trap(
             function.instruction(&Instruction::F64Const(0.0.into()));
             function.instruction(&Instruction::F64Eq);
         }
-        BinaryFloatPrecision::Binary16 => {
-            return Err(wasm_generation_error(
-                "Wasm checked float operations do not support F16".to_owned(),
-            ));
-        }
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm checked float operations do not support F16"
+        ),
     }
     function.instruction(&Instruction::If(BlockType::Empty));
     function.instruction(&Instruction::Unreachable);
@@ -228,7 +225,7 @@ fn emit_float_helper_call(
     precision: BinaryFloatPrecision,
     context: &LirBodyEmitContext<'_>,
     plan: &WasmEmitPlan,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(left, context)?));
     if precision == BinaryFloatPrecision::Binary32 {
         function.instruction(&Instruction::F64PromoteF32);

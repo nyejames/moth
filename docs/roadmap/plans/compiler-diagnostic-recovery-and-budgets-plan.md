@@ -12,12 +12,12 @@
 
 ## Status and activation
 
-- Status: queued, design interview confirmed.
+- Status: queued after diagnostic improvements, design interview confirmed.
 - Current slice: not started.
-- Blockers: completed compact diagnostic drafts/reports, type-display snapshots, three failure lanes and canonical diagnostic aggregation.
-- Next action: refresh the activation tree and run Phase 0 after those capabilities are delivered.
+- Blockers: compiler diagnostics improvements are ahead in the roadmap. Compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
+- Next action: refresh the activation tree and run Phase 0 after diagnostic improvements complete.
 
-The main roadmap places this work after compiler source/token/diagnostic data layout and before diagnostic presentation improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
+The main roadmap places this work after compiler source/token/diagnostic data layout and diagnostic improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 
 The repository inspection used for authoring found the compact typed-expression foundation merged, its later reductions awaiting merge and the source-token and diagnostic-layout migration still gated. This is navigation context, not current implementation evidence when this plan activates. Record the actual starting revision and toolchain in working notes. Do not pin a future implementation baseline in this status block or reactivate another plan implicitly.
 
@@ -282,8 +282,8 @@ The planning PR adds this queued plan and its roadmap position. It does not mark
 | `docs/build-system-design.md` | Specify strict module allowances, soft request scheduling cutoff, pre-discovery fallback, canonical admission/aggregation, package/check-only accounting and explicit incomplete graph handling. Define diagnostic policy as separate from semantic reuse identity. |
 | `docs/compiler-data-layout-design.md` | Describe only the minimal report stop metadata and its source/type/identity lifetime. Preserve locked common-record sizes, one diagnostic store and the three failure lanes. Do not duplicate recovery policy here. |
 | `docs/src/docs/project-structure/project-config.mtf` | Document current working syntax for both `I32?` settings, 5/30 defaults, positive-value validation and independent `none` semantics. Explain that the project value is a soft cutoff, not a maximum result count. Keep final-design syntax clearly separated from current support. |
-| `docs/roadmap/roadmap.md` | Keep normal ordering: diagnostic layout, this recovery work, then diagnostic presentation. Mark activation in the existing bullet. Do not reactivate paused work or duplicate the production borrow tracker. Remove this bullet on accepted completion. |
-| `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` | In its status/activation and relevant report sections, name the delivered bounded-recovery, limits and stop-metadata capabilities to consume. Preserve remaining presentation work and avoid rebuilding limits. Use permanent contract references, not a dependency link to this temporary plan. |
+| `docs/roadmap/roadmap.md` | Keep normal ordering: compact diagnostic layout, diagnostic improvements, then this recovery work. Mark activation in the existing bullet. Do not reactivate paused work or duplicate the production borrow tracker. Remove this bullet on accepted completion. |
+| Diagnostic presentation work | Consume the delivered bounded-recovery, module-limit and stop-metadata capabilities when this work completes. Preserve remaining presentation scope and avoid rebuilding those controls. Use permanent contract references. |
 | `docs/roadmap/plans/general-directives-and-project-config-plan.md` | Keep a short migration reminder for both setting names, optional I32 types, defaults, validation, build-only ownership and `none` semantics. Extend its later closed signature, config application, options projection, docs and regression tests rather than dropping the settings or maintaining two syntax paths. |
 | `docs/src/docs/progress/@page.moth` | At implementation, update the existing diagnostic/recovery status or add one compact accepted-implementation row. Name ordinary concrete-body recovery and its limits, without implying all-AST or borrow recovery. Record narrow/rejected gates truthfully. A prose-only planning PR changes no supported status. |
 | `docs/src/docs/progress/packages-and-builders/@page.moth` | Update an existing configuration/command coverage row only when actual config or public command support changes. Do not add duplicate compiler diagnostic coverage. |

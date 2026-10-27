@@ -2,12 +2,14 @@ use super::*;
 
 #[test]
 fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
-    let headers = parse_single_file_headers_with_entry(
-        "export:\n    Button = | label String |\n;\n[ Button(\"ignored\") ]\n",
-        "src/@components.moth",
-        "src/@page.moth",
-    )
-    .expect("imported module roots should parse their declaration surface");
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(
+            "export:\n    Button = | label String |\n;\n[ Button(\"ignored\") ]\n",
+            "src/@components.moth",
+            "src/@page.moth",
+        ),
+        "imported module roots should parse their declaration surface",
+    );
 
     assert_eq!(
         headers
@@ -40,21 +42,24 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
                 1,
                 "expected one delimiter diagnostic for {file_path}: {source:?}"
             );
-            let diagnostic = &errors.diagnostics[0];
+            let diagnostic = errors
+                .diagnostics
+                .first()
+                .expect("expected one delimiter diagnostic");
             assert_eq!(
-                diagnostic.kind,
-                DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
+                diagnostic.descriptor().code,
+                "MOTH-SYNTAX-0017",
+                "the missing template delimiter keeps its stable diagnostic code"
             );
-            assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0017");
-            let DiagnosticPayload::UnexpectedEndOfFile {
-                expected_delimiter: Some(expected_delimiter),
-            } = &diagnostic.payload
-            else {
-                panic!("expected a typed EOF diagnostic naming the missing template delimiter");
-            };
-            assert_eq!(errors.string_table.resolve(*expected_delimiter), "]");
+            let facts = diagnostic
+                .family_view::<token_lexical::UnexpectedEndOfFileView>()
+                .expect("expected a typed EOF diagnostic naming the missing template delimiter");
+            let expected_delimiter = facts
+                .expected_delimiter
+                .expect("the diagnostic should name the expected delimiter");
+            assert_eq!(errors.string_table.resolve(expected_delimiter), "]");
             assert_eq!(
-                diagnostic.primary_span,
+                diagnostic_primary_span(diagnostic),
                 Some(source_span_for(source, "", source.len())),
                 "the missing template delimiter must point at EOF for {file_path}: {source:?}"
             );
@@ -64,12 +69,14 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
 
 #[test]
 fn imported_module_root_discards_const_root_fragments() {
-    let headers = parse_single_file_headers_with_entry(
-        "#[html.head: [\"ignored\"]]\n",
-        "src/@components.moth",
-        "src/@page.moth",
-    )
-    .expect("imported roots should skip const root fragments");
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(
+            "#[html.head: [\"ignored\"]]\n",
+            "src/@components.moth",
+            "src/@page.moth",
+        ),
+        "imported roots should skip const root fragments",
+    );
 
     assert!(headers.top_level_const_fragments.is_empty());
     assert!(

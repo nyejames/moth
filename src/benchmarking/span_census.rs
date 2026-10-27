@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 /// Candidate length-bit widths the architecture requires us to measure.
 pub const CANDIDATE_LENGTH_BITS: [u32; 5] = [8, 9, 10, 11, 12];
 
-/// Corpus roots matching the Phase 0 source-size census.
+/// Corpus roots for the source-size census: benchmarks, documentation sources and test cases.
 const CORPUS_ROOTS: [&str; 3] = ["benchmarks", "docs/src", "tests"];
 
 const MOTH_EXTENSION: &str = "moth";
@@ -498,9 +498,7 @@ pub(super) fn tokenize_source(
         &mut span_builder,
     )
     .map_err(|failure| match failure {
-        lexer::TokenizeFailure::Diagnosed(diagnostic) => {
-            format!("{} ({:?})", diagnostic.kind.code(), diagnostic.kind)
-        }
+        lexer::TokenizeFailure::Diagnosed(diagnostic) => diagnostic.code().to_owned(),
         lexer::TokenizeFailure::Infrastructure(error) => {
             format!("tokenization infrastructure failure: {error:?}")
         }

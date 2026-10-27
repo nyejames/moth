@@ -13,7 +13,6 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -22,6 +21,9 @@ use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator}
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast,
+};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 mod checked_numeric_lowering_tests;

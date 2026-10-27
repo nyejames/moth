@@ -238,13 +238,10 @@ fn transfer_assign_target(
 
     if !is_definition {
         let Some(local_index) = layout.index_of(target.root) else {
-            return Err(transfer_context.diagnostics.internal_error(
-                format!(
-                    "Assignment target local '{}' is not in the active function layout",
-                    transfer_context.diagnostics.local_name(target.root)
-                ),
-                location,
-            ));
+            return Err(transfer_context.diagnostics.internal_error(format!(
+                "Assignment target local '{}' is not in the active function layout",
+                transfer_context.diagnostics.local_name(target.root)
+            )));
         };
         require_initialized_update_target(
             layout,
@@ -259,13 +256,10 @@ fn transfer_assign_target(
         true => {
             let local_id = target.root;
             let Some(local_index) = layout.index_of(local_id) else {
-                return Err(transfer_context.diagnostics.internal_error(
-                    format!(
-                        "Assignment target local '{}' is not in the active function layout",
-                        transfer_context.diagnostics.local_name(local_id)
-                    ),
-                    location,
-                ));
+                return Err(transfer_context.diagnostics.internal_error(format!(
+                    "Assignment target local '{}' is not in the active function layout",
+                    transfer_context.diagnostics.local_name(local_id)
+                )));
             };
 
             let local_state = state.local_state(local_index).clone();
@@ -689,13 +683,10 @@ fn roots_for_place(
     increment_frontend_counter(FrontendCounter::BorrowPlaceAccessCount);
 
     let Some(local_index) = layout.index_of(place.root) else {
-        return Err(diagnostics.internal_error(
-            format!(
-                "Borrow checker could not resolve place local '{}' in the current function",
-                place.root
-            ),
-            location,
-        ));
+        return Err(diagnostics.internal_error(format!(
+            "Borrow checker could not resolve place local '{}' in the current function",
+            place.root
+        )));
     };
 
     let local_state = state.local_state(local_index);

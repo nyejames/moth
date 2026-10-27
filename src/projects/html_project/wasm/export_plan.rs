@@ -3,7 +3,7 @@
 //! WHAT: selects which functions must be callable from builder-owned JS orchestration.
 //! WHY: the backend must stay generic and only lower exports explicitly requested by builders.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 
@@ -77,7 +77,7 @@ impl HtmlWasmHelperExports {
 ///      the returned fragment list. No entry-body call scanning is needed or correct.
 pub(crate) fn build_html_wasm_export_plan(
     hir_module: &HirModule,
-) -> Result<HtmlWasmExportPlan, CompilerError> {
+) -> Result<HtmlWasmExportPlan, InfrastructureFailure> {
     let start_function = hir_module.require_start_function("HTML-Wasm export planning")?;
 
     Ok(HtmlWasmExportPlan {

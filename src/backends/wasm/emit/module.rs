@@ -14,7 +14,7 @@ use crate::backends::wasm::emit::validate::validate_emitted_module;
 use crate::backends::wasm::emit::{WasmEmitDebugOutputs, WasmEmitResult};
 use crate::backends::wasm::lir::module::WasmLirModule;
 use crate::backends::wasm::request::WasmBackendRequest;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use rustc_hash::FxHashMap;
 use wasm_encoder::{
     ConstExpr, FunctionSection, GlobalSection, GlobalType, MemorySection, MemoryType, Module,
@@ -24,7 +24,7 @@ use wasm_encoder::{
 pub(crate) fn emit_lir_to_wasm_module(
     lir_module: &WasmLirModule,
     request: &WasmBackendRequest,
-) -> Result<WasmEmitResult, CompilerError> {
+) -> Result<WasmEmitResult, InfrastructureFailure> {
     // WHAT: precompute all indices/layout before section writing starts.
     // WHY: index spaces cross-reference each other, so deterministic preplanning avoids
     // accidental order-dependent bugs during section assembly.

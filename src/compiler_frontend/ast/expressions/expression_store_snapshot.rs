@@ -4,7 +4,7 @@ impl<'a> ExpressionView<'a> {
     pub(crate) fn to_owned_completed_input(
         self,
         builder: &AstExpressionBuilder,
-    ) -> Result<OwnedCompletedExpressionInput, CompilerError> {
+    ) -> Result<OwnedCompletedExpressionInput, InfrastructureFailure> {
         builder.store().check_owner_token(self.owner_token())?;
         // Every range and edge read below was checked when its row was appended, so these
         // expects guard the store invariant rather than user input.

@@ -1,4 +1,7 @@
+use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -32,39 +35,28 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let mut frontend = compile_project_frontend(
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("diagnosed modules are retained in the typed frontend outcome");
-    let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
     assert_eq!(
-        messages.error_count(),
+        reports.counts().errors,
         2,
         "the provider and independent branch should each diagnose once; blocked consumers should emit no cascades"
     );
-    let diagnosed_paths = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            diagnostic.severity
-                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-        })
-        .filter_map(|(diagnostic_index, diagnostic)| {
-            Some(
-                messages
-                    .diagnostic_render_context(diagnostic_index)
-                    .primary_position(diagnostic)?
-                    .path,
-            )
+    let diagnosed_paths = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter_map(|(report, view)| {
+            DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .map(|position| position.path)
         })
         .collect::<Vec<_>>();
     assert!(
@@ -106,25 +98,29 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let mut builder_surface = BuilderSurface::with_mandatory_core();
     let mut project_source_files = None;
+    let mut project_source_builder = None;
     let build_config_inputs = BuildConfigInputSet::new();
-    compile_project_frontend_with_inputs(
+    let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut builder_surface,
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
+        &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
-    )
-    .expect("multiple source modules should compile");
+    ));
 
-    let source_files =
-        project_source_files.expect("compiled project should retain source database");
+    let source_files = frontend
+        .project_source_database
+        .as_ref()
+        .expect("compiled project should retain source database");
     for (relative_path, expected_text) in [
         ("src/@page.moth", root_source),
         ("src/about/@page.moth", nested_source),
@@ -143,7 +139,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
 }
 
 #[test]
-fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
+fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
     // Hold the shared instrumentation lock; see the mechanism test below.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
@@ -160,35 +156,31 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
 
     let mut config = Config::new(dir);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let mut builder_surface = BuilderSurface::with_mandatory_core();
-    let error = match compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut builder_surface,
-        &mut string_table,
-    ) {
-        Ok(_) => panic!("selected unreadable source should fail its existing preparation lane"),
-        Err(error) => error,
-    };
-    let error_value = error
-        .primary_infrastructure_error()
-        .expect("selected preload failure should remain an infrastructure file error");
-    assert_eq!(&error_value.error_type, &ErrorType::File);
-    assert!(
-        error_value
-            .msg
-            .contains("Error reading file when adding new moth files to parse"),
-        "selected source should preserve the existing read failure message: {}",
-        error_value.msg,
+        &mut warning_owner,
     );
-    let canonical_selected_path =
-        fs::canonicalize(selected_path).expect("selected source path should canonicalize");
-    assert_eq!(
-        error_value.host_path.as_deref(),
-        Some(canonical_selected_path.as_path()),
+    let reports = diagnosed_reports(&result);
+    assert_eq!(reports.counts().errors, 1);
+    let (report, diagnostic) = reports
+        .iter()
+        .next()
+        .expect("invalid UTF-8 source should diagnose once");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0040");
+    let rendered = terse::format_terse_diagnostic_view(
+        diagnostic,
+        DiagnosticRenderContext::for_report(report),
+    );
+    assert!(
+        rendered.contains("Source 'src/@page.moth' is not valid UTF-8"),
+        "the non-UTF-8 diagnostic must name the selected logical path: {rendered}"
     );
 }
 
@@ -212,26 +204,27 @@ fn unselected_preload_read_failure_stays_inert() {
 
     let mut config = Config::new(dir);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let mut builder_surface = BuilderSurface::with_mandatory_core();
     let mut project_source_files = None;
+    let mut project_source_builder = None;
     let build_config_inputs = BuildConfigInputSet::new();
-    let frontend = compile_project_frontend_with_inputs(
+    let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut builder_surface,
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
+        &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
-    )
-    .expect("unselected unreadable source should not abort the build");
+    ));
 
-    // `Ok` alone proves nothing: a diagnosed outcome still returns `Ok` and carries its
-    // diagnostics in the payload, so an invented failure for the unselected file would pass an
-    // expect-only assertion. Inert means the build reports nothing at all about it.
+    // `Success` proves the selected project compiled; an unselected unreadable source must
+    // neither add transient diagnostics nor suppress its independent successful module.
     assert!(
         frontend.transient_batches.is_empty(),
         "preloading an unreadable unselected source must not report anything: {:?}",
@@ -243,8 +236,10 @@ fn unselected_preload_read_failure_stays_inert() {
         "the one selected module must still compile successfully"
     );
 
-    let source_files =
-        project_source_files.expect("successful build should retain source database");
+    let source_files = frontend
+        .project_source_database
+        .as_ref()
+        .expect("successful build should retain source database");
     let unselected_path =
         fs::canonicalize(unselected_path).expect("unselected source path should canonicalize");
     let unselected_id = source_files
@@ -272,35 +267,38 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     fs::write(dir.join("src/@page.moth"), "value = 1\n").expect("should write project entry");
     // Keep the dependency unused so declaration-time validation cannot rely on binding or
     // reachability analysis to reject the facade's self-dependency.
-    fs::write(dir.join("+package.moth"), "@project\n").expect("should write project facade");
+    fs::write(
+        dir.join("+package.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write project facade with a header naming warning");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let mut frontend = compile_project_frontend(
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("a facade dependency diagnostic should remain a retained frontend outcome");
-    let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
-    let matching = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidDependencyClause {
-                    reason: InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
-                    ..
-                }
-            )
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
+    assert_eq!(
+        reports.counts().warnings,
+        0,
+        "the facade precheck must not include discarded preparation warnings"
+    );
+    let matching = reports
+        .iter()
+        .filter(|(_, view)| {
+            view.descriptor().code == "MOTH-SYNTAX-0019"
+                && view.reason_key()
+                    == Some(
+                        "invalid_dependency_clause.project_globals_facade_dependency_not_allowed",
+                    )
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -308,11 +306,9 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
         1,
         "the facade's own @project declaration should produce one structured diagnostic"
     );
-    let (diagnostic_index, diagnostic) = matching[0];
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0019");
-    let position = messages
-        .diagnostic_render_context(diagnostic_index)
-        .primary_position(diagnostic)
+    let (report, view) = matching[0];
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("facade diagnostic should retain its authored source position");
     assert!(
         position.path.ends_with("+package.moth"),
@@ -323,12 +319,9 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
 #[cfg(feature = "timers")]
 #[test]
 fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion() {
-    // Regression history (Sept 2026, 4-thread validation): this test asserts over the whole
-    // snapshot (exactly one unfinished module). `try_start_session` blocks a second *session*
-    // but not a second *compile*: an unguarded parallel compile mints boundary/module ids from
-    // this test's active session via the global attribution gate, adding a phantom `/src`
-    // unfinished record (`left: 2, right: 1`). Keep this lock, and the matching lock on every
-    // other test that calls an instrumented compile entry point (see the mechanism test below).
+    // Keep the shared instrumentation lock against tests that start another session. An unguarded
+    // compile can still register into this active process-global session, so the assertions below
+    // select this fixture's boundary and unfinished module rather than counting the whole snapshot.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
@@ -342,37 +335,58 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         .expect("should write malformed entry");
 
     let mut config = Config::new(dir.clone());
+    config.project_name = "failed_directory_preparation_test_project".to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-
     let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
-    let Err(messages) = result else {
-        panic!("malformed Stage 0 input should fail preparation");
-    };
-    assert_has_diagnostic_code(&messages, "MOTH-SYNTAX-0019");
+
+    let reports = diagnosed_reports(&result);
+    assert_has_diagnostic_code(&result, "MOTH-SYNTAX-0019");
     assert_eq!(
-        messages.error_count(),
+        reports.counts().errors,
         1,
         "malformed Stage 0 input should produce exactly the syntax diagnostic"
     );
 
     let snapshot = timing_session.finish();
+    let project_boundaries = snapshot
+        .boundaries
+        .iter()
+        .filter(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == config.project_name
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        project_boundaries.len(),
+        1,
+        "the failed project must register its own main-project boundary"
+    );
+    let project_boundary = project_boundaries[0].id;
     let unfinished_modules = snapshot
         .modules
         .iter()
-        .filter(|module| !module.source_facts_finalized)
+        .filter(|module| {
+            module.key.boundary() == project_boundary && !module.source_facts_finalized
+        })
         .collect::<Vec<_>>();
-    assert_eq!(unfinished_modules.len(), 1);
+    assert_eq!(
+        unfinished_modules.len(),
+        1,
+        "the failed project must leave exactly one unfinished module"
+    );
     let unfinished = unfinished_modules[0];
+    assert_eq!(unfinished.logical_identity, config.project_name);
     assert_eq!(unfinished.source_file_count, 0);
     assert_eq!(unfinished.source_byte_count, 0);
     assert!(module_has_timing(
@@ -414,7 +428,8 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     let mut config = Config::new(dir.clone());
     config.project_name = PROJECT_NAME.to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         PACKAGE_NAME,
@@ -424,15 +439,14 @@ fn directory_frontend_registers_package_and_project_boundaries() {
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-    let frontend = compile_project_frontend(
+    let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("a clean source package and project should compile");
+        &mut warning_owner,
+    ));
     let snapshot = timing_session.finish();
     drop(frontend);
 
@@ -592,47 +606,52 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
 
     let mut config = Config::new(dir.clone());
+    config.project_name = "moth_incremental_file_prepare_fixture".to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-    let frontend = compile_project_frontend(
+    let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("a clean directory project should compile");
+        &mut warning_owner,
+    ));
     let snapshot = timing_session.finish();
     drop(frontend);
 
     let project_boundary = snapshot
         .boundaries
         .iter()
-        .find(|boundary| boundary.display_name == config.project_name)
+        .find(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == config.project_name
+        })
         .expect("the main project boundary should be registered")
         .id;
-    let prepare_modules = snapshot
+    let project_modules = snapshot
         .modules
         .iter()
         .filter(|module| {
             module.key.boundary() == project_boundary
-                && module_has_timing(module, crate::timing::TimingMetric::FrontendPrepare)
+                && module.logical_identity == config.project_name
         })
         .collect::<Vec<_>>();
-
-    assert!(
-        !prepare_modules.is_empty(),
-        "incremental directory discovery must record frontend.prepare for the project boundary"
+    assert_eq!(
+        project_modules.len(),
+        1,
+        "the incremental directory compile must register exactly one project module"
     );
     assert!(
-        prepare_modules
-            .iter()
-            .all(|module| module.key.boundary() == project_boundary),
-        "every project-boundary preparation observation must carry the owning module"
+        module_has_timing(
+            project_modules[0],
+            crate::timing::TimingMetric::FrontendPrepare
+        ),
+        "incremental directory discovery must record frontend.prepare for its own module"
     );
 }
 
@@ -648,60 +667,52 @@ fn single_file_frontend_records_file_prepare_with_module_attribution() {
     fs::write(&moth_path, "value = 1\n").expect("should write .moth");
 
     let mut config = Config::new(moth_path.clone());
+    config.project_name = "moth_single_file_prepare_fixture".to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-    let frontend = compile_project_frontend(
+    let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("a clean single-file project should compile");
+        &mut warning_owner,
+    ));
     let snapshot = timing_session.finish();
     drop(frontend);
 
     let project_boundary = snapshot
         .boundaries
         .iter()
-        .find(|boundary| boundary.display_name == config.project_name)
+        .find(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == config.project_name
+        })
         .expect("the synthetic single-file boundary should be registered")
         .id;
-    let prepare_modules = snapshot
+    let project_modules = snapshot
         .modules
         .iter()
         .filter(|module| {
             module.key.boundary() == project_boundary
-                && module_has_timing(module, crate::timing::TimingMetric::FrontendPrepare)
+                && module.logical_identity == config.project_name
         })
         .collect::<Vec<_>>();
-    assert!(
-        !prepare_modules.is_empty(),
-        "single-file preparation must record frontend.prepare: boundaries={:#?} modules={:#?}",
-        snapshot
-            .boundaries
-            .iter()
-            .map(|boundary| (boundary.id, boundary.display_name.as_str()))
-            .collect::<Vec<_>>(),
-        snapshot
-            .modules
-            .iter()
-            .filter(|module| module_has_timing(
-                module,
-                crate::timing::TimingMetric::FrontendPrepare
-            ))
-            .map(|module| module.key)
-            .collect::<Vec<_>>()
+    assert_eq!(
+        project_modules.len(),
+        1,
+        "the single-file compile must register exactly one project module"
     );
     assert!(
-        prepare_modules
-            .iter()
-            .all(|module| module.key.boundary() == project_boundary),
-        "single-file preparation must carry the synthetic module key"
+        module_has_timing(
+            project_modules[0],
+            crate::timing::TimingMetric::FrontendPrepare
+        ),
+        "single-file preparation must record frontend.prepare for its own module"
     );
 }
 
@@ -717,22 +728,52 @@ fn ast_aggregate_metrics_recorded_with_timers() {
     fs::write(&moth_path, "value = 1\n").expect("should write .moth");
 
     let mut config = Config::new(moth_path.clone());
+    config.project_name = "moth_ast_timing_fixture".to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-    let frontend = compile_project_frontend(
+    let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("a clean single-file project should compile");
+        &mut warning_owner,
+    ));
     let snapshot = timing_session.finish();
     drop(frontend);
+
+    let project_boundaries = snapshot
+        .boundaries
+        .iter()
+        .filter(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == config.project_name
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        project_boundaries.len(),
+        1,
+        "this single-file compile must register exactly one main-project boundary"
+    );
+    let project_boundary = project_boundaries[0].id;
+    let project_modules = snapshot
+        .modules
+        .iter()
+        .filter(|module| {
+            module.key.boundary() == project_boundary
+                && module.logical_identity == config.project_name
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        project_modules.len(),
+        1,
+        "this single-file compile must register exactly one module"
+    );
+    let project_module = project_modules[0];
 
     for metric in [
         "frontend.ast.environment",
@@ -740,22 +781,19 @@ fn ast_aggregate_metrics_recorded_with_timers() {
         "frontend.ast.finalise",
     ] {
         assert!(
-            snapshot.timings.iter().any(|aggregate| {
+            project_module.timings.iter().any(|aggregate| {
                 aggregate.metric.descriptor().stable_name == metric && aggregate.samples > 0
             }),
-            "{metric} must be recorded whenever timers is enabled"
+            "{metric} must be recorded for this module whenever timers is enabled"
         );
     }
-    let ast_total_count = snapshot
+    let ast_total_samples = project_module
         .timings
         .iter()
-        .filter(|aggregate| {
-            aggregate.metric.descriptor().stable_name == "frontend.ast.total"
-                && aggregate.samples > 0
-        })
-        .count();
+        .find(|aggregate| aggregate.metric == crate::timing::TimingMetric::FrontendAstTotal)
+        .map_or(0, |aggregate| aggregate.samples);
     assert_eq!(
-        ast_total_count, 1,
+        ast_total_samples, 1,
         "module AST construction must record one aggregate timing span"
     );
 }
@@ -772,29 +810,59 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     fs::write(&moth_path, "value = 1\n").expect("should write .moth");
 
     let mut config = Config::new(moth_path.clone());
+    config.project_name = "moth_detailed_ast_timing_fixture".to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
-    let frontend = compile_project_frontend(
+    let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("a clean single-file project should compile");
+        &mut warning_owner,
+    ));
     let snapshot = timing_session.finish();
     drop(frontend);
+
+    let project_boundaries = snapshot
+        .boundaries
+        .iter()
+        .filter(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == config.project_name
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        project_boundaries.len(),
+        1,
+        "this single-file compile must register exactly one main-project boundary"
+    );
+    let project_boundary = project_boundaries[0].id;
+    let project_modules = snapshot
+        .modules
+        .iter()
+        .filter(|module| {
+            module.key.boundary() == project_boundary
+                && module.logical_identity == config.project_name
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        project_modules.len(),
+        1,
+        "this single-file compile must register exactly one module"
+    );
+    let project_module = project_modules[0];
 
     for metric in [
         "frontend.ast.environment",
         "frontend.ast.emit",
         "frontend.ast.finalise",
     ] {
-        let count = snapshot
+        let count = project_module
             .timings
             .iter()
             .filter(|aggregate| {
@@ -803,19 +871,16 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
             .count();
         assert!(
             count >= 1,
-            "{metric} must be recorded under detailed_timers"
+            "{metric} must be recorded for this module under detailed_timers"
         );
     }
-    let ast_total_count = snapshot
+    let ast_total_samples = project_module
         .timings
         .iter()
-        .filter(|aggregate| {
-            aggregate.metric.descriptor().stable_name == "frontend.ast.total"
-                && aggregate.samples > 0
-        })
-        .count();
+        .find(|aggregate| aggregate.metric == crate::timing::TimingMetric::FrontendAstTotal)
+        .map_or(0, |aggregate| aggregate.samples);
     assert_eq!(
-        ast_total_count, 1,
+        ast_total_samples, 1,
         "detailed AST construction must still record one aggregate span"
     );
 }
@@ -823,27 +888,18 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
 #[cfg(feature = "timers")]
 #[test]
 fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
-    // Defensive guard for the Sept 2026 4-thread validation failure (see mechanism below): this
-    // test owns a session while spawning its own thread, so hold the shared instrumentation
-    // lock against *other* tests' compiles; the spawned thread itself stays deliberately
-    // unguarded to pin the session-sharing mechanism.
     let dir_a_temp = tempfile::tempdir().expect("should create temp dir");
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    // Without the shared lock, a second compile on another thread inherits the active session's
-    // ids through the global attribution gate (`register_timing_boundary` only checks global
-    // `attribution_active()`, then mints the id from `collection.id`). That session-sharing
-    // turned `failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion`
-    // red (`left: 2, right: 1`) when unguarded compile tests overlapped it. The pinning here is
-    // the ordering a scoped worker gives: the session is already active before the spawn and the
-    // scope join happens before `finish()`, so the worker always overlaps the session without
-    // simultaneous execution of both compiles. One failing fixture plus one concurrent failing
-    // fixture must yield two boundaries and two unfinished modules. Do not delete this test and
-    // the `lock_counter_test()` guards it documents; a future caller-side capture model must
-    // keep the victim assertions whole-snapshot exact.
+    // Keep the shared instrumentation lock against tests that start another session, but leave
+    // this test's worker deliberately unguarded. Unique project names let the assertions select
+    // both failed fixtures while unrelated compiles register into the same process-global session.
     let dir_a = dir_a_temp.path().to_path_buf();
+    let project_a_name = "unguarded_parallel_fixture_a";
+    let project_b_name = "unguarded_parallel_fixture_b";
+    let unrelated_project_name = "unrelated_active_timing_fixture";
     fs::write(
         dir_a.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        format!("project #= (\n    name = \"{project_a_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
     fs::write(dir_a.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
@@ -853,14 +909,33 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     fs::create_dir_all(dir_b.join("src")).expect("should create source root");
     fs::write(
         dir_b.join("config.moth"),
-        "project #= (\n    name = \"selected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        format!(
+            "project #= (\n    name = \"{project_b_name}\",\n    entry_root = \"src\",\n)\nhtml #= ()\n"
+        ),
     )
     .expect("should write config");
     fs::write(dir_b.join("src/@page.moth"), [b'o', b'k', 0xff, b'\n'])
         .expect("should write invalid UTF-8 source");
+    let dir_unrelated_temp = tempfile::tempdir().expect("should create unrelated temp project");
+    let dir_unrelated = dir_unrelated_temp.path().to_path_buf();
+    fs::create_dir_all(dir_unrelated.join("src")).expect("should create unrelated source root");
+    fs::write(
+        dir_unrelated.join("config.moth"),
+        format!(
+            "project #= (\n    name = \"{unrelated_project_name}\",\n    entry_root = \"src\",\n)\nhtml #= ()\n"
+        ),
+    )
+    .expect("should write unrelated config");
+    fs::write(
+        dir_unrelated.join("src/@page.moth"),
+        [b'o', b'k', 0xff, b'\n'],
+    )
+    .expect("should write unrelated invalid UTF-8 source");
     let mut config_a = Config::new(dir_a.clone());
+    config_a.project_name = project_a_name.to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
     let result_a = compile_project_frontend(
@@ -869,98 +944,150 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
-    let Err(messages_a) = result_a else {
-        panic!("first fixture should fail before the concurrent compile starts");
-    };
-    assert_has_diagnostic_code(&messages_a, "MOTH-SYNTAX-0019");
+    let reports_a = diagnosed_reports(&result_a);
+    assert_has_diagnostic_code(&result_a, "MOTH-SYNTAX-0019");
     assert_eq!(
-        messages_a.error_count(),
+        reports_a.counts().errors,
         1,
-        "first fixture should fail with exactly the syntax diagnostic before the concurrent compile starts: {:#?}",
-        messages_a
+        "first fixture should fail with exactly the syntax diagnostic before the unguarded worker starts"
     );
 
     std::thread::scope(|scope| {
         scope
             .spawn(move || {
-                let mut thread_string_table = StringTable::new();
+                let thread_string_table = StringTable::new();
+                let mut thread_warning_owner =
+                    BoundaryAccumulator::with_root_string_table(thread_string_table);
                 let thread_style = StyleDirectiveRegistry::built_ins();
                 let mut thread_config = Config::new(dir_b.clone());
+                thread_config.project_name = project_b_name.to_owned();
                 let mut thread_surface = BuilderSurface::with_mandatory_core();
-                let thread_error = match compile_project_frontend(
+                let thread_result = compile_project_frontend(
                     &mut thread_config,
                     BuildProfile::Dev,
                     None,
                     &thread_style,
                     &mut thread_surface,
-                    &mut thread_string_table,
-                ) {
-                    Err(error) => error,
-                    Ok(_) => panic!("second fixture should fail its existing preparation lane"),
-                };
+                    &mut thread_warning_owner,
+                );
 
-                // The concurrent fixture must fail for the infrastructure file-error reason, not
-                // carry a user diagnostic: the invalid-UTF-8 source is unreadable, not invalid.
-                let error_value = thread_error
-                    .primary_infrastructure_error()
-                    .expect("concurrent failure should remain an infrastructure file error");
-                assert_eq!(&error_value.error_type, &ErrorType::File);
-                assert!(
-                    error_value
-                        .msg
-                        .contains("Error reading file when adding new moth files to parse"),
-                    "second fixture should stay in the infrastructure file-error lane: {}",
-                    error_value.msg
+                // The concurrent fixture fails in its source-loading lane: invalid UTF-8 is a
+                // source diagnostic naming the file, not an infrastructure read failure.
+                assert_has_diagnostic_code(&thread_result, "MOTH-SYNTAX-0040");
+                assert_eq!(
+                    diagnosed_reports(&thread_result).counts().errors,
+                    1,
+                    "second fixture should fail with exactly the invalid UTF-8 diagnostic"
                 );
             })
             .join()
             .expect("concurrent compile worker should not panic");
     });
+    let mut unrelated_config = Config::new(dir_unrelated.clone());
+    unrelated_config.project_name = unrelated_project_name.to_owned();
+    let mut unrelated_warning_owner =
+        BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let unrelated_result = compile_project_frontend(
+        &mut unrelated_config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut unrelated_warning_owner,
+    );
+    assert_has_diagnostic_code(&unrelated_result, "MOTH-SYNTAX-0040");
+    assert_eq!(
+        diagnosed_reports(&unrelated_result).counts().errors,
+        1,
+        "the unrelated compile must register an independent failure during the active session"
+    );
     let snapshot = timing_session.finish();
-    let boundary_count = snapshot.boundaries.len();
-    let unfinished_modules = snapshot
-        .modules
+    let project_a_boundaries = snapshot
+        .boundaries
         .iter()
-        .filter(|module| !module.source_facts_finalized)
+        .filter(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == project_a_name
+        })
         .collect::<Vec<_>>();
     assert_eq!(
-        boundary_count,
-        2,
-        "the concurrent compile must register its own boundary into the active session: {:#?}",
-        snapshot
-            .boundaries
-            .iter()
-            .map(|boundary| (boundary.id, boundary.display_name.as_str()))
-            .collect::<Vec<_>>()
+        project_a_boundaries.len(),
+        1,
+        "the first fixture must register its own main-project boundary"
     );
+    let project_a_boundary = project_a_boundaries[0].id;
+    let project_b_boundaries = snapshot
+        .boundaries
+        .iter()
+        .filter(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == project_b_name
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        unfinished_modules.len(),
+        project_b_boundaries.len(),
+        1,
+        "the unguarded worker must register its own main-project boundary"
+    );
+    let project_b_boundary = project_b_boundaries[0].id;
+    let unrelated_boundaries = snapshot
+        .boundaries
+        .iter()
+        .filter(|boundary| {
+            boundary.kind == crate::timing::TimingBoundaryKind::MainProject
+                && boundary.display_name == unrelated_project_name
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unrelated_boundaries.len(),
+        1,
+        "the extra unrelated compile must register during this active session"
+    );
+    let unrelated_boundary = unrelated_boundaries[0].id;
+
+    let fixture_boundaries = [project_a_boundary, project_b_boundary];
+    let unfinished_fixture_modules = snapshot
+        .modules
+        .iter()
+        .filter(|module| {
+            !module.source_facts_finalized && fixture_boundaries.contains(&module.key.boundary())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unfinished_fixture_modules.len(),
         2,
-        "both failed preparations must leave unfinished module metadata: {:#?}",
-        snapshot
+        "both failed fixtures must leave their own unfinished modules"
+    );
+    let project_b_identity = format!("{project_b_name}/src");
+    let unrelated_identity = format!("{unrelated_project_name}/src");
+    for (boundary, logical_identity) in [
+        (project_a_boundary, project_a_name),
+        (project_b_boundary, project_b_identity.as_str()),
+        (unrelated_boundary, unrelated_identity.as_str()),
+    ] {
+        let modules = snapshot
             .modules
             .iter()
-            .map(|module| (module.key.boundary(), module.logical_identity.as_str()))
-            .collect::<Vec<_>>()
-    );
-    // The second fixture's empty project name plus `src` logical path composes `/src`; that
-    // label is the observed signature of the original phantom record, not a filesystem path.
-    assert!(
-        unfinished_modules
-            .iter()
-            .any(|module| module.logical_identity == "/src"),
-        "concurrent fixture must reproduce the original phantom identity: {:#?}",
-        unfinished_modules
-            .iter()
-            .map(|module| module.logical_identity.as_str())
-            .collect::<Vec<_>>()
-    );
+            .filter(|module| {
+                module.key.boundary() == boundary && module.logical_identity == logical_identity
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            modules.len(),
+            1,
+            "each fixture should register its expected module exactly once: {boundary:?} {logical_identity}"
+        );
+        assert!(
+            !modules[0].source_facts_finalized,
+            "failed preparation should leave {logical_identity} unfinished"
+        );
+    }
 }
 
-/// A dependency module root's dormant runtime work is validated by that module's own canonical
-/// compilation. Each review fixture leaves a grouped delimiter open after the root's public
+/// A dependency module root's dormant runtime work is validated by that module's own
+/// canonical compilation. Each case leaves a grouped delimiter open after the root's public
 /// declaration, and the HTML-selected entry consumes that public value without activating it.
 #[test]
 fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
@@ -993,72 +1120,51 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
 
         let mut config = Config::new(dir.clone());
         let style_directives = StyleDirectiveRegistry::built_ins();
-        let mut string_table = StringTable::new();
-        let mut frontend = compile_project_frontend(
+        let string_table = StringTable::new();
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+        let result = compile_project_frontend(
             &mut config,
             BuildProfile::Dev,
             None,
             &style_directives,
             &mut BuilderSurface::with_mandatory_core(),
-            &mut string_table,
-        )
-        .expect("a diagnosed dependency module stays a retained frontend outcome");
-        let project_source = frontend.project_source_database.take();
-        let messages = frontend.into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source,
-            None,
+            &mut warning_owner,
         );
-
-        assert!(
-            !messages.has_infrastructure_error(),
-            "{case}: malformed dependency source must stay in the diagnostic lane: {messages:?}"
-        );
+        let reports = diagnosed_reports(&result);
         assert_eq!(
-            messages.error_count(),
+            reports.counts().errors,
             1,
-            "{case}: the dependency root should diagnose once and the blocked page must not \
-             cascade: {messages:?}"
+            "{case}: the dependency root should diagnose once and the blocked page must not cascade"
         );
-        let (diagnostic_index, diagnostic) = messages
-            .diagnostics()
-            .enumerate()
-            .find(|(_, diagnostic)| {
-                matches!(
-                    &diagnostic.payload,
-                    DiagnosticPayload::UnexpectedEndOfFile { .. }
-                )
-            })
-            .expect("the dormant group must report one typed unexpected-EOF diagnostic");
-        assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile),
-            "{case}: {diagnostic:?}"
+        let (report, view) = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .find(|(_, view)| view.descriptor().code == "MOTH-SYNTAX-0017")
+            .expect("the dormant group must retain its unexpected-EOF view");
+        assert_eq!(view.severity(), DiagnosticSeverity::Error, "{case}");
+        let rendered =
+            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
+        assert!(
+            rendered.contains(&format!("expected '{expected_delimiter}'")),
+            "{case}: the retained EOF view must render the exact missing-delimiter fact: {rendered}"
         );
-        assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0017", "{case}");
-        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error, "{case}");
-        // Payload strings belong to the diagnostic's frozen identity, not the merged table.
-        let frozen_identity = messages
-            .frozen_identity_context_for_diagnostic(diagnostic_index)
-            .expect("project diagnostics must retain their frozen source identity");
-        let DiagnosticPayload::UnexpectedEndOfFile {
-            expected_delimiter: Some(expected_delimiter_id),
-        } = &diagnostic.payload
-        else {
-            panic!("{case}: expected a typed EOF payload naming the missing delimiter");
+        let span = match view.primary_site() {
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                span,
+            )
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } => span,
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                panic!("{case}: unexpected EOF must retain its authored source span")
+            }
         };
-        assert_eq!(
-            frozen_identity.strings().resolve(*expected_delimiter_id),
-            expected_delimiter,
-            "{case}: the dormant group must name its own missing delimiter"
-        );
+        let context = DiagnosticRenderContext::for_report(report);
+        let identity = report.context();
 
-        let span = diagnostic
-            .primary_span
-            .expect("the EOF diagnostic must retain its authored span");
         let dependency_path = fs::canonicalize(dir.join("src/components/@components.moth"))
             .expect("dependency source path should canonicalize");
-        let source_slot = frozen_identity
+        let source_slot = identity
             .get(span.source())
             .expect("the EOF span must resolve through the dependency's own source identity");
         assert_eq!(
@@ -1066,7 +1172,11 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
             Some(dependency_path.as_path()),
             "{case}: the missing delimiter must belong to the dependency source"
         );
-        let range = span.byte_range(frozen_identity);
+        let position = context
+            .site_position(view.primary_site())
+            .expect("the EOF site should resolve through its dependency report");
+        assert_eq!(position.host_path, Some(dependency_path.as_path()));
+        let range = span.byte_range(identity);
         assert_eq!(
             (range.start(), range.end()),
             (

@@ -1,12 +1,12 @@
 //! Terminator lowering for HIR -> Wasm LIR.
 
-use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
 use crate::backends::wasm::hir_to_lir::expr::{lower_concrete_string, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::ensure_host_import;
 use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier};
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::terminators::{
@@ -18,7 +18,7 @@ pub(crate) fn lower_terminator(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     terminator: &HirTerminator,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<WasmLirTerminator, CompilerError> {
+) -> Result<WasmLirTerminator, InfrastructureFailure> {
     // Unsupported legal source features are diagnosed before lowering. Reaching one here
     // indicates an inconsistent validated backend input.
     match terminator {
@@ -55,15 +55,18 @@ pub(crate) fn lower_terminator(
                 values: lowered_values,
             })
         }
-        HirTerminator::ReturnError(_) => Err(lir_transformation_error(
-            "Wasm ReturnError reached lowering before backend feature validation",
-        )),
-        HirTerminator::Invoke { .. } => Err(lir_transformation_error(
-            "Wasm Invoke reached lowering before backend feature validation",
-        )),
-        HirTerminator::Uninitialized => Err(lir_transformation_error(
-            "Wasm lowering encountered Uninitialized terminator",
-        )),
+        HirTerminator::ReturnError(_) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm ReturnError reached lowering before backend feature validation"
+        ),
+        HirTerminator::Invoke { .. } => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm Invoke reached lowering before backend feature validation"
+        ),
+        HirTerminator::Uninitialized => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering encountered Uninitialized terminator"
+        ),
         HirTerminator::RuntimeFailure { .. } => Ok(WasmLirTerminator::Trap),
         HirTerminator::AssertFailure {
             message,
@@ -90,7 +93,8 @@ pub(crate) fn lower_terminator(
                         .expression(*message)
                         .kind
                     else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::BackendLowering,
                             "Wasm lowering received a non-option folded assertion message",
                         ));
                     };
@@ -100,17 +104,17 @@ pub(crate) fn lower_terminator(
                         .expressions
                         .variant_fields(*fields)
                     else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::BackendLowering,
                             "Wasm lowering received a folded assertion message without one payload",
                         ));
                     };
                     lower_expression(context, field.value, statements)?
                 }
-                HirAssertionMessageEvaluation::Runtime => {
-                    return Err(CompilerError::compiler_error(
-                        "Wasm lowering received a runtime assertion message after target validation",
-                    ));
-                }
+                HirAssertionMessageEvaluation::Runtime => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm lowering received a runtime assertion message after target validation"
+                ),
             };
             let import =
                 ensure_host_import(context.module_context, WasmHostFunction::AssertionFailed);
@@ -123,9 +127,12 @@ pub(crate) fn lower_terminator(
             // A returning host must still end this unrecoverable invocation.
             Ok(WasmLirTerminator::Trap)
         }
-        HirTerminator::Match { .. } => Err(lir_transformation_error(
-            "Wasm lowering does not yet support HirTerminator::Match",
-        )),
+        // Unreachable: `validate_wasm_unsupported_shapes` rejects `HirTerminator::Match`
+        // (`MatchTerminators`) before lowering.
+        HirTerminator::Match { .. } => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering does not yet support HirTerminator::Match"
+        ),
     }
 }
 
@@ -134,7 +141,7 @@ fn lower_jump_argument_transfer(
     target: BlockId,
     args: &[HirJumpArgument],
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<crate::backends::wasm::lir::types::WasmLirBlockId, CompilerError> {
+) -> Result<crate::backends::wasm::lir::types::WasmLirBlockId, InfrastructureFailure> {
     let target_block = context
         .module_context
         .hir_module
@@ -142,7 +149,7 @@ fn lower_jump_argument_transfer(
         .iter()
         .find(|block| block.id == target)
         .ok_or_else(|| {
-            lir_transformation_error(format!(
+            InfrastructureFailure::lir_transformation(format!(
                 "Wasm lowering could not resolve block id {target:?}"
             ))
         })?;
@@ -160,13 +167,13 @@ fn lower_jump_argument_transfer(
             .iter()
             .any(|local| local.id == argument.destination)
         {
-            return Err(lir_transformation_error(format!(
+            return Err(InfrastructureFailure::lir_transformation(format!(
                 "Wasm jump argument destination {:?} is not declared by target block {}",
                 argument.destination, target.0
             )));
         }
         if !destinations.insert(argument.destination) {
-            return Err(lir_transformation_error(format!(
+            return Err(InfrastructureFailure::lir_transformation(format!(
                 "Wasm jump to block {} defines destination {:?} more than once",
                 target.0, argument.destination
             )));
@@ -177,7 +184,7 @@ fn lower_jump_argument_transfer(
             .get(&argument.source)
             .copied()
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm lowering could not resolve jump source local {:?}",
                     argument.source
                 ))
@@ -187,7 +194,7 @@ fn lower_jump_argument_transfer(
             .get(&argument.destination)
             .copied()
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm lowering could not resolve jump target local {:?}",
                     argument.destination
                 ))
@@ -197,7 +204,7 @@ fn lower_jump_argument_transfer(
             .get(&source)
             .copied()
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm lowering could not resolve carrier ABI for jump source local {:?}",
                     argument.source
                 ))
@@ -207,14 +214,14 @@ fn lower_jump_argument_transfer(
             .get(&destination)
             .copied()
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm lowering could not resolve carrier ABI for jump target local {:?}",
                     argument.destination
                 ))
             })?;
 
         if source_abi != destination_abi {
-            return Err(lir_transformation_error(format!(
+            return Err(InfrastructureFailure::lir_transformation(format!(
                 "Wasm lowering cannot transfer jump argument from {:?} ({source_abi:?}) into target local {:?} ({destination_abi:?}) because their carrier ABI types differ",
                 argument.source, argument.destination
             )));
@@ -261,9 +268,9 @@ fn lower_jump_argument_transfer(
 fn resolve_block_id(
     context: &WasmFunctionLoweringContext<'_, '_>,
     block_id: BlockId,
-) -> Result<crate::backends::wasm::lir::types::WasmLirBlockId, CompilerError> {
+) -> Result<crate::backends::wasm::lir::types::WasmLirBlockId, InfrastructureFailure> {
     context.block_map.get(&block_id).copied().ok_or_else(|| {
-        lir_transformation_error(format!(
+        InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve block id {block_id:?}"
         ))
     })

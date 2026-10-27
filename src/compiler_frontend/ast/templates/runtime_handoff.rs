@@ -152,7 +152,6 @@ pub(crate) struct OwnedRuntimeSlotContributionSource {
     pub(crate) source: RuntimeSlotContributionSourceId,
     pub(crate) render_root: OwnedRuntimeTemplateNode,
     pub(crate) renders_wrapper_unconditionally: bool,
-    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Owned runtime slot-site plan for one wrapper placeholder occurrence.

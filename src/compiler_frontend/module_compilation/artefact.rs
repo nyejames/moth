@@ -12,7 +12,6 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
@@ -35,7 +34,7 @@ use std::sync::Arc;
 ///
 /// WHAT: a lane container with exactly an executable lane (typed HIR, its paired resource table,
 ///       type environment and borrow facts), a link-facts lane (per-function runtime facts,
-///       warnings, fragments, root activity and docs).
+///       fragments, root activity and docs).
 /// WHY: backends consume one stable module payload shape regardless of project type, with explicit
 ///      ownership keeping HIR/type/borrow/resource pairing obvious at call sites.
 pub(crate) struct Module {
@@ -66,17 +65,15 @@ impl Module {
 
         self.executable
             .remap_string_ids_with_type_environment_cache(remap, type_environment_cache);
-        self.metadata.remap_string_ids(remap);
     }
 }
 
 /// One successful canonical module artefact.
 ///
 /// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
-/// interface published to later graph waves.
-/// WHY: provider publication must point at a complete success value. Keeping both lanes in one
-///      artefact prevents the scheduler from publishing a local draft or dropping the interface
-///      while retaining only backend state.
+///       interface published to later graph waves.
+/// WHY: provider publication must point at a complete success value without retaining diagnostics
+///      in a semantic artefact.
 pub(crate) struct CompiledModuleArtifact {
     pub(crate) module: Module,
     pub(crate) interface: PublicSemanticInterface,
@@ -122,8 +119,7 @@ impl ModuleExecutable {
 
     /// Remap interned string IDs after string-table merging.
     ///
-    /// WHY: HIR, type identity, retained resource provenance and borrow-fact source locations
-    ///      remap exactly once here.
+    /// WHY: HIR, type identity and borrow-fact source locations remap exactly once here.
     pub(crate) fn remap_string_ids_with_type_environment_cache(
         &mut self,
         remap: &StringIdRemap,
@@ -132,7 +128,6 @@ impl ModuleExecutable {
         self.hir.remap_string_ids(remap);
         self.type_environment
             .remap_string_ids_with_cache(remap, type_environment_cache);
-        self.resource_table.remap_string_ids(remap);
         self.borrow_analysis.remap_string_ids(remap);
     }
 }
@@ -149,8 +144,8 @@ pub(crate) struct ModuleLinkFacts {
     /// WHY: provider-backed import discovery mutates the registry during Stage 0; the module
     ///      must carry the effective registry so backends validate and lower against the same
     ///      symbols the frontend resolved, rather than reconstructing a fresh registry that
-    ///      loses provider-created packages. R6A replaces this temporary complete registry with
-    ///      stable binding identities after the canonical provider path exists.
+    ///      loses provider-created packages. The registry is carried whole, not as stable
+    ///      binding identities.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     /// All provider and builder runtime imports available to this module's executable functions.
     /// Entry assembly filters these candidates through per-function reachability before any
@@ -162,15 +157,14 @@ pub(crate) struct ModuleLinkFacts {
 
 /// Non-HIR compiler and builder-facing metadata for one compiled module.
 ///
-/// WHAT: owns the resolved root-local entry path, module warnings, resolved const top-level
-///       fragments, header-derived root activity, and resolved documentation fragments.
+/// WHAT: owns the resolved root-local entry path, resolved const top-level fragments,
+///       header-derived root activity, and resolved documentation fragments.
 /// WHY: these are compiler-metadata lanes, not executable HIR state or link facts. Consolidating
 ///      them into one owned lane on the `Module` payload keeps HIR limited to executable/semantic
 ///      IR and gives backend assembly a single metadata owner.
 pub(crate) struct ModuleCompilerMetadata {
     /// Canonical entry file for the compiled module.
     pub(crate) entry_point: PathBuf,
-    pub(crate) warnings: Vec<CompilerDiagnostic>,
     pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
     pub(crate) root_activity: ModuleRootActivity,
     #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
@@ -181,11 +175,9 @@ pub(crate) struct ModuleCompilerMetadata {
     /// the build system's artefact storage grows behind it.
     pub(crate) materialisation_context: Option<Arc<ModuleMaterialisationContext>>,
 }
-
 impl ModuleCompilerMetadata {
     pub(crate) fn from_hir_lowering(
         entry_point: PathBuf,
-        warnings: Vec<CompilerDiagnostic>,
         lowering_metadata: HirLoweringMetadata,
         const_top_level_fragments: Vec<ResolvedConstFragment>,
         root_activity: ModuleRootActivity,
@@ -193,7 +185,6 @@ impl ModuleCompilerMetadata {
     ) -> Self {
         Self {
             entry_point,
-            warnings,
             doc_fragments: lowering_metadata.doc_fragments,
             const_top_level_fragments,
             root_activity,
@@ -204,23 +195,9 @@ impl ModuleCompilerMetadata {
     /// WHY: every retained field remaps exactly once. Const-fragment spans are global and carry
     ///      no interned identity, values are already owned folded strings, root activity has no
     ///      interned fields, and the entry path is a `PathBuf`.
-    ///
-    /// Warnings may carry `PathId` payloads issued against the module-local path fork, so they
-    /// remap with the materialisation context. Materialisation metadata owns self-contained
-    /// strings and stable semantic identities; this remap covers the fields that retain local
-    /// `PathId` values.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        for warning in &mut self.warnings {
-            warning.remap_path_ids(remap);
-        }
         if let Some(context) = &mut self.materialisation_context {
             Arc::make_mut(context).remap_path_ids(remap);
-        }
-    }
-
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for warning in &mut self.warnings {
-            warning.remap_string_ids(remap);
         }
     }
 }
@@ -270,7 +247,7 @@ pub(crate) struct ResolvedConstFragment {
 ///      the full per-source-file resolution table.
 #[derive(Debug, Clone)]
 // Kept ahead of the backend handoff: external provider/runtime metadata is recorded by the
-// frontend today, while the current HTML path only reads the subset it can lower.
+// frontend, while the current HTML path only reads the subset it can lower.
 pub(crate) struct ModuleExternalImport {
     pub(crate) package_id: ExternalPackageId,
     pub(crate) runtime_asset: Option<RuntimeAssetIdentity>,

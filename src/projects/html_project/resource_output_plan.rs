@@ -13,7 +13,11 @@ use crate::build_system::build::ProjectEntry;
 use crate::build_system::output::{OutputPathIdentity, output_path_identity};
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::compiler_frontend::module_compilation::Module;
@@ -22,9 +26,9 @@ use crate::compiler_frontend::paths::resource_identity::{
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StablePackageIdentity};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::html_project::diagnostics::{
-    resource_output_path_collision_messages, resource_output_path_reserved_messages,
+    artefact_output_path_invalid_diagnostic, capture_html_diagnostic,
+    resource_output_path_collision_diagnostic, resource_output_path_reserved_diagnostic,
 };
 use crate::projects::html_project::page_metadata::{HtmlPageMetadataPlan, MetadataResourceUse};
 use std::collections::HashMap;
@@ -69,8 +73,8 @@ pub(crate) enum ResourceUrlContext {
 }
 
 impl ResourceUrlContext {
-    fn page_document(path: &Path) -> Result<Self, CompilerError> {
-        validate_output_path(path, "page document")?;
+    fn page_document(path: &Path) -> Result<Self, InvalidOutputFolderReason> {
+        output_path_identity(path)?;
         Ok(Self::PageDocument(path.to_path_buf()))
     }
 
@@ -142,7 +146,8 @@ pub(crate) struct HtmlResourceOutputPlan {
     record_by_output: HashMap<OutputPathIdentity, usize>,
     /// Direct origin index for renderer lookups; `record_by_output` owns collision detection.
     record_by_origin: HashMap<StableResourceOriginId, usize>,
-    builder_output_paths: HashMap<OutputPathIdentity, StringId>,
+    /// Backend-owned artifact labels; they are interned only if a diagnostic is emitted.
+    builder_output_paths: HashMap<OutputPathIdentity, &'static str>,
 }
 
 impl HtmlResourceOutputPlan {
@@ -164,14 +169,14 @@ impl HtmlResourceOutputPlan {
         entry: &ProjectEntry<'_>,
         page_output_path: &Path,
         page_metadata_plan: &HtmlPageMetadataPlan,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let context = ResourceUrlContext::page_document(page_output_path)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
+        let context = ResourceUrlContext::page_document(page_output_path).map_err(|reason| {
+            invalid_artefact_output_path(page_output_path, "HTML page", reason, None, string_table)
+        })?;
         self.reserve_builder_output_path(page_output_path, "HTML page", string_table)?;
 
-        let spans = first_authored_spans(entry)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let spans = first_authored_spans(entry)?;
         self.plan_union(entry.resource_union, &spans, context.clone(), string_table)?;
         self.plan_page_metadata_uses(
             &page_metadata_plan.resource_uses,
@@ -189,26 +194,54 @@ impl HtmlResourceOutputPlan {
     pub(crate) fn reserve_builder_output_path(
         &mut self,
         output_path: &Path,
-        artefact_kind: &str,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let identity = validate_output_path(output_path, artefact_kind)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        artefact_kind: &'static str,
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
+        let identity = validated_output_identity(output_path, artefact_kind, None, string_table)?;
+        self.reserve_identity(output_path, artefact_kind, identity, string_table)
+    }
+
+    /// Reserve a compiler-owned runtime module destination.
+    ///
+    /// Runtime module specifiers come from registry constants, so an invalid destination is a
+    /// compiler contract breach rather than an authored path diagnostic.
+    pub(crate) fn reserve_compiler_output_path(
+        &mut self,
+        output_path: &Path,
+        artefact_kind: &'static str,
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
+        let identity = output_path_identity(output_path)
+            .map_err(|reason| invalid_output_path_internal(output_path, artefact_kind, reason))?;
+        self.reserve_identity(output_path, artefact_kind, identity, string_table)
+    }
+
+    fn reserve_identity(
+        &mut self,
+        output_path: &Path,
+        artefact_kind: &'static str,
+        identity: OutputPathIdentity,
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
         if let Some(&record_index) = self.record_by_output.get(&identity) {
             let record = &self.records[record_index];
-            return Err(resource_output_path_reserved_messages(
-                output_path,
-                &display_origin(&record.origin),
-                artefact_kind,
-                record.first_authored_span.clone(),
-                string_table,
+            return Err(capture_html_diagnostic(
+                resource_output_path_reserved_diagnostic(
+                    output_path,
+                    &display_origin(&record.origin),
+                    artefact_kind,
+                    record.first_authored_span.clone(),
+                    string_table,
+                ),
+                string_table.strings(),
+                None,
+                || None,
             ));
         }
 
-        let artefact_kind_id = string_table.intern(artefact_kind);
         self.builder_output_paths
             .entry(identity)
-            .or_insert(artefact_kind_id);
+            .or_insert(artefact_kind);
         Ok(())
     }
 
@@ -219,12 +252,10 @@ impl HtmlResourceOutputPlan {
         origin: StableResourceOriginId,
         first_authored_span: Option<ResourceDiagnosticSite>,
         context: ResourceUrlContext,
-        string_table: &mut StringTable,
+        string_table: &mut DiagnosticStringBuilder,
         use_kind: ResourceUseKind,
-    ) -> Result<(), CompilerMessages> {
-        let output_path = self
-            .output_path_for_origin(&origin)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    ) -> Result<(), PreparedFailure> {
+        let output_path = self.output_path_for_origin(&origin);
         let observed_use = ObservedResourceUse {
             context,
             kind: use_kind,
@@ -243,8 +274,8 @@ impl HtmlResourceOutputPlan {
         resource_uses: &[MetadataResourceUse],
         context: ResourceUrlContext,
         source_domain: Option<&StablePackageIdentity>,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
         for resource_use in resource_uses {
             self.plan_origin(
                 resource_use.origin.clone(),
@@ -266,11 +297,9 @@ impl HtmlResourceOutputPlan {
         &mut self,
         origin: StableResourceOriginId,
         source_span: Option<ResourceDiagnosticSite>,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let output_path = self
-            .output_path_for_origin(&origin)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
+        let output_path = self.output_path_for_origin(&origin);
 
         self.plan_one_origin(origin, output_path, source_span, None, string_table)
     }
@@ -295,19 +324,20 @@ impl HtmlResourceOutputPlan {
         union: &ResourceOriginUnion,
         spans: &HashMap<StableResourceOriginId, OriginAuthoredSpans>,
         context: ResourceUrlContext,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
         for origin in union.iter() {
             let Some(authored_spans) = spans.get(origin) else {
-                let error = CompilerError::compiler_error(format!(
-                    "HTML resource origin {origin:?} has no authored span in its linked module resource tables"
-                ));
-                return Err(CompilerMessages::from_error_ref(error, string_table));
+                let error = InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "HTML resource origin {origin:?} has no authored span in its linked module resource tables"
+                    ),
+                );
+                return Err(error.into());
             };
 
-            let output_path = self
-                .output_path_for_origin(origin)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let output_path = self.output_path_for_origin(origin);
 
             for authored_span in &authored_spans.executable {
                 self.plan_one_origin(
@@ -345,10 +375,13 @@ impl HtmlResourceOutputPlan {
                         string_table,
                     )?;
                 } else {
-                    let error = CompilerError::compiler_error(format!(
-                        "HTML resource origin {origin:?} has no authored span in its linked module resource tables"
-                    ));
-                    return Err(CompilerMessages::from_error_ref(error, string_table));
+                    let error = InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "HTML resource origin {origin:?} has no authored span in its linked module resource tables"
+                        ),
+                    );
+                    return Err(error.into());
                 }
             }
         }
@@ -362,20 +395,42 @@ impl HtmlResourceOutputPlan {
         output_path: PathBuf,
         first_authored_span: Option<ResourceDiagnosticSite>,
         observed_use: Option<ObservedResourceUse>,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let output_identity = validate_output_path(&output_path, "resource")
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
+        let output_identity = match output_path_identity(&output_path) {
+            Ok(identity) => identity,
+            Err(reason) if output_path_is_authored(&origin) => {
+                return Err(invalid_artefact_output_path(
+                    &output_path,
+                    "HTML resource",
+                    reason,
+                    first_authored_span.clone(),
+                    string_table,
+                ));
+            }
+            Err(reason) => {
+                return Err(invalid_output_path_internal(
+                    &output_path,
+                    "resource",
+                    reason,
+                ));
+            }
+        };
         if let Some(&record_index) = self.record_by_output.get(&output_identity) {
             let record = &mut self.records[record_index];
             if record.origin != origin {
-                return Err(resource_output_path_collision_messages(
-                    &output_path,
-                    &display_origin(&record.origin),
-                    record.first_authored_span.clone(),
-                    &display_origin(&origin),
-                    first_authored_span.clone(),
-                    string_table,
+                return Err(capture_html_diagnostic(
+                    resource_output_path_collision_diagnostic(
+                        &output_path,
+                        &display_origin(&record.origin),
+                        record.first_authored_span.clone(),
+                        &display_origin(&origin),
+                        first_authored_span.clone(),
+                        string_table,
+                    ),
+                    string_table.strings(),
+                    None,
+                    || None,
                 ));
             }
 
@@ -405,14 +460,18 @@ impl HtmlResourceOutputPlan {
             return Ok(());
         }
 
-        if let Some(&artefact_kind_id) = self.builder_output_paths.get(&output_identity) {
-            let artefact_kind = string_table.resolve(artefact_kind_id).to_owned();
-            return Err(resource_output_path_reserved_messages(
-                &output_path,
-                &display_origin(&origin),
-                &artefact_kind,
-                first_authored_span.clone(),
-                string_table,
+        if let Some(&artefact_kind) = self.builder_output_paths.get(&output_identity) {
+            return Err(capture_html_diagnostic(
+                resource_output_path_reserved_diagnostic(
+                    &output_path,
+                    &display_origin(&origin),
+                    artefact_kind,
+                    first_authored_span.clone(),
+                    string_table,
+                ),
+                string_table.strings(),
+                None,
+                || None,
             ));
         }
 
@@ -440,11 +499,8 @@ impl HtmlResourceOutputPlan {
         Ok(())
     }
 
-    fn output_path_for_origin(
-        &self,
-        origin: &StableResourceOriginId,
-    ) -> Result<PathBuf, CompilerError> {
-        let output_path = match origin.owner() {
+    fn output_path_for_origin(&self, origin: &StableResourceOriginId) -> PathBuf {
+        match origin.owner() {
             StableResourceOwnerId::Module(module_origin) => {
                 let package = module_origin.package();
                 let package_relative_path = package_relative_path(
@@ -465,16 +521,13 @@ impl HtmlResourceOutputPlan {
                 // is deliberately not converted into a guessed package-relative filesystem path.
                 PathBuf::from(origin.logical_path().as_str())
             }
-        };
-
-        validate_output_path(&output_path, "resource")?;
-        Ok(output_path)
+        }
     }
 }
 
 fn first_authored_spans(
     entry: &ProjectEntry<'_>,
-) -> Result<HashMap<StableResourceOriginId, OriginAuthoredSpans>, CompilerError> {
+) -> Result<HashMap<StableResourceOriginId, OriginAuthoredSpans>, InfrastructureFailure> {
     let mut spans = HashMap::new();
     let mut module_views = Vec::with_capacity(1 + entry.linked_modules.len());
     module_views.push((entry.module, entry.source_domain, entry.reachability));
@@ -515,7 +568,7 @@ fn record_reachable_resource_spans(
     module: &Module,
     source_domain: Option<&StablePackageIdentity>,
     reachability: &HirReachability,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for resource_use in &reachability.reachable_resource_uses {
         let resource = module
             .executable
@@ -590,16 +643,65 @@ fn package_origin_tag(origin: PackageOrigin) -> &'static str {
     }
 }
 
-fn validate_output_path(
+fn validated_output_identity(
     output_path: &Path,
     artefact_kind: &str,
-) -> Result<OutputPathIdentity, CompilerError> {
+    span: Option<ResourceDiagnosticSite>,
+    string_table: &mut DiagnosticStringBuilder,
+) -> Result<OutputPathIdentity, PreparedFailure> {
     output_path_identity(output_path).map_err(|reason| {
-        CompilerError::compiler_error(format!(
+        invalid_artefact_output_path(output_path, artefact_kind, reason, span, string_table)
+    })
+}
+
+/// Only authored module resources carry user-chosen path components. Provider-declared paths and
+/// builder or core package paths are contract breaches, so they stay infrastructure failures.
+fn output_path_is_authored(origin: &StableResourceOriginId) -> bool {
+    match origin.owner() {
+        StableResourceOwnerId::Module(module_origin) => matches!(
+            module_origin.package().origin(),
+            PackageOrigin::ProjectLocal | PackageOrigin::Dependency
+        ),
+        StableResourceOwnerId::Provider(_) => false,
+    }
+}
+
+fn invalid_artefact_output_path(
+    output_path: &Path,
+    artefact_kind: &str,
+    reason: InvalidOutputFolderReason,
+    span: Option<ResourceDiagnosticSite>,
+    string_table: &mut DiagnosticStringBuilder,
+) -> PreparedFailure {
+    capture_html_diagnostic(
+        artefact_output_path_invalid_diagnostic(
+            output_path,
+            artefact_kind,
+            reason,
+            span,
+            string_table,
+        ),
+        string_table.strings(),
+        None,
+        || None,
+    )
+}
+
+/// Compiler-owned and provider-declared destinations never carry authored path components, so an
+/// invalid one is a contract breach rather than a user diagnostic.
+fn invalid_output_path_internal(
+    output_path: &Path,
+    artefact_kind: &str,
+    reason: InvalidOutputFolderReason,
+) -> PreparedFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::ProjectBuildAssembly,
+        format!(
             "HTML {artefact_kind} output path '{}' is invalid: {reason:?}",
             output_path.display()
-        ))
-    })
+        ),
+    )
+    .into()
 }
 
 pub(crate) fn display_origin(origin: &StableResourceOriginId) -> String {

@@ -1,0 +1,786 @@
+//! Fixed-width fact codecs for compact diagnostic records.
+//!
+//! WHAT: each fact occupies one or more 32-bit words in a record's fact area. A codec pairs the value a
+//! producer supplies (`Draft`) with the value a reader gets back (`Durable`).
+//! WHY: records stay 32 bytes. Each codec owns its sentinels and bit layout, so a reader only decodes words
+//! that the same codec wrote, and every family row checks its layout against the words its constructor writes.
+
+use super::schema::FamilyRow;
+use crate::compiler_frontend::compiler_messages::DiagnosticPlace;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
+use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use std::cell::Cell;
+use std::marker::PhantomData;
+
+/// Words in a record's fact area.
+pub(super) const FACT_WORDS: usize = 4;
+
+/// A value does not fit the words its codec writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FactCapacityError;
+
+/// Encodes one fact type into record words and decodes it back.
+pub(crate) trait FactCodec {
+    /// The value a producer supplies.
+    type Draft;
+    /// The value a reader gets back.
+    type Durable;
+    /// Words the fact occupies.
+    const WORDS: usize;
+    /// Whether all fact words hold raw type ids that compaction rewrites into type display words.
+    const PENDING: bool = false;
+    /// Relative fact words that every value of this codec leaves as raw type ids.
+    const REQUIRED_PENDING_MASK: u8 = if Self::PENDING {
+        ((1u16 << Self::WORDS) - 1) as u8
+    } else {
+        0
+    };
+    /// Relative fact words that some value of this codec may leave as raw type ids.
+    const PENDING_MASK: u8 = Self::REQUIRED_PENDING_MASK;
+    /// The exact relative fact words holding raw type ids in this draft value.
+    fn pending_mask(_draft: &Self::Draft) -> u8 {
+        Self::REQUIRED_PENDING_MASK
+    }
+
+    fn encode(draft: &Self::Draft, words: &mut [u32]) -> Result<(), FactCapacityError>;
+    fn decode(words: &[u32]) -> Option<Self::Durable>;
+
+    /// Rewrites the identity words this codec stores into another string table or path interner.
+    /// A codec with no identity words leaves them unchanged.
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError>;
+
+    /// Appends any path IDs encoded in this fact to `paths`.
+    fn append_path_ids(_words: &[u32], _paths: &mut Vec<PathId>) {}
+}
+
+/// The identity remap one draft's words are rewritten through. A remap owns one kind of word and leaves the
+/// other kind alone: a string remap never touches path words, and a path remap never touches string words.
+#[derive(Clone, Copy)]
+pub(crate) enum IdRemap<'a> {
+    Strings(&'a StringIdRemap),
+    Paths(&'a PathIdRemap),
+}
+
+impl IdRemap<'_> {
+    /// Rewrites one string word.
+    pub(super) fn rewrite_string(self, word: &mut u32) -> Result<(), FactCapacityError> {
+        if let Self::Strings(remap) = self {
+            *word = string_word(remap.get(StringId::from_index(*word)))?;
+        }
+        Ok(())
+    }
+
+    /// Rewrites one path word.
+    pub(super) fn rewrite_path(self, word: &mut u32) -> Result<(), FactCapacityError> {
+        if let Self::Paths(remap) = self {
+            let old = PathId::try_from_index(*word as usize)
+                .expect("a stored path word names an interned path");
+            *word = path_word(remap.get(old))?;
+        }
+        Ok(())
+    }
+
+    /// Rewrites the string payload of a token's two words.
+    pub(super) fn rewrite_token(self, words: &mut [u32]) {
+        if let Self::Strings(remap) = self {
+            let mut token = DiagnosticToken::from_raw_words([words[0], words[1]])
+                .expect("a stored token decodes to a token");
+            token.remap_string_ids(remap);
+            words.copy_from_slice(&token.raw_words());
+        }
+    }
+
+    /// Rewrites the name or path a place word holds. Unknown and absent places hold no identity.
+    pub(super) fn rewrite_place(self, word: &mut u32) -> Result<(), FactCapacityError> {
+        let value = *word & PLACE_VALUE_MASK;
+        match (*word >> PLACE_TAG_SHIFT, self) {
+            (PLACE_LOCAL_TAG, Self::Strings(remap)) => {
+                let name = remap.get(StringId::from_index(value));
+                *word = place_word(PLACE_LOCAL_TAG, name.index() as usize)?;
+            }
+            (PLACE_PATH_TAG, Self::Paths(remap)) => {
+                let old = PathId::try_from_index(value as usize)
+                    .expect("a stored place path names an interned path");
+                *word = place_word(PLACE_PATH_TAG, remap.get(old).index())?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+/// A unit enum stored as one word. Codes are small non-zero integers chosen by the enum's `unit_code!` table.
+pub(super) trait UnitCode: Sized + Copy {
+    fn code(self) -> u32;
+    fn from_code(code: u32) -> Option<Self>;
+}
+
+/// Declares a unit enum's word codes, or attaches them to an existing enum.
+///
+/// `enum Name { Variant = code, .. }` declares the enum and its codes. `impl Name { Variant = code, .. }`
+/// attaches codes to an enum declared elsewhere. Both forms must list every variant.
+macro_rules! unit_code {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident {
+        $($variant:ident = $code:literal),+ $(,)?
+    }) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        $vis enum $name { $($variant),+ }
+
+        $crate::compiler_frontend::compiler_messages::diagnostics::facts::unit_code! {
+            impl $name { $($variant = $code),+ }
+        }
+    };
+    (impl $name:ident { $($variant:ident = $code:literal),+ $(,)? }) => {
+        impl $crate::compiler_frontend::compiler_messages::diagnostics::facts::UnitCode for $name {
+            fn code(self) -> u32 {
+                match self {
+                    $(Self::$variant => $code,)+
+                }
+            }
+
+            fn from_code(code: u32) -> Option<Self> {
+                match code {
+                    $($code => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+pub(super) use unit_code;
+
+/// Places pack a two-bit tag above a 30-bit value. Tag 0 with value 0 is the unknown place.
+const PLACE_TAG_SHIFT: u32 = 30;
+const PLACE_VALUE_MASK: u32 = (1 << PLACE_TAG_SHIFT) - 1;
+const PLACE_LOCAL_TAG: u32 = 1;
+const PLACE_PATH_TAG: u32 = 2;
+
+/// Encodes a string id. `u32::MAX` is the absent sentinel of `OptStringFact`, so it is never a valid id.
+pub(super) fn string_word(id: StringId) -> Result<u32, FactCapacityError> {
+    let index = id.index();
+    if index == u32::MAX {
+        return Err(FactCapacityError);
+    }
+    Ok(index)
+}
+
+/// Encodes a type display as its one-based index, so zero stays free for "no type".
+pub(super) fn type_display_word(id: TypeDisplayId) -> Result<u32, FactCapacityError> {
+    u32::try_from(id.index() + 1).map_err(|_| FactCapacityError)
+}
+
+/// Decodes a type display word. Zero means no type.
+pub(super) fn type_display_from_word(word: u32) -> Option<TypeDisplayId> {
+    let index = word.checked_sub(1)?;
+    TypeDisplayId::from_index(index as usize).ok()
+}
+
+/// The pending word of an absent type. `capture_types` rewrites it to `NO_TYPE_WORD` without calling `rewrite`.
+pub(super) const ABSENT_TYPE_WORD: u32 = u32::MAX;
+/// The captured word for "no type". Display words are one-based, so zero stays free.
+pub(super) const NO_TYPE_WORD: u32 = 0;
+
+/// Encodes a raw `TypeId` as a pending word. `ABSENT_TYPE_WORD` marks absence, so that one id is refused.
+pub(super) fn pending_type_word(id: TypeId) -> Result<u32, FactCapacityError> {
+    if id.0 == ABSENT_TYPE_WORD {
+        return Err(FactCapacityError);
+    }
+    Ok(id.0)
+}
+
+/// Encodes a path id as its zero-based index. `u32::MAX` is never a valid index, so it stays free as a sentinel.
+pub(super) fn path_word(id: PathId) -> Result<u32, FactCapacityError> {
+    let index = u32::try_from(id.index()).map_err(|_| FactCapacityError)?;
+    if index == u32::MAX {
+        return Err(FactCapacityError);
+    }
+    Ok(index)
+}
+
+fn place_word(tag: u32, value: usize) -> Result<u32, FactCapacityError> {
+    let value = u32::try_from(value).map_err(|_| FactCapacityError)?;
+    if value > PLACE_VALUE_MASK {
+        return Err(FactCapacityError);
+    }
+    Ok((tag << PLACE_TAG_SHIFT) | value)
+}
+
+/// A token that is always present.
+pub(crate) struct TokenFact;
+
+impl FactCodec for TokenFact {
+    type Draft = DiagnosticToken;
+    type Durable = DiagnosticToken;
+    const WORDS: usize = 2;
+
+    fn encode(draft: &DiagnosticToken, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words.copy_from_slice(&draft.raw_words());
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<DiagnosticToken> {
+        DiagnosticToken::from_raw_words([words[0], words[1]])
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_token(words);
+        Ok(())
+    }
+}
+
+/// Two words that encode `Option::None` as `[u32::MAX, 0]`. No token encodes to that pair.
+const ABSENT_TOKEN_WORDS: [u32; 2] = [u32::MAX, 0];
+
+/// A token that may be absent.
+pub(crate) struct OptTokenFact;
+
+impl FactCodec for OptTokenFact {
+    type Draft = Option<DiagnosticToken>;
+    type Durable = Option<DiagnosticToken>;
+    const WORDS: usize = 2;
+
+    fn encode(draft: &Option<DiagnosticToken>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        match draft {
+            Some(token) => words.copy_from_slice(&token.raw_words()),
+            None => words.copy_from_slice(&ABSENT_TOKEN_WORDS),
+        }
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<DiagnosticToken>> {
+        if words[0] == ABSENT_TOKEN_WORDS[0] && words[1] == ABSENT_TOKEN_WORDS[1] {
+            return Some(None);
+        }
+        DiagnosticToken::from_raw_words([words[0], words[1]]).map(Some)
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        if *words == ABSENT_TOKEN_WORDS {
+            return Ok(());
+        }
+        TokenFact::remap_ids(words, remap)
+    }
+}
+
+/// A string id that is always present.
+pub(crate) struct StringFact;
+
+impl FactCodec for StringFact {
+    type Draft = StringId;
+    type Durable = StringId;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &StringId, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = string_word(*draft)?;
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<StringId> {
+        (words[0] != u32::MAX).then(|| StringId::from_index(words[0]))
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_string(&mut words[0])
+    }
+}
+
+/// A string id that may be absent. `u32::MAX` encodes absence.
+pub(crate) struct OptStringFact;
+
+impl FactCodec for OptStringFact {
+    type Draft = Option<StringId>;
+    type Durable = Option<StringId>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<StringId>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(id) => string_word(*id)?,
+            None => u32::MAX,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<StringId>> {
+        Some((words[0] != u32::MAX).then(|| StringId::from_index(words[0])))
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        if words[0] == u32::MAX {
+            return Ok(());
+        }
+        remap.rewrite_string(&mut words[0])
+    }
+}
+
+/// An optional interned path. `u32::MAX` encodes absence.
+pub(crate) struct OptPathFact;
+
+impl FactCodec for OptPathFact {
+    type Draft = Option<PathId>;
+    type Durable = Option<PathId>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<PathId>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(id) => path_word(*id)?,
+            None => u32::MAX,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<PathId>> {
+        if words[0] == u32::MAX {
+            return Some(None);
+        }
+        PathId::try_from_index(words[0] as usize).map(Some)
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        if words[0] == u32::MAX {
+            return Ok(());
+        }
+        remap.rewrite_path(&mut words[0])
+    }
+
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        if words[0] != u32::MAX {
+            paths.push(
+                PathId::try_from_index(words[0] as usize)
+                    .expect("a draft path fact always names an interned path"),
+            );
+        }
+    }
+}
+
+/// An interned path. Zero-based, so `u32::MAX` never decodes.
+pub(crate) struct PathFact;
+
+impl FactCodec for PathFact {
+    type Draft = PathId;
+    type Durable = PathId;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &PathId, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = path_word(*draft)?;
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<PathId> {
+        PathId::try_from_index(words[0] as usize)
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_path(&mut words[0])
+    }
+
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        paths.push(
+            PathId::try_from_index(words[0] as usize)
+                .expect("a draft path fact always names an interned path"),
+        );
+    }
+}
+
+/// A count stored as one word.
+pub(crate) struct CountFact;
+
+impl FactCodec for CountFact {
+    type Draft = usize;
+    type Durable = usize;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &usize, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = u32::try_from(*draft).map_err(|_| FactCapacityError)?;
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<usize> {
+        Some(words[0] as usize)
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// A character as one word. Decoding rejects words that are not Unicode scalar values.
+pub(crate) struct CharFact;
+
+impl FactCodec for CharFact {
+    type Draft = char;
+    type Durable = char;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &char, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = u32::from(*draft);
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<char> {
+        char::from_u32(words[0])
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// An optional character as one word. `u32::MAX` encodes absence and is not a Unicode scalar.
+pub(crate) struct OptCharFact;
+
+impl FactCodec for OptCharFact {
+    type Draft = Option<char>;
+    type Durable = Option<char>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<char>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = draft.map_or(u32::MAX, u32::from);
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<char>> {
+        if words[0] == u32::MAX {
+            Some(None)
+        } else {
+            char::from_u32(words[0]).map(Some)
+        }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// An optional count. `u32::MAX` marks absence, so a present count must stay below it.
+pub(crate) struct OptCountFact;
+
+impl FactCodec for OptCountFact {
+    type Draft = Option<usize>;
+    type Durable = Option<usize>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<usize>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(count) => {
+                let word = u32::try_from(*count).map_err(|_| FactCapacityError)?;
+                if word == u32::MAX {
+                    return Err(FactCapacityError);
+                }
+                word
+            }
+            None => u32::MAX,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<usize>> {
+        match words[0] {
+            u32::MAX => Some(None),
+            word => Some(Some(word as usize)),
+        }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// A type. The draft holds a raw `TypeId`, which compaction rewrites into a type display word.
+pub(crate) struct TypeFact;
+
+impl FactCodec for TypeFact {
+    type Draft = TypeId;
+    type Durable = TypeDisplayId;
+    const WORDS: usize = 1;
+    const PENDING: bool = true;
+
+    fn encode(draft: &TypeId, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = pending_type_word(*draft)?;
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<TypeDisplayId> {
+        type_display_from_word(words[0])
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// An optional type. Absence is `ABSENT_TYPE_WORD`, which `capture_types` captures as `NO_TYPE_WORD`.
+pub(crate) struct OptTypeFact;
+
+impl FactCodec for OptTypeFact {
+    type Draft = Option<TypeId>;
+    type Durable = Option<TypeDisplayId>;
+    const WORDS: usize = 1;
+    const PENDING: bool = true;
+
+    fn encode(draft: &Option<TypeId>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(id) => pending_type_word(*id)?,
+            None => ABSENT_TYPE_WORD,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<TypeDisplayId>> {
+        match words[0] {
+            NO_TYPE_WORD => Some(None),
+            word => type_display_from_word(word).map(Some),
+        }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// A place as the store keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoredPlace {
+    Unknown,
+    Local(StringId),
+    Path(PathId),
+}
+
+impl StoredPlace {
+    /// The draft place this stored place renders as.
+    pub(crate) fn diagnostic_place(self) -> DiagnosticPlace {
+        match self {
+            Self::Unknown => DiagnosticPlace::Unknown,
+            Self::Local(name) => DiagnosticPlace::Local(name),
+            Self::Path(path) => DiagnosticPlace::Path(path),
+        }
+    }
+}
+
+/// A place: unknown, a local name, or a path.
+pub(crate) struct PlaceFact;
+
+impl FactCodec for PlaceFact {
+    type Draft = DiagnosticPlace;
+    type Durable = StoredPlace;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &DiagnosticPlace, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            DiagnosticPlace::Unknown => 0,
+            DiagnosticPlace::Local(name) => place_word(PLACE_LOCAL_TAG, name.index() as usize)?,
+            DiagnosticPlace::Path(path) => place_word(PLACE_PATH_TAG, path.index())?,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<StoredPlace> {
+        let tag = words[0] >> PLACE_TAG_SHIFT;
+        let value = words[0] & PLACE_VALUE_MASK;
+        match (tag, value) {
+            (0, 0) => Some(StoredPlace::Unknown),
+            (0, _) => None,
+            (PLACE_LOCAL_TAG, _) => Some(StoredPlace::Local(StringId::from_index(value))),
+            (PLACE_PATH_TAG, _) => PathId::try_from_index(value as usize).map(StoredPlace::Path),
+            _ => None,
+        }
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_place(&mut words[0])
+    }
+
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        let word = words[0];
+        if word >> PLACE_TAG_SHIFT == PLACE_PATH_TAG {
+            let value = word & PLACE_VALUE_MASK;
+            paths.push(
+                PathId::try_from_index(value as usize)
+                    .expect("a draft path place always names an interned path"),
+            );
+        }
+    }
+}
+/// The tag-0 word with value 1; `PlaceFact` emits only tag-0 value 0 or tag-1/tag-2 words.
+pub(super) const ABSENT_PLACE_WORD: u32 = 1;
+
+/// A place that may be absent. Tag 0 with nonzero value is not a valid `PlaceFact` encoding.
+pub(crate) struct OptPlaceFact;
+
+impl FactCodec for OptPlaceFact {
+    type Draft = Option<DiagnosticPlace>;
+    type Durable = Option<StoredPlace>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<DiagnosticPlace>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        match draft {
+            Some(place) => PlaceFact::encode(place, words),
+            None => {
+                words[0] = ABSENT_PLACE_WORD;
+                Ok(())
+            }
+        }
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<StoredPlace>> {
+        if words[0] == ABSENT_PLACE_WORD {
+            Some(None)
+        } else {
+            PlaceFact::decode(words).map(Some)
+        }
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        // The absent word is tag 0 with value 1, which names no place.
+        remap.rewrite_place(&mut words[0])
+    }
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        PlaceFact::append_path_ids(words, paths);
+    }
+}
+
+/// A unit enum stored as its one-word code.
+pub(crate) struct UnitFact<T>(PhantomData<T>);
+
+impl<T: UnitCode> FactCodec for UnitFact<T> {
+    type Draft = T;
+    type Durable = T;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &T, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = draft.code();
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<T> {
+        T::from_code(words[0])
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+/// An optional unit enum. Zero is absent; `unit_code!` reserves it for absence.
+pub(crate) struct OptUnitFact<T>(PhantomData<T>);
+
+impl<T: UnitCode> FactCodec for OptUnitFact<T> {
+    type Draft = Option<T>;
+    type Durable = Option<T>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<T>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(code) => code.code(),
+            None => 0,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<T>> {
+        if words[0] == 0 {
+            Some(None)
+        } else {
+            T::from_code(words[0]).map(Some)
+        }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+/// Writes facts in declaration order, records each draft's exact pending type words, and validates
+/// them against the family's required and possible masks.
+pub(super) struct FactCursor {
+    words: [u32; FACT_WORDS],
+    used: usize,
+    pending: u8,
+}
+
+impl FactCursor {
+    pub(super) fn new() -> Self {
+        Self {
+            words: [0; FACT_WORDS],
+            used: 0,
+            pending: 0,
+        }
+    }
+
+    pub(super) fn push<C: FactCodec>(&mut self, draft: &C::Draft) -> Result<(), FactCapacityError> {
+        let end = self.used + C::WORDS;
+        assert!(
+            end <= FACT_WORDS,
+            "family fact layout exceeds the record's fact area"
+        );
+        C::encode(draft, &mut self.words[self.used..end])?;
+        let pending = C::pending_mask(draft);
+        assert_eq!(
+            pending & C::REQUIRED_PENDING_MASK,
+            C::REQUIRED_PENDING_MASK,
+            "every required pending type word is present"
+        );
+        assert_eq!(
+            pending & !C::PENDING_MASK,
+            0,
+            "a fact value's pending words are possible for its codec"
+        );
+        self.pending |= pending << self.used;
+        self.used = end;
+        Ok(())
+    }
+
+    /// Checks the written facts against the row's required and possible pending type words.
+    pub(super) fn finish_for(self, row: &FamilyRow) -> ([u32; FACT_WORDS], u8) {
+        assert_eq!(
+            self.used,
+            row.word_count(),
+            "a family constructor writes every fact in its family layout"
+        );
+        assert_eq!(
+            self.pending & row.required_pending_mask(),
+            row.required_pending_mask(),
+            "every required pending type word is present"
+        );
+        assert_eq!(
+            self.pending & !row.pending_mask(),
+            0,
+            "pending type words are possible in the family layout"
+        );
+        (self.words, self.pending)
+    }
+}
+
+/// Reads facts from a record's fact area in declaration order.
+pub(super) struct FactReader<'a> {
+    words: &'a [u32; FACT_WORDS],
+    used: Cell<usize>,
+}
+
+impl<'a> FactReader<'a> {
+    pub(super) fn new(words: &'a [u32; FACT_WORDS]) -> Self {
+        Self {
+            words,
+            used: Cell::new(0),
+        }
+    }
+
+    pub(super) fn read<C: FactCodec>(&self) -> C::Durable {
+        let start = self.used.get();
+        let end = start + C::WORDS;
+        self.used.set(end);
+        C::decode(&self.words[start..end])
+            .expect("fact words are written only by the codec that reads them")
+    }
+
+    /// Checks that no word was left unread. Unread words are always zero, because only codecs write words.
+    pub(super) fn finish(self) {
+        let used = self.used.get();
+        assert!(
+            self.words[used..].iter().all(|word| *word == 0),
+            "unread fact words stay zero"
+        );
+    }
+}

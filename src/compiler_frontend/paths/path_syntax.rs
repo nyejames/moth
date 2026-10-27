@@ -10,7 +10,8 @@
 //! identity once at its lifecycle boundary; token-aware lookup checks that identity before
 //! accepting a same-index handle from another source.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
@@ -63,32 +64,6 @@ impl PathSyntaxId {
     // Internal spelling retained at call sites that construct IDs while iterating a Vec.
     fn from_index(index: usize) -> Option<Self> {
         Self::try_from_index(index)
-    }
-}
-
-/// Input accepted by the compatibility `push` API.
-///
-/// New source-owned producers should use [`PathSyntaxTable::try_push_for_source`] so the owner
-/// boundary remains explicit. Accepting a global span here keeps existing test and retained-body
-/// fixtures source-compatible while the stored row is always local.
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PathSyntaxLocation {
-    Local(LocalSpan),
-    Global(SourceSpan),
-}
-
-#[cfg(test)]
-impl From<LocalSpan> for PathSyntaxLocation {
-    fn from(span: LocalSpan) -> Self {
-        Self::Local(span)
-    }
-}
-
-#[cfg(test)]
-impl From<SourceSpan> for PathSyntaxLocation {
-    fn from(span: SourceSpan) -> Self {
-        Self::Global(span)
     }
 }
 
@@ -194,20 +169,25 @@ impl PathSyntaxTable {
 
     /// Read one path row through a fallible boundary.
     ///
-    /// Absent, out-of-range, or foreign handles are retained-state failures and therefore remain
-    /// on the infrastructure lane rather than becoming source diagnostics.
-    pub fn try_path(&self, id: PathSyntaxId) -> Result<&PathSyntax, CompilerError> {
+    /// Out-of-range handles are retained-state failures and therefore remain on the
+    /// infrastructure lane rather than becoming source diagnostics. The absent marker is a
+    /// compiler bug because `try_from_raw` and `try_from_index` never issue it.
+    pub fn try_path(&self, id: PathSyntaxId) -> Result<&PathSyntax, InfrastructureFailure> {
         let Some(index) = id.index() else {
-            return Err(CompilerError::compiler_error(
-                "path syntax table received the absent PathSyntaxId marker",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
+                "path syntax table received PathSyntaxId::NONE; try_from_raw and try_from_index never issue raw 0"
+            );
         };
         self.paths.get(index).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "path syntax handle {} is outside a table of {} rows",
-                id.raw(),
-                self.paths.len()
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "path syntax handle {} is outside a table of {} rows",
+                    id.raw(),
+                    self.paths.len()
+                ),
+            )
         })
     }
 
@@ -219,45 +199,23 @@ impl PathSyntaxTable {
         &self,
         path_id: PathSyntaxId,
         token_span: SourceSpan,
-    ) -> Result<&PathSyntax, CompilerError> {
+    ) -> Result<&PathSyntax, InfrastructureFailure> {
         let row = self.try_path(path_id)?;
         if let Some(owner_source) = self.owner_source
             && owner_source != token_span.source()
         {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
                 "path syntax row does not belong to the consumed path token",
-            ));
+            );
         }
         if row.span != token_span.local() {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
                 "path syntax row does not belong to the consumed path token",
-            ));
+            );
         }
         Ok(row)
-    }
-    /// Append one row through the compatibility location adapter.
-    ///
-    /// Source producers use the checked methods below. This method remains for existing
-    /// test/retained-body construction and is intentionally not used by authored lexing.
-    #[cfg(test)]
-    pub fn push(&mut self, root: PathId, location: impl Into<PathSyntaxLocation>) -> PathSyntaxId {
-        self.try_push(root, location)
-            .expect("path syntax row construction must be checked at its owning boundary")
-    }
-    /// Checked append of one row. A global input establishes the table owner on first use.
-    #[cfg(test)]
-    pub fn try_push(
-        &mut self,
-        root: PathId,
-        location: impl Into<PathSyntaxLocation>,
-    ) -> Result<PathSyntaxId, PathSyntaxError> {
-        let location = location.into();
-        match location {
-            PathSyntaxLocation::Local(span) => self.try_push_local(root, span),
-            PathSyntaxLocation::Global(span) => {
-                self.try_push_for_source(root, span.source(), span.local())
-            }
-        }
     }
 
     /// Checked append for a table whose source owner is already known.
@@ -313,14 +271,17 @@ impl PathSyntaxTable {
     }
 
     /// Validate the dense table independently of any consuming token stream.
-    pub(crate) fn validate_structure(&self) -> Result<(), CompilerError> {
-        if self.paths.len() >= u32::MAX as usize {
-            return Err(CompilerError::compiler_error(
-                "path syntax table contains more rows than its checked handle domain",
-            ));
+    pub(crate) fn validate_structure(&self) -> Result<(), InfrastructureFailure> {
+        // try_from_index issues indices below u32::MAX, so exactly u32::MAX rows is legal.
+        if self.paths.len() > u32::MAX as usize {
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
+                "path syntax table row count exceeds the handle domain; try_push_local refuses PathSyntaxId::try_from_index overflow"
+            );
         }
         if !self.paths.is_empty() && self.owner_source.is_none() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
                 "path syntax table has rows but no source owner",
             ));
         }
@@ -331,12 +292,13 @@ impl PathSyntaxTable {
     pub(crate) fn validate_file_owned_locations(
         &self,
         expected_source: SourceId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.validate_structure()?;
         if let Some(owner_source) = self.owner_source
             && owner_source != expected_source
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
                 "path table does not use the prepared file's source identity",
             ));
         }

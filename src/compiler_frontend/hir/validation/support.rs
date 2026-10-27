@@ -6,14 +6,13 @@
 //! through the HIR side table whenever possible.
 
 use super::HirValidator;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, LocalId, RegionId, StructId,
 };
-use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashSet;
 
@@ -22,80 +21,59 @@ impl<'a> HirValidator<'a> {
     //  Resolution Helpers
     // -------------------------
 
-    pub(super) fn require_block_id(
-        &self,
-        block_id: BlockId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    pub(super) fn require_block_id(&self, block_id: BlockId) -> Result<(), InfrastructureFailure> {
         if self.block_ids.contains(&block_id) {
             return Ok(());
         }
 
-        Err(self.error_with_hir(format!("Unknown HIR block id {block_id:?}"), anchor))
+        Err(self.error_with_hir(format!("Unknown HIR block id {block_id:?}")))
     }
 
     pub(super) fn require_struct_id(
         &self,
         struct_id: StructId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.struct_types.contains_key(&struct_id) {
             return Ok(());
         }
 
-        Err(self.error_with_hir(format!("Unknown HIR struct id {struct_id:?}"), anchor))
+        Err(self.error_with_hir(format!("Unknown HIR struct id {struct_id:?}")))
     }
 
-    pub(super) fn require_field_id(
-        &self,
-        field_id: FieldId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    pub(super) fn require_field_id(&self, field_id: FieldId) -> Result<(), InfrastructureFailure> {
         if self.field_ids.contains(&field_id) {
             return Ok(());
         }
 
-        Err(self.error_with_hir(format!("Unknown HIR field id {field_id:?}"), anchor))
+        Err(self.error_with_hir(format!("Unknown HIR field id {field_id:?}")))
     }
 
-    pub(super) fn require_local_id(
-        &self,
-        local_id: LocalId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    pub(super) fn require_local_id(&self, local_id: LocalId) -> Result<(), InfrastructureFailure> {
         if self.local_types.contains_key(&local_id) {
             return Ok(());
         }
 
-        Err(self.error_with_hir(format!("Unknown HIR local id {local_id:?}"), anchor))
+        Err(self.error_with_hir(format!("Unknown HIR local id {local_id:?}")))
     }
 
     pub(super) fn require_local_in_function(
         &self,
         local_id: LocalId,
         function_id: FunctionId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
-        self.require_local_id(local_id, anchor)?;
+    ) -> Result<(), InfrastructureFailure> {
+        self.require_local_id(local_id)?;
         let Some(local_block) = self.local_block_by_id.get(&local_id).copied() else {
-            return Err(self.error_with_hir(
-                format!("Local {local_id:?} has no owning HIR block"),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!("Local {local_id:?} has no owning HIR block")));
         };
         let Some(local_owner) = self.block_owner_by_id.get(&local_block).copied() else {
-            return Err(self.error_with_hir(
-                format!("Local {local_id:?} belongs to a block without a function owner"),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!(
+                "Local {local_id:?} belongs to a block without a function owner"
+            )));
         };
         if local_owner != function_id {
-            return Err(self.error_with_hir(
-                format!(
-                    "Local {local_id:?} belongs to function {local_owner:?}, not {function_id:?}"
-                ),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!(
+                "Local {local_id:?} belongs to function {local_owner:?}, not {function_id:?}"
+            )));
         }
 
         Ok(())
@@ -105,31 +83,25 @@ impl<'a> HirValidator<'a> {
         &self,
         local_id: LocalId,
         block_id: BlockId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
-        self.require_local_id(local_id, anchor)?;
+    ) -> Result<(), InfrastructureFailure> {
+        self.require_local_id(local_id)?;
         if self.local_block_by_id.get(&local_id) == Some(&block_id) {
             return Ok(());
         }
 
-        Err(self.error_with_hir(
-            format!(
-                "CFG edge destination {local_id:?} is not a local owned by target block {block_id}"
-            ),
-            anchor,
-        ))
+        Err(self.error_with_hir(format!(
+            "CFG edge destination {local_id:?} is not a local owned by target block {block_id}"
+        )))
     }
 
     pub(super) fn require_local_not_parameter_definition(
         &self,
         local_id: LocalId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.parameter_local_ids.contains(&local_id) {
-            return Err(self.error_with_hir(
-                format!("ABI parameter local {local_id:?} cannot be an HIR definition destination"),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!(
+                "ABI parameter local {local_id:?} cannot be an HIR definition destination"
+            )));
         }
 
         Ok(())
@@ -139,7 +111,7 @@ impl<'a> HirValidator<'a> {
         &self,
         local_id: LocalId,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let block_id = match anchor {
             Some(HirLocation::Block(block_id) | HirLocation::Terminator(block_id)) => {
                 Some(block_id)
@@ -152,38 +124,32 @@ impl<'a> HirValidator<'a> {
         let function_id =
             block_id.and_then(|block_id| self.block_owner_by_id.get(&block_id).copied());
         if let Some(function_id) = function_id {
-            return self.require_local_in_function(local_id, function_id, anchor);
+            return self.require_local_in_function(local_id, function_id);
         }
 
-        self.require_local_id(local_id, anchor)
+        self.require_local_id(local_id)
     }
 
     pub(super) fn require_region_id(
         &self,
         region_id: RegionId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.region_ids.contains(&region_id) {
             return Ok(());
         }
 
-        Err(self.error_with_hir(format!("Unknown HIR region id {region_id:?}"), anchor))
+        Err(self.error_with_hir(format!("Unknown HIR region id {region_id:?}")))
     }
 
-    pub(super) fn require_type_id(
-        &self,
-        type_id: TypeId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
-        self.require_concrete_type_id(type_id, anchor, &mut FxHashSet::default())
+    pub(super) fn require_type_id(&self, type_id: TypeId) -> Result<(), InfrastructureFailure> {
+        self.require_concrete_type_id(type_id, &mut FxHashSet::default())
     }
 
     fn require_concrete_type_id(
         &self,
         type_id: TypeId,
-        anchor: Option<HirLocation>,
         visited: &mut FxHashSet<TypeId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let definition = self.type_environment.get(type_id);
 
         // WHY: only composite definitions recurse, so only they need the cycle guard. Leaves
@@ -203,48 +169,44 @@ impl<'a> HirValidator<'a> {
         }
 
         match definition {
-            Some(TypeDefinition::GenericParameter(parameter)) => Err(self.error_with_hir(
-                format!(
-                    "Unresolved generic parameter TypeId {type_id:?} ({:?}) reached HIR validation",
-                    parameter.id
-                ),
-                anchor,
-            )),
+            Some(TypeDefinition::GenericParameter(parameter)) => Err(self.error_with_hir(format!(
+                "Unresolved generic parameter TypeId {type_id:?} ({:?}) reached HIR validation",
+                parameter.id
+            ))),
             Some(TypeDefinition::Constructed(constructed)) => {
                 for argument in &constructed.arguments {
-                    self.require_concrete_type_id(*argument, anchor, visited)?;
+                    self.require_concrete_type_id(*argument, visited)?;
                 }
 
                 Ok(())
             }
             Some(TypeDefinition::Function(function)) => {
                 for parameter in &function.parameters {
-                    self.require_concrete_type_id(parameter.type_id, anchor, visited)?;
+                    self.require_concrete_type_id(parameter.type_id, visited)?;
                 }
 
                 for return_type in &function.returns {
-                    self.require_concrete_type_id(*return_type, anchor, visited)?;
+                    self.require_concrete_type_id(*return_type, visited)?;
                 }
 
                 if let Some(error_return_type) = function.error_return {
-                    self.require_concrete_type_id(error_return_type, anchor, visited)?;
+                    self.require_concrete_type_id(error_return_type, visited)?;
                 }
 
                 Ok(())
             }
             Some(TypeDefinition::GenericInstance(instance)) => {
                 for argument in &instance.arguments {
-                    self.require_concrete_type_id(*argument, anchor, visited)?;
+                    self.require_concrete_type_id(*argument, visited)?;
                 }
 
                 Ok(())
             }
             Some(TypeDefinition::AnonymousConstRecordMarker) => Err(self.error_with_hir(
                 "compile-time-only anonymous const-record marker reached executable HIR".to_owned(),
-                anchor,
             )),
             Some(_) => Ok(()),
-            None => Err(self.error_with_hir(format!("Unknown HIR type id {type_id:?}"), anchor)),
+            None => Err(self.error_with_hir(format!("Unknown HIR type id {type_id:?}"))),
         }
     }
 
@@ -252,19 +214,16 @@ impl<'a> HirValidator<'a> {
         &self,
         source_block: BlockId,
         target_block: BlockId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(source_owner) = self.block_owner_by_id.get(&source_block).copied() else {
-            return Err(self.error_with_hir(
-                format!("Block {source_block} has no function CFG owner"),
-                anchor,
-            ));
+            return Err(
+                self.error_with_hir(format!("Block {source_block} has no function CFG owner"))
+            );
         };
         let Some(target_owner) = self.block_owner_by_id.get(&target_block).copied() else {
-            return Err(self.error_with_hir(
-                format!("Block {target_block} has no function CFG owner"),
-                anchor,
-            ));
+            return Err(
+                self.error_with_hir(format!("Block {target_block} has no function CFG owner"))
+            );
         };
 
         if source_owner == target_owner {
@@ -275,19 +234,15 @@ impl<'a> HirValidator<'a> {
             format!(
                 "CFG edge from block {source_block} to block {target_block} crosses function boundary ({source_owner:?} -> {target_owner:?})"
             ),
-            anchor,
         ))
     }
 
     pub(super) fn block_by_id(
         &self,
         block_id: BlockId,
-    ) -> Result<&crate::compiler_frontend::hir::blocks::HirBlock, CompilerError> {
+    ) -> Result<&crate::compiler_frontend::hir::blocks::HirBlock, InfrastructureFailure> {
         let Some(index) = self.block_index_by_id.get(&block_id).copied() else {
-            return Err(self.error_with_hir(
-                format!("Unknown HIR block id {block_id:?}"),
-                Some(HirLocation::Block(block_id)),
-            ));
+            return Err(self.error_with_hir(format!("Unknown HIR block id {block_id:?}")));
         };
 
         Ok(&self.module.blocks[index])
@@ -297,26 +252,23 @@ impl<'a> HirValidator<'a> {
         &self,
         field_id: FieldId,
         struct_id: StructId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
-        self.require_field_id(field_id, anchor)?;
-        self.require_struct_id(struct_id, anchor)?;
+    ) -> Result<(), InfrastructureFailure> {
+        self.require_field_id(field_id)?;
+        self.require_struct_id(struct_id)?;
 
         let Some(owner) = self.field_owner.get(&field_id).copied() else {
-            return Err(self.error_with_hir(
-                format!("Field {field_id:?} has no owning struct in HIR metadata"),
-                anchor,
-            ));
+            return Err(self.error_with_hir(format!(
+                "Field {field_id:?} has no owning struct in HIR metadata"
+            )));
         };
 
         if owner == struct_id {
             return Ok(());
         }
 
-        Err(self.error_with_hir(
-            format!("Field {field_id:?} is owned by struct {owner:?}, not {struct_id:?}"),
-            anchor,
-        ))
+        Err(self.error_with_hir(format!(
+            "Field {field_id:?} is owned by struct {owner:?}, not {struct_id:?}"
+        )))
     }
 
     // -------------------------
@@ -325,25 +277,7 @@ impl<'a> HirValidator<'a> {
 
     // HIR validation reports compiler invariants only. Source-authored failures
     // must be rejected before this point by header, AST, or borrow validation.
-    pub(super) fn error_with_hir(
-        &self,
-        message: impl Into<String>,
-        anchor: Option<HirLocation>,
-    ) -> CompilerError {
-        let span = anchor.and_then(|hir_location| self.hir_error_span(hir_location));
-        CompilerError::new(message, span, ErrorType::HirTransformation)
-    }
-
-    pub(super) fn hir_error_span(&self, location: HirLocation) -> Option<SourceSpan> {
-        let source_span = match location {
-            // A value's source span is its row's span; the side table keeps only AST mappings.
-            HirLocation::Value(value_id) => self
-                .module
-                .expressions
-                .get_expression(value_id)
-                .and_then(|expression| expression.span),
-            _ => self.module.side_table.hir_source_span_for_hir(location),
-        };
-        source_span.or_else(|| self.module.side_table.ast_span_for_hir(location))
+    pub(super) fn error_with_hir(&self, message: impl Into<Box<str>>) -> InfrastructureFailure {
+        InfrastructureFailure::hir_transformation(message)
     }
 }

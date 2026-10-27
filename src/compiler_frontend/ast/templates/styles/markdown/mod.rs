@@ -16,6 +16,7 @@
 //! the shared records and `output` the piece buffer.
 //! Plain Markdown `.md` content has its own renderer and does not use this module.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutput, FormatterOutputPiece,
@@ -24,7 +25,8 @@ use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhites
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
@@ -46,19 +48,19 @@ impl TemplateFormatter for MarkdownTemplateFormatter {
     fn format(
         &self,
         input: FormatterInput,
-        string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages> {
-        let lines = split_formatter_input_into_lines(input, string_table);
+        diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    ) -> Result<FormatterResult, TemplateError> {
+        let lines = split_formatter_input_into_lines(input, diagnostic_strings.strings());
         let pieces = render_markdown_stream(&lines, "p");
 
         Ok(FormatterResult {
             output: FormatterOutput { pieces },
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
         })
     }
 }
 
-pub fn markdown_formatter() -> Formatter {
+pub(crate) fn markdown_formatter() -> Formatter {
     Formatter {
         // `$md` opts into the shared default body dedent/trim pass explicitly.
         pre_format_whitespace_passes: vec![TemplateWhitespacePassProfile::default_template_body()],

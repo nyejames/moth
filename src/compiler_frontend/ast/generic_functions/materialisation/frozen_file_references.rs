@@ -8,7 +8,8 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
     FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
     Stage0ResolvedFileReferenceOutcome, Stage0ResolvedFileReferenceView,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -34,8 +35,8 @@ impl StableResolvedFileReference {
     pub(super) fn capture(
         path_syntax: PathSyntaxId,
         resolved: Stage0ResolvedFileReferenceView<'_>,
-        content_value_at_path: &impl Fn(&PathId) -> Result<PublicFoldedValue, CompilerError>,
-    ) -> Result<Self, CompilerError> {
+        content_value_at_path: &impl Fn(&PathId) -> Result<PublicFoldedValue, InfrastructureFailure>,
+    ) -> Result<Self, InfrastructureFailure> {
         let outcome = match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => {
                 StableResolvedFileReferenceOutcome::NoPhysicalTarget
@@ -48,7 +49,7 @@ impl StableResolvedFileReference {
                     Some(value) => value.clone(),
                     None => {
                         let logical_path = logical_path.ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                 "ordinary content reference had no logical source path before capture",
                             )
                         })?;
@@ -67,7 +68,8 @@ impl StableResolvedFileReference {
                 StableResolvedFileReferenceOutcome::IdentifiedSourceKind
             }
             Stage0ResolvedFileReferenceOutcome::Diagnostic(_) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "persistent generic body retained a diagnosed file reference; generic body validation must report it before capture",
                 ));
             }
@@ -80,7 +82,7 @@ impl StableResolvedFileReference {
         })
     }
 
-    pub(super) fn materialise(&self) -> Result<FrozenResolvedFileReference, CompilerError> {
+    pub(super) fn materialise(&self) -> Result<FrozenResolvedFileReference, InfrastructureFailure> {
         let outcome = match &self.outcome {
             StableResolvedFileReferenceOutcome::NoPhysicalTarget => {
                 FrozenResolvedFileReferenceOutcome::NoPhysicalTarget
@@ -112,9 +114,10 @@ impl StableResolvedFileReference {
 
 fn capture_public_content_value(
     value: PublicFoldedValue,
-) -> Result<OwnedFoldedString, CompilerError> {
+) -> Result<OwnedFoldedString, InfrastructureFailure> {
     let PublicFoldedValue::String(value) = value else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "synthetic content constant did not fold to a String value",
         ));
     };

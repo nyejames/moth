@@ -10,8 +10,11 @@
 //! MUST NOT: perform type checking, constant folding, or semantic validation.
 
 use super::DeclarationCursor;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason,
+    CommonSyntaxMistakeReason, DiagnosticToken, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -142,7 +145,7 @@ pub fn parse_declaration_syntax(
         }
         TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE => {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::missing_declaration_initializer(
+                names_declarations::missing_declaration_initializer(
                     name,
                     current_source_span(token_stream),
                 ),
@@ -154,15 +157,21 @@ pub fn parse_declaration_syntax(
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
                     HeaderParseFailure::Infrastructure(
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
+                        InfrastructureFailure::malformed_token_projection(
                             "declaration initializer diagnostic projection",
+                            error,
                         ),
                     )
                 })?
                 .or_else(|| Some(DiagnosticToken::from_static_tag(TokenTag::EOF)));
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::expected_token_from_tags(TokenTag::ASSIGN, found, span),
+                token_lexical::expected_token_from_projections(
+                    crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
+                        TokenTag::ASSIGN,
+                    ),
+                    found,
+                    span,
+                ),
             ));
         }
     }
@@ -179,7 +188,7 @@ pub fn parse_declaration_syntax(
 
     if initializer_range.is_empty() {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_declaration(
+            names_declarations::invalid_declaration(
                 InvalidDeclarationReason::MissingInitializerExpression,
                 Some(name),
                 current_source_span(token_stream),
@@ -268,7 +277,7 @@ pub(crate) fn require_binding_marker_adjacent(
             BindingMode::ImmutableRuntime => return Ok(()),
         };
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::common_syntax_mistake(reason, Some(current_token.source_span())),
+            token_lexical::common_syntax_mistake(reason, Some(current_token.source_span())),
         ));
     }
 

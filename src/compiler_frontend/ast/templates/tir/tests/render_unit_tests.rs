@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::render_unit::{
     build_aggregate_wrapper_candidate_root_from_tir_nodes,
-    build_conditional_body_candidate_root_from_tir_nodes, tir_formatter_messages_to_template_error,
+    build_conditional_body_candidate_root_from_tir_nodes,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
@@ -34,8 +34,9 @@ use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_reference_for_template;
 use crate::compiler_frontend::ast::templates::tir::{head_prefix_tir_nodes, sequence_children};
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+    InfrastructureDetail, InfrastructureErrors, InfrastructureFailure,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::Path;
 
@@ -134,10 +135,10 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
     let missing_context_error = wrapper_reference_for_template(&missing_context_template, &store)
         .expect_err("missing view context should be rejected");
     assert!(
-        missing_context_error.msg.contains("expression overlay")
-            && missing_context_error.msg.contains("does not exist"),
+        missing_context_error.message.contains("expression overlay")
+            && missing_context_error.message.contains("does not exist"),
         "expected a missing-view-context error, got: {}",
-        missing_context_error.msg
+        missing_context_error.message
     );
 
     // A reference whose template root does not exist in the store is rejected.
@@ -153,10 +154,10 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
     let missing_template_error = wrapper_reference_for_template(&missing_template, &empty_store)
         .expect_err("missing template should be rejected");
     assert!(
-        missing_template_error.msg.contains("template")
-            && missing_template_error.msg.contains("was missing"),
+        missing_template_error.message.contains("template")
+            && missing_template_error.message.contains("was missing"),
         "expected a missing-template error, got: {}",
-        missing_template_error.msg
+        missing_template_error.message
     );
 }
 
@@ -223,10 +224,10 @@ fn sequence_children_rejects_missing_and_non_sequence_roots() {
     let missing_error = sequence_children(&store, TemplateIrNodeId::new(99))
         .expect_err("missing node should be rejected");
     assert!(
-        missing_error.msg.contains("sequence-children lookup")
-            && missing_error.msg.contains("was missing"),
+        missing_error.message.contains("sequence-children lookup")
+            && missing_error.message.contains("was missing"),
         "expected a missing-node error, got: {}",
-        missing_error.msg
+        missing_error.message
     );
 
     let mut string_table = StringTable::new();
@@ -235,9 +236,11 @@ fn sequence_children_rejects_missing_and_non_sequence_roots() {
     let non_sequence_error = sequence_children(&non_sequence_store, text_node)
         .expect_err("non-sequence root should be rejected");
     assert!(
-        non_sequence_error.msg.contains("was not a Sequence root."),
+        non_sequence_error
+            .message
+            .contains("was not a Sequence root."),
         "expected a non-sequence-root error, got: {}",
-        non_sequence_error.msg
+        non_sequence_error.message
     );
 }
 
@@ -247,10 +250,10 @@ fn head_prefix_rejects_missing_child_and_accepts_empty_prefix() {
     let missing_error = head_prefix_tir_nodes(&store, &[TemplateIrNodeId::new(99)])
         .expect_err("missing root child should be rejected");
     assert!(
-        missing_error.msg.contains("head-prefix extraction")
-            && missing_error.msg.contains("was missing"),
+        missing_error.message.contains("head-prefix extraction")
+            && missing_error.message.contains("was missing"),
         "expected a missing-child error, got: {}",
-        missing_error.msg
+        missing_error.message
     );
 
     assert!(
@@ -263,25 +266,24 @@ fn head_prefix_rejects_missing_child_and_accepts_empty_prefix() {
 
 #[test]
 fn formatter_infrastructure_aggregate_survives_ast_error_adapters() {
-    let mut primary = CompilerError::compiler_error("formatter infrastructure cause");
-    primary.new_metadata_entry(
-        CompilerErrorMetadataKey::CompilationStage,
-        "formatter".to_owned(),
-    );
-    let mut secondary = CompilerError::file_error(
+    let primary = InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "formatter infrastructure cause",
+    )
+    .with_detail(InfrastructureDetail::PrimarySuggestion(
+        "formatter suggestion".into(),
+    ));
+    let secondary = InfrastructureFailure::filesystem(
+        CompilerStage::SourceLoading,
         Path::new("formatter-input.moth"),
         "formatter secondary cause",
     );
-    secondary.new_metadata_entry(
-        CompilerErrorMetadataKey::CompilationStage,
-        "read input".to_owned(),
-    );
     let expected = [primary.clone(), secondary.clone()];
-    let mut messages = CompilerMessages::from_error(primary, StringTable::new());
-    messages.set_infrastructure_error(secondary);
+    let mut infrastructure = InfrastructureErrors::new(primary);
+    infrastructure.push(secondary);
 
     // Template folding and stored values re-enter expression construction through these adapters.
-    let template_error = tir_formatter_messages_to_template_error(messages);
+    let template_error = TemplateError::Infrastructure(Box::new(infrastructure));
     let fold_error = ConstantFoldError::from(template_error);
     let typing_error = ExpressionTypingError::from(fold_error);
     let expression_error = ExpressionParseError::from(typing_error);
@@ -289,16 +291,20 @@ fn formatter_infrastructure_aggregate_survives_ast_error_adapters() {
     let store_error = ConstValueStoreError::from(template_error);
     let construction_error = ExpressionConstructionFailure::from(store_error);
     let expression_error = ExpressionParseError::from(construction_error);
-    let errors = expression_error
+    let ExpressionParseError::Infrastructure(errors) = expression_error
         .at_boundary_without_numeric_retention("the formatter adapter test")
-        .expect_err("both formatter causes must remain infrastructure failures");
+        .expect_err("both formatter causes must remain infrastructure failures")
+    else {
+        panic!("formatter causes must stay on the infrastructure lane");
+    };
 
     let actual = errors.iter().collect::<Vec<_>>();
     assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.into_iter().zip(expected) {
-        assert_eq!(actual.msg, expected.msg);
-        assert_eq!(actual.error_type, expected.error_type);
+        assert_eq!(actual.message, expected.message);
+        assert_eq!(actual.kind, expected.kind);
+        assert_eq!(actual.stage, expected.stage);
         assert_eq!(actual.host_path, expected.host_path);
-        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.details, expected.details);
     }
 }

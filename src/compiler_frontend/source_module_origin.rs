@@ -17,7 +17,8 @@
 //! participate in active-root origin projection. The compilation-root record is not physical and
 //! is rejected as an internal error rather than assigned a module origin.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 
@@ -87,19 +88,23 @@ impl SourceModuleOriginTable {
     pub(crate) fn origin_for(
         &self,
         source_id: SourceId,
-    ) -> Result<Option<&StableModuleOriginIdentity>, CompilerError> {
+    ) -> Result<Option<&StableModuleOriginIdentity>, InfrastructureFailure> {
         let physical_index = source_id.physical_index().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
                 "source module origin table: compilation-root SourceId has no module origin",
             )
         })?;
 
         match self.origins.get(physical_index) {
             Some(origin) => Ok(origin.as_ref()),
-            None => Err(CompilerError::compiler_error(format!(
-                "source module origin table: out-of-range {source_id:?} at physical index {physical_index} (table has {} entries)",
-                self.origins.len()
-            ))),
+            None => Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "source module origin table: out-of-range {source_id:?} at physical index {physical_index} (table has {} entries)",
+                    self.origins.len()
+                ),
+            )),
         }
     }
 

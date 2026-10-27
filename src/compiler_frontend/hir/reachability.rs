@@ -9,7 +9,7 @@
 //! branches, inspect borrow facts, or perform backend lowering.
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp};
@@ -254,7 +254,7 @@ impl HirBackendSelection {
     ///
     /// WHY: physical variants may reuse dense IDs, so backends must reject a selection detached
     /// from its owning module before lowering or host-import planning begins.
-    pub(crate) fn validate_for_hir(&self, hir: &HirModule) -> Result<(), CompilerError> {
+    pub(crate) fn validate_for_hir(&self, hir: &HirModule) -> Result<(), InfrastructureFailure> {
         let index = HirReachabilityIndex::new(hir)?;
         let selected_functions = hir
             .functions
@@ -283,7 +283,7 @@ impl HirBackendSelection {
                             "Backend selection could not resolve HIR block {block_id:?}"
                         ))
                     })?;
-                    Ok::<_, CompilerError>(
+                    Ok::<_, InfrastructureFailure>(
                         crate::compiler_frontend::hir::utils::terminator_targets(&block.terminator),
                     )
                 },
@@ -488,7 +488,7 @@ struct HirReachabilityContext<'index, 'hir> {
 /// compiler-created declarations carry `None`; no source identity or render table is retained.
 pub(crate) fn collect_module_function_link_facts(
     hir: &HirModule,
-) -> Result<HirModuleLinkFacts, CompilerError> {
+) -> Result<HirModuleLinkFacts, InfrastructureFailure> {
     let index = HirReachabilityIndex::new(hir)?;
     let mut function_ids = hir
         .functions
@@ -541,7 +541,7 @@ pub(crate) fn collect_module_function_link_facts(
 pub(crate) fn collect_reachability_from_function_link_facts(
     function_facts: &HirModuleLinkFacts,
     root_functions: &[FunctionId],
-) -> Result<HirReachability, CompilerError> {
+) -> Result<HirReachability, InfrastructureFailure> {
     let mut function_worklist = VecDeque::from(root_functions.to_vec());
     let mut block_worklist = VecDeque::new();
     let mut visited_functions = FxHashSet::default();
@@ -687,7 +687,7 @@ impl HirReachability {
 }
 
 impl<'hir> HirReachabilityIndex<'hir> {
-    fn new(hir: &'hir HirModule) -> Result<Self, CompilerError> {
+    fn new(hir: &'hir HirModule) -> Result<Self, InfrastructureFailure> {
         Ok(Self {
             hir,
             function_by_id: build_function_map(hir)?,
@@ -716,7 +716,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         }
     }
 
-    fn collect(mut self) -> Result<Vec<HirBlockLinkFacts>, CompilerError> {
+    fn collect(mut self) -> Result<Vec<HirBlockLinkFacts>, InfrastructureFailure> {
         while let Some(block_id) = self.block_worklist.pop_front() {
             self.visit_block(block_id)?;
         }
@@ -724,7 +724,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         Ok(self.block_facts)
     }
 
-    fn visit_block(&mut self, block_id: BlockId) -> Result<(), CompilerError> {
+    fn visit_block(&mut self, block_id: BlockId) -> Result<(), InfrastructureFailure> {
         if !self.visited_blocks.insert(block_id) {
             return Ok(());
         }
@@ -1039,7 +1039,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
-            // Terminators that return a value.
             HirTerminator::Return(values) => {
                 for value in self.index.hir.expressions.values(*values) {
                     expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
@@ -1221,7 +1220,9 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
     }
 }
 
-fn terminator_successors(terminator: &HirTerminator) -> Result<Vec<BlockId>, CompilerError> {
+fn terminator_successors(
+    terminator: &HirTerminator,
+) -> Result<Vec<BlockId>, InfrastructureFailure> {
     let successors = match terminator {
         HirTerminator::Jump { target, .. } => vec![*target],
         HirTerminator::If {
@@ -1250,7 +1251,7 @@ fn terminator_successors(terminator: &HirTerminator) -> Result<Vec<BlockId>, Com
 
 fn build_function_map(
     hir: &HirModule,
-) -> Result<FxHashMap<FunctionId, &HirFunction>, CompilerError> {
+) -> Result<FxHashMap<FunctionId, &HirFunction>, InfrastructureFailure> {
     let mut function_by_id = FxHashMap::default();
 
     for function in &hir.functions {
@@ -1265,7 +1266,9 @@ fn build_function_map(
     Ok(function_by_id)
 }
 
-fn build_block_map(hir: &HirModule) -> Result<FxHashMap<BlockId, &HirBlock>, CompilerError> {
+fn build_block_map(
+    hir: &HirModule,
+) -> Result<FxHashMap<BlockId, &HirBlock>, InfrastructureFailure> {
     let mut block_by_id = FxHashMap::default();
 
     for block in &hir.blocks {
@@ -1280,6 +1283,6 @@ fn build_block_map(hir: &HirModule) -> Result<FxHashMap<BlockId, &HirBlock>, Com
     Ok(block_by_id)
 }
 
-fn hir_reachability_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::new(message, None, ErrorType::HirTransformation)
+fn hir_reachability_error(message: impl Into<Box<str>>) -> InfrastructureFailure {
+    InfrastructureFailure::hir_transformation(message)
 }

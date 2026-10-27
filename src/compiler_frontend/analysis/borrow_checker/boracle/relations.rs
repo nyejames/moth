@@ -9,7 +9,8 @@
 //! topology, `PlaceOverlap`, retained-edge counting (REC), or experiment selection.
 
 use super::super::problem::{ProjectionElem, ValueOriginId};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
@@ -31,17 +32,17 @@ pub(crate) enum PrecisionLossReason {
     UnknownCallResult,
     MissingLocalSummary,
     #[allow(dead_code)]
-    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (dynamic-index precision).
+    // Reserved for dynamic-index precision loss; current relation inference does not emit it.
     DynamicIndex,
     #[allow(dead_code)]
-    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (storage-domain precision).
+    // Reserved for storage-domain precision loss; current relation inference does not emit it.
     ConservativeStorageDomain,
     PathJoin,
     #[allow(dead_code)]
-    // Boracle conflict-directed relational refinement plan: docs/roadmap/plans/boracle-next-research-plans/boracle-conflict-directed-relational-refinement-plan.md (mixed-mode precision).
+    // Reserved for mixed-mode precision loss; current relation inference does not emit it.
     MixedBindingMode,
     #[allow(dead_code)]
-    // Boracle loop-generation plan: docs/roadmap/plans/boracle-next-research-plans/boracle-loop-generation-epochs-and-edge-last-use-plan.md (generation widening).
+    // Reserved for generation widening; current relation inference does not emit it.
     LoopGenerationWidening,
     ExternalOpaqueValue,
 }
@@ -52,13 +53,13 @@ pub(crate) enum DisjointReason {
     DifferentFreshGenerations,
     ExplicitCopy,
     #[allow(dead_code)]
-    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (fixed-field disjointness).
+    // No current relation-inference path emits fixed-field disjointness evidence.
     DistinctFixedFields,
     #[allow(dead_code)]
-    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (fixed-index disjointness).
+    // No current relation-inference path emits fixed-index disjointness evidence.
     DistinctFixedIndices,
     #[allow(dead_code)]
-    // Boracle conflict-directed relational refinement plan: docs/roadmap/plans/boracle-next-research-plans/boracle-conflict-directed-relational-refinement-plan.md (experimental proof evidence).
+    // No current relation-inference path emits experimental proof evidence.
     ExperimentProof,
 }
 
@@ -81,7 +82,7 @@ pub(crate) enum OriginRelationKind {
         reason: PrecisionLossReason,
     },
     #[allow(dead_code)]
-    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (positive disjoint relation rows).
+    // Relation queries accept positive disjoint rows, but current inference creates none.
     ProvenDisjoint {
         reason: DisjointReason,
     },
@@ -114,7 +115,7 @@ pub(crate) enum OriginRelationEvidence {
         reason: PrecisionLossReason,
     },
     #[allow(dead_code)]
-    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (positive disjoint relation rows).
+    // Relation queries accept positive disjoint evidence, but current inference creates none.
     ProvenDisjoint {
         left: ValueOriginId,
         right: ValueOriginId,
@@ -213,7 +214,8 @@ impl OriginRelation {
             },
         )
     }
-    #[allow(dead_code)] // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (positive disjoint relation rows).
+    // Tests construct positive disjoint rows; production relation inference currently has no producer.
+    #[allow(dead_code)]
     pub(crate) const fn proven_disjoint(
         left: ValueOriginId,
         right: ValueOriginId,
@@ -264,7 +266,7 @@ pub(crate) struct OriginUnknownEvidence {
     pub(crate) relation: Option<OriginRelationEvidence>,
 }
 
-// LEAVE-LOCAL: counterparts are boracle/oracle/conflicts.rs:23 DynamicOverlap and problem/places.rs:64 PlaceOverlap.
+// The counterparts are boracle/oracle/conflicts.rs:23 DynamicOverlap and problem/places.rs:64 PlaceOverlap.
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 /// Result of asking whether two origin sets can observe one source-semantic generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,7 +280,7 @@ pub(crate) enum OriginOverlapDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OriginRegistration {
     Fresh(ValueOriginId),
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // Alias-derived origins remain non-fresh so unrelated registrations cannot imply disjointness.
     #[allow(dead_code)]
     Derived(ValueOriginId),
     Unknown {
@@ -340,7 +342,7 @@ impl OriginRelations {
     pub(crate) fn new(
         registrations: impl IntoIterator<Item = OriginRegistration>,
         relations: impl IntoIterator<Item = OriginRelation>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut registration_map = BTreeMap::new();
         for registration in registrations {
             let id = registration.id();
@@ -415,7 +417,7 @@ impl OriginRelations {
         &self,
         left: &[ValueOriginId],
         right: &[ValueOriginId],
-    ) -> Result<OriginOverlapDecision, CompilerError> {
+    ) -> Result<OriginOverlapDecision, InfrastructureFailure> {
         let mut left = canonical_query_set(&self.registrations, left, "left")?;
         let mut right = canonical_query_set(&self.registrations, right, "right")?;
 
@@ -616,7 +618,7 @@ fn canonical_query_set(
     registrations: &BTreeMap<ValueOriginId, OriginRegistration>,
     origins: &[ValueOriginId],
     side: &str,
-) -> Result<BTreeSet<ValueOriginId>, CompilerError> {
+) -> Result<BTreeSet<ValueOriginId>, InfrastructureFailure> {
     let mut canonical = BTreeSet::new();
     for origin in origins.iter().copied() {
         if !registrations.contains_key(&origin) {
@@ -633,7 +635,7 @@ fn canonical_query_set(
 fn validate_relation(
     registrations: &BTreeMap<ValueOriginId, OriginRegistration>,
     relation: OriginRelation,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if !registrations.contains_key(&relation.left) {
         return Err(relation_error(format!(
             "relation {:?} references unknown left origin {:?}",
@@ -729,7 +731,7 @@ fn validate_relation(
     Ok(())
 }
 
-fn validate_contradictions(rows: &[OriginRelation]) -> Result<(), CompilerError> {
+fn validate_contradictions(rows: &[OriginRelation]) -> Result<(), InfrastructureFailure> {
     let mut facts: BTreeMap<(ValueOriginId, ValueOriginId), (bool, bool)> = BTreeMap::new();
     for relation in rows.iter().copied() {
         let fact = facts
@@ -755,6 +757,9 @@ fn validate_contradictions(rows: &[OriginRelation]) -> Result<(), CompilerError>
     Ok(())
 }
 
-fn relation_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(format!("Boracle origin relations: {}", message.into()))
+fn relation_error(message: impl Into<String>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::BorrowChecking,
+        format!("Boracle origin relations: {}", message.into()),
+    )
 }

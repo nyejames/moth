@@ -141,12 +141,11 @@ fn trait_requirement_rejects_lowercase_this_receiver() {
     );
     let errors = expect_header_error(result, "lowercase this should be rejected");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidSignatureMember {
-            reason: InvalidSignatureMemberReason::ThisNotAllowed
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidSignatureMemberView>()
+            .is_some_and(|facts| facts.reason == InvalidSignatureMemberReason::ThisNotAllowed)
+    }));
 }
 
 #[test]
@@ -158,12 +157,13 @@ fn trait_requirement_rejects_missing_this_receiver() {
     );
     let errors = expect_header_error(result, "trait requirements should start with This");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidSignatureMember {
-            reason: InvalidSignatureMemberReason::TraitReceiverMustBeThis
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidSignatureMemberView>()
+            .is_some_and(|facts| {
+                facts.reason == InvalidSignatureMemberReason::TraitReceiverMustBeThis
+            })
+    }));
 }
 
 #[test]
@@ -175,12 +175,13 @@ fn trait_requirement_rejects_mutable_this_after_receiver() {
     );
     let errors = expect_header_error(result, "mutable This is receiver-only");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidSignatureMember {
-            reason: InvalidSignatureMemberReason::TraitMutableThisOnlyFirstParameter
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidSignatureMemberView>()
+            .is_some_and(|facts| {
+                facts.reason == InvalidSignatureMemberReason::TraitMutableThisOnlyFirstParameter
+            })
+    }));
 }
 
 #[test]
@@ -192,13 +193,12 @@ fn trait_requirement_rejects_composed_this_type_forms() {
     );
     let errors = expect_header_error(result, "composed This forms are deferred");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTypeAnnotation {
-            reason: InvalidTypeAnnotationReason::TraitThisMustBeDirect,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidTypeAnnotationView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_type_annotation.trait_this_must_be_direct")
+    }));
 }
 
 #[test]
@@ -213,13 +213,9 @@ fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
         "trait requirements cannot have method bodies",
     );
 
-    assert!(
-        method_body_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind
-                == DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedTokenInDeclaration))
-    );
+    assert!(method_body_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic_has_family::<token_lexical::UnexpectedTokenInDeclarationView>(&diagnostic)
+    }));
 
     let reversed_mutability_result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This ~|\n;\n",
@@ -234,11 +230,10 @@ fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
     assert!(
         reversed_mutability_errors
             .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::ExpectedToken { .. }
-            ))
+            .views()
+            .any(|diagnostic| {
+                diagnostic_has_family::<token_lexical::ExpectedTokenView>(&diagnostic)
+            })
     );
 }
 
@@ -248,13 +243,13 @@ fn trait_conformance_rejects_missing_trait_name() {
         parse_single_file_headers_with_entry("Card must\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "conformance declarations require a trait name");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::TraitConformanceMissingTrait,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key()
+                == Some("invalid_declaration.trait_conformance_missing_trait")
+    }));
 }
 
 #[test]
@@ -269,18 +264,12 @@ fn trait_declaration_and_reference_names_must_be_all_caps() {
         "trait declarations should require all-caps names",
     );
 
-    assert!(
-        declaration_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::InvalidTraitName,
-                    ..
-                }
-            ))
-    );
+    assert!(declaration_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_declaration.invalid_trait_name")
+    }));
 
     let conformance_result = parse_single_file_headers_with_entry(
         "Card must Displayable\n",
@@ -292,18 +281,12 @@ fn trait_declaration_and_reference_names_must_be_all_caps() {
         "trait references should require all-caps names",
     );
 
-    assert!(
-        conformance_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::InvalidTraitName,
-                    ..
-                }
-            ))
-    );
+    assert!(conformance_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_declaration.invalid_trait_name")
+    }));
 }
 
 #[test]
@@ -366,13 +349,13 @@ fn trait_incompatibility_rejects_missing_trait_name() {
         "incompatibility declarations require at least one trait name",
     );
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::TraitIncompatibilityMissingTrait,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key()
+                == Some("invalid_declaration.trait_incompatibility_missing_trait")
+    }));
 }
 
 #[test]
@@ -381,10 +364,9 @@ fn trait_incompatibility_rejects_trailing_comma() {
         parse_single_file_headers_with_entry("A must not B,\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "trailing incompatibility commas should be rejected");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedTrailingComma
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic_has_family::<token_lexical::UnexpectedTrailingCommaView>(&diagnostic)
+    }));
 }
 
 #[test]
@@ -396,13 +378,13 @@ fn trait_incompatibility_rejects_semicolon_terminator() {
         "incompatibility declarations should be newline terminated",
     );
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::TraitIncompatibilitySemicolon,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key()
+                == Some("invalid_declaration.trait_incompatibility_semicolon")
+    }));
 }
 
 #[test]
@@ -417,18 +399,12 @@ fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
         "incompatibility subjects should require all-caps names",
     );
 
-    assert!(
-        declaration_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::InvalidTraitName,
-                    ..
-                }
-            ))
-    );
+    assert!(declaration_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_declaration.invalid_trait_name")
+    }));
 
     let reference_result = parse_single_file_headers_with_entry(
         "DISPLAYABLE must not Other\n",
@@ -440,18 +416,12 @@ fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
         "incompatibility trait references should require all-caps names",
     );
 
-    assert!(
-        reference_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::InvalidTraitName,
-                    ..
-                }
-            ))
-    );
+    assert!(reference_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_declaration.invalid_trait_name")
+    }));
 }
 
 #[test]
@@ -463,10 +433,10 @@ fn trait_this_outside_trait_declaration_is_targeted() {
     );
     let errors = expect_header_error(result, "This outside trait declarations should be rejected");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidThisUsage {
-            reason: InvalidThisUsageReason::OutsideTraitDeclaration
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<generics_traits_api::InvalidThisUsageView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_this_usage.outside_trait_declaration")
+    }));
 }

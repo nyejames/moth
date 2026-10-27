@@ -233,9 +233,6 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
     /// Nested expression input: `catch` and expected-result evidence are both
     /// rejected, matching expression positions inside function arguments,
     /// collection items, and loop headers.
-    ///
-    /// WHAT: replaces the previous `create_expression_without_boundary_catch`
-    ///      entry point.
     pub(crate) fn without_boundary_catch(
         resources: ExpressionParseResources<'a, 'env, 'tokens>,
         consume_closing_parenthesis: bool,

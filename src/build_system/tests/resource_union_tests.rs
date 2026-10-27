@@ -9,7 +9,7 @@ use crate::build_system::resource_unions::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -66,7 +66,6 @@ fn module_with_resource_table(resources: ModuleResourceTable) -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: Default::default(),
             doc_fragments: Vec::new(),
@@ -233,7 +232,7 @@ fn package_export_join_rejects_export_without_public_declaration() {
     let error = append_exported_interface_resources(&mut union, &interface)
         .expect_err("an export binding without a declaration is malformed");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert!(error.msg.contains("no matching public declaration"));
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+    assert!(error.message.contains("no matching public declaration"));
     assert!(union.is_empty());
 }

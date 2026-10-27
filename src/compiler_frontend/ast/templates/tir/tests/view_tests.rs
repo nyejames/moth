@@ -7,7 +7,7 @@
 //!
 //! WHY: `TirView` is the central read API for all future template consumers.
 //! These tests guard the invariants later phases depend on: invalid store
-//! IDs produce `CompilerError` instead of panics, minimum-phase checks reject
+//! IDs produce `InfrastructureFailure` instead of panics, minimum-phase checks reject
 //! unready roots, and overlay dimension accessors resolve entries through the
 //! value-carried view context.
 
@@ -188,7 +188,7 @@ fn new_fails_for_missing_root_template() {
     let error = TirView::new(&store, missing_root, TemplateTirPhase::Parsed, context)
         .expect_err("missing root should be rejected");
 
-    assert!(error.msg.contains("does not exist"));
+    assert!(error.message.contains("does not exist"));
 }
 
 // -------------------------
@@ -513,8 +513,8 @@ fn new_fails_for_missing_view_context() {
     let error = TirView::new(&store, root_ref, TemplateTirPhase::Parsed, missing_context)
         .expect_err("missing view context should be rejected");
 
-    assert!(error.msg.contains("expression overlay"));
-    assert!(error.msg.contains("does not exist"));
+    assert!(error.message.contains("expression overlay"));
+    assert!(error.message.contains("does not exist"));
 }
 
 #[test]
@@ -556,7 +556,7 @@ fn with_minimum_phase_fails_when_phase_is_below_minimum() {
     )
     .expect_err("phase below minimum should be rejected");
 
-    assert!(error.msg.contains("does not satisfy minimum phase"));
+    assert!(error.message.contains("does not satisfy minimum phase"));
 }
 
 // -------------------------
@@ -670,7 +670,7 @@ fn effective_node_errors_for_invalid_node_ref() {
         .effective_node(invalid_node_ref)
         .expect_err("invalid node ref should be rejected");
 
-    assert!(error.msg.contains("does not exist"));
+    assert!(error.message.contains("does not exist"));
 }
 
 // -------------------------
@@ -727,7 +727,7 @@ fn structural_child_rejects_a_missing_view_context() {
         ))
         .expect_err("missing view context should be rejected");
 
-    assert!(error.msg.contains("does not exist"));
+    assert!(error.message.contains("does not exist"));
 }
 
 #[test]
@@ -1078,8 +1078,7 @@ fn overlay_dimension_accessors_resolve_each_dimension() {
 ///
 /// WHAT: uses the same compact local-span codec as authored spans while keeping
 /// the reserved compilation-root identity explicit.
-/// WHY: TIR tests must assert exact byte ranges and source identity rather than
-/// relying on the deleted line/column location bridge.
+/// WHY: TIR tests assert exact byte ranges and source identity from the compact span representation.
 fn span_at(start: u32, end: u32) -> SourceSpan {
     let mut span_builder = ExtendedSpanBuilder::new();
     SourceSpan::new(
@@ -1091,7 +1090,10 @@ fn span_at(start: u32, end: u32) -> SourceSpan {
 
 /// Asserts that an optional source span result matches an exact byte range and source identity.
 fn assert_span(
-    result: Result<Option<SourceSpan>, crate::compiler_frontend::compiler_errors::CompilerError>,
+    result: Result<
+        Option<SourceSpan>,
+        crate::compiler_frontend::compiler_errors::InfrastructureFailure,
+    >,
     start: u32,
     end: u32,
 ) {

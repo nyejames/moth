@@ -12,11 +12,19 @@
 //! MUST NOT: concatenate package artefacts into one vector with a count, place build-local
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
+use crate::build_system::build::ProjectAssemblyError;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, RenderSourceContext,
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
 };
-use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeDiagnosticBatch};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    BoundaryAccumulator, SuccessfulWarningBoundary, SuccessfulWarningPosition,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
@@ -24,11 +32,9 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceDatabase;
 #[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::source::{
-    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabaseRetentionMetrics,
-};
+use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabaseRetentionMetrics};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -40,20 +46,73 @@ use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
-fn diagnostic_range_requires_source_identity(
-    diagnostics: &[CompilerDiagnostic],
-    range: &std::ops::Range<usize>,
-) -> bool {
-    diagnostics[range.clone()].iter().any(|diagnostic| {
-        diagnostic.primary_span.is_some()
-            || diagnostic.labels.iter().any(|label| label.span.is_some())
-    })
+
+struct PreparedAppendMetrics {
+    diagnostic_count: usize,
+    missing_source_error: bool,
+    #[cfg(feature = "data_layout_memory_probe")]
+    label_count: usize,
+}
+
+fn append_prepared_frontend_diagnostics(
+    accumulator: &mut BoundaryAccumulator,
+    mut batch: PreparedDiagnosticBatch,
+    source: Option<(&Arc<SourceDatabase>, Option<StablePackageIdentity>)>,
+    diagnostic_offset: usize,
+    can_freeze: &mut bool,
+) -> PreparedAppendMetrics {
+    let diagnostic_count = batch.diagnostic_count();
+    #[cfg(feature = "data_layout_memory_probe")]
+    let label_count = batch.label_count();
+    let requires_source = batch.requires_source_identity();
+
+    if diagnostic_count == 0 {
+        accumulator.append_prepared(batch, None);
+        return PreparedAppendMetrics {
+            diagnostic_count: 0,
+            missing_source_error: false,
+            #[cfg(feature = "data_layout_memory_probe")]
+            label_count,
+        };
+    }
+
+    let Some((source_database, domain)) = source else {
+        *can_freeze = false;
+        let missing_source_error = requires_source;
+        if missing_source_error {
+            let global_range = diagnostic_offset..diagnostic_offset + diagnostic_count;
+            let error = InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!("diagnostic range {global_range:?} has no finalized source identity",),
+            );
+            accumulator.append_infrastructure(error.into());
+        }
+        accumulator.append_prepared(batch, None);
+        return PreparedAppendMetrics {
+            diagnostic_count,
+            missing_source_error,
+            #[cfg(feature = "data_layout_memory_probe")]
+            label_count,
+        };
+    };
+    if requires_source && let Some(identity) = domain.as_ref() {
+        batch.attach_frozen_identity_handle_if_missing(FrozenIdentityHandle::for_domain(
+            identity.clone(),
+        ));
+    }
+    accumulator.append_prepared(batch, Some((Arc::clone(source_database), domain)));
+    PreparedAppendMetrics {
+        diagnostic_count,
+        missing_source_error: false,
+        #[cfg(feature = "data_layout_memory_probe")]
+        label_count,
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct DiagnosedModule {
     pub(crate) module_id: ModuleId,
-    pub(crate) diagnostics: ModuleDiagnostics,
+    pub(crate) diagnostics: PreparedDiagnosticBatch,
 }
 
 /// The direct provider that prevented one module from compiling.
@@ -115,7 +174,7 @@ impl CompiledGraphBoundary {
     ///       boundary exists, so a boundary must be provably complete before it becomes a
     ///       provider. Callers that later receive an already-finished boundary keep only
     ///       defensive validation.
-    pub(crate) fn finish(mut self) -> Result<Self, CompilerError> {
+    pub(crate) fn finish(mut self) -> Result<Self, InfrastructureFailure> {
         self.sort_outcomes();
         self.validate_invariants()?;
         Ok(self)
@@ -127,16 +186,19 @@ impl CompiledGraphBoundary {
     ///       slot/lane bijection: graph nodes match store slots, every slot reached a final
     ///       outcome, successful slots reference an existing artefact row, and diagnosed and
     ///       blocked lanes hold exactly their slot's record without duplicates or overlap.
-    /// WHY: dense lookups are only safe after this validation; an invalid mapping must surface
-    ///       as `CompilerError` instead of becoming an absent artefact later. The success-only
-    ///       `ProjectCompilation` gate separately adds the all-successful requirement.
-    pub(crate) fn validate_invariants(&self) -> Result<(), CompilerError> {
+    /// WHY: dense lookups are only safe after this validation; invalid mappings must fail rather
+    ///       than becoming absent artefacts. The success-only `ProjectCompilation` gate separately
+    ///       adds the all-successful requirement.
+    pub(crate) fn validate_invariants(&self) -> Result<(), InfrastructureFailure> {
         if self.structure.nodes().len() != self.modules.slot_count() {
-            return Err(CompilerError::compiler_error(format!(
-                "Graph retained {} nodes but module store has {} slots",
-                self.structure.nodes().len(),
-                self.modules.slot_count()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Graph retained {} nodes but module store has {} slots",
+                    self.structure.nodes().len(),
+                    self.modules.slot_count()
+                ),
+            ));
         }
 
         // Dense lane proof: every diagnosed or blocked record claims one distinct slot lane.
@@ -147,48 +209,66 @@ impl CompiledGraphBoundary {
             let lane = retained_lanes
                 .get_mut(diagnosed.module_id.index())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Diagnosed module {} is out of range for {} slots",
-                        diagnosed.module_id.index(),
-                        self.modules.slot_count()
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Diagnosed module {} is out of range for {} slots",
+                            diagnosed.module_id.index(),
+                            self.modules.slot_count()
+                        ),
+                    )
                 })?;
             if *lane != RetainedOutcomeLane::None {
-                return Err(CompilerError::compiler_error(format!(
-                    "ModuleId {} is both diagnosed and blocked or appears more than once in the diagnosed lane",
-                    diagnosed.module_id.index()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "ModuleId {} is both diagnosed and blocked or appears more than once in the diagnosed lane",
+                        diagnosed.module_id.index()
+                    ),
+                ));
             }
             *lane = RetainedOutcomeLane::Diagnosed;
             if self.modules.slot(diagnosed.module_id)? != ProviderSlot::Diagnosed {
-                return Err(CompilerError::compiler_error(format!(
-                    "Diagnosed module {} does not hold the diagnosed store slot",
-                    diagnosed.module_id.index()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Diagnosed module {} does not hold the diagnosed store slot",
+                        diagnosed.module_id.index()
+                    ),
+                ));
             }
         }
         for blocked in &self.blocked {
             let lane = retained_lanes
                 .get_mut(blocked.module_id.index())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Blocked module {} is out of range for {} slots",
-                        blocked.module_id.index(),
-                        self.modules.slot_count()
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Blocked module {} is out of range for {} slots",
+                            blocked.module_id.index(),
+                            self.modules.slot_count()
+                        ),
+                    )
                 })?;
             if *lane != RetainedOutcomeLane::None {
-                return Err(CompilerError::compiler_error(format!(
-                    "ModuleId {} is both diagnosed and blocked or appears more than once in the blocked lane",
-                    blocked.module_id.index()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "ModuleId {} is both diagnosed and blocked or appears more than once in the blocked lane",
+                        blocked.module_id.index()
+                    ),
+                ));
             }
             *lane = RetainedOutcomeLane::Blocked;
             if self.modules.slot(blocked.module_id)? != ProviderSlot::Blocked {
-                return Err(CompilerError::compiler_error(format!(
-                    "Blocked module {} does not hold the blocked store slot",
-                    blocked.module_id.index()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Blocked module {} does not hold the blocked store slot",
+                        blocked.module_id.index()
+                    ),
+                ));
             }
         }
 
@@ -201,56 +281,72 @@ impl CompiledGraphBoundary {
             let module_id = ModuleId::from_index(index);
             match self.modules.slot(module_id)? {
                 ProviderSlot::Unavailable => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "ModuleId {index} never reached a completed outcome"
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!("ModuleId {index} never reached a completed outcome"),
+                    ));
                 }
                 ProviderSlot::Successful(artifact_id) => {
                     let artifact = self.modules.artifact(module_id)?.ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "ModuleId {index} references missing artifact row {}",
-                            artifact_id.index()
-                        ))
+                        InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "ModuleId {index} references missing artifact row {}",
+                                artifact_id.index()
+                            ),
+                        )
                     })?;
                     let row_count = row_owners.len();
                     let owner: &mut Option<ModuleId> = row_owners
                         .get_mut(artifact_id.index())
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(format!(
+                            InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                 "ModuleId {index} references artifact row {} outside the retained artefact lane of {} rows",
                                 artifact_id.index(),
                                 row_count
                             ))
                         })?;
                     if let Some(existing) = owner {
-                        return Err(CompilerError::compiler_error(format!(
-                            "Artifact row {} is referenced by both ModuleId {} and ModuleId {index}",
-                            artifact_id.index(),
-                            existing.index()
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "Artifact row {} is referenced by both ModuleId {} and ModuleId {index}",
+                                artifact_id.index(),
+                                existing.index()
+                            ),
+                        ));
                     }
                     *owner = Some(module_id);
                     let node = &self.structure.nodes()[index];
                     if &artifact.interface.module_origin != node.stable_origin() {
-                        return Err(CompilerError::compiler_error(format!(
-                            "ModuleId {index} artefact interface origin {:?} disagrees with its graph node origin {:?}",
-                            artifact.interface.module_origin,
-                            node.stable_origin()
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "ModuleId {index} artefact interface origin {:?} disagrees with its graph node origin {:?}",
+                                artifact.interface.module_origin,
+                                node.stable_origin()
+                            ),
+                        ));
                     }
                 }
                 ProviderSlot::Diagnosed => {
                     if *retained_lane != RetainedOutcomeLane::Diagnosed {
-                        return Err(CompilerError::compiler_error(format!(
-                            "ModuleId {index} holds the diagnosed slot but has no diagnosed record"
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "ModuleId {index} holds the diagnosed slot but has no diagnosed record"
+                            ),
+                        ));
                     }
                 }
                 ProviderSlot::Blocked => {
                     if *retained_lane != RetainedOutcomeLane::Blocked {
-                        return Err(CompilerError::compiler_error(format!(
-                            "ModuleId {index} holds the blocked slot but has no blocked record"
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "ModuleId {index} holds the blocked slot but has no blocked record"
+                            ),
+                        ));
                     }
                 }
             }
@@ -261,9 +357,10 @@ impl CompiledGraphBoundary {
             .enumerate()
             .find(|(_, owner)| owner.is_none())
         {
-            return Err(CompilerError::compiler_error(format!(
-                "Artifact row {row_index} is not referenced by any module slot"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!("Artifact row {row_index} is not referenced by any module slot"),
+            ));
         }
 
         Ok(())
@@ -277,20 +374,27 @@ impl CompiledGraphBoundary {
     /// WHY: `build`/`dev` must never receive a diagnosed or blocked boundary, and the stricter
     ///       requirement should not re-run the full invariant proof once finalization is the
     ///       authoritative completion gate.
-    pub(crate) fn require_all_successful(&self) -> Result<(), CompilerError> {
+    pub(crate) fn require_all_successful(&self) -> Result<(), InfrastructureFailure> {
         if let Some(diagnosed) = self.diagnosed.first() {
-            return Err(CompilerError::compiler_error(format!(
-                "Project compilation received a boundary with diagnosed ModuleId {}",
-                diagnosed.module_id.index()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Project compilation received a boundary with diagnosed ModuleId {}",
+                    diagnosed.module_id.index()
+                ),
+            ));
         }
         if let Some(blocked) = self.blocked.first() {
-            return Err(CompilerError::compiler_error(format!(
-                "Project compilation received a boundary with blocked ModuleId {}",
-                blocked.module_id.index()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Project compilation received a boundary with blocked ModuleId {}",
+                    blocked.module_id.index()
+                ),
+            ));
         }
-        self.modules.ensure_all_successful()
+        self.modules.ensure_all_successful();
+        Ok(())
     }
 
     /// Iterate every successful artefact in deterministic `ModuleId` order.
@@ -300,22 +404,12 @@ impl CompiledGraphBoundary {
         self.modules.successful_artefacts_in_module_id_order()
     }
 
-    /// Iterate every successful module view including generated sidecars.
-    ///
     /// Base artefacts come first in `ModuleId` order, then generated sidecars in deterministic
-    /// publication order. Warnings produced during generic materialisation live in sidecar
-    /// metadata, so boundary consumers must visit both lanes.
+    /// publication order. Their warning batches are retained separately from executable views.
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
-    }
-
-    /// Move successful-module warnings from artefact and sidecar owners in view order.
-    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
-        let mut warnings = self.modules.take_successful_warnings();
-        warnings.extend(self.generated.take_sidecar_warnings());
-        warnings
     }
 
     /// Install the single boundary-owned identity pair after all canonical publications.
@@ -323,10 +417,10 @@ impl CompiledGraphBoundary {
     /// WHAT: overwrites every base artefact and generated sidecar placeholder with one final
     ///       `Arc<PathTable>` and pairs the retained materialisation contexts with that table
     ///       plus one frozen requester-domain string table.
-    /// WHY: per-module publication used to take one full table snapshot per successful module
-    ///      and one frozen table clone per context. The boundary tail builds each once and
-    ///      shares it across every retained row; the local registry must already be dropped so
-    ///      `Arc::make_mut` proves the retained contexts are the sole owners.
+    /// WHY: a full table snapshot per successful module and a frozen table clone per context
+    ///      would scale publication cost with the module count. The boundary tail builds each
+    ///      once and shares it across every retained row; the local registry must already be
+    ///      dropped so `Arc::make_mut` proves the retained contexts are the sole owners.
     ///
     /// Both tables are required together because every retained `PathId` resolves through the
     /// component IDs issued by the paired string table. A boundary with no materialisation
@@ -371,7 +465,7 @@ impl CompiledSourcePackage {
     /// WHY: `CompletedSourcePackageRegistry::publish` mutates registry state, so the package
     ///       row must be provably coherent before dependency edges and materialisation rows are
     ///       recorded beside it.
-    pub(crate) fn validate(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate(&self) -> Result<(), InfrastructureFailure> {
         self.boundary.validate_invariants()?;
 
         let root_index = self.root_module_id.index();
@@ -381,27 +475,36 @@ impl CompiledSourcePackage {
             .nodes()
             .get(root_index)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Source package @{} root ModuleId {} is out of range for {} graph nodes",
-                    self.package_prefix(),
-                    root_index,
-                    self.boundary.structure.nodes().len()
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Source package @{} root ModuleId {} is out of range for {} graph nodes",
+                        self.package_prefix(),
+                        root_index,
+                        self.boundary.structure.nodes().len()
+                    ),
+                )
             })?;
         if node.stable_origin().package() != &self.package_identity {
-            return Err(CompilerError::compiler_error(format!(
-                "Source package @{} root node belongs to package {:?}, not {:?}",
-                self.package_prefix(),
-                node.stable_origin().package(),
-                self.package_identity
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Source package @{} root node belongs to package {:?}, not {:?}",
+                    self.package_prefix(),
+                    node.stable_origin().package(),
+                    self.package_identity
+                ),
+            ));
         }
         if node.role() != ModuleRootRole::Normal {
-            return Err(CompilerError::compiler_error(format!(
-                "Source package @{} root module has role {:?}; packages require a normal entry-root module",
-                self.package_prefix(),
-                node.role()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Source package @{} root module has role {:?}; packages require a normal entry-root module",
+                    self.package_prefix(),
+                    node.role()
+                ),
+            ));
         }
 
         match self.boundary.modules.slot(self.root_module_id)? {
@@ -411,28 +514,34 @@ impl CompiledSourcePackage {
                     .modules
                     .interface(self.root_module_id)?
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                             "Source package @{} root ModuleId {} holds a successful slot without a published interface",
                             self.package_prefix(),
                             root_index
                         ))
                     })?;
                 if &interface.module_origin != node.stable_origin() {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Source package @{} root interface origin {:?} disagrees with its graph node origin {:?}",
-                        self.package_prefix(),
-                        interface.module_origin,
-                        node.stable_origin()
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Source package @{} root interface origin {:?} disagrees with its graph node origin {:?}",
+                            self.package_prefix(),
+                            interface.module_origin,
+                            node.stable_origin()
+                        ),
+                    ));
                 }
             }
             ProviderSlot::Diagnosed | ProviderSlot::Blocked => {}
             ProviderSlot::Unavailable => {
-                return Err(CompilerError::compiler_error(format!(
-                    "Source package @{} root ModuleId {} never reached a completed outcome",
-                    self.package_prefix(),
-                    root_index
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Source package @{} root ModuleId {} never reached a completed outcome",
+                        self.package_prefix(),
+                        root_index
+                    ),
+                ));
             }
         }
 
@@ -440,20 +549,23 @@ impl CompiledSourcePackage {
     }
 
     /// The root facade's publication slot inside this package's own store.
-    pub(crate) fn root_slot(&self) -> Result<ProviderSlot, CompilerError> {
+    pub(crate) fn root_slot(&self) -> Result<ProviderSlot, InfrastructureFailure> {
         self.boundary.modules.slot(self.root_module_id)
     }
 
     /// The completed facade interface for this package boundary.
-    pub(crate) fn root_interface(&self) -> Result<&PublicSemanticInterface, CompilerError> {
+    pub(crate) fn root_interface(&self) -> Result<&PublicSemanticInterface, InfrastructureFailure> {
         self.boundary
             .modules
             .interface(self.root_module_id)?
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Source package @{} completed without a successful facade interface",
-                    self.package_prefix()
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Source package @{} completed without a successful facade interface",
+                        self.package_prefix()
+                    ),
+                )
             })
     }
 }
@@ -487,9 +599,8 @@ pub(crate) struct PackageMaterialisationLocation {
 /// WHAT: stores completed packages contiguously, resolves package prefixes to dense
 ///       [`PackageBoundaryId`] values, and records the package dependency graph (provider and
 ///       consumer edges) exactly once when each package publishes.
-/// WHY: every boundary compilation and module readiness check previously rebuilt prefix maps or
-///      filtered the full dependency vector per module; one registry keeps package indexing and
-///      dependency adjacency in a single build-owned owner.
+/// WHY: boundary compilation and module readiness checks both need package prefix lookup and
+///      dependency adjacency; one registry keeps both in a single build-owned owner.
 /// MUST NOT: store project modules, merge package artefacts into one vector, or expose
 /// package-local dense handles as cross-boundary semantic identities.
 pub(crate) struct CompletedSourcePackageRegistry {
@@ -547,13 +658,13 @@ impl CompletedSourcePackageRegistry {
         &self,
         package: &CompiledSourcePackage,
         dependency_prefixes: &[String],
-    ) -> Result<SourcePackagePublication, CompilerError> {
+    ) -> Result<SourcePackagePublication, InfrastructureFailure> {
         let prefix = package.package_prefix().to_owned();
         if self.by_prefix.contains_key(prefix.as_str()) {
-            return Err(CompilerError::compiler_error(format!(
-                "source package @{} completed more than once",
-                prefix
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!("source package @{} completed more than once", prefix),
+            ));
         }
 
         // Validate the finished boundary and package root before any mutation.
@@ -570,16 +681,22 @@ impl CompletedSourcePackageRegistry {
                 .get(dependency_prefix.as_str())
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "source package @{} depends on unindexed source package @{}",
-                        prefix, dependency_prefix
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "source package @{} depends on unindexed source package @{}",
+                            prefix, dependency_prefix
+                        ),
+                    )
                 })?;
             if !seen_providers.insert(provider_id) {
-                return Err(CompilerError::compiler_error(format!(
-                    "source package @{} lists provider package @{} more than once",
-                    prefix, dependency_prefix
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "source package @{} lists provider package @{} more than once",
+                        prefix, dependency_prefix
+                    ),
+                ));
             }
             resolved_providers.push(provider_id);
         }
@@ -589,18 +706,24 @@ impl CompletedSourcePackageRegistry {
         let mut seen_declarations = FxHashSet::default();
         for (identity, location) in package.boundary.modules.materialisation_locations() {
             if !seen_declarations.insert(identity.clone()) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} is duplicated inside source package @{}",
-                    identity, prefix
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Generated declaration identity {:?} is duplicated inside source package @{}",
+                        identity, prefix
+                    ),
+                ));
             }
             if let Some(existing) = self.declarations_by_identity.get(identity) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generated declaration identity {:?} was published by source packages @{} and @{}",
-                    identity,
-                    self.package(existing.package_id)?.package_prefix(),
-                    prefix
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Generated declaration identity {:?} was published by source packages @{} and @{}",
+                        identity,
+                        self.package(existing.package_id)?.package_prefix(),
+                        prefix
+                    ),
+                ));
             }
             materialisation_rows.push((
                 identity.clone(),
@@ -660,21 +783,24 @@ impl CompletedSourcePackageRegistry {
         &mut self,
         package_id: PackageBoundaryId,
         source_database: Arc<SourceDatabase>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let slot = self
             .source_databases
             .get_mut(package_id.index())
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                     "completed source package registry has no source database slot for boundary id {}",
                     package_id.index()
                 ))
             })?;
         if slot.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "source package @{} source database was attached more than once",
-                self.package(package_id)?.package_prefix()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "source package @{} source database was attached more than once",
+                    self.package(package_id)?.package_prefix()
+                ),
+            ));
         }
         *slot = Some(source_database);
         Ok(())
@@ -713,7 +839,7 @@ impl CompletedSourcePackageRegistry {
         &mut self,
         package: CompiledSourcePackage,
         dependency_prefixes: &[String],
-    ) -> Result<PackageBoundaryId, CompilerError> {
+    ) -> Result<PackageBoundaryId, InfrastructureFailure> {
         let publication = self.preflight(&package, dependency_prefixes)?;
         let package_id = publication.package_id;
         self.reserve_commit(&publication);
@@ -728,12 +854,15 @@ impl CompletedSourcePackageRegistry {
     pub(crate) fn package(
         &self,
         package_id: PackageBoundaryId,
-    ) -> Result<&CompiledSourcePackage, CompilerError> {
+    ) -> Result<&CompiledSourcePackage, InfrastructureFailure> {
         self.packages.get(package_id.0).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "completed source package registry has no package for boundary id {}",
-                package_id.0
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "completed source package registry has no package for boundary id {}",
+                    package_id.0
+                ),
+            )
         })
     }
 
@@ -741,12 +870,12 @@ impl CompletedSourcePackageRegistry {
     pub(crate) fn provider_packages(
         &self,
         package_id: PackageBoundaryId,
-    ) -> Result<&[PackageBoundaryId], CompilerError> {
+    ) -> Result<&[PackageBoundaryId], InfrastructureFailure> {
         self.provider_packages
             .get(package_id.0)
             .map(Vec::as_slice)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                     "completed source package registry has no provider edges for boundary id {}",
                     package_id.0
                 ))
@@ -757,12 +886,12 @@ impl CompletedSourcePackageRegistry {
     pub(crate) fn consumer_packages(
         &self,
         package_id: PackageBoundaryId,
-    ) -> Result<&[PackageBoundaryId], CompilerError> {
+    ) -> Result<&[PackageBoundaryId], InfrastructureFailure> {
         self.consumer_packages
             .get(package_id.0)
             .map(Vec::as_slice)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                     "completed source package registry has no consumer edges for boundary id {}",
                     package_id.0
                 ))
@@ -806,25 +935,27 @@ impl CompletedSourcePackageRegistry {
     ///       before dependants.
     /// WHY: the registry records package dependency adjacency exactly once; this invariant
     ///       check keeps the recorded graph usable without re-deriving it from dependency vectors.
-    pub(crate) fn validate_dependency_edges(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate_dependency_edges(&self) -> Result<(), InfrastructureFailure> {
         for package_id in 0..self.packages.len() {
             let package_id = PackageBoundaryId(package_id);
             for provider_id in self.provider_packages(package_id)? {
                 if provider_id.index() >= package_id.index() {
-                    return Err(CompilerError::compiler_error(format!(
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
                         "source package @{} lists provider package {} that did not publish first",
                         self.package(package_id)?.package_prefix(),
                         self.package(*provider_id)?.package_prefix()
-                    )));
+                    );
                 }
             }
             for consumer_id in self.consumer_packages(package_id)? {
                 if consumer_id.index() <= package_id.index() {
-                    return Err(CompilerError::compiler_error(format!(
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
                         "source package @{} lists consumer package {} that published before it",
                         self.package(package_id)?.package_prefix(),
                         self.package(*consumer_id)?.package_prefix()
-                    )));
+                    );
                 }
             }
         }
@@ -869,7 +1000,7 @@ pub(crate) enum CompiledModuleRef {
 pub(crate) fn compilation_module_views<'a>(
     project: &'a CompiledGraphBoundary,
     source_packages: &'a CompletedSourcePackageRegistry,
-) -> Result<Vec<(CompiledModuleRef, &'a Module)>, CompilerError> {
+) -> Result<Vec<(CompiledModuleRef, &'a Module)>, InfrastructureFailure> {
     let mut views = Vec::new();
 
     for module_id in project
@@ -927,44 +1058,42 @@ pub(crate) fn compilation_module_views<'a>(
     Ok(views)
 }
 
-/// Move-only domain-tagged premerge batch lane for transient check-only diagnostics.
+/// Move-only domain-tagged prepared batch lane for transient check-only diagnostics.
 ///
-/// WHAT: retains a [`PremergeDiagnosticBatch`] with its local [`StringTable`] alongside the
-///       package domain that produced it (`None` for project transients).
-/// WHY: transient units have no graph slot, so their diagnostics must cross into the final
-///      render tail as move-only owners with domain tags; the final tail merges each local
-///      table exactly once and installs the matching frozen identity.
+/// WHAT: retains a prepared diagnostic batch alongside the package domain that produced it
+///       (`None` for project transients).
+/// WHY: transient units have no graph slot, so their diagnostics cross into the final render
+///      tail as move-only owners with domain tags and join the run through `append_prepared`.
 #[derive(Debug)]
-pub(crate) struct TransientPremergeBatch {
+pub(crate) struct TransientPreparedBatch {
     pub(crate) package_id: Option<PackageBoundaryId>,
-    pub(crate) batch: PremergeDiagnosticBatch,
+    pub(crate) batch: PreparedDiagnosticBatch,
 }
 
-impl TransientPremergeBatch {
-    pub(crate) fn project(batch: PremergeDiagnosticBatch) -> Self {
+impl TransientPreparedBatch {
+    pub(crate) fn project(batch: PreparedDiagnosticBatch) -> Self {
         Self {
             package_id: None,
             batch,
         }
     }
 
-    pub(crate) fn package(package_id: PackageBoundaryId, batch: PremergeDiagnosticBatch) -> Self {
+    pub(crate) fn package(package_id: PackageBoundaryId, batch: PreparedDiagnosticBatch) -> Self {
         Self {
             package_id: Some(package_id),
             batch,
         }
     }
 }
-/// Storage retained by the final diagnostic render boundary.
+/// Storage retained by the final diagnostic report boundary.
 ///
-/// The source fields count only frozen source owners reachable from the returned diagnostic
-/// vessel. Diagnostic fields count records and label slots, while `retained_identity_contexts`
-/// counts distinct frozen identity allocations reachable through range rows or donor-only handles.
-/// The `path_table_*` fields count distinct path-table owners reachable from that same returned
-/// vessel: the frozen identity contexts behind range rows or donor-only handles, explicit
-/// `RenderPathContext` tables, and any transitional source-context table still present after
-/// freezing. Successful-module executable views are deliberately not counted; a table only
-/// reachable from executable rows without a diagnostic owner is not report-retained storage.
+/// The source fields count only frozen source owners reachable from the returned report.
+/// Diagnostic fields count records and label slots, while `retained_identity_contexts` counts
+/// distinct frozen identity allocations reachable through source rows or donor-only handles.
+/// The `path_table_*` fields count distinct path-table owners reachable from that same report:
+/// frozen identity contexts behind source rows or donor-only handles, explicit path rows, and
+/// retained path tables. Successful-module executable views are deliberately not counted; a table
+/// only reachable from executable rows without a diagnostic owner is not report-retained storage.
 /// The `source_tokens_*`, construction, donor-snapshot and generic-owner fields are command-scoped
 /// ledger observations and can remain nonzero for clean results even though report-retention
 /// fields stay zero.
@@ -972,10 +1101,49 @@ impl TransientPremergeBatch {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) source_snapshot_bytes: usize,
+    pub(crate) source_text_capacity_bytes: usize,
+    pub(crate) source_line_start_rows: usize,
+    pub(crate) source_line_start_bytes: usize,
+    pub(crate) source_line_start_capacity_bytes: usize,
     pub(crate) extended_span_rows: usize,
+    pub(crate) extended_span_bytes: usize,
+    pub(crate) extended_span_duplicate_rows: usize,
     pub(crate) source_identity_slots: usize,
+    pub(crate) source_identity_slot_capacity_bytes: usize,
+    pub(crate) source_provenance_field_bytes: usize,
+    pub(crate) compilation_root_slots: usize,
+    pub(crate) authored_physical_slots: usize,
+    pub(crate) canonical_os_path_bytes: usize,
+    pub(crate) loaded_source_records: usize,
+    pub(crate) loaded_source_record_capacity_bytes: usize,
     pub(crate) diagnostic_records: usize,
+    pub(crate) diagnostic_record_capacity_bytes: usize,
     pub(crate) diagnostic_label_slots: usize,
+    pub(crate) diagnostic_extra_rows: usize,
+    pub(crate) diagnostic_extra_capacity_bytes: usize,
+    pub(crate) diagnostic_label_rows: usize,
+    pub(crate) diagnostic_label_capacity_bytes: usize,
+    pub(crate) diagnostic_label_data_rows: usize,
+    pub(crate) diagnostic_label_data_capacity_bytes: usize,
+    pub(crate) diagnostic_string_list_rows: usize,
+    pub(crate) diagnostic_string_list_capacity_bytes: usize,
+    pub(crate) diagnostic_substitution_rows: usize,
+    pub(crate) diagnostic_substitution_capacity_bytes: usize,
+    pub(crate) diagnostic_foreign_site_rows: usize,
+    pub(crate) diagnostic_foreign_site_capacity_bytes: usize,
+    pub(crate) type_display_record_rows: usize,
+    pub(crate) type_display_record_capacity_bytes: usize,
+    pub(crate) type_display_auxiliary_rows: usize,
+    pub(crate) type_display_auxiliary_capacity_bytes: usize,
+    pub(crate) diagnostic_report_count: usize,
+    pub(crate) diagnostic_report_capacity_bytes: usize,
+    pub(crate) diagnostic_run_count: usize,
+    pub(crate) diagnostic_run_capacity_bytes: usize,
+    pub(crate) diagnostic_foreign_context_slots: usize,
+    pub(crate) diagnostic_foreign_context_capacity_bytes: usize,
+    pub(crate) frozen_context_shell_bytes: usize,
+    pub(crate) frozen_string_tables: usize,
+    pub(crate) frozen_string_storage_bytes: usize,
     pub(crate) retained_identity_contexts: usize,
     /// Distinct path-table owners reachable from the returned diagnostic report.
     pub(crate) path_table_count: usize,
@@ -1000,10 +1168,22 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     /// Largest individual builder buffer sample; a high-water observation, not an aggregate live
     /// allocation claim.
     pub(crate) transient_construction_peak_bytes: usize,
-    pub(crate) cutover_adapter_bytes: usize,
     pub(crate) donor_identity_string_tables: usize,
     pub(crate) donor_identity_string_storage_bytes: usize,
     pub(crate) donor_identity_path_tables: usize,
+    pub(crate) mutable_string_table_samples: usize,
+    pub(crate) mutable_string_table_slot_capacity_bytes: usize,
+    pub(crate) mutable_string_table_local_payload_bytes: usize,
+    pub(crate) mutable_string_table_reverse_capacity_entries: usize,
+    pub(crate) mutable_string_table_inherited_prefix_rows: usize,
+    pub(crate) mutable_string_table_inherited_prefix_slot_bytes: usize,
+    pub(crate) mutable_string_table_inherited_reverse_capacity_entries: usize,
+    pub(crate) mutable_string_table_peak_slot_capacity_bytes: usize,
+    pub(crate) mutable_path_builder_samples: usize,
+    pub(crate) mutable_path_table_storage_bytes: usize,
+    pub(crate) mutable_path_builder_lookup_layers: usize,
+    pub(crate) mutable_path_builder_lookup_capacity_entries: usize,
+    pub(crate) mutable_path_builder_local_lookup_capacity_entries: usize,
     pub(crate) donor_identity_path_storage_bytes: usize,
     pub(crate) generic_source_tokens_owners: usize,
     pub(crate) generic_source_tokens_bytes: usize,
@@ -1012,6 +1192,8 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) requester_remap_count: usize,
     pub(crate) requester_remap_used_bytes: usize,
     pub(crate) requester_remap_capacity_bytes: usize,
+    pub(crate) string_merge_remap_ns: u64,
+    pub(crate) path_merge_remap_ns: u64,
     pub(crate) observation_incomplete: bool,
 }
 #[cfg(feature = "data_layout_memory_probe")]
@@ -1034,10 +1216,31 @@ impl FrozenRenderRetentionMetrics {
                 .source_tokens_sequence_store_capacity_bytes,
             transient_construction_buffer_bytes: snapshot.transient_construction_buffer_bytes,
             transient_construction_peak_bytes: snapshot.transient_construction_peak_bytes,
-            cutover_adapter_bytes: snapshot.cutover_adapter_bytes,
             donor_identity_string_tables: snapshot.donor_identity_string_tables,
             donor_identity_string_storage_bytes: snapshot.donor_identity_string_storage_bytes,
             donor_identity_path_tables: snapshot.donor_identity_path_tables,
+            mutable_string_table_samples: snapshot.mutable_string_table_samples,
+            mutable_string_table_slot_capacity_bytes: snapshot
+                .mutable_string_table_slot_capacity_bytes,
+            mutable_string_table_local_payload_bytes: snapshot
+                .mutable_string_table_local_payload_bytes,
+            mutable_string_table_reverse_capacity_entries: snapshot
+                .mutable_string_table_reverse_capacity_entries,
+            mutable_string_table_inherited_prefix_rows: snapshot
+                .mutable_string_table_inherited_prefix_rows,
+            mutable_string_table_inherited_prefix_slot_bytes: snapshot
+                .mutable_string_table_inherited_prefix_slot_bytes,
+            mutable_string_table_inherited_reverse_capacity_entries: snapshot
+                .mutable_string_table_inherited_reverse_capacity_entries,
+            mutable_string_table_peak_slot_capacity_bytes: snapshot
+                .mutable_string_table_peak_slot_capacity_bytes,
+            mutable_path_builder_samples: snapshot.mutable_path_builder_samples,
+            mutable_path_table_storage_bytes: snapshot.mutable_path_table_storage_bytes,
+            mutable_path_builder_lookup_layers: snapshot.mutable_path_builder_lookup_layers,
+            mutable_path_builder_lookup_capacity_entries: snapshot
+                .mutable_path_builder_lookup_capacity_entries,
+            mutable_path_builder_local_lookup_capacity_entries: snapshot
+                .mutable_path_builder_local_lookup_capacity_entries,
             donor_identity_path_storage_bytes: snapshot.donor_identity_path_storage_bytes,
             generic_source_tokens_owners: snapshot.generic_source_tokens_owners,
             generic_source_tokens_bytes: snapshot.generic_source_tokens_bytes,
@@ -1046,129 +1249,110 @@ impl FrozenRenderRetentionMetrics {
             requester_remap_count: snapshot.requester_remap_count,
             requester_remap_used_bytes: snapshot.requester_remap_used_bytes,
             requester_remap_capacity_bytes: snapshot.requester_remap_capacity_bytes,
+            string_merge_remap_ns: snapshot.string_merge_remap_ns,
+            path_merge_remap_ns: snapshot.path_merge_remap_ns,
             observation_incomplete: snapshot.observation_incomplete,
             ..Self::default()
         }
     }
+    pub(crate) fn from_ledger_with_reports(
+        snapshot: MemoryLedgerSnapshot,
+        reports: &DiagnosticReportSet,
+    ) -> Self {
+        let mut retention = Self::from_ledger(snapshot);
+        retention.add_report_storage(reports);
+        retention
+    }
 
     fn add_source(&mut self, metrics: SourceDatabaseRetentionMetrics) {
         self.source_snapshot_bytes += metrics.source_snapshot_bytes;
+        self.source_text_capacity_bytes += metrics.source_text_capacity_bytes;
+        self.source_line_start_rows += metrics.source_line_start_rows;
+        self.source_line_start_bytes += metrics.source_line_start_bytes;
         self.extended_span_rows += metrics.extended_span_rows;
+        self.source_line_start_capacity_bytes += metrics.source_line_start_capacity_bytes;
+        self.extended_span_bytes += metrics.extended_span_bytes;
+        self.extended_span_duplicate_rows += metrics.extended_span_duplicate_rows;
         self.source_identity_slots += metrics.source_identity_slots;
+        self.source_identity_slot_capacity_bytes += metrics.source_identity_slot_capacity_bytes;
+        self.source_provenance_field_bytes += metrics.source_provenance_field_bytes;
+        self.compilation_root_slots += metrics.compilation_root_slots;
+        self.authored_physical_slots += metrics.authored_physical_slots;
+        self.canonical_os_path_bytes += metrics.canonical_os_path_bytes;
+        self.loaded_source_records += metrics.loaded_source_records;
+        self.loaded_source_record_capacity_bytes += metrics.loaded_source_record_capacity_bytes;
     }
 
-    /// Count only owners still reachable from the report, including live sources on freeze failure.
-    fn add_report_source_owners(&mut self, messages: &CompilerMessages) {
-        let mut identities = FxHashSet::<*const FrozenIdentityContext>::default();
-        let mut add_identity = |identity: &FrozenIdentityContext| {
-            if identities.insert(identity as *const FrozenIdentityContext) {
+    fn add_report_storage(&mut self, reports: &DiagnosticReportSet) {
+        let report_metrics = reports.memory_ledger_metrics();
+        self.diagnostic_records = report_metrics.record_rows;
+        self.diagnostic_record_capacity_bytes = report_metrics.record_capacity_bytes;
+        self.diagnostic_label_slots = report_metrics.label_rows;
+        self.diagnostic_extra_rows = report_metrics.extra_rows;
+        self.diagnostic_extra_capacity_bytes = report_metrics.extra_capacity_bytes;
+        self.diagnostic_label_rows = report_metrics.label_rows;
+        self.diagnostic_label_capacity_bytes = report_metrics.label_capacity_bytes;
+        self.diagnostic_label_data_rows = report_metrics.label_data_rows;
+        self.diagnostic_label_data_capacity_bytes = report_metrics.label_data_capacity_bytes;
+        self.diagnostic_string_list_rows = report_metrics.string_list_rows;
+        self.diagnostic_string_list_capacity_bytes = report_metrics.string_list_capacity_bytes;
+        self.diagnostic_substitution_rows = report_metrics.substitution_rows;
+        self.diagnostic_substitution_capacity_bytes = report_metrics.substitution_capacity_bytes;
+        self.diagnostic_foreign_site_rows = report_metrics.foreign_site_rows;
+        self.diagnostic_foreign_site_capacity_bytes = report_metrics.foreign_site_capacity_bytes;
+        self.type_display_record_rows = report_metrics.type_display_record_rows;
+        self.type_display_record_capacity_bytes = report_metrics.type_display_record_capacity_bytes;
+        self.type_display_auxiliary_rows = report_metrics.type_display_auxiliary_rows;
+        self.type_display_auxiliary_capacity_bytes =
+            report_metrics.type_display_auxiliary_capacity_bytes;
+        self.diagnostic_report_count = report_metrics.report_rows;
+        self.diagnostic_report_capacity_bytes = report_metrics.report_capacity_bytes;
+        self.diagnostic_run_count = report_metrics.run_rows;
+        self.diagnostic_run_capacity_bytes = report_metrics.run_capacity_bytes;
+        self.diagnostic_foreign_context_slots = report_metrics.foreign_context_rows;
+        self.diagnostic_foreign_context_capacity_bytes =
+            report_metrics.foreign_context_capacity_bytes;
+
+        for (index, identity) in reports.contexts().enumerate() {
+            let identity_address = identity as *const FrozenIdentityContext as usize;
+            let already_counted = reports.contexts().take(index).any(|previous| {
+                previous as *const FrozenIdentityContext as usize == identity_address
+            });
+            if !already_counted {
                 self.add_source(identity.retention_metrics());
+                self.retained_identity_contexts += 1;
+                self.frozen_context_shell_bytes += std::mem::size_of::<FrozenIdentityContext>();
             }
-        };
-        for context in &messages.render_frozen_contexts {
-            add_identity(&context.identity);
-        }
-        if let Some(errors) = messages.infrastructure_errors() {
-            for identity in errors.frozen_identities() {
-                add_identity(identity);
+
+            let strings = identity.strings();
+            let string_address = strings as *const FrozenStringTable as usize;
+            let string_already_counted = reports.contexts().take(index).any(|previous| {
+                previous.strings() as *const FrozenStringTable as usize == string_address
+            });
+            if !string_already_counted {
+                self.frozen_string_tables += 1;
+                self.frozen_string_storage_bytes += strings.storage_bytes();
             }
-        }
-        for diagnostic in messages.diagnostic_slice() {
-            if let Some(identity) = diagnostic
-                .primary_frozen_identity_handle
-                .as_ref()
-                .and_then(FrozenIdentityHandle::get)
-            {
-                add_identity(identity);
-            }
-            for label in &diagnostic.labels {
-                if let Some(identity) = label
-                    .frozen_identity_handle
-                    .as_ref()
-                    .and_then(FrozenIdentityHandle::get)
-                {
-                    add_identity(identity);
-                }
-            }
-        }
-        self.retained_identity_contexts = identities.len();
-        let mut live_sources = FxHashSet::<*const SourceDatabase>::default();
-        let cause_sources = messages
-            .infrastructure_errors()
-            .into_iter()
-            .flat_map(|errors| errors.source_databases());
-        for source in messages
-            .render_source_contexts
-            .iter()
-            .map(|context| &context.source_database)
-            .chain(cause_sources)
-        {
-            if live_sources.insert(Arc::as_ptr(source)) {
-                self.add_source(source.retention_metrics());
+
+            let paths = identity.paths();
+            let path_address = paths as *const PathTable as usize;
+            let path_already_counted = reports
+                .contexts()
+                .take(index)
+                .any(|previous| previous.paths() as *const PathTable as usize == path_address);
+            if !path_already_counted {
+                self.path_table_count += 1;
+                self.path_table_node_rows += paths.len();
+                self.path_table_storage_bytes += paths.storage_bytes();
             }
         }
     }
-    /// Count distinct path-table owners reachable from the returned diagnostic report.
-    ///
-    /// WHAT: walks the exact owner set the diagnostic renderer can still dereference after the
-    ///       render tail: the frozen identity contexts behind range rows or donor-only handles,
-    ///       the explicit `RenderPathContext` tables, and any transitional
-    ///       `RenderSourceContext` table still present. Deduplication is by table pointer.
-    /// WHY: the report is the retention owner after the build boundary drops; counting
-    ///      executable-row tables instead would describe storage the returned report cannot
-    ///      reach, including all-diagnosed results with no successful module at all.
-    fn add_report_path_tables(&mut self, messages: &CompilerMessages) {
-        let mut seen = FxHashSet::<usize>::default();
-        let mut add = |path_table: &PathTable| {
-            let address = path_table as *const PathTable as usize;
-            if seen.insert(address) {
-                self.path_table_count += 1;
-                self.path_table_node_rows += path_table.len();
-                self.path_table_storage_bytes += path_table.storage_bytes();
-            }
-        };
-        let mut add_identity = |identity: &FrozenIdentityContext| {
-            add(identity.paths());
-        };
-        for frozen_context in &messages.render_frozen_contexts {
-            add_identity(&frozen_context.identity);
-        }
-        if let Some(errors) = messages.infrastructure_errors() {
-            for identity in errors.frozen_identities() {
-                add_identity(identity);
-            }
-        }
-        for diagnostic in messages.diagnostic_slice() {
-            if let Some(identity) = diagnostic
-                .primary_frozen_identity_handle
-                .as_ref()
-                .and_then(FrozenIdentityHandle::get)
-            {
-                add_identity(identity);
-            }
-            for label in &diagnostic.labels {
-                if let Some(identity) = label
-                    .frozen_identity_handle
-                    .as_ref()
-                    .and_then(FrozenIdentityHandle::get)
-                {
-                    add_identity(identity);
-                }
-            }
-        }
-        if let Some(path_contexts) = messages.render_path_contexts.as_deref() {
-            for path_context in path_contexts {
-                add(path_context.path_table.as_ref());
-            }
-        }
-        for source_context in &messages.render_source_contexts {
-            add(source_context.source_database.paths());
-        }
-        if let Some(errors) = messages.infrastructure_errors() {
-            for source in errors.source_databases() {
-                add(source.paths());
-            }
-        }
+
+    #[cfg(test)]
+    pub(crate) fn from_reports(reports: &DiagnosticReportSet) -> Self {
+        let mut retention = Self::default();
+        retention.add_report_storage(reports);
+        retention
     }
 }
 
@@ -1181,7 +1365,7 @@ type FrozenRenderRetentionMetrics = ();
 /// It retains successful boundaries beside diagnosed and blocked outcomes so `check` and
 /// benchmark tooling never lose independent work to an aggregate `Err`.
 /// WHY: user diagnostics are retained data, not an infrastructure failure. Only
-/// [`CompilerError`] aborts compilation.
+/// [`InfrastructureFailure`] aborts compilation.
 pub(crate) struct ProjectFrontendCompilation {
     pub(crate) project: CompiledGraphBoundary,
     pub(crate) source_packages: CompletedSourcePackageRegistry,
@@ -1189,9 +1373,9 @@ pub(crate) struct ProjectFrontendCompilation {
     pub(crate) resource_inputs: ResourceInputRegistry,
     /// Diagnostics and warnings from transient check-only units, which have no canonical graph slot.
     ///
-    /// WHAT: move-only premerge batches tagged by domain; local tables merge exactly once
-    ///       at the final render tail.
-    pub(crate) transient_batches: Vec<TransientPremergeBatch>,
+    /// WHAT: move-only premerge batches tagged by domain. They stay retained until the canonical
+    ///       tail can append them after project and package graph diagnostics.
+    pub(crate) transient_batches: Vec<TransientPreparedBatch>,
     /// Project source identity retained by the no-input frontend seam for its caller to pass into
     /// the frozen render tail.
     ///
@@ -1205,8 +1389,8 @@ impl ProjectFrontendCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
-        transient_batches: Vec<TransientPremergeBatch>,
-    ) -> Result<Self, CompilerError> {
+        transient_batches: Vec<TransientPreparedBatch>,
+    ) -> Result<Self, InfrastructureFailure> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
         resource_inputs.validate()?;
@@ -1225,12 +1409,13 @@ impl ProjectFrontendCompilation {
         }
         for (identity, location) in project.modules.materialisation_locations() {
             if let Some(package_id) = package_owners.get(identity) {
-                return Err(CompilerError::compiler_error(format!(
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
                     "Generated declaration identity {:?} is published by both project module {} and source package @{}",
                     identity,
                     location.artifact_id.index(),
                     source_packages.package(*package_id)?.package_prefix()
-                )));
+                );
             }
         }
 
@@ -1268,53 +1453,130 @@ impl ProjectFrontendCompilation {
         )
     }
 
-    /// Build the frozen-identity render-boundary message set for this outcome.
-    ///
-    /// WHAT: merges every retained local table exactly once into the caller aggregate, pairs
-    ///       each diagnostic range and infrastructure cause with its issuing source owner, then
-    ///       freezes through the shared message owner. Order is project warnings, package warnings,
-    ///       project diagnosed, package diagnosed, then transient batches and trailing messages.
-    ///       Freeze failures append to the original vessel; live source/string owners remain intact.
-    /// WHY: production build/check/benchmark render against exact snapshots without source/table
-    ///      copies or filesystem rereads, and finalisation cannot replace an earlier failure.
-    pub(crate) fn into_render_messages_with_frozen_identity(
-        self,
-        string_table: &mut StringTable,
+    /// Convert diagnosed graph work at the owning frontend boundary. Successful warnings remain
+    /// staged in the command-owned accumulator until its report owner releases the source database.
+    pub(crate) fn into_compilation_result(
+        mut self,
+        warning_owner: &mut BoundaryAccumulator,
         project_source: Option<Arc<SourceDatabase>>,
-        trailing_project_messages: Option<CompilerMessages>,
-    ) -> CompilerMessages {
-        self.into_render_messages_with_optional_retention(
-            string_table,
+        trailing_facade_failure: Option<ProjectAssemblyError>,
+    ) -> CompilationResult<Self> {
+        if self.has_diagnosed_or_blocked() || trailing_facade_failure.is_some() {
+            let reports = self.into_diagnostic_reports(
+                warning_owner,
+                project_source,
+                trailing_facade_failure,
+            )?;
+            return Ok(CompilationOutcome::Diagnosed(reports));
+        }
+
+        let project_source = project_source.or_else(|| self.project_source_database.clone());
+        self.project_source_database = project_source;
+        self.stage_transient_warnings(warning_owner)?;
+        self.retain_successful_warning_identity_domains(warning_owner);
+        Ok(CompilationOutcome::Success {
+            value: self,
+            warnings: None,
+        })
+    }
+    fn retain_successful_warning_identity_domains(&self, warning_owner: &mut BoundaryAccumulator) {
+        if let (Some(identity), Some(source_database)) = (
+            self.project.structure.stable_package_identity(),
+            self.project_source_database.as_ref(),
+        ) {
+            warning_owner.retain_successful_warning_identity_domain(identity, source_database);
+        }
+        for (package, source_database) in self
+            .source_packages
+            .packages
+            .iter()
+            .zip(&self.source_packages.source_databases)
+        {
+            if let Some(source_database) = source_database.as_ref() {
+                warning_owner.retain_successful_warning_identity_domain(
+                    &package.package_identity,
+                    source_database,
+                );
+            }
+        }
+    }
+
+    fn stage_transient_warnings(
+        &mut self,
+        warning_owner: &mut BoundaryAccumulator,
+    ) -> Result<(), InfrastructureErrors> {
+        let transient_batches = std::mem::take(&mut self.transient_batches);
+        if transient_batches
+            .iter()
+            .all(|transient| transient.batch.diagnostic_count() == 0)
+        {
+            return Ok(());
+        }
+
+        let (_, mut warning_sink) = warning_owner.compiler_parts_mut();
+        for transient in transient_batches {
+            if transient.batch.diagnostic_count() == 0 {
+                continue;
+            }
+            let Some(package_id) = transient.package_id else {
+                warning_sink.append(
+                    SuccessfulWarningBoundary::Project,
+                    SuccessfulWarningPosition::CommandTail,
+                    transient.batch,
+                );
+                continue;
+            };
+
+            let package = self.source_packages.package(package_id)?;
+            let source_database = self
+                .source_packages
+                .source_database(package_id)
+                .cloned()
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "check-only warning package @{} has no finalized source database",
+                            package.package_prefix()
+                        ),
+                    )
+                })?;
+            let boundary = SuccessfulWarningBoundary::SourcePackage(package_id.index());
+            warning_sink.set_source_package_identity(boundary, package.package_identity.clone());
+            warning_sink.append(
+                boundary,
+                SuccessfulWarningPosition::CommandTail,
+                transient.batch,
+            );
+            warning_sink.commit_boundary(boundary, Some(source_database));
+        }
+        Ok(())
+    }
+
+    /// Freeze only diagnosed graph work. Committed success warnings never share this report set.
+    pub(crate) fn into_diagnostic_reports(
+        self,
+        warning_owner: &mut BoundaryAccumulator,
+        project_source: Option<Arc<SourceDatabase>>,
+        trailing_facade_failure: Option<ProjectAssemblyError>,
+    ) -> Result<DiagnosticReportSet, InfrastructureErrors> {
+        self.into_diagnostic_reports_with_retention(
+            warning_owner,
             project_source,
-            trailing_project_messages,
+            trailing_facade_failure,
         )
         .0
     }
 
-    #[cfg(feature = "data_layout_memory_probe")]
-    pub(crate) fn into_render_messages_with_frozen_identity_and_metrics(
+    fn into_diagnostic_reports_with_retention(
         self,
-        string_table: &mut StringTable,
+        warning_owner: &mut BoundaryAccumulator,
         project_source: Option<Arc<SourceDatabase>>,
-        trailing_project_messages: Option<CompilerMessages>,
-    ) -> (CompilerMessages, FrozenRenderRetentionMetrics) {
-        self.into_render_messages_with_optional_retention(
-            string_table,
-            project_source,
-            trailing_project_messages,
-        )
-    }
-
-    fn into_render_messages_with_optional_retention(
-        self,
-        string_table: &mut StringTable,
-        project_source: Option<Arc<SourceDatabase>>,
-        trailing_project_messages: Option<CompilerMessages>,
-    ) -> (CompilerMessages, FrozenRenderRetentionMetrics) {
-        // The second tuple member is a unit in normal builds. Retention scans and source
-        // accounting exist only in the data-layout probe feature, while production rendering
-        // still shares this one ownership-preserving implementation.
-
+        trailing_facade_failure: Option<ProjectAssemblyError>,
+    ) -> (
+        Result<DiagnosticReportSet, InfrastructureErrors>,
+        FrozenRenderRetentionMetrics,
+    ) {
         let Self {
             mut project,
             source_packages,
@@ -1322,7 +1584,7 @@ impl ProjectFrontendCompilation {
             project_source_database,
             ..
         } = self;
-        let project_warnings = project.take_successful_warnings();
+        let project_diagnosed = std::mem::take(&mut project.diagnosed);
         let (mut source_packages, package_source_arcs) =
             source_packages.into_packages_with_source_databases();
         #[cfg(feature = "data_layout_memory_probe")]
@@ -1334,185 +1596,202 @@ impl ProjectFrontendCompilation {
         }
         #[cfg(feature = "data_layout_memory_probe")]
         let ledger_snapshot = crate::compiler_frontend::instrumentation::snapshot_memory_ledger();
-        let project_diagnosed = std::mem::take(&mut project.diagnosed);
-        let package_diagnosed = source_packages
-            .iter_mut()
-            .map(|package| std::mem::take(&mut package.boundary.diagnosed))
-            .collect::<Vec<_>>();
-        let package_warnings = source_packages
-            .iter_mut()
-            .map(|package| package.boundary.take_successful_warnings())
-            .collect::<Vec<_>>();
-        // Consume the caller aggregate without cloning; success warnings already live in
-        // this domain while each local batch merges exactly once below before freezing.
-        let mut messages = CompilerMessages::empty(std::mem::take(string_table));
-        // Pending frozen rows as (range, package_index). `None` package means project/root.
-        let mut frozen_spans: Vec<(std::ops::Range<usize>, Option<usize>)> = Vec::new();
-        let start = messages.diagnostic_slice().len();
-        messages.extend_diagnostics(project_warnings);
-        if messages.diagnostic_slice().len() != start {
-            frozen_spans.push((start..messages.diagnostic_slice().len(), None));
+
+        let project_domain = project.structure.stable_package_identity().cloned();
+        let project_source = project_source.or(project_source_database);
+        let trailing_facade_failure = trailing_facade_failure.map(|failure| {
+            let diagnostic_strings = DiagnosticStringBuilder::new(warning_owner.string_table_mut());
+            failure.into_prepared_failure(&diagnostic_strings)
+        });
+        warning_owner.discard_successful_warnings();
+        let mut accumulator = std::mem::replace(warning_owner, BoundaryAccumulator::new());
+        if let Some(source) = project_source.as_ref() {
+            accumulator.set_project_source_database(Arc::clone(source));
         }
-        for (package_index, warnings) in package_warnings.into_iter().enumerate() {
-            if warnings.is_empty() {
-                continue;
+        let mut diagnostic_count = accumulator.diagnostic_count();
+        let mut can_freeze = true;
+        let mut saw_infrastructure = false;
+        #[cfg(feature = "data_layout_memory_probe")]
+        let (mut diagnostic_records, mut diagnostic_label_slots) =
+            (diagnostic_count, accumulator.prepared_label_count());
+
+        // Diagnosed graph modules are already in canonical ModuleId order.
+        for diagnosed in project_diagnosed {
+            let metrics = append_prepared_frontend_diagnostics(
+                &mut accumulator,
+                diagnosed.diagnostics,
+                project_source.as_ref().map(|source| (source, None)),
+                diagnostic_count,
+                &mut can_freeze,
+            );
+            #[cfg(feature = "data_layout_memory_probe")]
+            {
+                diagnostic_records += metrics.diagnostic_count;
+                diagnostic_label_slots += metrics.label_count;
             }
-            let start = messages.diagnostic_slice().len();
-            // Warnings already live in the aggregate domain, so no local merge is needed;
-            // the frozen row below still binds them to their package snapshot.
-            messages.extend_diagnostics(warnings);
-            frozen_spans.push((
-                start..messages.diagnostic_slice().len(),
-                Some(package_index),
-            ));
+            diagnostic_count += metrics.diagnostic_count;
+            saw_infrastructure |= metrics.missing_source_error;
         }
-        if !project_diagnosed.is_empty() {
-            let start = messages.diagnostic_slice().len();
-            for diagnosed in project_diagnosed {
-                messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
-            }
-            if messages.diagnostic_slice().len() != start {
-                frozen_spans.push((start..messages.diagnostic_slice().len(), None));
-            }
-        }
-        for (package_index, diagnosed_modules) in package_diagnosed.into_iter().enumerate() {
-            if diagnosed_modules.is_empty() {
-                continue;
-            }
-            let start = messages.diagnostic_slice().len();
-            for diagnosed in diagnosed_modules {
-                messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
-            }
-            if messages.diagnostic_slice().len() != start {
-                frozen_spans.push((
-                    start..messages.diagnostic_slice().len(),
-                    Some(package_index),
-                ));
+        for (package_index, package) in source_packages.iter_mut().enumerate() {
+            let source = package_source_arcs
+                .get(package_index)
+                .unwrap_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
+                        "diagnostic range references missing source package identity index {package_index}"
+                    )
+                })
+                .as_ref();
+            let domain = Some(package.package_identity.clone());
+            for diagnosed in std::mem::take(&mut package.boundary.diagnosed) {
+                let metrics = append_prepared_frontend_diagnostics(
+                    &mut accumulator,
+                    diagnosed.diagnostics,
+                    source.map(|source| (source, domain.clone())),
+                    diagnostic_count,
+                    &mut can_freeze,
+                );
+                #[cfg(feature = "data_layout_memory_probe")]
+                {
+                    diagnostic_records += metrics.diagnostic_count;
+                    diagnostic_label_slots += metrics.label_count;
+                }
+                diagnostic_count += metrics.diagnostic_count;
+                saw_infrastructure |= metrics.missing_source_error;
             }
         }
         for transient in transient_batches {
-            let domain = transient.package_id.map(|id| id.index());
-            let start = messages.diagnostic_slice().len();
-            messages.append_messages_preserving_context(transient.batch.into_messages());
-            if messages.diagnostic_slice().len() != start {
-                frozen_spans.push((start..messages.diagnostic_slice().len(), domain));
+            if !transient.batch.has_errors() {
+                continue;
             }
-        }
-        if let Some(trailing_project_messages) = trailing_project_messages {
-            let start = messages.diagnostic_slice().len();
-            messages.append_messages_preserving_context(trailing_project_messages);
-            if messages.diagnostic_slice().len() != start {
-                frozen_spans.push((start..messages.diagnostic_slice().len(), None));
-            }
-        }
-        // A clean result has no source-backed render work. Return before freezing so the common
-        // success path retains no source snapshots, path trie or extended-span tables solely for
-        // an empty message vessel.
-        if messages.diagnostic_slice().is_empty() && !messages.has_infrastructure_error() {
-            let _ = std::mem::take(&mut messages.string_table);
+            let (source, domain) = match transient.package_id {
+                Some(package_id) => {
+                    let package_index = package_id.index();
+                    let package = source_packages.get(package_index).unwrap_or_else(|| {
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
+                            "diagnostic range references missing source package identity index {package_index}"
+                        )
+                    });
+                    let source = package_source_arcs
+                        .get(package_index)
+                        .unwrap_or_else(|| {
+                            crate::compiler_bug!(
+                                CompilerStage::ProjectBuildAssembly,
+                                "diagnostic range references missing source package identity index {package_index}"
+                            )
+                        })
+                        .as_ref();
+                    let domain = Some(package.package_identity.clone());
+                    (source, domain)
+                }
+                None => (project_source.as_ref(), None),
+            };
+            let metrics = append_prepared_frontend_diagnostics(
+                &mut accumulator,
+                transient.batch,
+                source.map(|source| (source, domain)),
+                diagnostic_count,
+                &mut can_freeze,
+            );
             #[cfg(feature = "data_layout_memory_probe")]
             {
-                return (
-                    messages,
-                    FrozenRenderRetentionMetrics::from_ledger(ledger_snapshot),
-                );
+                diagnostic_records += metrics.diagnostic_count;
+                diagnostic_label_slots += metrics.label_count;
             }
-            #[cfg(not(feature = "data_layout_memory_probe"))]
-            {
-                return (messages, ());
+            diagnostic_count += metrics.diagnostic_count;
+            saw_infrastructure |= metrics.missing_source_error;
+        }
+        if let Some(failure) = trailing_facade_failure {
+            match failure {
+                PreparedFailure::Diagnosed(batch) => {
+                    let metrics = append_prepared_frontend_diagnostics(
+                        &mut accumulator,
+                        batch,
+                        project_source.as_ref().map(|source| (source, None)),
+                        diagnostic_count,
+                        &mut can_freeze,
+                    );
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    {
+                        diagnostic_records += metrics.diagnostic_count;
+                        diagnostic_label_slots += metrics.label_count;
+                    }
+                    diagnostic_count += metrics.diagnostic_count;
+                    saw_infrastructure |= metrics.missing_source_error;
+                }
+                PreparedFailure::Infrastructure(errors) => {
+                    accumulator.append_infrastructure(errors);
+                    saw_infrastructure = true;
+                }
             }
+        }
+        // Keep the project source inventory available as the identityless fallback for package
+        // diagnostics whose source IDs collide outside their package identity handles.
+        if let Some(source) = project_source.as_ref() {
+            accumulator.set_project_source_database(Arc::clone(source));
         }
 
         #[cfg(feature = "data_layout_memory_probe")]
-        let mut retention = {
+        let retention = {
             let mut retention = FrozenRenderRetentionMetrics::from_ledger(ledger_snapshot);
-            retention.diagnostic_records = messages.diagnostic_slice().len();
-            retention.diagnostic_label_slots = messages
-                .diagnostic_slice()
-                .iter()
-                .map(|diagnostic| diagnostic.labels.len())
-                .sum();
+            retention.diagnostic_records = diagnostic_records;
+            retention.diagnostic_label_slots = diagnostic_label_slots;
             retention
         };
         #[cfg(not(feature = "data_layout_memory_probe"))]
         let retention = ();
 
-        // These artefacts are consumed by this terminal report conversion. Their materialisation
-        // handles have no later artefact reader; only explicit primary/label handles retained by
-        // diagnostics need installation, which the shared freeze owner performs by exact domain.
-        let project_domain = project.structure.stable_package_identity().cloned();
-        let project_source = project_source.or(project_source_database);
-        if let (Some(errors), Some(source)) = (
-            messages.infrastructure_errors.as_mut(),
-            project_source.as_ref(),
-        ) {
-            // All unpaired causes came from the explicitly project-owned trailing vessel.
-            // Earlier package/foreign pairings already retained by the aggregate take precedence.
-            errors.set_source_database(Arc::clone(source));
+        // A clean result has no source-backed render work. Freeze an empty run so the common
+        // success path retains no caller string table, source snapshot, path trie or extended-span
+        // table solely for an empty report set.
+        if diagnostic_count == 0 && !saw_infrastructure {
+            drop(project_source);
+            drop(package_source_arcs);
+            drop(source_packages);
+            drop(project);
+            let messages = accumulator.finish(InstallMode::Frozen);
+            return (messages, retention);
         }
 
-        let mut can_freeze = true;
-        let mut source_contexts = Vec::new();
-        for (range, package_index) in frozen_spans {
-            let (source, domain) = match package_index {
-                Some(index) => match (package_source_arcs.get(index), source_packages.get(index)) {
-                    (Some(source), Some(package)) => {
-                        (source.as_ref(), Some(package.package_identity.clone()))
-                    }
-                    _ => {
-                        messages.set_infrastructure_error(CompilerError::compiler_error(format!(
-                            "diagnostic range references missing source package identity index {index}",
-                        )));
-                        can_freeze = false;
-                        continue;
-                    }
-                },
-                None => (project_source.as_ref(), None),
-            };
+        // Preserve donor rows after every diagnostic range, including identities referenced only
+        // by a foreign frozen handle. Empty rows do not change diagnostic pairing.
+        if let Some(source) = project_source.as_ref() {
+            let donor = PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::new(),
+                StringTable::empty_unallocated(),
+                None,
+                None,
+            );
+            accumulator.append_prepared(donor, Some((Arc::clone(source), project_domain.clone())));
+        }
+        for (package, source) in source_packages.iter().zip(&package_source_arcs) {
             if let Some(source) = source {
-                source_contexts.push(RenderSourceContext {
-                    diagnostic_range: range,
-                    source_database: Arc::clone(source),
-                    domain,
-                });
-            } else {
-                // Keep the merged string table live for unpaired rows. No project fallback may
-                // reinterpret a package span through an unrelated source with the same numeric ID.
-                if diagnostic_range_requires_source_identity(messages.diagnostic_slice(), &range) {
-                    messages.set_infrastructure_error(CompilerError::compiler_error(format!(
-                        "diagnostic range {range:?} has no finalized source identity",
-                    )));
-                }
-                can_freeze = false;
+                let donor = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::new(),
+                    StringTable::empty_unallocated(),
+                    None,
+                    None,
+                );
+                accumulator.append_prepared(
+                    donor,
+                    Some((Arc::clone(source), Some(package.package_identity.clone()))),
+                );
             }
         }
-        // Domain-only rows supply donor handles even when their source has no ordinary diagnostic
-        // range. The freeze owner retains these only when a report-visible handle needs them.
-        if let Some(source) = project_source {
-            source_contexts.push(RenderSourceContext {
-                diagnostic_range: 0..0,
-                source_database: source,
-                domain: project_domain,
-            });
-        }
-        for (package, source) in source_packages.iter().zip(package_source_arcs) {
-            if let Some(source) = source {
-                source_contexts.push(RenderSourceContext {
-                    diagnostic_range: 0..0,
-                    source_database: source,
-                    domain: Some(package.package_identity.clone()),
-                });
-            }
-        }
-        messages.install_source_contexts(source_contexts, 0);
-        if can_freeze && let Err(error) = messages.freeze_source_contexts() {
-            messages.set_infrastructure_error(error);
-        }
-        #[cfg(feature = "data_layout_memory_probe")]
-        {
-            retention.add_report_source_owners(&messages);
-            retention.add_report_path_tables(&messages);
-        }
+
+        // The accumulator must own the only source handles before it unwraps its source rows.
+        drop(project_source);
+        drop(package_source_arcs);
+        drop(source_packages);
+        drop(project);
+
+        let install = if can_freeze {
+            InstallMode::Frozen
+        } else {
+            InstallMode::Unfrozen
+        };
+        let messages = accumulator.finish(install);
         (messages, retention)
     }
 }

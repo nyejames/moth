@@ -1,18 +1,18 @@
-//! Stage-boundary invariants for HIR failure conversion and warning ownership.
+//! Stage-boundary invariants for prepared HIR failures and warning ownership.
 //!
-//! WHAT: exercises the premerge conversion with a forced compact-store capacity failure.
-//! WHY: the lowering stage owns accumulated warnings and must attach each once while preserving
-//!      the failure's source, frozen-identity, and type-rendering context.
+//! WHAT: forces a typed HIR capacity failure with unrelated warning diagnostics in flight.
+//! WHY: failure reports must retain capacity facts without mixing in warning reports.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::unreachable_match_arm;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-    HirCapacityResource, PremergeFailure, SyntaxDiagnosticKind,
+    CapacityResource, DiagnosticBag, DiagnosticSeverity, HirCapacityResource,
 };
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
@@ -35,7 +35,7 @@ fn test_span(start: u32) -> SourceSpan {
 }
 
 #[test]
-fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
+fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let entry_path = symbol("@page.moth", &mut path_fork, &mut string_table);
@@ -45,9 +45,8 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
     let authored_span = test_span(10);
     let ast_warning_span = test_span(20);
     let preparation_warning_span = test_span(30);
-    let ast_warning = CompilerDiagnostic::unreachable_match_arm(Some(ast_warning_span));
-    let preparation_warning =
-        CompilerDiagnostic::unreachable_match_arm(Some(preparation_warning_span));
+    let ast_warning = unreachable_match_arm(Some(ast_warning_span));
+    let preparation_warning = unreachable_match_arm(Some(preparation_warning_span));
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let literal = expressions
@@ -76,10 +75,18 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
         constants,
         Default::default(),
     );
-    ast.warnings.push(ast_warning.clone());
-    let warnings = [preparation_warning.clone(), ast_warning.clone()];
+    ast.warnings.push(ast_warning);
+    let mut warnings = DiagnosticBag::from_diagnostics(vec![
+        preparation_warning,
+        unreachable_match_arm(Some(ast_warning_span)),
+    ]);
 
-    let type_environment = ast.type_environment.clone();
+    let type_environment = std::mem::take(&mut ast.type_environment);
+    let frozen_identity = FrozenIdentityHandle::for_domain(
+        crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
+            "hir-stage-test",
+        ),
+    );
     let mut builder = HirBuilder::new(
         &mut string_table,
         &mut path_fork,
@@ -87,72 +94,59 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
         HirFunctionOriginLookup::default(),
         Default::default(),
     );
+    builder.set_frozen_identity_handle(Some(frozen_identity.clone()));
+    builder.set_prior_diagnostics(Some(&mut warnings));
     builder.set_expression_store_test_limits(HirExpressionStoreTestLimits {
         rows: 0,
         ..Default::default()
     });
-    let hir_messages = match builder.build_hir_module(ast, &ExternalPackageRegistry::new()) {
+    let failure = match builder.build_hir_module(ast, &ExternalPackageRegistry::new()) {
         Ok(_) => panic!("the first authored HIR expression should exceed the forced row limit"),
-        Err(messages) => messages,
+        Err(failure) => failure,
+    };
+    let failure =
+        crate::compiler_frontend::tests::parse_support::freeze_ast_diagnostic_failure(failure);
+    let Ok(CompilationOutcome::Diagnosed(reports)) = failure else {
+        panic!("the HIR capacity failure should produce a diagnosed result");
     };
 
-    let frozen_identity = FrozenIdentityHandle::new();
-    let failure = super::premerge_hir_failure(hir_messages, &warnings, Some(&frozen_identity));
-    assert!(matches!(failure, PremergeFailure::Diagnosed(_)));
-    let messages = failure.into_messages(&string_table);
-
-    assert_eq!(
-        messages
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
-            .count(),
-        2,
-        "the preparation warning and AST warning should each appear once"
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .next()
+            .is_none(),
+        "a failed HIR compilation must not carry unrelated warnings"
     );
-    assert_eq!(
-        messages
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.primary_span == Some(preparation_warning_span))
-            .count(),
-        1
-    );
-    assert_eq!(
-        messages
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.primary_span == Some(ast_warning_span))
-            .count(),
-        1
-    );
-
-    let (capacity_index, capacity_diagnostic) = messages
-        .diagnostics
-        .iter()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            diagnostic.kind
-                == DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded)
-        })
+    let mut error_views = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(_, diagnostic)| diagnostic);
+    let capacity_view = error_views
+        .next()
         .expect("the HIR row limit produces a source-capacity diagnostic");
-    assert_eq!(capacity_diagnostic.primary_span, Some(authored_span));
+    assert!(
+        error_views.next().is_none(),
+        "the HIR capacity failure should be the only error"
+    );
     assert_eq!(
-        capacity_diagnostic.payload,
-        DiagnosticPayload::CompilerCapacityExceeded {
-            resource: CapacityResource::Hir(HirCapacityResource::ExpressionRows),
+        crate::compiler_frontend::tests::parse_support::ast_error_primary_span(capacity_view),
+        Some(authored_span)
+    );
+    let capacity = capacity_view
+        .family_view::<CompilerCapacityExceededView>()
+        .expect("the source-capacity diagnostic should retain typed resource facts");
+    assert_eq!(
+        capacity.resource,
+        CapacityResource::Hir(HirCapacityResource::ExpressionRows)
+    );
+    assert!(matches!(
+        capacity_view.primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            context,
+            ..
+        } if match (context, frozen_identity.get()) {
+            (Some(context), Some(expected)) => std::ptr::eq(context, expected),
+            (None, None) => true,
+            _ => false,
         }
-    );
-    assert_eq!(
-        capacity_diagnostic.primary_frozen_identity_handle.as_ref(),
-        Some(&frozen_identity),
-        "the exact frozen identity owner should remain paired with the authored span"
-    );
-    assert!(messages.render_type_contexts.iter().any(|context| {
-        context.diagnostic_range.contains(&capacity_index)
-            && context
-                .type_environment
-                .get(builtin_type_ids::fixed_scalar(FixedScalar::I32))
-                .is_some()
-    }));
+    ));
 }

@@ -23,9 +23,13 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ParsedReceiverValue, ProducedValues, ValueBlock, ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow, types_borrows_targets,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
-    TypeMismatchContext, ValueReceiverContext,
+    InvalidControlFlowStatementReason, InvalidReturnShapeReason, TypeMismatchContext,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -151,10 +155,12 @@ pub(crate) fn finalize_inferred_value_block(
                 expression_builder,
             )?)
         }
-        ValueBlock::Catch(_) => unreachable!(
+        ValueBlock::Catch(_) => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "value-if receivers do not parse catch handlers; mixed-slot catch is not a multi-bind path"
         ),
-        ValueBlock::LexicalScope(_) => unreachable!(
+        ValueBlock::LexicalScope(_) => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "static value-if specialisation runs after mixed-slot inference is complete"
         ),
     }
@@ -353,7 +359,7 @@ fn accumulate_produced_group(
 
         if let Some(existing) = slot_types[slot_index] {
             if existing != produced_type {
-                return Err(CompilerDiagnostic::type_mismatch(
+                return Err(types_borrows_targets::type_mismatch(
                     existing,
                     produced_type,
                     TypeMismatchContext::Assignment,
@@ -375,7 +381,7 @@ fn finish_inferred_slots(
     span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     if !saw_producing_path {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfNoProducingPath,
             span,
         )
@@ -386,7 +392,7 @@ fn finish_inferred_slots(
         .into_iter()
         .map(|slot_type| {
             slot_type.ok_or_else(|| {
-                CompilerDiagnostic::invalid_control_flow_statement(
+                choices_control_flow::invalid_control_flow_statement(
                     InvalidControlFlowStatementReason::ValueIfNoProducingPath,
                     span,
                 )
@@ -411,7 +417,7 @@ fn validate_expression_against_slot(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::type_mismatch(
+    Err(types_borrows_targets::type_mismatch(
         expected_type,
         produced_type,
         TypeMismatchContext::Assignment,
@@ -434,7 +440,7 @@ fn validate_optional_produced_arity(
     }
 
     if values.len() > target_count {
-        return Err(CompilerDiagnostic::invalid_return_shape(
+        return Err(calls_data::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: target_count,
             },
@@ -443,7 +449,7 @@ fn validate_optional_produced_arity(
         .into());
     }
 
-    Err(CompilerDiagnostic::invalid_return_shape(
+    Err(calls_data::invalid_return_shape(
         InvalidReturnShapeReason::TooFewReturnValues {
             expected_count: target_count,
             provided_count: values.len(),
@@ -482,7 +488,7 @@ fn coerce_produced_values_in_body(
             }
 
             if !is_type_compatible(*expected_type, produced_type, type_environment) {
-                return Err(CompilerDiagnostic::type_mismatch(
+                return Err(types_borrows_targets::type_mismatch(
                     *expected_type,
                     produced_type,
                     TypeMismatchContext::Assignment,

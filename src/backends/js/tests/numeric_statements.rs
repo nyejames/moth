@@ -2,6 +2,8 @@
 
 use super::support::*;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -951,9 +953,9 @@ fn int_helpers_delegate_to_int_check() {
     );
 }
 
-/// Verifies that malformed HIR arity produces a compiler error rather than invalid JS.
+/// Verifies that malformed HIR arity raises a compiler bug rather than emitting invalid JS.
 #[test]
-fn numeric_op_arity_mismatch_returns_error() {
+fn numeric_op_arity_mismatch_raises_compiler_bug() {
     let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -999,19 +1001,26 @@ fn numeric_op_arity_mismatch_returns_error() {
         &[(LocalId(0), "result")],
     );
 
-    let result = lower_hir_to_js(
-        &module,
-        &NumericProofs::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-        &path_fork.snapshot_table(),
+    let expected_message = format!(
+        "JS backend received NumericOp::{} with operand arity that does not match the operation",
+        i32_op(NumericOperator::Add)
     );
-
-    assert!(
-        result.is_err(),
-        "NumericOp arity mismatch must fail lowering with a compiler error"
-    );
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = lower_hir_to_js(
+            &module,
+            &NumericProofs::default(),
+            &string_table,
+            default_config(),
+            &type_environment,
+            &path_fork.snapshot_table(),
+        );
+    }))
+    .expect_err("NumericOp arity mismatch must raise a compiler bug");
+    let report = payload
+        .downcast::<CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("NumericOp arity mismatch must carry a CompilerBugReport"));
+    assert_eq!(report.stage, CompilerStage::BackendLowering);
+    assert_eq!(&*report.message, expected_message.as_str());
 }
 
 /// Verifies that an operation result explicitly updating an existing local uses ordinary
@@ -1083,12 +1092,12 @@ fn numeric_op_update_uses_value_assignment() {
     );
 }
 
-// D15 operation completion [numeric] [d15]
+// Operation completion [numeric]
 // ---------------------------------------------------------------------------
 
 /// Builds and lowers one single-operation entry whose returned local carries the operation result.
 ///
-/// WHY: D15 completion and narrow-width failure must be observed on the emitted operation rather
+/// WHY: completion and narrow-width failure must be observed on the emitted operation rather
 ///      than by calling a runtime helper with hand-picked bounds, so the driver executes the
 ///      lowered function itself.
 fn lower_returned_numeric_op(
@@ -1222,7 +1231,7 @@ fn lower_returned_operation(
     }
 }
 
-/// The recovered outcome one emitted D15 operation must report.
+/// The recovered outcome one emitted operation must report.
 ///
 /// WHY: the entry returns an ABI envelope, so a completed operation is proved by its exact
 ///      scalar and signed zero while a rejected one is proved by the shared builtin error code;
@@ -1275,8 +1284,8 @@ fn run_returned_numeric_op(entry: &LoweredEntry) -> String {
 ///       must complete it to 1; the finite maximum absorbs a step, `-1 * 0` and an underflowing
 ///       min-subnormal division keep signed zero, `2^-14 / 2` produces the first subnormal, and a
 ///       large product reports the shared non-finite failure code instead of succeeding at F32.
-/// WHY: the old runtime promoted binary16 to binary32 before arithmetic, so a widened
-///      intermediate would keep `1 + 2^-11` and change the selected domain's result.
+/// WHY: promoting binary16 to binary32 before arithmetic would keep a widened
+///      intermediate of `1 + 2^-11` and change the selected domain's result.
 #[test]
 fn f16_operations_complete_at_binary16_at_each_operation() {
     let f16_ty = builtin_type_ids::fixed_scalar(FixedScalar::F16);
@@ -1373,7 +1382,7 @@ fn f16_operations_complete_at_binary16_at_each_operation() {
 /// WHAT: in-range addition and multiplication return their exact I8 results while the maximum and
 ///       product boundaries, the minimum subtraction and the minimum negation report the shared
 ///       integer overflow code instead of succeeding at a promoted 32-bit domain.
-/// WHY: D15 preserves an equal-type narrow result, so a wider intermediate must not make an
+/// WHY: an equal-type narrow result is preserved, so a wider intermediate must not make an
 ///      overflowing I8 operation succeed.
 #[test]
 fn narrow_i8_operations_check_the_selected_width_at_each_operation() {

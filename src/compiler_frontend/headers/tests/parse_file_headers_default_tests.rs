@@ -30,18 +30,17 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
             expect_header_error(result, "an authored `=` with no value should be rejected");
         let diagnostic = errors
             .diagnostics
-            .iter()
+            .views()
             .find(|diagnostic| {
-                matches!(
-                    diagnostic.payload,
-                    DiagnosticPayload::InvalidSignatureMember {
-                        reason: InvalidSignatureMemberReason::MissingDefaultValue
-                    }
-                )
+                diagnostic
+                    .family_view::<names_declarations::InvalidSignatureMemberView>()
+                    .is_some_and(|facts| {
+                        facts.reason == InvalidSignatureMemberReason::MissingDefaultValue
+                    })
             })
             .expect("expected a MissingDefaultValue signature-member diagnostic");
         assert_eq!(
-            diagnostic.kind.code(),
+            diagnostic.descriptor().code,
             "MOTH-RULE-0028",
             "MissingDefaultValue must keep the stable signature-member code"
         );
@@ -53,7 +52,7 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
             |(needle, occurrence)| source_span_for(source, needle, occurrence),
         );
         assert_eq!(
-            diagnostic.primary_span,
+            diagnostic_primary_span(diagnostic),
             Some(expected_span),
             "MissingDefaultValue should point at the authored boundary for: {source}",
         );
@@ -71,12 +70,13 @@ fn special_member_default_reasons_win_over_missing_default_value() {
         trait_requirement,
         "trait requirement defaults must be rejected",
     );
-    assert!(trait_errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidSignatureMember {
-            reason: InvalidSignatureMemberReason::TraitRequirementDefaultValue
-        }
-    )));
+    assert!(trait_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidSignatureMemberView>()
+            .is_some_and(|facts| {
+                facts.reason == InvalidSignatureMemberReason::TraitRequirementDefaultValue
+            })
+    }));
 
     let choice = parse_single_file_headers_with_entry(
         "Response ::\n    Err |\n        message String =|,\n    Success,\n;\n",
@@ -85,12 +85,13 @@ fn special_member_default_reasons_win_over_missing_default_value() {
     );
     let choice_errors =
         expect_header_error(choice, "choice payload field defaults must be rejected");
-    assert!(choice_errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidSignatureMember {
-            reason: InvalidSignatureMemberReason::ChoicePayloadDefaultValue
-        }
-    )));
+    assert!(choice_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidSignatureMemberView>()
+            .is_some_and(|facts| {
+                facts.reason == InvalidSignatureMemberReason::ChoicePayloadDefaultValue
+            })
+    }));
 }
 
 #[test]

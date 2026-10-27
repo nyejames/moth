@@ -15,7 +15,9 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
     literal::{parse_literal_pattern, parse_pending_numeric_literal_pattern},
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidMatchPatternReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -23,7 +25,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 /// Result for the relational pattern family.
 ///
-/// Authored mismatches remain diagnostics while malformed retained payloads stay infrastructure.
+/// Authored mismatches remain compact drafts while malformed retained payloads stay infrastructure.
 type RelationalPatternResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse a relational comparison pattern (`<`, `<=`, `>`, `>=`).
@@ -45,7 +47,10 @@ pub(super) fn parse_relational_pattern(
         TokenTag::LESS_THAN_OR_EQUAL => RelationalPatternOp::LessThanOrEqual,
         TokenTag::GREATER_THAN => RelationalPatternOp::GreaterThan,
         TokenTag::GREATER_THAN_OR_EQUAL => RelationalPatternOp::GreaterThanOrEqual,
-        _ => unreachable!("caller checked relational lead token"),
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "caller checked relational lead token"
+        ),
     };
 
     token_stream.advance();
@@ -83,7 +88,10 @@ pub(super) fn parse_pending_relational_pattern(
         TokenTag::LESS_THAN_OR_EQUAL => RelationalPatternOp::LessThanOrEqual,
         TokenTag::GREATER_THAN => RelationalPatternOp::GreaterThan,
         TokenTag::GREATER_THAN_OR_EQUAL => RelationalPatternOp::GreaterThanOrEqual,
-        _ => unreachable!("caller checked relational lead token"),
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "caller checked relational lead token"
+        ),
     };
 
     token_stream.advance();
@@ -113,7 +121,7 @@ fn ensure_relational_subject_type(
         || type_environment.number_scale(subject_type_id).is_some();
 
     if !is_ordered_scalar {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::ScrutineeTypeUnsupportedForRelational,
             None,
             None,

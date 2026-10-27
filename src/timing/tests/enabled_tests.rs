@@ -682,8 +682,11 @@ fn finalizing_a_fallback_module_key_is_ignored_when_attribution_becomes_active()
 
     let snapshot = timing_session.finish();
     assert!(
-        snapshot.modules.is_empty(),
-        "a fallback key must not create or finalize an unregistered module"
+        snapshot
+            .modules
+            .iter()
+            .all(|module| module.key.boundary() != boundary),
+        "a fallback key must not create or finalize a module in its boundary"
     );
 }
 
@@ -697,14 +700,26 @@ fn finalizing_a_stale_registered_module_key_is_ignored_by_a_new_collection() {
     );
     let stale_key = crate::timing::register_timing_module(boundary, 0, "entry", 0, 0);
     let stale_snapshot = stale_session.finish();
-    assert_eq!(stale_snapshot.modules.len(), 1);
+    let stale_modules = stale_snapshot
+        .modules
+        .iter()
+        .filter(|module| module.key == stale_key)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        stale_modules.len(),
+        1,
+        "the owning session must retain its registered module"
+    );
 
     let current_session = start_benchmark_collection(true).expect("timing session should start");
     crate::timing::finalize_timing_module_source_facts(stale_key, 1, 128);
 
     let current_snapshot = current_session.finish();
     assert!(
-        current_snapshot.modules.is_empty(),
+        current_snapshot
+            .modules
+            .iter()
+            .all(|module| module.key != stale_key),
         "a stale module key must not mutate a later collection"
     );
 }
@@ -719,7 +734,16 @@ fn finalizing_after_the_owning_collection_drains_is_ignored() {
     );
     let module = crate::timing::register_timing_module(boundary, 0, "entry", 0, 0);
     let snapshot = timing_session.finish();
-    assert_eq!(snapshot.modules.len(), 1);
+    let modules = snapshot
+        .modules
+        .iter()
+        .filter(|record| record.key == module)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modules.len(),
+        1,
+        "the owning collection must retain its registered module"
+    );
 
     crate::timing::finalize_timing_module_source_facts(module, 1, 128);
 }
@@ -795,10 +819,17 @@ fn boundary_and_module_registration_is_dense_and_deterministic() {
         || "moth_docs".to_owned(),
     );
 
+    let empty_project = crate::timing::register_timing_boundary(
+        crate::timing::TimingBoundaryKind::MainProject,
+        String::new,
+    );
+
     let first_module = crate::timing::register_timing_module(first, 0, "", 1, 512);
     let second_module = crate::timing::register_timing_module(second, 0, "parser", 3, 2048);
     let project_module =
         crate::timing::register_timing_module(project, 7, "docs/progress", 1, 44_928);
+    let empty_project_module =
+        crate::timing::register_timing_module_for_preparation(empty_project, 0, "src");
 
     let snapshot = timing_session.finish();
 
@@ -806,22 +837,28 @@ fn boundary_and_module_registration_is_dense_and_deterministic() {
         .boundaries
         .iter()
         .filter(|boundary| {
-            matches!(
-                boundary.display_name.as_str(),
-                "@html" | "@markdown" | "moth_docs"
-            )
+            boundary.id == first
+                || boundary.id == second
+                || boundary.id == project
+                || boundary.id == empty_project
         })
         .collect::<Vec<_>>();
     assert_eq!(
         own_boundaries
             .iter()
-            .map(|boundary| boundary.display_name.as_str())
+            .map(|boundary| boundary.id)
             .collect::<Vec<_>>(),
-        vec!["@html", "@markdown", "moth_docs"]
+        vec![first, second, project, empty_project]
     );
     assert_eq!(own_boundaries[0].module_count, 1);
     assert_eq!(own_boundaries[1].module_count, 1);
     assert_eq!(own_boundaries[2].module_count, 1);
+    assert_eq!(
+        own_boundaries[3].kind,
+        crate::timing::TimingBoundaryKind::MainProject
+    );
+    assert_eq!(own_boundaries[3].display_name, "");
+    assert_eq!(own_boundaries[3].module_count, 1);
 
     let own_modules = snapshot
         .modules
@@ -830,14 +867,21 @@ fn boundary_and_module_registration_is_dense_and_deterministic() {
             module.key == first_module
                 || module.key == second_module
                 || module.key == project_module
+                || module.key == empty_project_module
         })
         .collect::<Vec<_>>();
+    assert_eq!(own_modules.len(), 4);
     assert_eq!(
         own_modules[0].logical_identity, "@html",
         "entry-root modules reuse the boundary display name"
     );
     assert_eq!(own_modules[1].logical_identity, "@markdown/parser");
     assert_eq!(own_modules[2].logical_identity, "moth_docs/docs/progress");
+    assert_eq!(
+        own_modules[3].logical_identity, "/src",
+        "an empty project name preserves the rooted source identity"
+    );
+    assert!(!own_modules[3].source_facts_finalized);
 
     assert_ne!(first_module, second_module);
     assert_ne!(first_module, project_module);
@@ -995,14 +1039,24 @@ fn duplicate_module_registration_is_idempotent_when_metadata_matches() {
         first_key, second_key,
         "duplicate registration returns the existing key"
     );
+    let modules = snapshot
+        .modules
+        .iter()
+        .filter(|record| record.key == first_key)
+        .collect::<Vec<_>>();
     assert_eq!(
-        snapshot.modules.len(),
+        modules.len(),
         1,
-        "duplicate registration must not add a record"
+        "duplicate registration must retain exactly its own record once"
     );
-    assert_eq!(snapshot.boundaries[0].module_count, 1);
-    assert_eq!(snapshot.modules[0].source_file_count, 1);
-    assert_eq!(snapshot.modules[0].source_byte_count, 512);
+    let boundary_record = snapshot
+        .boundaries
+        .iter()
+        .find(|record| record.id == boundary)
+        .expect("the registered boundary should remain in the snapshot");
+    assert_eq!(boundary_record.module_count, 1);
+    assert_eq!(modules[0].source_file_count, 1);
+    assert_eq!(modules[0].source_byte_count, 512);
 }
 
 #[test]
@@ -1025,10 +1079,18 @@ fn conflicting_module_registration_panics_without_mutating_the_record() {
     );
     let snapshot = session.finish();
 
-    assert_eq!(snapshot.modules.len(), 1);
-    assert_eq!(snapshot.modules[0].key, first_key);
-    assert_eq!(snapshot.modules[0].source_file_count, 1);
-    assert_eq!(snapshot.modules[0].source_byte_count, 512);
+    let modules = snapshot
+        .modules
+        .iter()
+        .filter(|record| record.key == first_key)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modules.len(),
+        1,
+        "conflicting registration must not replace or duplicate its own record"
+    );
+    assert_eq!(modules[0].source_file_count, 1);
+    assert_eq!(modules[0].source_byte_count, 512);
 }
 
 #[test]
@@ -1053,8 +1115,13 @@ fn staged_module_registration_finalizes_source_facts_once() {
         },
     );
     let snapshot = session.finish();
-    assert_eq!(snapshot.modules[0].source_file_count, 2);
-    assert_eq!(snapshot.modules[0].source_byte_count, 1024);
+    let module = snapshot
+        .modules
+        .iter()
+        .find(|record| record.key == key)
+        .expect("the finalized module must remain in the snapshot");
+    assert_eq!(module.source_file_count, 2);
+    assert_eq!(module.source_byte_count, 1024);
 }
 
 #[test]
@@ -1383,10 +1450,6 @@ fn counter_mode_parser_is_pure() {
     assert_eq!(
         crate::timing::CounterOutputMode::parse(Some("summary")),
         crate::timing::CounterOutputMode::Summary
-    );
-    assert_eq!(
-        crate::timing::CounterOutputMode::parse(Some("full")),
-        crate::timing::CounterOutputMode::Full
     );
     assert_eq!(
         crate::timing::CounterOutputMode::parse(Some("unknown")),

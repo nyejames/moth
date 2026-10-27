@@ -4,11 +4,14 @@ use super::{
     span::{SourceSpan, SpanJoinError},
 };
 
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, SourceSpanCapacityResource,
-};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::SourceSpanCapacityView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, SourceSpanCapacityResource};
 
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure;
 use crate::compiler_frontend::pipeline::CompilerFrontend;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -21,20 +24,22 @@ use std::sync::Arc;
 
 use super::test_support::database_with_retained_text;
 
-fn compiler_bug_panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = panic.downcast_ref::<String>() {
-        return message.clone();
-    }
-    if let Some(message) = panic.downcast_ref::<&str>() {
-        return (*message).to_owned();
-    }
-    panic!("compiler bug panic should carry a string message");
+fn assert_source_loading_compiler_bug(
+    panic: Box<dyn std::any::Any + Send>,
+    expected_message: &str,
+) {
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .unwrap_or_else(|| panic!("compiler bug panic should carry a CompilerBugReport"));
+    assert_eq!(report.stage, CompilerStage::SourceLoading);
+    assert_eq!(report.message.as_ref(), expected_message);
 }
 
 #[test]
-fn installing_extended_spans_preserves_live_record_resolution() {
-    let (mut database, source_id) = database_with_retained_text("source snapshot");
-    let mut builder = ExtendedSpanBuilder::new();
+fn source_finalization_preserves_live_record_resolution() {
+    let (database, source_id) = database_with_retained_text("source snapshot");
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let mut builder = sources.split().1.take_span_builder(source_id);
     let inline = LocalSpan::exact(12, 8, &mut builder).expect("inline span");
     let extended = LocalSpan::exact(5_000, 2_000, &mut builder).expect("extended span");
     let empty_extended =
@@ -45,10 +50,16 @@ fn installing_extended_spans_preserves_live_record_resolution() {
         extended.resolve_with(builder.resolver()),
         empty_extended.resolve_with(builder.resolver()),
     ];
-    let table = builder.freeze();
-    database
-        .install_extended_spans(source_id, table)
-        .expect("the loaded source should install its table once");
+    sources.retain_span_builder(source_id, builder);
+    sources
+        .finish_source(source_id)
+        .expect("the source should finalize after its producer returns");
+    sources
+        .assemble_finalized_tables()
+        .expect("the frozen table should assemble into its source record");
+    let database = sources
+        .finish()
+        .expect("the assembled table should satisfy source invariants");
 
     let inline_range = SourceSpan::new(source_id, inline).byte_range(&database);
     let extended_range = SourceSpan::new(source_id, extended).byte_range(&database);
@@ -58,6 +69,93 @@ fn installing_extended_spans_preserves_live_record_resolution() {
     assert_eq!(empty_extended_range, live_ranges[2]);
     assert!(!(inline_range.start() == inline_range.end()));
     assert!(empty_extended_range.start() == empty_extended_range.end());
+}
+
+#[test]
+fn source_database_finalizes_one_record_while_another_remains_live() {
+    let first_path = PathBuf::from("/project/first.moth");
+    let second_path = PathBuf::from("/project/second.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::build(
+        [&first_path, &second_path],
+        &first_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identities should build");
+    let first_id = database
+        .get_by_canonical_path(&first_path)
+        .expect("first source should be registered")
+        .id;
+    let second_id = database
+        .get_by_canonical_path(&second_path)
+        .expect("second source should be registered")
+        .id;
+    database
+        .retain_text(first_id, "a".repeat(8_000))
+        .expect("first source text should be retained");
+    database
+        .retain_text(second_id, "b".repeat(8_000))
+        .expect("second source text should be retained");
+
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let mut first_builder = sources.split().1.take_span_builder(first_id);
+    let first_local = LocalSpan::exact(5_000, 1_000, &mut first_builder).expect("first span");
+    let first_range = first_local.resolve_with(first_builder.resolver());
+    sources.retain_span_builder(first_id, first_builder);
+
+    let mut second_builder = sources.split().1.take_span_builder(second_id);
+    let second_first_local =
+        LocalSpan::exact(5_000, 1_000, &mut second_builder).expect("second source first span");
+    let second_first_range = second_first_local.resolve_with(second_builder.resolver());
+    sources.retain_span_builder(second_id, second_builder);
+
+    sources
+        .finish_source(first_id)
+        .expect("the first source should finalize independently");
+    assert!(
+        sources
+            .is_source_finalized(first_id)
+            .expect("the first source should remain registered")
+    );
+    assert!(
+        !sources
+            .is_source_finalized(second_id)
+            .expect("the second source should remain registered"),
+        "the second source must remain live while the first is frozen"
+    );
+    let duplicate_error = sources
+        .finish_source(first_id)
+        .expect_err("the first source must not finalize twice");
+    assert_eq!(duplicate_error.kind, InfrastructureFailureKind::Internal);
+
+    let mut second_builder = sources.split().1.take_span_builder(second_id);
+    let second_later_local =
+        LocalSpan::exact(7_000, 1_000, &mut second_builder).expect("second source later span");
+    let second_later_range = second_later_local.resolve_with(second_builder.resolver());
+    sources.retain_span_builder(second_id, second_builder);
+    sources
+        .finish_source(second_id)
+        .expect("the second source should finalize after its later producer");
+
+    sources
+        .assemble_finalized_tables()
+        .expect("both frozen tables should assemble into their records");
+    let database = sources
+        .finish()
+        .expect("both assembled tables should satisfy source invariants");
+    assert_eq!(
+        SourceSpan::new(first_id, first_local).byte_range(&database),
+        first_range
+    );
+    assert_eq!(
+        SourceSpan::new(second_id, second_first_local).byte_range(&database),
+        second_first_range
+    );
+    assert_eq!(
+        SourceSpan::new(second_id, second_later_local).byte_range(&database),
+        second_later_range
+    );
 }
 
 #[test]
@@ -74,6 +172,12 @@ fn repeated_source_preparation_preserves_earlier_extended_spans() {
     let repeated_span =
         LocalSpan::exact(2_000, 2_000, &mut repeated).expect("repeated extended span");
     builders.retain_span_builder(source_id, repeated);
+    sources
+        .finish_source(source_id)
+        .expect("the source should finalize after all producers return");
+    sources
+        .assemble_finalized_tables()
+        .expect("the frozen table should assemble");
     let database = sources
         .finish()
         .expect("all producers returned their builders");
@@ -93,12 +197,15 @@ fn repeated_source_preparation_preserves_earlier_extended_spans() {
 }
 
 #[test]
-#[should_panic]
 fn source_finalization_rejects_a_checked_out_span_builder() {
     let (database, source_id) = database_with_retained_text("source snapshot");
     let mut sources = SourceDatabaseBuilder::new(database);
     let _active_producer = sources.split().1.take_span_builder(source_id);
-    let _ = sources.finish();
+    let error = sources
+        .finish_source(source_id)
+        .expect_err("a checked-out builder must be returned before finalization");
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+    assert!(error.message.contains("outstanding span producer"));
 }
 
 #[test]
@@ -111,29 +218,64 @@ fn source_finalization_rejects_an_outstanding_transient_share() {
 }
 
 #[test]
-fn installing_extended_spans_twice_is_a_compiler_bug() {
-    let (mut database, source_id) = database_with_retained_text("source snapshot");
-    database
-        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
-        .expect("the first table installation should succeed");
+fn finalized_source_rejects_span_builder_take_and_retain() {
+    let (database, source_id) = database_with_retained_text("source snapshot");
+    let mut sources = SourceDatabaseBuilder::new(database);
+    sources
+        .finish_source(source_id)
+        .expect("an unprepared loaded source can finalize with an empty table");
 
-    let error = database
-        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
-        .expect_err("a source can install its table only once");
+    let take_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = sources.split().1.take_span_builder(source_id);
+    }))
+    .expect_err("a finalized source must not yield another builder");
+    assert_source_loading_compiler_bug(
+        take_panic,
+        &format!(
+            "source {} was already finalized and cannot take another span builder; this is a compiler bug",
+            source_id.index()
+        ),
+    );
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert!(
-        error.msg.contains(&source_id.index().to_string()) && error.msg.contains("more than once"),
-        "the duplicate installation should name the source and lifecycle violation: {}",
-        error.msg
+    let retain_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sources.retain_span_builder(source_id, ExtendedSpanBuilder::new());
+    }))
+    .expect_err("a finalized source must not accept another builder");
+    assert_source_loading_compiler_bug(
+        retain_panic,
+        &format!(
+            "source {} was already finalized and cannot retain another span builder; this is a compiler bug",
+            source_id.index()
+        ),
     );
 }
 
 #[test]
-fn installing_extended_spans_for_a_source_that_never_loaded_is_a_compiler_bug() {
+fn source_finalization_rejects_a_second_finalization() {
+    let (database, source_id) = database_with_retained_text("source snapshot");
+    let mut sources = SourceDatabaseBuilder::new(database);
+    sources
+        .finish_source(source_id)
+        .expect("the loaded source should finalize once");
+
+    let error = sources
+        .finish_source(source_id)
+        .expect_err("a source can finalize only once");
+
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+    assert!(
+        error.message.contains(&source_id.index().to_string())
+            && error.message.contains("finalized more than once"),
+        "the duplicate finalization should name the source and lifecycle violation: {}",
+        error.message
+    );
+}
+
+#[test]
+fn selected_source_finalization_before_retention_survives_adoption() {
     let source_path = PathBuf::from("/project/pending.moth");
     let mut string_table = StringTable::new();
-    let mut database = SourceDatabase::build(
+    let database = SourceDatabase::build(
         std::iter::once(&source_path),
         &source_path,
         None,
@@ -145,47 +287,60 @@ fn installing_extended_spans_for_a_source_that_never_loaded_is_a_compiler_bug() 
         .expect("source should be registered")
         .id;
 
-    let error = database
-        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
-        .expect_err("an unloaded source cannot install an extended-span table");
-
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let mut span_builder = sources.split().1.take_span_builder(source_id);
+    let local = LocalSpan::exact(5_000, 2_000, &mut span_builder).expect("extended span");
+    let expected_range = local.resolve_with(span_builder.resolver());
+    sources.retain_span_builder(source_id, span_builder);
+    sources
+        .finish_source(source_id)
+        .expect("a selected pending source should freeze after its producer returns");
     assert!(
-        error.msg.contains(&source_id.index().to_string())
-            && error.msg.contains("before its source was loaded"),
-        "the unloaded-source failure should name the source and lifecycle violation: {}",
-        error.msg
+        sources
+            .is_source_finalized(source_id)
+            .expect("the pending source should remain registered")
+    );
+
+    sources
+        .sources_mut()
+        .retain_text(source_id, "x".repeat(8_000))
+        .expect("selected source text should be retained");
+    sources.adopt_pending_span_builders();
+    assert!(
+        sources
+            .is_source_finalized(source_id)
+            .expect("the retained source should remain registered")
+    );
+    sources
+        .assemble_finalized_tables()
+        .expect("the adopted table should assemble into its record");
+    let database = sources
+        .finish()
+        .expect("the assembled source should satisfy lifecycle invariants");
+    assert_eq!(
+        SourceSpan::new(source_id, local).byte_range(&database),
+        expected_range
     );
 }
 
 #[test]
-fn installing_extended_spans_for_the_compilation_root_is_a_compiler_bug() {
-    let mut database = SourceDatabase::empty();
-    let source_id = SourceId::from_index(0);
+fn source_finalization_rejects_the_compilation_root() {
+    let database = SourceDatabase::empty();
+    let mut sources = SourceDatabaseBuilder::new(database);
 
-    let error = database
-        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
-        .expect_err("the compilation root cannot install an extended-span table");
+    let error = sources
+        .finish_source(SourceId::COMPILATION_ROOT)
+        .expect_err("the compilation root cannot finalize an extended-span table");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains(&source_id.index().to_string())
-            && error.msg.contains("compilation root"),
+        error
+            .message
+            .contains(&SourceId::COMPILATION_ROOT.index().to_string())
+            && error.message.contains("before its source was loaded"),
         "the root failure should name the source and lifecycle violation: {}",
-        error.msg
+        error.message
     );
-}
-
-#[test]
-fn inline_span_resolves_through_a_record_before_table_installation() {
-    let (database, source_id) = database_with_retained_text("source snapshot");
-    let mut builder = ExtendedSpanBuilder::new();
-    let inline = LocalSpan::exact(12, 8, &mut builder).expect("inline span");
-    assert!(builder.is_empty());
-
-    let range = SourceSpan::new(source_id, inline).byte_range(&database);
-    assert_eq!((range.start(), range.end()), (12, 20));
-    assert!(!(range.start() == range.end()));
 }
 
 #[test]
@@ -199,13 +354,12 @@ fn extended_span_without_an_installed_table_names_its_source_identity() {
         span.byte_range(&database);
     }))
     .expect_err("an extended span cannot resolve before its builder is installed");
-    let message = compiler_bug_panic_message(panic);
-
-    assert!(
-        message.contains(&source_id.index().to_string())
-            && message.contains("builder")
-            && message.contains("never installed"),
-        "the missing-table panic should name the source and lifecycle violation: {message}"
+    assert_source_loading_compiler_bug(
+        panic,
+        &format!(
+            "extended span builder for source identity {} was never installed; this is a compiler bug",
+            source_id.index()
+        ),
     );
 }
 
@@ -237,13 +391,23 @@ fn database_span_reads_reject_missing_source_records() {
             span.byte_range(&database);
         }))
         .expect_err("a span must not resolve without its source record");
-        let message = compiler_bug_panic_message(panic);
-
-        assert!(
-            message.contains(&source_id.index().to_string()) && message.contains("compiler bug"),
-            "the missing source-record panic should name source {}: {message}",
-            source_id.index()
-        );
+        let expected_message = if source_id == SourceId::COMPILATION_ROOT {
+            format!(
+                "span on compilation root source identity {} resolves only the exact empty range [0, 0), not [12, 20); this is a compiler bug",
+                source_id.index()
+            )
+        } else if source_id == pending_id {
+            format!(
+                "source identity {} has no loaded source record; this is a compiler bug",
+                source_id.index()
+            )
+        } else {
+            format!(
+                "source identity {} is absent from the source database; this is a compiler bug",
+                source_id.index()
+            )
+        };
+        assert_source_loading_compiler_bug(panic, &expected_message);
     }
 }
 
@@ -269,24 +433,33 @@ fn non_empty_compilation_root_spans_fail_loudly_as_compiler_bugs() {
     let database = SourceDatabase::empty();
     let mut builder = ExtendedSpanBuilder::new();
 
-    for local in [
-        LocalSpan::exact(4, 3, &mut builder).expect("non-empty inline root span"),
-        LocalSpan::exact(7, 0, &mut builder).expect("non-zero empty root span"),
-        LocalSpan::exact(5_000, 2_000, &mut builder).expect("extended root span"),
+    let root_identity = SourceId::COMPILATION_ROOT.index();
+    for (local, expected_message) in [
+        (
+            LocalSpan::exact(4, 3, &mut builder).expect("non-empty inline root span"),
+            format!(
+                "span on compilation root source identity {root_identity} resolves only the exact empty range [0, 0), not [4, 7); this is a compiler bug"
+            ),
+        ),
+        (
+            LocalSpan::exact(7, 0, &mut builder).expect("non-zero empty root span"),
+            format!(
+                "span on compilation root source identity {root_identity} resolves only the exact empty range [0, 0), not [7, 7); this is a compiler bug"
+            ),
+        ),
+        (
+            LocalSpan::exact(5_000, 2_000, &mut builder).expect("extended root span"),
+            format!(
+                "span on compilation root source identity {root_identity} names extended row 0, but the root owns no extended-span table; only the exact empty range [0, 0) resolves on the root; this is a compiler bug"
+            ),
+        ),
     ] {
         let span = SourceSpan::new(SourceId::COMPILATION_ROOT, local);
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             span.byte_range(&database);
         }))
         .expect_err("a non-empty compilation-root span must not resolve silently");
-        let message = compiler_bug_panic_message(panic);
-
-        assert!(
-            message.contains("compilation root")
-                && message.contains(&SourceId::COMPILATION_ROOT.index().to_string())
-                && message.contains("compiler bug"),
-            "the root range rejection should name the identity as a compiler bug: {message}"
-        );
+        assert_source_loading_compiler_bug(panic, &expected_message);
     }
 }
 
@@ -317,24 +490,31 @@ fn database_span_resolution_uses_each_source_extended_table() {
         .retain_text(second_id, "second source".to_owned())
         .expect("second source text should be retained");
 
-    let mut first_builder = ExtendedSpanBuilder::new();
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let mut first_builder = sources.split().1.take_span_builder(first_id);
     let first_local = LocalSpan::exact(5_000, 5_000, &mut first_builder).expect("first span");
     let first_span = SourceSpan::new(first_id, first_local);
     let first_range = first_local.resolve_with(first_builder.resolver());
-    let first_table = first_builder.freeze();
+    sources.retain_span_builder(first_id, first_builder);
 
-    let mut second_builder = ExtendedSpanBuilder::new();
+    let mut second_builder = sources.split().1.take_span_builder(second_id);
     let second_local = LocalSpan::exact(7_000, 3_000, &mut second_builder).expect("second span");
     let second_span = SourceSpan::new(second_id, second_local);
     let second_range = second_local.resolve_with(second_builder.resolver());
-    let second_table = second_builder.freeze();
+    sources.retain_span_builder(second_id, second_builder);
 
-    database
-        .install_extended_spans(first_id, first_table)
-        .expect("first source should install its table");
-    database
-        .install_extended_spans(second_id, second_table)
-        .expect("second source should install its table");
+    sources
+        .finish_source(first_id)
+        .expect("first source should finalize");
+    sources
+        .finish_source(second_id)
+        .expect("second source should finalize");
+    sources
+        .assemble_finalized_tables()
+        .expect("both source tables should assemble");
+    let database = sources
+        .finish()
+        .expect("source span tables should satisfy lifecycle invariants");
 
     assert_eq!(first_span.byte_range(&database), first_range);
     assert_eq!(second_span.byte_range(&database), second_range);
@@ -421,7 +601,7 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     assert_eq!(error.reason(), SpanCapacityReason::ExtendedTableFull);
 
     // The real exhausted table must classify a long authored token as a typed source diagnostic
-    // at the tokenizer boundary. The rejected interval remains in the payload, while the primary
+    // at the tokenizer boundary. The rejected interval remains in typed facts, while the primary
     // span uses the file-owned inline source-start anchor and does not append another row.
     let source = format!("\"{}\"", "x".repeat(1023));
     let path = Path::new("capacity.moth");
@@ -451,27 +631,24 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("token storage exhaustion must remain an authored-source diagnosis");
     };
-    assert_eq!(
-        error.diagnostic.identity().code,
-        "MOTH-SYNTAX-0036",
-        "capacity diagnostics need a stable descriptor identity"
-    );
-    assert_eq!(
-        error.diagnostic.primary_span,
-        Some(SourceSpan::new(source_id, LocalSpan::source_start())),
+    let compact = compact_bag_for_test(DiagnosticBag::from(error.diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("source-capacity diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0036");
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span)
+                if span == SourceSpan::new(source_id, LocalSpan::source_start())
+        ),
         "capacity diagnostics must retain the owning file's inline source-start anchor"
     );
-    match &error.diagnostic.payload {
-        DiagnosticPayload::SourceSpanCapacity {
-            start,
-            length,
-            resource,
-        } => {
-            assert_eq!((*start, *length), (0, source.len() as u32));
-            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpan);
-        }
-        payload => panic!("unexpected source-capacity payload: {payload:?}"),
-    }
+    let facts = diagnostic
+        .family_view::<SourceSpanCapacityView>()
+        .expect("capacity diagnostics retain typed source-capacity facts");
+    assert_eq!((facts.start, facts.length), (0, source.len()));
+    assert_eq!(facts.resource, SourceSpanCapacityResource::ExtendedSpan);
 
     assert_eq!(builder.len(), last_usable_index as usize + 1);
     let mut malformed_builder = ExtendedSpanBuilder::new();
@@ -492,23 +669,24 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("source-owned span exhaustion must remain an authored-source diagnosis");
     };
-    assert_eq!(error.diagnostic.identity().code, "MOTH-SYNTAX-0036");
-    assert_eq!(
-        error.diagnostic.primary_span,
-        Some(SourceSpan::new(malformed_id, LocalSpan::source_start())),
+    let compact = compact_bag_for_test(DiagnosticBag::from(error.diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("malformed-source capacity diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0036");
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span)
+                if span == SourceSpan::new(malformed_id, LocalSpan::source_start())
+        ),
         "the malformed file must remain the diagnostic's owning source",
     );
-    match &error.diagnostic.payload {
-        DiagnosticPayload::SourceSpanCapacity {
-            start,
-            length,
-            resource,
-        } => {
-            assert_eq!((*start, *length), (0, malformed_source.len() as u32));
-            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpan);
-        }
-        payload => panic!("unexpected malformed-source capacity payload: {payload:?}"),
-    }
+    let facts = diagnostic
+        .family_view::<SourceSpanCapacityView>()
+        .expect("malformed-source capacity diagnostic retains typed facts");
+    assert_eq!((facts.start, facts.length), (0, malformed_source.len()));
+    assert_eq!(facts.resource, SourceSpanCapacityResource::ExtendedSpan);
     assert_eq!(malformed_builder.len(), last_usable_index as usize + 1);
 }
 
@@ -615,22 +793,18 @@ fn source_span_rejects_resolution_through_another_sources_resolver() {
         first_span.resolve_with(foreign_resolver);
     }))
     .expect_err("a global span must not resolve through another source's resolver");
-    let foreign_message = compiler_bug_panic_message(foreign_panic);
-    assert!(
-        foreign_message.contains(&SourceId::from_index(1).index().to_string())
-            && foreign_message.contains(&SourceId::from_index(2).index().to_string())
-            && foreign_message.contains("compiler bug"),
-        "the wrong-source rejection should name both identities as a compiler bug: {foreign_message}"
+    assert_source_loading_compiler_bug(
+        foreign_panic,
+        "span from source identity 1 cannot resolve through source identity 2; this is a compiler bug",
     );
 
     let bare_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         first_span.resolve_with(bare_resolver);
     }))
     .expect_err("a global span must not resolve through an unqualified resolver");
-    let bare_message = compiler_bug_panic_message(bare_panic);
-    assert!(
-        bare_message.contains("unqualified") && bare_message.contains("compiler bug"),
-        "the unqualified rejection should require resolver_for(source): {bare_message}"
+    assert_source_loading_compiler_bug(
+        bare_panic,
+        "span from source identity 1 resolved through an unqualified resolver; global spans require resolver_for(source); this is a compiler bug",
     );
 
     let own_range = first_span.resolve_with(first_builder.resolver_for(SourceId::from_index(1)));
@@ -910,14 +1084,21 @@ fn exact_reports_end_overflow_at_u32_boundary_without_wrapping() {
 }
 
 #[test]
-fn end_unrepresentable_capacity_stays_on_compiler_error_lane() {
+fn end_unrepresentable_capacity_is_a_compiler_bug() {
     let mut builder = ExtendedSpanBuilder::new();
     let error = LocalSpan::exact(u32::MAX, 1, &mut builder)
         .expect_err("a range beyond u32::MAX must be rejected");
-    let anchor = SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start());
-
-    let compiler_error = CompilerDiagnostic::from_span_capacity_error(error, Some(anchor))
-        .expect_err("an unrepresentable end is a compiler invariant failure");
-    assert_eq!(compiler_error.error_type, ErrorType::Compiler);
-    assert_eq!(compiler_error.source_span, Some(anchor));
+    let source = SourceId::from_index(7);
+    let panic = std::panic::catch_unwind(|| {
+        crate::compiler_frontend::tokenizer::lexer::map_span_capacity_error(source, error)
+    })
+    .expect_err("an unrepresentable end must panic as a compiler bug");
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .expect("compiler bug panic should carry a structured report");
+    assert_eq!(report.stage, CompilerStage::Tokenization);
+    assert_eq!(
+        report.message.as_ref(),
+        "span at byte offset 4294967295 with length 1 ends past u32::MAX in a source that was accepted as addressable; this is a compiler bug"
+    );
 }

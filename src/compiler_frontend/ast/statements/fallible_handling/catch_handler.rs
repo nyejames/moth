@@ -48,8 +48,10 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, token_lexical,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -528,7 +530,7 @@ pub(crate) fn constrain_protected_by_fallbacks(
 /// WHAT: visits each reachable `then` group once; each group contributes its witness to every slot it
 ///       holds, so a later group never hides an earlier one. The continuation table is detached for
 ///       the walk, so the walk reads its entries while the witness sinks mutate the state.
-/// WHY: the earlier first-group-decides rule linked only one branch, leaving a later branch's exact
+/// WHY: deciding by the first group alone would link one branch and leave a later branch's exact
 ///      type unjoined before defaults; a single shared visitor reaches every branch.
 fn visit_fallback_witnesses(
     body: &CatchHandlerBody,
@@ -967,11 +969,11 @@ pub(crate) fn parse_catch_fallible_handler_typed(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
-    let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut local_handler_warnings = DiagnosticBag::new();
     let warnings = match warnings {
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
@@ -997,7 +999,7 @@ pub(crate) fn parse_catch_fallible_handler_typed(
 /// Parses a `catch:` handler without an error binding.
 #[allow(
     clippy::too_many_arguments,
-    reason = "catch without binding keeps stream, scope, site, warnings and mutable parse resources apart"
+    reason = "catch without binding shares the typed catch entrypoint shape while keeping parse resources separate"
 )]
 pub(crate) fn parse_catch_without_error_binding_typed(
     token_stream: &mut AstCursor,
@@ -1006,16 +1008,15 @@ pub(crate) fn parse_catch_without_error_binding_typed(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
-    let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut local_handler_warnings = DiagnosticBag::new();
     let warnings = match warnings {
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
     };
-
     parse_catch_fallible_handler_body(
         token_stream,
         context,
@@ -1038,11 +1039,11 @@ fn parse_catch_error_binding(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: &CatchFallibleHandlerSite<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerOpeningPipe,
             Some(token_stream.current_span()),
         )
@@ -1052,7 +1053,7 @@ fn parse_catch_error_binding(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::EmptyCatchHandlerBinding,
             Some(token_stream.current_span()),
         )
@@ -1060,7 +1061,7 @@ fn parse_catch_error_binding(
     }
 
     if token_stream.current_tag() != TokenTag::SYMBOL {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
             Some(token_stream.current_span()),
         )
@@ -1068,7 +1069,7 @@ fn parse_catch_error_binding(
     }
 
     let Some(handler_name) = token_stream.current_string_id_in(string_table)? else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
             Some(token_stream.current_span()),
         )
@@ -1094,7 +1095,7 @@ fn parse_catch_error_binding(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::COMMA {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::MultipleCatchHandlerBindings,
             Some(token_stream.current_span()),
         )
@@ -1102,7 +1103,7 @@ fn parse_catch_error_binding(
     }
 
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerClosingPipe,
             Some(token_stream.current_span()),
         )
@@ -1130,7 +1131,7 @@ fn bind_catch_error(
 ) -> Result<CatchErrorBinding, ExpressionParseError> {
     let error_binding = path_fork
         .try_intern_child(handler_context.scope, error.name)
-        .expect("path table exhausted while creating catch binding");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
 
     match error_return {
         GenericErrorReturn::Concrete(error_type_id) => {
@@ -1176,7 +1177,7 @@ fn bind_catch_error(
 /// WHY: this is the shared backend for both binding and no-binding catch handlers.
 #[allow(
     clippy::too_many_arguments,
-    reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, error binding, and warning sink as separate borrows"
+    reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, and error binding as separate borrows"
 )]
 fn parse_catch_fallible_handler_body(
     token_stream: &mut AstCursor,
@@ -1186,12 +1187,12 @@ fn parse_catch_fallible_handler_body(
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     error: Option<ParsedCatchErrorBinding>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
     if token_stream.current_tag() != TokenTag::COLON {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerColon,
             Some(token_stream.current_span()),
         )
@@ -1199,7 +1200,7 @@ fn parse_catch_fallible_handler_body(
     }
 
     let mut handler_context =
-        context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork);
+        context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork)?;
     // Even an error-only catch owns its zero success slots. A `then` must diagnose that
     // contract rather than target an enclosing value block or report a crossed boundary. A
     // pending contract parses against its declared arity of inferred slots, and an unresolved
@@ -1214,16 +1215,19 @@ fn parse_catch_fallible_handler_body(
 
     token_stream.advance();
 
-    let parsed_body = function_body_to_ast(
+    let mut body_warnings = DiagnosticBag::new();
+    let parsed_body_result = function_body_to_ast(
         token_stream,
         handler_context,
         type_interner,
         expression_builder,
         const_values,
-        warnings,
+        &mut body_warnings,
         string_table,
         path_fork,
-    )?;
+    );
+    warnings.append(body_warnings);
+    let parsed_body = parsed_body_result?;
 
     // A handler body shares the enclosing body root's numeric domain, so its parse returns the
     // authored-order draft. A draft that retained no numeric continuation converts straight to
@@ -1317,11 +1321,11 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
-    let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut local_handler_warnings = DiagnosticBag::new();
     let warnings = match warnings {
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
@@ -1357,7 +1361,7 @@ fn parse_inline_catch_handler_body(
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
         )
@@ -1365,7 +1369,7 @@ fn parse_inline_catch_handler_body(
     }
 
     if token_stream.current_tag() != TokenTag::THEN {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )
@@ -1380,7 +1384,7 @@ fn parse_inline_catch_handler_body(
             Some(success_result_type_ids) if success_result_type_ids.is_empty()
         )
     {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
             Some(token_stream.current_span()),
         )
@@ -1391,7 +1395,7 @@ fn parse_inline_catch_handler_body(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
         )
@@ -1399,7 +1403,7 @@ fn parse_inline_catch_handler_body(
     }
 
     if is_missing_produced_value_boundary(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ThenRequiresValues,
             Some(token_stream.current_span()),
         )
@@ -1407,7 +1411,7 @@ fn parse_inline_catch_handler_body(
     }
 
     let mut handler_context =
-        context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork);
+        context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork)?;
     let active_target = site.success_contract.handler_target();
     handler_context.active_value_target = Some(active_target.clone());
 
@@ -1432,7 +1436,7 @@ fn parse_inline_catch_handler_body(
     })?;
 
     if token_stream.current_tag() == TokenTag::CATCH {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )

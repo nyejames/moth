@@ -6,7 +6,8 @@
 //! Rendered HTML fragments remain opaque during assembly so the shell never rewrites
 //! whitespace-sensitive content such as code blocks, scripts, import maps, or head markup.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::output_plan::CanonicalPageRoute;
@@ -48,7 +49,7 @@ pub(crate) struct HtmlDocumentShellInput<'a> {
 
 pub(crate) fn render_html_document_shell(
     input: HtmlDocumentShellInput<'_>,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     timed_stage!(crate::timing::TimingMetric::BackendHtmlRender, {
         let resolved = resolve_html_document(input)?;
 
@@ -58,7 +59,7 @@ pub(crate) fn render_html_document_shell(
 
 fn resolve_html_document(
     input: HtmlDocumentShellInput<'_>,
-) -> Result<ResolvedHtmlDocument, CompilerError> {
+) -> Result<ResolvedHtmlDocument, InfrastructureFailure> {
     let HtmlDocumentShellInput {
         config,
         page_metadata,
@@ -118,7 +119,7 @@ fn resolve_html_document(
 fn render_metadata_value(
     value: Option<&OwnedFoldedString>,
     structural_url_renderer: &StructuralUrlRenderer<'_>,
-) -> Result<Option<String>, CompilerError> {
+) -> Result<Option<String>, InfrastructureFailure> {
     value
         .map(|value| structural_url_renderer.render_owned(value))
         .transpose()
@@ -210,12 +211,14 @@ fn append_rendered_html_fragment(output: &mut String, fragment: &str) {
 /// WHAT: turns `-`, `_` and `/` boundaries into spaces and title-cases each following word.
 /// WHY: route semantics are owned by `CanonicalPageRoute`; this function only projects its raw
 ///      segment into display text and never inspects a path.
-fn route_title_fallback(route_segment: Option<&OsStr>) -> Result<Option<String>, CompilerError> {
+fn route_title_fallback(
+    route_segment: Option<&OsStr>,
+) -> Result<Option<String>, InfrastructureFailure> {
     let Some(route_segment) = route_segment else {
         return Ok(None);
     };
     let route_segment = route_segment.to_str().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
+        InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
             "HTML planned route segment {route_segment:?} is not valid UTF-8; route components must be validated before title fallback."
         ))
     })?;

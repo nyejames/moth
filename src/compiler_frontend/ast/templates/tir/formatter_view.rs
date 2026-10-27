@@ -17,11 +17,10 @@
 //! no intermediate content-to-TIR conversion remains in the render-unit path.
 
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore, ConstValueStoreError,
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
 };
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExpressionConstructionFailure,
-};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece, output_to_input,
@@ -40,10 +39,10 @@ use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity, structural_transition_context,
 };
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
-};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -62,7 +61,7 @@ use std::collections::HashMap;
 /// an explicit parser/control-flow mutation boundary before forwarding warnings.
 pub(crate) struct TirFormatterResult {
     pub root: TemplateIrNodeId,
-    pub warnings: Vec<CompilerDiagnostic>,
+    pub warnings: DiagnosticBag,
 }
 
 /// Mutable formatter state for one module-local TIR store.
@@ -98,28 +97,35 @@ impl FormatterStore<'_> {
         (self.store, self.expressions, self.const_values)
     }
 
-    fn view(&self) -> Result<TirView<'_>, CompilerError> {
-        let root = self.root.ok_or_else(|| {
-            CompilerError::compiler_error(
-                "TIR formatter view: no owning template for a node-root formatter store.",
-            )
-        })?;
+    fn view(&self) -> Result<TirView<'_>, InfrastructureFailure> {
+        let Some(root) = self.root else {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "TIR formatter view: no owning template for a node-root formatter.",
+            );
+        };
         TirView::new(&*self.store, root, self.phase, self.context)
     }
 
-    fn effective_node(&self, node_id: TemplateIrNodeId) -> Result<&TemplateIrNode, CompilerError> {
+    fn effective_node(
+        &self,
+        node_id: TemplateIrNodeId,
+    ) -> Result<&TemplateIrNode, InfrastructureFailure> {
         self.store.get_node(node_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR formatter view: node {} does not exist in the store",
-                node_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR formatter view: node {} does not exist in the store",
+                    node_id
+                ),
+            )
         })
     }
 
     fn structural_child_view(
         &self,
         reference: TemplateTirChildReference,
-    ) -> Result<TirView<'_>, CompilerError> {
+    ) -> Result<TirView<'_>, InfrastructureFailure> {
         // For a published-template formatter, use the view's structural_child
         // transition to carry the current expression overlay. For a node-root
         // formatter (no owning template), create the child view directly with
@@ -160,16 +166,13 @@ pub(crate) fn format_tir_template(
     context: TemplateViewContext,
     style: &Style,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, CompilerMessages> {
+) -> Result<TirFormatterResult, TemplateError> {
     let (root_node_id, head_node_count) = {
         let template = store.get_template(root).ok_or_else(|| {
-            compiler_error_messages(
-                CompilerError::compiler_error(format!(
-                    "TIR formatter view lost referenced template {}.",
-                    root
-                )),
-                string_table,
-            )
+            TemplateError::from(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR formatter view lost referenced template {}.", root),
+            ))
         })?;
         (template.root, template.summary.head_node_count as usize)
     };
@@ -193,9 +196,9 @@ pub(crate) fn format_tir_template(
 /// WHAT: runs the same formatter pipeline as `format_tir_template` directly on
 ///       a node root, with zero head-prefix nodes. The body root is not a
 ///       published template, so no durable `TemplateIr` entry is created.
-/// WHY: control-flow body roots are parser-emitted TIR nodes, not template
-///      identities. Formatting them directly avoids scratch templates that
-///      would remain in the durable store without a referencing identity.
+/// WHY: control-flow body roots are parser-emitted TIR nodes, not top-level
+///      templates. Formatting the node root directly avoids scratch templates
+///      that would remain in the durable store without a referencing identity.
 #[allow(
     clippy::too_many_arguments,
     reason = "the optional owner and body root stay separate from the store and formatter inputs"
@@ -210,7 +213,7 @@ pub(crate) fn format_tir_body_node_root(
     context: TemplateViewContext,
     style: &Style,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, CompilerMessages> {
+) -> Result<TirFormatterResult, TemplateError> {
     let mut formatter_store = FormatterStore {
         store,
         expressions,
@@ -229,7 +232,7 @@ fn format_tir_formatter_store(
     formatter_store: &mut FormatterStore<'_>,
     style: &Style,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, CompilerMessages> {
+) -> Result<TirFormatterResult, TemplateError> {
     let root_node_id = formatter_store.root_node_id;
 
     let formatter = style.formatter.as_ref();
@@ -242,7 +245,7 @@ fn format_tir_formatter_store(
     if implicit_default_whitespace_pass.is_none() && formatter.is_none() {
         return Ok(TirFormatterResult {
             root: root_node_id,
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
         });
     }
 
@@ -349,11 +352,11 @@ fn format_child_templates_in_subtree(
     node_ref: TemplateIrNodeId,
     formatted_templates: &mut HashMap<TemplateIrId, TemplateIrId>,
     string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), TemplateError> {
     let fact = {
         let node = formatter_store
             .effective_node(node_ref)
-            .map_err(|error| compiler_error_messages(error, string_table))?;
+            .map_err(TemplateError::from)?;
         extract_formatter_child_fact(&node.kind)
     };
 
@@ -362,7 +365,7 @@ fn format_child_templates_in_subtree(
             let child_identity = formatter_store
                 .structural_child_view(reference)
                 .map(|view| view.identity())
-                .map_err(|error| compiler_error_messages(error, string_table))?;
+                .map_err(TemplateError::from)?;
             let formatted_id = if let Some(formatted_id) =
                 formatted_templates.get(&child_identity.root).copied()
             {
@@ -384,7 +387,7 @@ fn format_child_templates_in_subtree(
                 formatter_store
                     .store
                     .replace_child_template_reference(node_ref, formatted_id)
-                    .map_err(|error| compiler_error_messages(error, string_table))?;
+                    .map_err(TemplateError::from)?;
             }
         }
 
@@ -454,7 +457,7 @@ fn format_referenced_child_template(
     formatter_store: &mut FormatterStore<'_>,
     identity: TirViewIdentity,
     string_table: &mut StringTable,
-) -> Result<Option<TemplateIrId>, CompilerMessages> {
+) -> Result<Option<TemplateIrId>, TemplateError> {
     let template_ref = identity.root;
     let phase = identity.phase;
     let context = identity.context;
@@ -463,13 +466,13 @@ fn format_referenced_child_template(
             .store
             .get_template(template_ref)
             .ok_or_else(|| {
-                compiler_error_messages(
-                    CompilerError::compiler_error(format!(
+                TemplateError::from(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
                         "TIR formatter view lost referenced child template {}.",
                         template_ref
-                    )),
-                    string_table,
-                )
+                    ),
+                ))
             })?;
         template.style.clone()
     };
@@ -503,7 +506,7 @@ fn format_referenced_child_template(
             crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(
             ),
         )
-        .map_err(|error| compiler_error_messages(error, string_table))?;
+        .map_err(TemplateError::from)?;
 
     Ok(Some(formatted_template_id))
 }
@@ -558,11 +561,11 @@ fn format_tir_node(
     post_format_passes: &[TemplateWhitespacePassProfile],
     formatter: Option<&crate::compiler_frontend::ast::templates::template::Formatter>,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, CompilerMessages> {
+) -> Result<TirFormatterResult, TemplateError> {
     let fact = {
         let node = formatter_store
             .effective_node(node_ref)
-            .map_err(|error| compiler_error_messages(error, string_table))?;
+            .map_err(TemplateError::from)?;
         extract_formatter_node_fact(node)
     };
 
@@ -622,7 +625,7 @@ fn format_tir_node(
         // Structural nodes that are not body-eligible pass through unchanged.
         FormatterNodeFact::Passthrough => Ok(TirFormatterResult {
             root: node_ref,
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
         }),
     }
 }
@@ -656,10 +659,10 @@ fn format_tir_sequence(
     post_format_passes: &[TemplateWhitespacePassProfile],
     formatter: Option<&crate::compiler_frontend::ast::templates::template::Formatter>,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, CompilerMessages> {
+) -> Result<TirFormatterResult, TemplateError> {
     let mut new_children: Vec<TemplateIrNodeId> = Vec::with_capacity(children.len());
     let mut current_run: Vec<TemplateIrNodeId> = Vec::new();
-    let mut all_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut all_warnings = DiagnosticBag::new();
     let mut content_changed = false;
     let mut is_first_run = true;
 
@@ -668,7 +671,7 @@ fn format_tir_sequence(
         let child_eligibility = {
             let child = formatter_store
                 .effective_node(child_ref)
-                .map_err(|error| compiler_error_messages(error, string_table))?;
+                .map_err(TemplateError::from)?;
             ChildRunEligibility {
                 is_child_template: matches!(child.kind, TemplateIrNodeKind::ChildTemplate { .. }),
                 is_body_eligible: is_body_eligible_kind(&child.kind),
@@ -697,7 +700,7 @@ fn format_tir_sequence(
             )?;
 
             new_children.extend(replacement);
-            all_warnings.extend(warnings);
+            append_diagnostics(&mut all_warnings, warnings);
             content_changed |= run_changed;
             current_run.clear();
             is_first_run = false;
@@ -719,7 +722,7 @@ fn format_tir_sequence(
         )?;
 
         new_children.extend(replacement);
-        all_warnings.extend(warnings);
+        append_diagnostics(&mut all_warnings, warnings);
         content_changed |= run_changed;
     }
 
@@ -777,7 +780,7 @@ fn is_body_eligible_kind(kind: &TemplateIrNodeKind) -> bool {
 fn child_template_is_head_expression_insert_in_tir(
     formatter_store: &FormatterStore<'_>,
     reference: &TemplateTirChildReference,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     let child_view = formatter_store.structural_child_view(*reference)?;
     let child_template = child_view.root_template()?;
     let root_node_ref = child_template.root;
@@ -817,7 +820,7 @@ fn child_template_is_head_expression_insert_in_tir(
 fn opaque_kind_for_kind(
     formatter_store: &FormatterStore<'_>,
     kind: &TemplateIrNodeKind,
-) -> Result<FormatterOpaqueKind, CompilerError> {
+) -> Result<FormatterOpaqueKind, InfrastructureFailure> {
     match kind {
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             if child_template_is_head_expression_insert_in_tir(formatter_store, reference)? {
@@ -828,10 +831,10 @@ fn opaque_kind_for_kind(
         }
         TemplateIrNodeKind::DynamicExpression { .. } => Ok(FormatterOpaqueKind::DynamicExpression),
 
-        _ => Err(CompilerError::compiler_error(format!(
-            "TIR formatter view attempted to anchor unsupported node kind: {:?}",
-            kind
-        ))),
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "TIR formatter view attempted to anchor unsupported node kind: {kind:?}",
+        ),
     }
 }
 
@@ -855,12 +858,12 @@ fn process_formatter_run(
     post_format_passes: &[TemplateWhitespacePassProfile],
     formatter: Option<&crate::compiler_frontend::ast::templates::template::Formatter>,
     string_table: &mut StringTable,
-) -> Result<(Vec<TemplateIrNodeId>, Vec<CompilerDiagnostic>, bool), CompilerMessages> {
+) -> Result<(Vec<TemplateIrNodeId>, DiagnosticBag, bool), TemplateError> {
     if run.is_empty() {
-        return Ok((Vec::new(), Vec::new(), false));
+        return Ok((Vec::new(), DiagnosticBag::new(), false));
     }
 
-    let representative_span = representative_span_for_run(formatter_store, run, string_table)?;
+    let representative_span = representative_span_for_run(formatter_store, run)?;
 
     let mut input_pieces: Vec<FormatterInputPiece> = Vec::with_capacity(run.len());
     let mut anchor_side_table: Vec<TemplateIrNodeId> = Vec::with_capacity(run.len());
@@ -868,7 +871,7 @@ fn process_formatter_run(
         let node_ref = node_id;
         let node = formatter_store
             .effective_node(node_ref)
-            .map_err(|error| compiler_error_messages(error, string_table))?;
+            .map_err(TemplateError::from)?;
 
         match &node.kind {
             TemplateIrNodeKind::Text { text, .. } => {
@@ -885,7 +888,7 @@ fn process_formatter_run(
                 input_pieces.push(FormatterInputPiece::Opaque(FormatterOpaquePiece {
                     id: anchor_id,
                     kind: opaque_kind_for_kind(formatter_store, &node.kind)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                        .map_err(TemplateError::from)?,
                 }));
             }
         }
@@ -900,13 +903,16 @@ fn process_formatter_run(
         apply_whitespace_passes_to_input(input, pre_format_passes, run_position, string_table);
 
     // 2. Style formatter.
-    let mut formatter_warnings = Vec::new();
+    let mut formatter_warnings = DiagnosticBag::new();
 
     if let Some(fmt) = formatter {
-        let next_input = output_to_input(output, representative_span, string_table);
-        let formatter_result = fmt.formatter.format(next_input, string_table)?;
-
-        formatter_warnings.extend(formatter_result.warnings);
+        let formatter_input = output_to_input(output, representative_span, string_table);
+        let formatter_result = {
+            let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+            fmt.formatter
+                .format(formatter_input, &mut diagnostic_strings)?
+        };
+        formatter_warnings = formatter_result.warnings;
         output = formatter_result.output;
     }
 
@@ -957,7 +963,7 @@ fn output_to_tir_nodes(
     anchor_side_table: &[TemplateIrNodeId],
     representative_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<(Vec<TemplateIrNodeId>, bool), CompilerMessages> {
+) -> Result<(Vec<TemplateIrNodeId>, bool), TemplateError> {
     let mut nodes = Vec::with_capacity(output.pieces.len());
     let mut content_changed = false;
 
@@ -991,14 +997,7 @@ fn output_to_tir_nodes(
                             ])),
                             representative_span,
                         )
-                        .map_err(|error| match error {
-                            ConstValueStoreError::Diagnostic(diagnostic) => {
-                                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
-                            }
-                            ConstValueStoreError::Infrastructure(error) => {
-                                compiler_error_messages(error, string_table)
-                            }
-                        })?;
+                        .map_err(TemplateError::from)?;
                     let expression = formatter_store
                         .expressions
                         .constant(
@@ -1007,14 +1006,7 @@ fn output_to_tir_nodes(
                             None,
                             ValueMode::ImmutableOwned,
                         )
-                        .map_err(|error| match error {
-                            ExpressionConstructionFailure::Diagnostic(diagnostic) => {
-                                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
-                            }
-                            ExpressionConstructionFailure::Invariant(error) => {
-                                compiler_error_messages(error, string_table)
-                            }
-                        })?;
+                        .map_err(TemplateError::from)?;
                     nodes.push(formatter_store.store.push_node(TemplateIrNode::new(
                         TemplateIrNodeKind::DynamicExpression {
                             expression: expression.id(),
@@ -1028,14 +1020,12 @@ fn output_to_tir_nodes(
                 }
 
                 let Some(node_id) = anchor_side_table.get(anchor.id.0).copied() else {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "TIR formatter view received invalid opaque anchor id {}; only {} anchors exist for this formatter run.",
-                            anchor.id.0,
-                            anchor_side_table.len()
-                        )),
-                        string_table,
-                    ));
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
+                        "TIR formatter view received invalid opaque anchor id {}; only {} anchors exist for this formatter run.",
+                        anchor.id.0,
+                        anchor_side_table.len()
+                    ))
+                    .into());
                 };
 
                 nodes.push(node_id);
@@ -1068,12 +1058,11 @@ fn run_position_for_run(is_first_run: bool, is_last_run: bool) -> TemplateBodyRu
 fn representative_span_for_run(
     formatter_store: &FormatterStore<'_>,
     run: &[TemplateIrNodeId],
-    string_table: &StringTable,
-) -> Result<Option<SourceSpan>, CompilerMessages> {
+) -> Result<Option<SourceSpan>, TemplateError> {
     for &node_id in run {
         let node = formatter_store
             .effective_node(node_id)
-            .map_err(|error| compiler_error_messages(error, string_table))?;
+            .map_err(TemplateError::from)?;
         if node.span.is_some() {
             return Ok(node.span);
         }
@@ -1085,11 +1074,6 @@ fn representative_span_for_run(
 //  Diagnostics
 // -------------------------
 
-fn compiler_error_messages(
-    error: impl Into<Box<InfrastructureErrors>>,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let mut messages = CompilerMessages::empty(string_table.clone());
-    messages.append_infrastructure_errors(error.into());
-    messages
+fn append_diagnostics(target: &mut DiagnosticBag, appended: DiagnosticBag) {
+    target.append(appended);
 }

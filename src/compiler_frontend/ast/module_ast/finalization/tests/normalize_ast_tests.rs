@@ -44,9 +44,13 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::templates::{InvalidTemplateStructureCode, InvalidTemplateStructureView},
+    test_support::compact_bag_for_test,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{
@@ -93,7 +97,7 @@ impl FoldedValueMaterialiser for ConstTemplateProjectionMaterializer {
         &mut self,
         origin: &StableResourceOriginId,
         span: Option<SourceSpan>,
-    ) -> Result<ResourceId, CompilerError> {
+    ) -> Result<ResourceId, InfrastructureFailure> {
         Ok(self.module_resources.intern_origin(origin.clone(), span))
     }
 
@@ -101,10 +105,12 @@ impl FoldedValueMaterialiser for ConstTemplateProjectionMaterializer {
         &mut self,
         _identity: &crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity,
         _string_table: &mut StringTable,
-    ) -> Result<crate::compiler_frontend::datatypes::ids::TypeId, CompilerError> {
-        Err(CompilerError::compiler_error(
+    ) -> Result<crate::compiler_frontend::datatypes::ids::TypeId, ConstValueStoreError> {
+        Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "const-template structural-string test materializer does not intern canonical types",
-        ))
+        )
+        .into())
     }
 
     fn type_environment(&self) -> &TypeEnvironment {

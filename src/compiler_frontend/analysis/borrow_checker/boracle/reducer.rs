@@ -16,7 +16,8 @@ use crate::compiler_frontend::analysis::borrow_checker::problem::{
     PlaceId, PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use, UseId,
     UseKind, ValueOrigin, ValueOriginId,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// The ordered transformations used by [`reduce_problem`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -136,7 +137,7 @@ pub(crate) fn reduction_size(problem: &BorrowProblem, bounds: OracleBounds) -> R
     measure_parts(&problem_parts(problem), bounds)
 }
 
-fn validate_bounds(bounds: OracleBounds) -> Result<(), CompilerError> {
+fn validate_bounds(bounds: OracleBounds) -> Result<(), InfrastructureFailure> {
     for (name, value) in [
         ("max_executions", bounds.max_executions),
         ("max_executed_events", bounds.max_executed_events),
@@ -144,9 +145,10 @@ fn validate_bounds(bounds: OracleBounds) -> Result<(), CompilerError> {
         ("max_dynamic_generations", bounds.max_dynamic_generations),
     ] {
         if value == 0 {
-            return Err(CompilerError::compiler_error(format!(
-                "Boracle reducer requires {name} to be greater than zero"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("Boracle reducer requires {name} to be greater than zero"),
+            ));
         }
     }
     Ok(())
@@ -157,19 +159,31 @@ fn validate_bounds(bounds: OracleBounds) -> Result<(), CompilerError> {
 pub(crate) fn reduce_problem(
     problem: BorrowProblem,
     bounds: OracleBounds,
-) -> Result<ReducedProblem, CompilerError> {
+) -> Result<ReducedProblem, InfrastructureFailure> {
     validate_bounds(bounds)?;
     let initial_set = compare_problem_parts(problem_parts(&problem), bounds)?;
     let comparison_classes = classes_from_set(&initial_set);
-    let static_accepts = static_accepts_from_set(&initial_set)
-        .ok_or_else(|| CompilerError::compiler_error("cannot reduce a malformed borrow problem"))?;
+    let static_accepts = static_accepts_from_set(&initial_set).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            "cannot reduce a malformed borrow problem",
+        )
+    })?;
     let oracle_outcome = initial_set
         .oracle_outcome
         .as_ref()
         .map(OracleOutcomeIdentity::from_outcome)
-        .ok_or_else(|| CompilerError::compiler_error("cannot reduce a malformed borrow problem"))?;
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                "cannot reduce a malformed borrow problem",
+            )
+        })?;
     let normalized_problem = initial_set.problem.ok_or_else(|| {
-        CompilerError::compiler_error("cannot reduce a malformed normalized borrow problem")
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            "cannot reduce a malformed normalized borrow problem",
+        )
     })?;
     let mut current = ReductionState {
         measure: reduction_size(&normalized_problem, bounds),
@@ -229,7 +243,7 @@ struct ReductionState {
 fn attempt_pass(
     current: &ReductionState,
     pass: ReductionPass,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     match pass {
         ReductionPass::RemoveUnreachableBlocks => attempt_remove_unreachable_blocks(current),
         ReductionPass::RemoveEvents => attempt_remove_events(current),
@@ -249,7 +263,7 @@ fn try_candidate(
     current: &ReductionState,
     parts: BorrowProblemParts,
     bounds: OracleBounds,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let measure = measure_parts(&parts, bounds);
     if measure >= current.measure
         || bounds.max_executions == 0
@@ -269,8 +283,8 @@ fn try_candidate(
 
     // Validation and operational-oracle errors belong to the candidate and reject it. Once that
     // pre-check succeeds, an error from comparison belongs to the static solver and must
-    // propagate rather than hiding an invariant defect. This static-solver branch is defensive
-    // today: every known input-dependent static failure also fails operational execution, and no
+    // propagate rather than hiding an invariant defect. This static-solver branch is defensive:
+    // every known input-dependent static failure also fails operational execution, and no
     // existing test covers a static-only failure.
     let comparison_set = compare_problem_parts(parts, bounds)?;
     let Some(oracle_outcome) = comparison_set
@@ -1096,7 +1110,7 @@ fn event_removal_rows(
 
 fn attempt_remove_unreachable_blocks(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
     let reachable = reachable_blocks(&parts);
     for (block_index, is_reachable) in reachable.iter().enumerate() {
@@ -1125,7 +1139,7 @@ fn attempt_remove_unreachable_blocks(
 
 fn attempt_remove_events(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
     for event in &parts.events {
         if matches!(
@@ -1158,7 +1172,7 @@ fn attempt_remove_events(
 
 fn attempt_remove_uses_and_loans(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
 
     for use_row in &parts.uses {
@@ -1224,7 +1238,9 @@ fn recompute_exits(parts: &mut BorrowProblemParts) {
         .collect();
 }
 
-fn attempt_remove_edges(current: &ReductionState) -> Result<Option<ReductionState>, CompilerError> {
+fn attempt_remove_edges(
+    current: &ReductionState,
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
     for edge_index in 0..parts.edges.len() {
         let removed_edge = parts.edges[edge_index];
@@ -1316,7 +1332,7 @@ fn simpler_projection(projection: ProjectionElem) -> Option<ProjectionElem> {
 
 fn attempt_simplify_projections(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
 
     for (place_index, place) in parts.places.iter().enumerate() {
@@ -1523,7 +1539,7 @@ fn event_kind_references_origin(kind: &EventKind, origin_id: ValueOriginId) -> b
 
 fn attempt_reduce_origins(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
     for (origin_index, origin) in parts.origins.iter().enumerate() {
         let Some(simple_kind) = simpler_origin_kind(&origin.kind) else {
@@ -1642,7 +1658,7 @@ fn binding_is_referenced(parts: &BorrowProblemParts, binding_id: BindingId) -> b
 
 fn attempt_reduce_bindings(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
 
     for (place_index, place) in parts.places.iter().enumerate() {
@@ -1717,7 +1733,7 @@ fn origin_referenced_except_event(
 fn attempt_simplify_call_arguments(
     current: &ReductionState,
     parts: &BorrowProblemParts,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     for (event_index, event) in parts.events.iter().enumerate() {
         let EventKind::CallEffect(effect) = &event.kind else {
             continue;
@@ -1788,7 +1804,7 @@ fn attempt_simplify_call_arguments(
 
 fn attempt_replace_calls_with_simpler_effects(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
 
     for (call_index, call) in parts.calls.iter().enumerate() {
@@ -1863,7 +1879,7 @@ fn lower_bound_candidates(value: usize) -> [Option<usize>; 2] {
 
 fn attempt_lower_loop_bounds(
     current: &ReductionState,
-) -> Result<Option<ReductionState>, CompilerError> {
+) -> Result<Option<ReductionState>, InfrastructureFailure> {
     let parts = problem_parts(&current.problem);
     let bound_values = [
         current.bounds.max_executions,
@@ -1879,7 +1895,10 @@ fn attempt_lower_loop_bounds(
                 1 => candidate_bounds.max_executed_events = target,
                 2 => candidate_bounds.max_block_entries = target,
                 3 => candidate_bounds.max_dynamic_generations = target,
-                _ => unreachable!("bound index is fixed by the four bound fields"),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BorrowChecking,
+                    "bound index is fixed by the four bound fields"
+                ),
             }
             if let Some(candidate) = try_candidate(current, parts.clone(), candidate_bounds)? {
                 return Ok(Some(candidate));

@@ -3,7 +3,8 @@
 //! Canonical parser paths borrow one [`TokenCursor`] over [`SourceTokens`]. Retained parser
 //! payloads stay in the canonical source owner and are read through checked [`TokenRef`] views.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::{ChoiceVariantSeparatorGap, DiagnosticToken};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -54,7 +55,7 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn from_source_tokens(
         source_tokens: &'a Arc<SourceTokens>,
         range: TokenRange,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         Self::from_source_tokens_for_handoff(source_tokens, range)
     }
 
@@ -65,11 +66,12 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn from_source_tokens_for_handoff(
         source_tokens: &'a Arc<SourceTokens>,
         range: TokenRange,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let canonical = source_tokens.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "canonical source range cursor construction failed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("canonical source range cursor construction failed: {error:?}"),
+            )
         })?;
         Ok(Self::new_with_owner(
             canonical,
@@ -84,16 +86,18 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn from_source_sequence(
         source_tokens: &'a Arc<SourceTokens>,
         sequence: TokenSequenceId,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let view = source_tokens.token_sequence(sequence).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "canonical source sequence cursor construction failed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("canonical source sequence cursor construction failed: {error:?}"),
+            )
         })?;
         let canonical = view.cursor().map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "canonical source sequence cursor construction failed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("canonical source sequence cursor construction failed: {error:?}"),
+            )
         })?;
         Ok(Self::new_with_owner(
             canonical,
@@ -187,7 +191,7 @@ impl<'a> AstCursor<'a> {
         &self,
         token: TokenRef<'a>,
         destination: &mut StringTable,
-    ) -> Result<Option<StringId>, CompilerError> {
+    ) -> Result<Option<StringId>, InfrastructureFailure> {
         let Some(id) = token.string_id() else {
             return Ok(None);
         };
@@ -195,9 +199,10 @@ impl<'a> AstCursor<'a> {
             return Ok(Some(id));
         };
         let spelling = origin.strings.try_resolve(id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "donor string handle {id:?} is outside its issuing frozen table"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("donor string handle {id:?} is outside its issuing frozen table"),
+            )
         })?;
         Ok(Some(destination.intern(spelling)))
     }
@@ -210,7 +215,7 @@ impl<'a> AstCursor<'a> {
         &self,
         index: usize,
         destination: &mut StringTable,
-    ) -> Result<Option<StringId>, CompilerError> {
+    ) -> Result<Option<StringId>, InfrastructureFailure> {
         let Some(token) = self.token_ref_at(index) else {
             return Ok(None);
         };
@@ -222,7 +227,8 @@ impl<'a> AstCursor<'a> {
                 | TokenTag::RAW_STRING_LITERAL
         ) && token.string_id().is_none()
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "canonical string-shaped token is missing its payload",
             ));
         }
@@ -233,7 +239,7 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn current_string_id_in(
         &self,
         destination: &mut StringTable,
-    ) -> Result<Option<StringId>, CompilerError> {
+    ) -> Result<Option<StringId>, InfrastructureFailure> {
         let Some(token) = self.current() else {
             return Ok(None);
         };
@@ -245,7 +251,8 @@ impl<'a> AstCursor<'a> {
                 | TokenTag::RAW_STRING_LITERAL
         ) && token.string_id().is_none()
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "canonical string-shaped token is missing its payload",
             ));
         }
@@ -274,7 +281,7 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn current_numeric_literal_in(
         &self,
         destination: &mut StringTable,
-    ) -> Result<Option<NumericLiteralToken>, CompilerError> {
+    ) -> Result<Option<NumericLiteralToken>, InfrastructureFailure> {
         let Some(token) = self.current() else {
             return Ok(None);
         };
@@ -282,17 +289,19 @@ impl<'a> AstCursor<'a> {
             Some(origin) => token
                 .numeric_literal_in(origin.strings, destination)
                 .map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "donor numeric payload could not be translated: {error:?}"
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!("donor numeric payload could not be translated: {error:?}"),
+                    )
                 }),
             None => token
                 .numeric_literal()
                 .map(|literal| literal.cloned())
                 .map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "canonical numeric payload could not be read: {error:?}"
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!("canonical numeric payload could not be read: {error:?}"),
+                    )
                 }),
         }
     }
@@ -302,12 +311,15 @@ impl<'a> AstCursor<'a> {
     }
 
     /// Read and validate the current authored path row without cloning its source owner.
-    pub(crate) fn current_path_syntax(&self) -> Result<Option<&'a PathSyntax>, CompilerError> {
+    pub(crate) fn current_path_syntax(
+        &self,
+    ) -> Result<Option<&'a PathSyntax>, InfrastructureFailure> {
         match self.current() {
             Some(token) => token.path_syntax().map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "canonical path payload could not be read: {error:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("canonical path payload could not be read: {error:?}"),
+                )
             }),
             None => Ok(None),
         }
@@ -339,52 +351,60 @@ impl<'a> AstCursor<'a> {
         self.token_ref_at(index).map(TokenRef::source_span)
     }
 
-    pub(crate) fn declaration_cursor(&self) -> Result<DeclarationCursor<'_>, CompilerError> {
-        DeclarationCursor::new(self.cursor)
-            .map(|declaration| declaration.with_payload_origin(self.payload_origin))
+    pub(crate) fn declaration_cursor(&self) -> DeclarationCursor<'_> {
+        DeclarationCursor::new(self.cursor).with_payload_origin(self.payload_origin)
     }
 
-    pub(crate) fn set_position(&mut self, position: usize) -> Result<(), CompilerError> {
+    pub(crate) fn set_position(&mut self, position: usize) -> Result<(), InfrastructureFailure> {
         if position < self.active_start() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "AST cursor position precedes its active parser window",
             ));
         }
         if position > self.active_end() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "AST cursor position exceeds its active parser limit",
             ));
         }
         if self.cursor.is_segmented() {
             self.cursor.set_parser_position(position).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "AST segmented cursor reposition failed: {error:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("AST segmented cursor reposition failed: {error:?}"),
+                )
             })?;
         } else {
             let position = TokenIndex::try_from_index(position).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "AST cursor position exceeds the checked index domain",
                 )
             })?;
             self.cursor.set_position(position).map_err(|error| {
-                CompilerError::compiler_error(format!("AST cursor reposition failed: {error:?}"))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("AST cursor reposition failed: {error:?}"),
+                )
             })?;
         }
         Ok(())
     }
 
     /// Narrow the active parser view's end and return the replaced end for restoration.
-    pub(crate) fn set_limit(&mut self, end: usize) -> Result<usize, CompilerError> {
+    pub(crate) fn set_limit(&mut self, end: usize) -> Result<usize, InfrastructureFailure> {
         let current = self.position();
         if end < current {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "AST cursor parser limit precedes its current position",
             ));
         }
         let previous = self.active_end();
         if end > previous {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "AST cursor parser limit exceeds its active range",
             ));
         }
@@ -447,14 +467,20 @@ impl<'a> AstCursor<'a> {
     ///
     /// Contiguous cursors use source-local positions; segmented cursors use dense sequence
     /// positions, so source gaps are never exposed.
-    pub(crate) fn subcursor_window(&self, start: usize, end: usize) -> Result<Self, CompilerError> {
+    pub(crate) fn subcursor_window(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> Result<Self, InfrastructureFailure> {
         if start > end {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "AST cursor subcursor window is inverted",
             ));
         }
         if start < self.active_start() || end > self.active_end() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "AST cursor subcursor window is outside its active bounds",
             ));
         }
@@ -479,7 +505,7 @@ impl<'a> AstCursor<'a> {
         SourceSpan::new(self.source_id(), LocalSpan::source_start())
     }
 
-    pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
+    pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, InfrastructureFailure> {
         self.cursor.source_tokens().path_syntax_table()
     }
 
@@ -501,13 +527,16 @@ impl<'a> AstCursor<'a> {
     ///
     /// Tag classification remains allocation-free; this explicit boundary is used only by
     /// scanners whose fallback diagnosis would otherwise hide a malformed payload.
-    pub(crate) fn validate_current_payload(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate_current_payload(&self) -> Result<(), InfrastructureFailure> {
         if let Some(token) = self.current() {
             token.validate_payload().map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "canonical token payload invariant failed at index {}: {error:?}",
-                    token.index().raw()
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "canonical token payload invariant failed at index {}: {error:?}",
+                        token.index().raw()
+                    ),
+                )
             })?;
         }
         Ok(())
@@ -515,10 +544,6 @@ impl<'a> AstCursor<'a> {
 
     pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
         self.peek_next_ref().map(|token| token.tag())
-    }
-
-    pub(crate) fn current_postfix_operator_span(&self) -> SourceSpan {
-        self.current_span()
     }
 
     fn visible_at(&self, logical_position: usize, token: TokenRef<'a>) -> Option<TokenRef<'a>> {

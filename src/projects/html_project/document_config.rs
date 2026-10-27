@@ -6,7 +6,7 @@
 //!      gives the HTML builder a single source of truth for shell defaults.
 
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::projects::settings::{Config, ProjectConfigError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +40,7 @@ impl Default for HtmlDocumentConfig {
 
 pub(crate) fn parse_html_document_config(
     config: &Config,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<HtmlDocumentConfig, ProjectConfigError> {
     let section = &config.html_section;
 
@@ -96,7 +96,7 @@ fn parse_required_string(
     default: &str,
     reject_empty: bool,
     config: &Config,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<String, ProjectConfigError> {
     let Some(raw_value) = raw_value else {
         return Ok(default.to_string());
@@ -113,7 +113,7 @@ fn parse_optional_string(
     raw_value: Option<&str>,
     key: &str,
     config: &Config,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<Option<String>, ProjectConfigError> {
     let Some(raw_value) = raw_value else {
         return Ok(None);
@@ -129,7 +129,7 @@ fn parse_optional_string(
 fn config_empty_error(
     config: &Config,
     key: &str,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     config
         .config_diagnostic(key, InvalidConfigReason::EmptyProjectSetting, string_table)

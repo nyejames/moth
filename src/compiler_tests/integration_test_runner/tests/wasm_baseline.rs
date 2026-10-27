@@ -2,9 +2,8 @@
 //!
 //! WHAT: proves the baseline requires every export the emitted bootstrap actually calls, with the
 //!       right export kind, and rejects an ambiguous export set.
-//! WHY: the previous baseline compared a hardcoded name list and never required `moth_start`,
-//!      the one export the generated JavaScript calls unconditionally. A module missing it, or
-//!      exporting it as something other than a function, passed the suite and failed in a browser.
+//! WHY: the generated JavaScript calls `moth_start` unconditionally. A missing or non-function
+//!      export fails in the browser, so the baseline must check both its presence and kind.
 
 use super::super::assertions::validate_success_result;
 use super::super::types::{ArtifactAssertion, ArtifactKind, GoldenExpectation};
@@ -95,7 +94,7 @@ fn html_wasm_build_result(page_js: &str, wasm_bytes: Vec<u8>) -> BuildResult {
 fn html_wasm_baseline_reason(build_result: BuildResult) -> Option<String> {
     let expectation = acceptance_only_expectation();
     let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     if result.passed {
         return None;
@@ -120,8 +119,8 @@ fn html_wasm_baseline_accepts_a_module_exporting_every_runtime_called_entity() {
 
 #[test]
 fn html_wasm_baseline_requires_the_start_export_the_bootstrap_calls() {
-    // `instance.exports.moth_start()` runs on every page load. A module without it is broken at
-    // runtime, and the old name-list baseline never checked for it.
+    // `instance.exports.moth_start()` runs on every page load, so the baseline must reject a
+    // module without that function.
     let without_start: Vec<&str> = BASELINE_FUNCTION_EXPORTS
         .iter()
         .copied()
@@ -282,7 +281,7 @@ fn artifact_export_assertions_reject_a_module_exporting_one_name_twice() {
         (PathBuf::from("page.wasm"), FileKind::Wasm(wasm_bytes)),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(!result.passed, "a duplicated export name is ambiguous");
     let reason = result

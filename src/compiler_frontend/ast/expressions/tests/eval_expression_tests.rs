@@ -20,9 +20,17 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidNumberLiteralView, MissingOperatorOperandView, NumberLiteralCode,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    TypeMismatchView, UnsupportedOperatorTypesView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidBuiltinCallReason,
-    OperatorOperandPosition, TypeDiagnosticKind, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, DiagnosticOperator, OperatorOperandPosition,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -33,6 +41,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_primary_span, ast_first_error_type_display,
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -140,17 +149,55 @@ fn nth_start_declaration_expression(source: &str, index: usize) -> ParsedExpress
 }
 
 fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperator) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_unsupported_operator_fact(&failure, expected_operator);
+}
 
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::UnsupportedOperatorTypes { operator, .. }
-                if *operator == expected_operator
-        ),
-        "expected {expected_operator:?} for {source:?}, got {:?}",
-        diagnostic.payload
+fn assert_unsupported_operator_fact(
+    failure: &crate::compiler_frontend::compiler_errors::CompilationResult<()>,
+    expected_operator: DiagnosticOperator,
+) {
+    let diagnostic = assert_ast_diagnostic(failure, "MOTH-TYPE-0003", None);
+    let facts = diagnostic
+        .family_view::<UnsupportedOperatorTypesView>()
+        .expect("unsupported-operator diagnostic should retain typed facts");
+    assert_eq!(facts.operator, expected_operator);
+}
+
+fn assert_byte_has_no_arithmetic(source: &str, expected_operator: DiagnosticOperator) {
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_unsupported_operator_fact(&failure, expected_operator);
+}
+
+fn assert_type_mismatch_context(
+    failure: &crate::compiler_frontend::compiler_errors::CompilationResult<()>,
+    expected_context: TypeMismatchContext,
+) {
+    let diagnostic = assert_ast_diagnostic(failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("type-mismatch diagnostic should retain typed facts");
+    assert_eq!(facts.context, expected_context);
+}
+
+fn assert_outside_fixed_scalar_range(
+    failure: &crate::compiler_frontend::compiler_errors::CompilationResult<()>,
+    expected_scalar: FixedScalar,
+) {
+    let diagnostic = assert_ast_diagnostic(
+        failure,
+        "MOTH-SYNTAX-0008",
+        Some("invalid_number_literal.outside_fixed_scalar_range"),
     );
+    let facts = diagnostic
+        .family_view::<InvalidNumberLiteralView>()
+        .expect("number-literal diagnostic should retain typed facts");
+    let expected_reason = NumberLiteralErrorReason::OutsideFixedScalarRange(expected_scalar);
+    let (expected_code, expected_scalar_fact, expected_scale_fact) =
+        NumberLiteralCode::split(&expected_reason);
+    assert_eq!(facts.code, expected_code);
+    assert_eq!(facts.scalar, expected_scalar_fact);
+    assert_eq!(facts.scale, expected_scale_fact);
 }
 
 /// Builds a `String` operand holding a `SiteRoot` structural piece. The piece is not final text,
@@ -236,18 +283,13 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     let crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError::Diagnostic(diagnostic) = error else {
         panic!("expected an expression type diagnostic");
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Type(TypeDiagnosticKind::UnsupportedOperatorTypes)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0003");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnsupportedOperatorTypes {
-            operator: DiagnosticOperator::Add,
-            ..
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-TYPE-0003");
+    let facts = diagnostic
+        .family_view::<UnsupportedOperatorTypesView>()
+        .expect("the diagnostic is an unsupported-operator failure");
+    assert_eq!(facts.operator, DiagnosticOperator::Add);
 }
 #[test]
 fn structural_string_equality_is_refused_only_in_a_constant_context() {
@@ -317,9 +359,14 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
     else {
         panic!("expected a typed structural-string diagnostic");
     };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
     assert_eq!(
-        diagnostic.identity().reason_key,
-        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+        facts.reason,
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText
     );
 
     let mut runtime_type_environment = TypeEnvironment::new();
@@ -391,14 +438,12 @@ fn logical_mix_rejects_non_bool_rhs_after_comparison() {
 
 #[test]
 fn bool_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = Bool(true)\n");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("value = Bool(true)\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0046",
+        Some("invalid_builtin_call.scalar_constructor_removed"),
+    );
 }
 
 #[test]
@@ -410,16 +455,11 @@ fn fixed_scalar_constructors_are_rejected_with_removed_scalar_constructor_diagno
         "value = I64(200)\n",
         "value = Byte(200)\n",
     ] {
-        let diagnostic = parse_single_file_ast_diagnostic(source);
-        assert!(
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidBuiltinCall {
-                    reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
-                    ..
-                }
-            ),
-            "expected ScalarConstructorRemoved for {source:?}"
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0046",
+            Some("invalid_builtin_call.scalar_constructor_removed"),
         );
     }
 }
@@ -657,14 +697,8 @@ fn copied_template_string_preserves_copy_expression_kind() {
 
 #[test]
 fn template_like_string_operands_reject_add() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = \"left\" + \"right\"\n");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnsupportedOperatorTypes {
-            operator: DiagnosticOperator::Add,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("value = \"left\" + \"right\"\n");
+    assert_unsupported_operator_fact(&failure, DiagnosticOperator::Add);
 }
 
 #[test]
@@ -693,15 +727,8 @@ fn direct_fixed_literal_rejects_parser_negation_as_operator_result() {
     // A parser-level subtraction is an operator, so both operands must be representable at the
     // declared `I8` destination: a positive `128` is not. Folding `0 - 128` into the direct
     // `-128` spelling would wrongly accept it.
-    let diagnostic = parse_single_file_ast_diagnostic("small I8 = 0 - 128\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("small I8 = 0 - 128\n");
+    assert_outside_fixed_scalar_range(&failure, FixedScalar::I8);
 }
 
 #[test]
@@ -922,22 +949,10 @@ fn i32_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operat
     // The exact `I32` receiver owns the range check, so the literal reports the fixed-scalar
     // reason for its destination.
     let int_overflow = parse_single_file_ast_diagnostic("large I32 = 18_446_744_073_709_551_615\n");
-    assert!(matches!(
-        int_overflow.payload,
-        DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-            ..
-        }
-    ));
+    assert_outside_fixed_scalar_range(&int_overflow, FixedScalar::I32);
 
     let decimal_int = parse_single_file_ast_diagnostic("value I32 = 1.0\n");
-    assert!(matches!(
-        decimal_int.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::Declaration,
-            ..
-        }
-    ));
+    assert_type_mismatch_context(&decimal_int, TypeMismatchContext::Declaration);
 
     let unconstrained = first_start_declaration_expression("value = 1 + 1\n");
     assert_eq!(
@@ -961,13 +976,7 @@ fn i32_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operat
     // `I32`, and the exact `F32` annotation rejects that completed result.
     let concrete_operands =
         parse_single_file_ast_diagnostic("left I32 = 1\nright I32 = 2\nvalue F32 = left + right\n");
-    assert!(matches!(
-        concrete_operands.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::Declaration,
-            ..
-        }
-    ));
+    assert_type_mismatch_context(&concrete_operands, TypeMismatchContext::Declaration);
 }
 
 #[test]
@@ -989,7 +998,7 @@ fn direct_fixed_literal_materialises_option_of_fixed() {
 
 #[test]
 fn literal_arithmetic_into_fixed_uses_the_receiving_context() {
-    // D15: an exact receiving context types raw literal operands before operator selection, so
+    // An exact receiving context types raw literal operands before operator selection, so
     // equal `U8` operands keep `U8` and the checked constant folds instead of being promoted to
     // a wider domain and rejected at the exact receiver.
     let value = first_start_declaration_expression("small U8 = 1 + 1\n");
@@ -1025,17 +1034,8 @@ fn operator_result_into_u64_uses_the_receiving_context() {
 #[test]
 fn decimal_spelling_into_integer_fixed_reports_declaration_mismatch() {
     for source in ["small U8 = 1.0\n", "raw Byte = 1.0\n"] {
-        let diagnostic = parse_single_file_ast_diagnostic(source);
-        assert!(
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::TypeMismatch {
-                    context: TypeMismatchContext::Declaration,
-                    ..
-                }
-            ),
-            "expected a Declaration mismatch for {source:?}"
-        );
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_type_mismatch_context(&failure, TypeMismatchContext::Declaration);
     }
 }
 
@@ -1070,53 +1070,36 @@ fn parser_negation_over_out_of_range_operand_reports_fixed_range_error() {
     // the I8 destination: a positive `128` is not, unlike the direct `-128` spelling whose sign
     // is parser-owned (covered by
     // `direct_fixed_literal_materialises_signed_minimum_from_token_sign`).
-    let diagnostic = parse_single_file_ast_diagnostic("small I8 = -(128)\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("small I8 = -(128)\n");
+    assert_outside_fixed_scalar_range(&failure, FixedScalar::I8);
 }
 
 #[test]
 fn curly_literal_into_fixed_reports_baseline_mismatch() {
-    let diagnostic = parse_single_file_ast_diagnostic("small U8 = {1}\n");
-
-    let DiagnosticPayload::TypeMismatch {
-        expected,
-        found,
-        context,
-    } = diagnostic.payload
-    else {
-        panic!("expected a type mismatch, got {:?}", diagnostic.payload);
-    };
-
-    assert_eq!(context, TypeMismatchContext::Declaration);
-    assert_ne!(found, builtin_type_ids::STRING);
-    assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::U8));
+    let failure = parse_single_file_ast_diagnostic("small U8 = {1}\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("type-mismatch diagnostic should retain typed facts");
+    assert_eq!(facts.context, TypeMismatchContext::Declaration);
+    assert_eq!(ast_first_error_type_display(&failure, facts.expected), "U8");
+    assert_ne!(
+        ast_first_error_type_display(&failure, facts.found),
+        "String"
+    );
 }
 
 #[test]
 fn unannotated_overflow_keeps_default_int_range_error() {
     // An unconstrained whole literal defaults to the exact `I32` domain, so an above-range
     // value reports the fixed-scalar range reason for that destination.
-    let diagnostic = parse_single_file_ast_diagnostic("value = 3_000_000_000\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("value = 3_000_000_000\n");
+    assert_outside_fixed_scalar_range(&failure, FixedScalar::I32);
 }
 
 #[test]
 fn fixed_width_arithmetic_uses_exact_result_domains() {
-    // D15: equal operand types keep their own type, same-signedness mixes take the wider
+    // Equal operand types keep their own type, same-signedness mixes take the wider
     // width, mixed signedness takes the smallest containing signed type, and real division
     // always produces F64. No 32-bit integer or minimum-F32 floor applies.
     let cases = [
@@ -1194,7 +1177,7 @@ fn fixed_width_comparisons_use_compatibility_without_arithmetic_promotion() {
 
 #[test]
 fn unary_minus_uses_the_numeric_negation_domain() {
-    // D15: unary minus preserves a signed integer or binary float operand type, so `-I8` is
+    // Unary minus preserves a signed integer or binary float operand type, so `-I8` is
     // `I8` and `-F16` is `F16`; every unsigned or `Byte` operand stays invalid.
     for (operand_type, result_scalar) in [
         ("I8", FixedScalar::I8),
@@ -1215,7 +1198,7 @@ fn unary_minus_uses_the_numeric_negation_domain() {
         "zero #U8 = 0\nvalue = -zero\n",
         DiagnosticOperator::Subtract,
     );
-    assert_unsupported_operator(
+    assert_byte_has_no_arithmetic(
         "octet Byte = 0\nvalue = -octet\n",
         DiagnosticOperator::Subtract,
     );
@@ -1223,7 +1206,7 @@ fn unary_minus_uses_the_numeric_negation_domain() {
 
 #[test]
 fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
-    // D15: both operands resolve to `U8`, so the checked result keeps `U8`; the raw literal
+    // Both operands resolve to `U8`, so the checked result keeps `U8`; the raw literal
     // still materialises directly at its peer's exact domain.
     let right_peer = nth_start_declaration_expression("x U8 = 5\nvalue = x + 1\n", 1);
     assert_eq!(
@@ -1285,13 +1268,7 @@ fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
 #[test]
 fn peer_literal_materialisation_preserves_natural_and_grouped_operator_types() {
     let out_of_range = parse_single_file_ast_diagnostic("x U8 = 5\nvalue = x + 300\n");
-    assert!(matches!(
-        out_of_range.payload,
-        DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U8),
-            ..
-        }
-    ));
+    assert_outside_fixed_scalar_range(&out_of_range, FixedScalar::U8);
 
     // A decimal leaf beside an exact integer peer keeps its own family: the integer
     // destination is dropped for a decimal token, the leaf defaults to F64, and the family mix
@@ -1320,18 +1297,18 @@ fn peer_literal_materialisation_preserves_natural_and_grouped_operator_types() {
 
 #[test]
 fn optional_fixed_scalar_does_not_materialise_pending_peers_as_inner_scalars() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "optional_value U8? = none\nresult = optional_value + 1\n",
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnsupportedOperatorTypes {
-            operator: DiagnosticOperator::Add,
-            rhs: Some(type_id),
-            ..
-        } if type_id == builtin_type_ids::fixed_scalar(FixedScalar::I32)
-    ));
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0003", None);
+    let facts = diagnostic
+        .family_view::<UnsupportedOperatorTypesView>()
+        .expect("unsupported-operator diagnostic should retain typed facts");
+    assert_eq!(facts.operator, DiagnosticOperator::Add);
+    let rhs = facts
+        .rhs
+        .expect("pending whole literal should remain the reported right operand");
+    assert_eq!(ast_first_error_type_display(&failure, rhs), "I32");
 }
 
 #[test]
@@ -1481,31 +1458,26 @@ fn u32_peer_types_literal_only_subtree_from_either_side() {
     // to convert the named operand, so the mixed-width result is rejected at the declaration
     // instead of being retagged to the receiver.
     let typed = parse_single_file_ast_diagnostic("signed I32 = 1\ninvalid U32 = signed + 2\n");
-    let DiagnosticPayload::TypeMismatch {
-        expected, context, ..
-    } = typed.payload
-    else {
-        panic!(
-            "typed I32 beside a U32 receiver must fail the exact receiving check, got {:?}",
-            typed.payload
-        );
-    };
-    assert_eq!(context, TypeMismatchContext::Declaration);
-    assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::U32));
-
+    let typed_diagnostic = assert_ast_diagnostic(&typed, "MOTH-TYPE-0001", None);
+    let typed_facts = typed_diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("typed I32 mismatch should retain type facts");
+    assert_eq!(typed_facts.context, TypeMismatchContext::Declaration);
+    assert_eq!(
+        ast_first_error_type_display(&typed, typed_facts.expected),
+        "U32"
+    );
     // Named I32 constants stay typed under a U32 receiver for the same reason.
     let named = parse_single_file_ast_diagnostic("left #I32 = 1\nresult U32 = left + 2\n");
-    let DiagnosticPayload::TypeMismatch {
-        expected, context, ..
-    } = named.payload
-    else {
-        panic!(
-            "a named I32 constant must stay typed under a U32 receiver, got {:?}",
-            named.payload
-        );
-    };
-    assert_eq!(context, TypeMismatchContext::Declaration);
-    assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::U32));
+    let named_diagnostic = assert_ast_diagnostic(&named, "MOTH-TYPE-0001", None);
+    let named_facts = named_diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("named I32 mismatch should retain type facts");
+    assert_eq!(named_facts.context, TypeMismatchContext::Declaration);
+    assert_eq!(
+        ast_first_error_type_display(&named, named_facts.expected),
+        "U32"
+    );
 }
 
 #[test]
@@ -1617,7 +1589,7 @@ fn dec_receiver_left_nested_powers_resolve_each_level_once() {
 
 #[test]
 fn u32_decimal_mix_rejects_and_completed_f64_rejects_into_u32() {
-    // D15/D00 remove the old integer-to-float mixing convenience: a decimal leaf beside a
+    // Integer-to-float mixing has no convenience path: a decimal leaf beside a
     // U32 operand does not select a float result without an explicit conversion.
     assert_unsupported_operator(
         "peer U32 = 10\nvalue = peer + 1.5\n",
@@ -1630,17 +1602,7 @@ fn u32_decimal_mix_rejects_and_completed_f64_rejects_into_u32() {
 
     // The completed F64 result cannot coerce back into a U32 receiver.
     let completed = parse_single_file_ast_diagnostic("result U32 = 1.5 + 2.5\n");
-    assert!(
-        matches!(
-            completed.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Declaration,
-                ..
-            }
-        ),
-        "completed F64 must not coerce into U32, got {:?}",
-        completed.payload
-    );
+    assert_type_mismatch_context(&completed, TypeMismatchContext::Declaration);
 
     // Unary minus on a typed U32 is a compile error, including known zero.
     assert_unsupported_operator(
@@ -1841,13 +1803,11 @@ fn malformed_groups_keep_group_operand_diagnostics() {
     // evaluation keeps the diagnostic at the group's own operator span.
     let plus_source = "value = 2 * (1 + )\n";
     let plus = parse_single_file_ast_diagnostic(plus_source);
-    let DiagnosticPayload::MissingOperatorOperand { position, operator } = &plus.payload else {
-        panic!(
-            "expected a missing-operand diagnostic, got {:?}",
-            plus.payload
-        );
-    };
-    assert_eq!(*position, OperatorOperandPosition::BinaryLeft);
+    let plus_diagnostic = assert_ast_diagnostic(&plus, "MOTH-SYNTAX-0024", None);
+    let plus_facts = plus_diagnostic
+        .family_view::<MissingOperatorOperandView>()
+        .expect("missing-operand diagnostic should retain typed position");
+    assert_eq!(plus_facts.position, OperatorOperandPosition::BinaryLeft);
     let mut span_builder = ExtendedSpanBuilder::new();
     let plus_span = LocalSpan::exact(
         plus_source
@@ -1859,32 +1819,29 @@ fn malformed_groups_keep_group_operand_diagnostics() {
     )
     .expect("the dangling operator span should fit inline");
     assert_eq!(
-        plus.primary_span,
+        ast_error_primary_span(plus_diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, plus_span))
     );
-    let _ = operator;
 
     let star_source = "value = 5 + (* 2)\n";
     let star = parse_single_file_ast_diagnostic(star_source);
-    let DiagnosticPayload::MissingOperatorOperand { position, .. } = &star.payload else {
-        panic!(
-            "expected a missing-operand diagnostic, got {:?}",
-            star.payload
-        );
-    };
-    assert_eq!(*position, OperatorOperandPosition::BinaryLeft);
+    let star_diagnostic = assert_ast_diagnostic(&star, "MOTH-SYNTAX-0024", None);
+    let star_facts = star_diagnostic
+        .family_view::<MissingOperatorOperandView>()
+        .expect("missing-operand diagnostic should retain typed position");
+    assert_eq!(star_facts.position, OperatorOperandPosition::BinaryLeft);
     let mut span_builder = ExtendedSpanBuilder::new();
     let star_span = LocalSpan::exact(
         star_source
             .find("(* ")
-            .expect("dangling star should be present") as u32
+            .expect("dangling operator should be present") as u32
             + 1,
         1,
         &mut span_builder,
     )
     .expect("the dangling operator span should fit inline");
     assert_eq!(
-        star.primary_span,
+        ast_error_primary_span(star_diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, star_span))
     );
 }
@@ -1916,8 +1873,8 @@ fn completed_evaluator_results_contain_no_pending_syntax() {
 fn bounded_flat_and_nested_dec_arithmetic_have_identical_exact_results() {
     const TERM_COUNT: usize = 128;
     let flat = vec!["0.1"; TERM_COUNT].join(" + ");
-    // Bound parser nesting separately from expression length: ordering and typing own the
-    // long-expression invariant, not a general parser-depth refactor.
+    // Group terms pairwise so parser nesting stays shallow while the expression length grows;
+    // ordering and typing own the long-expression invariant.
     let mut groups = vec![String::from("0.1"); TERM_COUNT];
     while groups.len() > 1 {
         let mut next_groups = Vec::with_capacity(groups.len().div_ceil(2));

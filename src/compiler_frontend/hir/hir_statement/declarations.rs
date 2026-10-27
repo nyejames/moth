@@ -6,9 +6,10 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
+//! `InfrastructureFailure::hir_transformation` in this module means an internal
 //! HIR transformation or lowering invariant failure only. Normal user-facing source failures
-//! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
+//! must be emitted during AST processing or earlier.
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -19,7 +20,7 @@ use crate::compiler_frontend::ast::const_values::store::{
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::TypeId;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
@@ -42,7 +43,6 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
-use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
     // WHAT: pre-registers all structs and functions before any HIR body lowering starts.
@@ -56,7 +56,7 @@ impl<'a> HirBuilder<'a> {
         //      them before expression lowering ensures `resolve_choice_id` is a pure
         //      lookup and never needs lazy creation.
         for choice_def in &ast.choice_definitions {
-            self.register_choice_id(&choice_def.nominal_path, &None)?;
+            self.register_choice_id(&choice_def.nominal_path)?;
         }
 
         for definition in &ast.imported_struct_definitions {
@@ -108,11 +108,10 @@ impl<'a> HirBuilder<'a> {
                 continue;
             }
 
-            let span = row.metadata.span;
             let const_value = self.lower_const_value_for_module_pool(store, row.id)?;
 
             let const_id = self.allocate_const_id();
-            let const_type = self.lower_type_id(row.metadata.type_id, &span)?;
+            let const_type = self.lower_type_id(row.metadata.type_id)?;
             let mut path_scratch = Vec::new();
             let name =
                 self.path_fork
@@ -139,7 +138,7 @@ impl<'a> HirBuilder<'a> {
             increment_frontend_counter(FrontendCounter::HirConstValueConversions);
             match visit {
                 ConstValueVisit::Number(value) => {
-                    self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
+                    self.validate_number_value_type(value, metadata.type_id)?;
                     Ok(HirConstValue::Number(value.clone()))
                 }
                 ConstValueVisit::FixedScalar(value) => Ok(HirConstValue::FixedScalar(value)),
@@ -206,7 +205,7 @@ impl<'a> HirBuilder<'a> {
                             pieces: pieces.clone(),
                         })
                     }
-                    None => Err(CompilerError::compiler_error(
+                    None => Err(InfrastructureFailure::internal(CompilerStage::HirConstruction,
                         "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
                     )
                     .into()),
@@ -228,8 +227,8 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirValueId, HirConstructionFailure> {
         let store = std::mem::take(&mut self.module_const_values);
         let result = store.fold_value(value_id, &mut |metadata, visit| {
-            let region = self.current_region_or_error(span)?;
-            let ty = self.lower_type_id(metadata.type_id, span)?;
+            let region = self.current_region_or_error()?;
+            let ty = self.lower_type_id(metadata.type_id)?;
             #[cfg(feature = "benchmark_counters")]
             if matches!(
                 visit,
@@ -241,7 +240,7 @@ impl<'a> HirBuilder<'a> {
                 ConstValueVisit::Number(value) => {
                     #[cfg(feature = "benchmark_counters")]
                     increment_frontend_counter(FrontendCounter::CensusHirNumberPayloadClonesSampled);
-                    self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
+                    self.validate_number_value_type(value, metadata.type_id)?;
                     self.make_expression(
                         span,
                         HirExpressionKind::Number(value.clone()),
@@ -301,12 +300,12 @@ impl<'a> HirBuilder<'a> {
                     )
                 }
                 ConstValueVisit::Record(fields) => {
-                    let struct_id = self.resolve_const_struct_id(metadata.type_id, span)?;
+                    let struct_id = self.resolve_const_struct_id(metadata.type_id)?;
                     let fields: Vec<(FieldId, HirValueId)> = fields
                         .into_iter()
                         .map(|field| {
                             Ok((
-                                self.resolve_field_id_or_error(struct_id, field.name, span)?,
+                                self.resolve_field_id_or_error(struct_id, field.name)?,
                                 field.value,
                             ))
                         })
@@ -419,10 +418,7 @@ impl<'a> HirBuilder<'a> {
                             region,
                         )
                     }
-                    None => return_hir_transformation_error!(
-                        "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
-                        self.hir_error_location(span)
-                    ),
+                    None => Err(InfrastructureFailure::hir_transformation("HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.").into()),
                 },
             }
         });
@@ -434,16 +430,13 @@ impl<'a> HirBuilder<'a> {
         &self,
         value: &NumberValue,
         type_id: TypeId,
-        span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         if self.type_environment.number_scale(type_id) != Some(value.scale()) {
-            return_hir_transformation_error!(
-                format!(
-                    "HIR invariant: Dec value scale {} does not match resolved type {type_id:?}",
-                    value.scale()
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "HIR invariant: Dec value scale {} does not match resolved type {type_id:?}",
+                value.scale()
+            ))
+            .into());
         }
 
         Ok(())
@@ -452,7 +445,6 @@ impl<'a> HirBuilder<'a> {
     fn resolve_const_struct_id(
         &mut self,
         type_id: TypeId,
-        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::StructId, HirConstructionFailure> {
         if let Some(TypeIdentityKey::GenericInstance(key)) =
             self.type_environment.type_id_to_type_identity_key(type_id)
@@ -461,25 +453,29 @@ impl<'a> HirBuilder<'a> {
                 .type_environment
                 .nominal_path(type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
                         "HIR const record generic instance has no nominal path",
                     )
                 })?
                 .to_owned();
-            return self.resolve_or_register_generic_struct(&key, &nominal_path, type_id, span);
+            return self.resolve_or_register_generic_struct(&key, &nominal_path, type_id);
         }
 
-        let TypeDefinition::Struct(definition) = self
-            .type_environment
-            .get(type_id)
-            .ok_or_else(|| CompilerError::compiler_error("HIR const record has unknown type"))?
+        let TypeDefinition::Struct(definition) =
+            self.type_environment.get(type_id).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    "HIR const record has unknown type",
+                )
+            })?
         else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "HIR invariant: const record value does not carry a struct type",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
-        self.resolve_struct_id_from_nominal_path(&definition.path, span)
+        self.resolve_struct_id_from_nominal_path(&definition.path)
     }
 
     fn resolve_const_choice_id(
@@ -493,7 +489,7 @@ impl<'a> HirBuilder<'a> {
         {
             return self.resolve_or_register_generic_choice(&key, nominal_path, type_id, span);
         }
-        self.resolve_choice_id(nominal_path, span)
+        self.resolve_choice_id(nominal_path)
     }
 
     fn register_struct_declaration(
@@ -502,13 +498,11 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         if self.structs_by_name.contains_key(name) {
-            return_hir_transformation_error!(
-                format!(
-                    "HIR invariant: duplicate struct declaration '{}' during HIR lowering",
-                    self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "HIR invariant: duplicate struct declaration '{}' during HIR lowering",
+                self.symbol_name_for_diagnostics(name)
+            ))
+            .into());
         }
 
         let frontend_type_id = self
@@ -516,7 +510,7 @@ impl<'a> HirBuilder<'a> {
             .nominal_id_for_path(name)
             .and_then(|nominal_id| self.type_environment.type_id_for_nominal_id(nominal_id))
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HirConstruction, format!(
                     "HIR invariant: struct '{}' is not registered in TypeEnvironment during HIR lowering",
                     self.symbol_name_for_diagnostics(name)
                 ))
@@ -526,10 +520,13 @@ impl<'a> HirBuilder<'a> {
             .type_environment
             .struct_definition_for(frontend_type_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "HIR invariant: nominal type '{}' is not a struct during HIR lowering",
-                    self.symbol_name_for_diagnostics(name)
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
+                        "HIR invariant: nominal type '{}' is not a struct during HIR lowering",
+                        self.symbol_name_for_diagnostics(name)
+                    ),
+                )
             })?
             .fields
             .to_vec();
@@ -541,38 +538,32 @@ impl<'a> HirBuilder<'a> {
             // AST guarantees module-wide unique PathId symbols. For struct fields this
             // means each field path must be prefixed by its parent struct path.
             let Some(parent) = self.path_fork.try_parent(field.name) else {
-                return_hir_transformation_error!(
-                    format!(
-                        "HIR invariant: field '{}' has no parent struct path during HIR lowering",
-                        self.symbol_name_for_diagnostics(&field.name)
-                    ),
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "HIR invariant: field '{}' has no parent struct path during HIR lowering",
+                    self.symbol_name_for_diagnostics(&field.name)
+                ))
+                .into());
             };
 
             if parent != *name {
-                return_hir_transformation_error!(
-                    format!(
-                        "HIR invariant: field '{}' is not prefixed by struct '{}'",
-                        self.symbol_name_for_diagnostics(&field.name),
-                        self.symbol_name_for_diagnostics(name)
-                    ),
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "HIR invariant: field '{}' is not prefixed by struct '{}'",
+                    self.symbol_name_for_diagnostics(&field.name),
+                    self.symbol_name_for_diagnostics(name)
+                ))
+                .into());
             }
 
             if self
                 .fields_by_struct_and_name
                 .contains_key(&(struct_id, field.name))
             {
-                return_hir_transformation_error!(
-                    format!(
-                        "HIR invariant: duplicate field '{}' in struct '{}'",
-                        self.symbol_name_for_diagnostics(&field.name),
-                        self.symbol_name_for_diagnostics(name)
-                    ),
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "HIR invariant: duplicate field '{}' in struct '{}'",
+                    self.symbol_name_for_diagnostics(&field.name),
+                    self.symbol_name_for_diagnostics(name)
+                ))
+                .into());
             }
 
             let field_location = if field.span.is_none() {
@@ -581,7 +572,7 @@ impl<'a> HirBuilder<'a> {
                 field.span
             };
 
-            let field_type = self.lower_type_id(field.type_id, &field_location)?;
+            let field_type = self.lower_type_id(field.type_id)?;
             let field_id = self.allocate_field_id();
 
             self.fields_by_struct_and_name
@@ -622,13 +613,11 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         if self.functions_by_name.contains_key(name) {
-            return_hir_transformation_error!(
-                format!(
-                    "HIR invariant: duplicate function declaration '{}' during HIR lowering",
-                    self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "HIR invariant: duplicate function declaration '{}' during HIR lowering",
+                self.symbol_name_for_diagnostics(name)
+            ))
+            .into());
         }
 
         let function_id = self.allocate_function_id();
@@ -646,19 +635,16 @@ impl<'a> HirBuilder<'a> {
             .filter(|id| id.is_some())
             .count();
         if resolved_success_count != success_return_slot_count {
-            return_hir_transformation_error!(
-                format!(
+            return Err(InfrastructureFailure::hir_transformation(format!(
                     "HIR invariant: function signature has {} success return slots but {} resolved canonical TypeIds.",
                     success_return_slot_count, resolved_success_count
-                ),
-                self.hir_error_location(span)
-            );
+                )).into());
         }
 
         let success_return_type_ids: Vec<_> = success_return_type_ids
             .into_iter()
             .flatten()
-            .map(|type_id| self.lower_type_id(type_id, span))
+            .map(|type_id| self.lower_type_id(type_id))
             .collect::<Result<Vec<_>, _>>()?;
 
         let has_error_return_slot = signature
@@ -666,18 +652,12 @@ impl<'a> HirBuilder<'a> {
             .iter()
             .any(|slot| slot.channel == ReturnChannel::Error);
         let error_return_type_id = match (has_error_return_slot, signature.error_return_type_id()) {
-            (true, Some(type_id)) => Some(self.lower_type_id(type_id, span)?),
+            (true, Some(type_id)) => Some(self.lower_type_id(type_id)?),
             (true, None) => {
-                return_hir_transformation_error!(
-                    "HIR invariant: function signature has an error return slot without a canonical TypeId.",
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation("HIR invariant: function signature has an error return slot without a canonical TypeId.").into());
             }
             (false, Some(_)) => {
-                return_hir_transformation_error!(
-                    "HIR invariant: function signature has an error return TypeId without an error return slot.",
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation("HIR invariant: function signature has an error return TypeId without an error return slot.").into());
             }
             (false, None) => None,
         };
@@ -734,15 +714,11 @@ impl<'a> HirBuilder<'a> {
             .copied();
 
         let Some(start_name) = start_name else {
-            let error_location = ast.nodes.first().map(|node| node.span).unwrap_or_default();
-
-            return_hir_transformation_error!(
-                format!(
-                    "HIR invariant: failed to resolve module start function '{}' during HIR lowering",
-                    IMPLICIT_START_FUNC_NAME
-                ),
-                self.hir_error_location(&error_location)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "HIR invariant: failed to resolve module start function '{}' during HIR lowering",
+                IMPLICIT_START_FUNC_NAME
+            ))
+            .into());
         };
 
         let start_function = self.functions_by_name[&start_name];
@@ -753,12 +729,9 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         function_id: crate::compiler_frontend::hir::ids::FunctionId,
         signature: &FunctionSignature,
-        fallback_span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         for param in &signature.parameters {
-            let param_span = param.binding_span.or(*fallback_span);
-
-            let param_type = self.lower_type_id(param.type_id, &param_span)?;
+            let param_type = self.lower_type_id(param.type_id)?;
             // Authored parameter binding uses the explicit `Declaration.binding_span`
             // (the binding-name anchor), never the default-value/initializer span.
             let local_id = self.allocate_named_local(
@@ -768,7 +741,7 @@ impl<'a> HirBuilder<'a> {
                 param.binding_span,
             )?;
 
-            let function = self.function_mut_by_id_or_error(function_id, &param_span)?;
+            let function = self.function_mut_by_id_or_error(function_id)?;
             function.params.push(local_id);
         }
 
@@ -789,13 +762,10 @@ impl<'a> HirBuilder<'a> {
             .transpose()?;
         if initializer.is_some_and(|initializer| initializer.is_const_record_value()) {
             if !self.module_constants_by_name.contains_key(&variable.id) {
-                return_hir_transformation_error!(
-                    format!(
+                return Err(InfrastructureFailure::hir_transformation(format!(
                         "HIR invariant: body-local const record '{}' reached HIR without a folded store binding",
                         self.symbol_name_for_diagnostics(&variable.id)
-                    ),
-                    self.hir_error_location(span)
-                );
+                    )).into());
             }
             return Ok(());
         }
@@ -807,13 +777,12 @@ impl<'a> HirBuilder<'a> {
                 | DeclarationValue::Default(_)
                 | DeclarationValue::StructDefinition(_)
         ) {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Unresolved or non-runtime declaration owner reached HIR statement lowering",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
-        let source_location = initializer.and_then(|value| value.span()).or(*span);
-        let local_type = self.lower_type_id(variable.type_id, &source_location)?;
+        let local_type = self.lower_type_id(variable.type_id)?;
         // Authored binding: the local carries the explicit `Declaration.binding_span`
         // (the binding-name anchor), never the initializer span. The initializer span
         // belongs to the value expression lowered below.
@@ -849,17 +818,15 @@ impl<'a> HirBuilder<'a> {
         span: Option<SourceSpan>,
     ) -> Result<LocalId, HirConstructionFailure> {
         if self.locals_by_name.contains_key(&name) {
-            return_hir_transformation_error!(
-                format!(
-                    "Local '{}' is already declared in this function scope",
-                    self.symbol_name_for_diagnostics(&name)
-                ),
-                self.hir_error_location(&span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Local '{}' is already declared in this function scope",
+                self.symbol_name_for_diagnostics(&name)
+            ))
+            .into());
         }
 
-        let region = self.current_region_or_error(&span)?;
-        let block_id = self.current_block_id_or_error(&span)?;
+        let region = self.current_region_or_error()?;
+        let block_id = self.current_block_id_or_error()?;
         let local_id = self.allocate_local_id();
 
         let local = HirLocal {
@@ -871,7 +838,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.side_table.map_local_source(&local);
-        self.register_local_in_block(block_id, local, &span)?;
+        self.register_local_in_block(block_id, local)?;
 
         self.locals_by_name.insert(name, local_id);
         self.side_table.bind_local_name(local_id, name);

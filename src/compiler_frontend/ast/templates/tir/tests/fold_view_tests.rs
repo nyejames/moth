@@ -46,9 +46,11 @@ use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirV
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTemplateStructureReason,
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -698,14 +700,17 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("const-loop expansion limit should remain a source diagnostic");
     };
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let facts = diagnostic
+        .first()
+        .expect("const-loop expansion error should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("const-loop expansion error should retain typed structure facts");
     assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
-                limit: 1,
-            },
-        }
+        facts.reason,
+        InvalidTemplateStructureCode::TemplateConstLoopExpansionLimitExceeded
     );
+    assert_eq!(facts.limit, Some(1));
 
     let remaining_binding_paths = context
         .bindings
@@ -1129,8 +1134,20 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
         .expect("repeated exact fold should succeed");
 
     assert_eq!(
-        first, second,
-        "repeated folds must retain the exact provenance"
+        first.emission, second.emission,
+        "repeated folds must match emission"
+    );
+    assert_eq!(
+        first.provenance, second.provenance,
+        "repeated folds must retain exact provenance"
+    );
+    assert_eq!(
+        first.projection_pieces, second.projection_pieces,
+        "repeated folds must retain projection pieces"
+    );
+    assert!(
+        first.refusal.is_none() && second.refusal.is_none(),
+        "a foldable value should not retain a refusal"
     );
     assert_eq!(
         first.provenance.members(),
@@ -1322,9 +1339,9 @@ fn prepared_fold_dynamic_ast_template_validates_malformed_root_authority() {
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains("does not exist in the module store"),
+        error.message.contains("does not exist in the module store"),
         "expected dynamic-template root authority failure, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1362,9 +1379,9 @@ fn prepared_fold_rejects_direct_sequence_node_cycle_as_infrastructure() {
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains("recursively referenced directly"),
+        error.message.contains("recursively referenced directly"),
         "expected a direct-cycle authority error, got: {}",
-        error.msg
+        error.message
     );
 }
 

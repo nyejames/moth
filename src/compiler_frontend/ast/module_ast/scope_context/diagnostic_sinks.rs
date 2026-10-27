@@ -54,11 +54,14 @@ impl ScopeContext {
         self.loop_depth > 0
     }
 
-    pub fn emit_warning(&self, warning: CompilerDiagnostic) {
-        self.shared.emitted_warnings.borrow_mut().push(warning);
+    pub fn emit_warning(&self, warning: impl Into<DiagnosticDraft>) {
+        self.shared
+            .emitted_warnings
+            .borrow_mut()
+            .push(warning.into());
     }
 
-    pub fn take_emitted_warnings(&self) -> Vec<CompilerDiagnostic> {
+    pub fn take_emitted_warnings(&self) -> Vec<DiagnosticDraft> {
         std::mem::take(&mut *self.shared.emitted_warnings.borrow_mut())
     }
 }

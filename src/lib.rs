@@ -40,6 +40,8 @@ pub const ENABLED_FEATURES: &[&str] = &[
     "boracle",
     #[cfg(feature = "boracle_campaign")]
     "boracle_campaign",
+    #[cfg(feature = "test_compiler_bug")]
+    "test_compiler_bug",
 ];
 
 mod compiler_tests {
@@ -68,9 +70,25 @@ pub mod first_party_js;
 /// types directly, not a compatibility shim or second implementation.
 pub use moth_mon as mon;
 
+/// Install the process-level compiler-bug hook and render recognized reports at host boundaries.
+pub use crate::compiler_frontend::compiler_messages::compiler_bug::{
+    install_compiler_bug_hook, render_compiler_bug_payload,
+};
+
+/// Trigger the compiler-bug boundary used by the opt-in CLI subprocess test.
+///
+/// This entrypoint is absent from normal builds; it is compiled only by the dedicated test lane.
+#[cfg(feature = "test_compiler_bug")]
+#[doc(hidden)]
+pub fn trigger_compiler_bug_for_test() -> ! {
+    crate::compiler_bug!(
+        crate::compiler_frontend::compiler_messages::CompilerStage::Unknown,
+        "deliberate compiler-bug boundary test trigger"
+    )
+}
+
 mod backends {
     pub(crate) mod backend_feature_validation;
-    pub(crate) mod error_types;
     pub(crate) mod external_package_validation;
     pub(crate) mod js;
     pub(crate) mod structural_string;
@@ -97,10 +115,11 @@ pub mod projects {
         BuildConfigInputSet, BuildConfigInputValue, BuildConfigValueLocation, BuildInputName,
         BuildInputNameError, BuildInputValueError, PrimitiveBuildValue,
     };
-    pub use crate::compiler_frontend::compiler_errors::CompilerError;
-    pub use crate::compiler_frontend::compiler_errors::CompilerMessages;
-    pub use crate::compiler_frontend::display_messages::{
-        print_compiler_messages, print_terse_compiler_messages,
+    pub use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+    pub use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+    pub use crate::compiler_frontend::compiler_messages::display_messages::{
+        print_compilation_result, print_diagnostic_reports, print_infrastructure_errors,
+        print_terse_compilation_result,
     };
     pub use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 
@@ -124,17 +143,14 @@ pub mod projects {
     }
 
     impl ProjectDiagnosticCounts {
-        pub(crate) fn from_messages(
-            messages: &CompilerMessages,
-        ) -> Option<ProjectDiagnosticCounts> {
-            if messages.has_infrastructure_error() {
-                return None;
+        pub(crate) fn from_reports(
+            reports: &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet,
+        ) -> ProjectDiagnosticCounts {
+            let counts = reports.counts();
+            ProjectDiagnosticCounts {
+                errors: counts.errors as usize,
+                warnings: counts.warnings as usize,
             }
-
-            Some(ProjectDiagnosticCounts {
-                errors: messages.error_count(),
-                warnings: messages.warning_count(),
-            })
         }
     }
 

@@ -1,12 +1,18 @@
 //! Final source ownership and failure publication for private discovery traversals.
 
+use super::super::source_loading::{
+    SourceReadError, classify_source_read_error, registered_source_read_error,
+    retained_source_error,
+};
 use super::discovery_identity_rebind::{
-    SourceIdentityMap, build_source_identity_map, rebind_discovery_diagnostics,
-    rebind_resolved_file_reference_diagnostics, rebind_source_discovery_failure,
+    SourceIdentityMap, build_source_identity_map, rebind_resolved_file_reference_diagnostics,
+    rebind_source_discovery_failure,
 };
 use super::discovery_missing_source_load::load_missing_sources;
 use super::*;
-use crate::build_system::create_project_modules::compilation::append_finish_failure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::sync::Arc;
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
@@ -16,11 +22,11 @@ use std::sync::Arc;
 /// terminal rebinding failure still carries the finalized source context.
 ///
 /// WHAT: rebinds retained warnings and the terminal diagnostic to final identities, moves the
-///       live local table into a diagnosed batch via `mem::take`, and finishes the source
+///       live local table into a prepared batch via `mem::take`, and finishes the source
 ///       owner before the finalized failure escapes.
 /// WHY: no intermediate vessel may carry diagnostics; the parent final boundary owns the
-///      single conversion and attaches the finished database. Infrastructure terminals stay
-///      typed and drop companion warnings, matching the premerge lane contract.
+///      single render conversion. Infrastructure terminals stay typed and drop companion
+///      warnings, matching the premerge lane contract.
 pub(super) fn finalize_failed_discovery(
     mut files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
@@ -28,6 +34,7 @@ pub(super) fn finalize_failed_discovery(
     source_ids: &SourceIdentityMap,
     failure: Option<TraversalFailure>,
     string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
 ) -> SourceDiscoveryError {
     files.sort_by_key(|file| {
         source_builder
@@ -36,7 +43,6 @@ pub(super) fn finalize_failed_discovery(
             .expect("known discovery source has a final registration")
             .id
     });
-    let mut warnings = Vec::new();
     let mut preparation_failure = None;
 
     for file in files {
@@ -48,12 +54,15 @@ pub(super) fn finalize_failed_discovery(
             .get_by_canonical_path(&file.path)
             .is_none()
         {
-            let error = CompilerError::compiler_error(format!(
-                "retained discovery source {} has no final registration",
-                file.path.display()
-            ));
+            let error = InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "retained discovery source {} has no final registration",
+                    file.path.display()
+                ),
+            );
             return finish_discovery_source_owner(
-                PremergeFailure::Infrastructure(error.into()),
+                PreparedFailure::Infrastructure(error.into()),
                 source_builder,
             );
         }
@@ -63,26 +72,9 @@ pub(super) fn finalize_failed_discovery(
             result,
         } = prepared.prepared_output;
         match result {
-            Ok(mut output) => {
-                if let Err(error) = rebind_discovery_diagnostics(&mut output.warnings, source_ids) {
-                    return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(error.into()),
-                        source_builder,
-                    );
-                }
-                warnings.append(&mut output.warnings);
-            }
+            Ok(_output) => {}
 
-            Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
-                if let Err(remap_error) =
-                    rebind_discovery_diagnostics(&mut error.warnings, source_ids)
-                {
-                    return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(remap_error.into()),
-                        source_builder,
-                    );
-                }
-                warnings.extend(error.warnings);
+            Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
                 preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
             }
 
@@ -101,70 +93,87 @@ pub(super) fn finalize_failed_discovery(
         Ok(error) => error,
         Err(error) => {
             return finish_discovery_source_owner(
-                PremergeFailure::Infrastructure(error.into()),
+                PreparedFailure::Infrastructure(error.into()),
                 source_builder,
             );
         }
     };
-    let mut terminal_failure = match terminal_error {
+    let terminal_failure = match terminal_error {
         SourceDiscoveryError::Diagnostic(diagnostic) => {
-            let table = std::mem::take(string_table);
-            let mut diagnostics = warnings;
-            diagnostics.push(diagnostic);
-            let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
-            if let Err(error) = batch
-                .attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()))
-            {
-                return finish_discovery_source_owner(
-                    PremergeFailure::Infrastructure(error.into()),
-                    source_builder,
-                );
-            }
-            PremergeFailure::Diagnosed(batch)
-        }
-        SourceDiscoveryError::Premerge(mut failure) => {
-            match &mut failure {
-                PremergeFailure::Diagnosed(batch) | PremergeFailure::Mixed { batch, .. } => {
-                    batch.prepend_diagnostics(warnings);
+            let table = string_table.take_for_handoff();
+            let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                || Some(Arc::new(path_fork.shared_table())),
+            ) {
+                Ok(batch) => batch,
+                Err(error) => {
+                    return finish_discovery_source_owner(
+                        PreparedFailure::Infrastructure(error.into()),
+                        source_builder,
+                    );
                 }
-                PremergeFailure::Infrastructure(_) => {}
-            }
-            failure
+            };
+            PreparedFailure::Diagnosed(batch)
         }
+        SourceDiscoveryError::Premerge(failure) => failure,
         SourceDiscoveryError::Infrastructure(error) => {
-            PremergeFailure::Infrastructure(error.into())
+            PreparedFailure::Infrastructure(error.into())
         }
         SourceDiscoveryError::Finalized(_) => {
-            unreachable!("discovery failure cannot already carry a finalized source owner")
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "discovery failure cannot already carry a finalized source owner"
+            )
         }
     };
-    let path_table = Arc::new(source_builder.sources().paths().clone());
-    if let Err(error) = terminal_failure.attach_path_table_if_missing(path_table) {
-        return finish_discovery_source_owner(
-            append_finish_failure(terminal_failure, error),
-            source_builder,
-        );
-    }
     finish_discovery_source_owner(terminal_failure, source_builder)
 }
 
-/// Finish the final source owner beside a typed failure.
+/// Finalize every retained source at the terminal aborted-discovery outcome.
 ///
-/// Every known source snapshot and original builder has already moved into `source_builder`.
-/// Finishing here is the only path that can publish those tables after a post-registration error.
+/// No later stage can produce spans after an aborted discovery. Loaded records without a retained
+/// producer receive an empty table; each known source builder is finalized before the database
+/// owner is consumed.
 ///
-/// WHAT: finishes the builder, then pairs the finished database with the typed failure.
-///       A builder-finish failure appends its cause to the original failure because there
-///       is no finished database to preserve in that case.
-/// WHY: the finalized failure must never drop the finished owner, and no intermediate
-///      vessel may be constructed before the parent final boundary.
+/// WHAT: finalizes the loaded source identities, checks the completed builder, and pairs the
+///       resulting database with the typed failure.
+/// WHY: the finalized failure must never drop the source owner, and terminal validation must not
+///      perform a delayed freeze pass for span tables.
 pub(super) fn finish_discovery_source_owner(
-    failure: PremergeFailure,
-    source_builder: SourceDatabaseBuilder,
+    mut failure: PreparedFailure,
+    mut source_builder: SourceDatabaseBuilder,
 ) -> SourceDiscoveryError {
-    match source_builder.finish() {
+    let loaded_source_ids: Vec<_> = source_builder
+        .sources()
+        .iter()
+        .filter_map(|slot| {
+            source_builder
+                .sources()
+                .retained_text(slot.id)
+                .map(|_| slot.id)
+        })
+        .collect();
+    for source_id in loaded_source_ids {
+        match source_builder.is_source_finalized(source_id) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => {
+                failure = failure.with_infrastructure_cause(error);
+                continue;
+            }
+        }
+        if let Err(error) = source_builder.finish_source(source_id) {
+            failure = failure.with_infrastructure_cause(error);
+        }
+    }
+    let finish_result = source_builder
+        .assemble_finalized_tables()
+        .and_then(|()| source_builder.finish());
+    match finish_result {
         Ok(source_database) => SourceDiscoveryError::finalized(failure, source_database),
-        Err(error) => SourceDiscoveryError::Premerge(append_finish_failure(failure, error)),
+        Err(error) => SourceDiscoveryError::Premerge(failure.with_infrastructure_cause(error)),
     }
 }
 
@@ -175,11 +184,11 @@ pub(super) fn finish_discovery_source_owner(
 /// WHY: retention and identity-rebinding errors occur after registration, so their source
 ///      snapshots must still reach the final boundary.
 pub(super) fn discovery_finalization_error(
-    error: CompilerError,
+    error: InfrastructureFailure,
     source_builder: SourceDatabaseBuilder,
 ) -> SourceDiscoveryError {
     finish_discovery_source_owner(
-        PremergeFailure::Infrastructure(error.into()),
+        PreparedFailure::Infrastructure(error.into()),
         source_builder,
     )
 }
@@ -194,8 +203,9 @@ pub(super) fn retain_known_discovery_sources(
     files: &[ReachableSourceFile],
     source_cache: &mut FxHashMap<PathBuf, PreparedDiscoverySource>,
     source_builder: &mut SourceDatabaseBuilder,
-) -> Result<(), CompilerError> {
-    let mut first_error = None;
+    path_fork: &mut PathInternerFork,
+) -> Result<(), SourceDiscoveryError> {
+    let mut first_error: Option<SourceDiscoveryError> = None;
     for file in files {
         let Some(prepared) = source_cache.get_mut(&file.path) else {
             continue;
@@ -206,24 +216,30 @@ pub(super) fn retain_known_discovery_sources(
             .map(|source| source.id)
         else {
             first_error.get_or_insert_with(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "known discovery source {} has no final registration",
                     file.path.display()
                 ))
+                .into()
             });
             continue;
         };
         let source_code = std::mem::take(&mut prepared.source_code);
-        match source_builder
+        let retained = source_builder
             .sources_mut()
-            .retain_text(source_id, source_code)
-        {
+            .retain_text(source_id, source_code);
+        match retained {
             Ok(()) => {
                 let span_builder = std::mem::take(&mut prepared.prepared_output.span_builder);
                 source_builder.retain_span_builder(source_id, span_builder);
             }
             Err(error) => {
-                first_error.get_or_insert(error);
+                first_error.get_or_insert(retained_source_error(
+                    error,
+                    source_id,
+                    source_builder.sources(),
+                    path_fork,
+                ));
             }
         }
     }
@@ -236,30 +252,36 @@ pub(super) fn retain_known_discovery_sources(
 
 /// Settle every missing-source read in the final owner before output rebinding.
 ///
-/// Read failures remain infrastructure diagnostics, but their source slots still become terminal
-/// failures. Successful siblings are retained before the first error is published, so finalizing
-/// a diagnosed discovery cannot leave a pending slot or discard a usable snapshot.
+/// Successful sibling snapshots are retained before the first error is published. An
+/// infrastructure read failure fails its slot. Invalid UTF-8 becomes a `NON_UTF8_SOURCE`
+/// diagnostic named by the source's logical path and leaves its slot `Pending`: that diagnostic is
+/// the source's terminal outcome, and there is no text or span to record.
 ///
-/// WHAT: retains every successful sibling snapshot before publishing the first typed
-///       infrastructure error; no intermediate vessel is constructed.
-/// WHY: the caller pairs this typed error with the aborted-walk finalization that finishes
-///      the source owner, so snapshots stay owned until the finalized failure escapes.
+/// WHAT: retains every successful sibling snapshot, fails infrastructure slots, and publishes the
+///       first typed error with its logical path.
+/// WHY: the caller pairs this typed error with the aborted-walk finalization that finishes the
+///      source owner, so snapshots stay owned until the finalized failure escapes.
 pub(super) fn finalize_missing_source_loads(
     files: &[ReachableSourceFile],
     load_results: Vec<MissingSourceLoadResult>,
     source_builder: &mut SourceDatabaseBuilder,
-) -> Result<(), CompilerError> {
-    let mut first_error = None;
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<(), SourceDiscoveryError> {
+    let mut failure_owner: Option<PreparedFailure> = None;
 
     for result in load_results {
         let input_index = missing_source_load_input_index(&result);
         let Some(source_file) = files.get(input_index) else {
-            first_error.get_or_insert_with(|| {
-                CompilerError::compiler_error(format!(
+            let error = InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
                     "missing source inventory slot {} is out of range",
                     input_index
-                ))
-            });
+                ),
+            )
+            .into();
+            admit_missing_source_error(&mut failure_owner, error, string_table, path_fork);
             continue;
         };
         let Some(source_id) = source_builder
@@ -267,12 +289,15 @@ pub(super) fn finalize_missing_source_loads(
             .get_by_canonical_path(&source_file.path)
             .map(|source| source.id)
         else {
-            first_error.get_or_insert_with(|| {
-                CompilerError::compiler_error(format!(
+            let error = InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
                     "missing discovery source {} has no final registration",
                     source_file.path.display()
-                ))
-            });
+                ),
+            )
+            .into();
+            admit_missing_source_error(&mut failure_owner, error, string_table, path_fork);
             continue;
         };
 
@@ -282,37 +307,72 @@ pub(super) fn finalize_missing_source_loads(
                     FrontendCounter::Stage0SourceBytesLoaded,
                     loaded.source_code.len(),
                 );
-                match source_builder
+                let retained = source_builder
                     .sources_mut()
-                    .retain_text(source_id, loaded.source_code)
-                {
-                    Ok(()) => {}
-                    Err(error) => {
-                        first_error.get_or_insert(error);
-                    }
+                    .retain_text(source_id, loaded.source_code);
+                if let Err(error) = retained {
+                    let error = retained_source_error(
+                        error,
+                        source_id,
+                        source_builder.sources(),
+                        path_fork,
+                    );
+                    admit_missing_source_error(&mut failure_owner, error, string_table, path_fork);
                 }
             }
             MissingSourceLoadResult::Failed(failure) => {
-                let error = source_read_error(&failure.path, failure.error);
-                let record_result = source_builder
-                    .sources_mut()
-                    .record_source_load_error(source_id, error.clone());
-                match record_result {
-                    Ok(()) => {
-                        first_error.get_or_insert(error);
+                match classify_source_read_error(&failure.path, failure.error) {
+                    SourceReadError::NonUtf8 => {
+                        let error = registered_source_read_error(
+                            SourceReadError::NonUtf8,
+                            source_id,
+                            source_builder.sources(),
+                            path_fork,
+                        );
+                        admit_missing_source_error(
+                            &mut failure_owner,
+                            error,
+                            string_table,
+                            path_fork,
+                        );
                     }
-                    Err(record_error) => {
-                        first_error.get_or_insert(record_error);
+                    SourceReadError::Infrastructure(error) => {
+                        let record_result = source_builder
+                            .sources_mut()
+                            .record_source_load_error(source_id, error.clone());
+                        match record_result {
+                            Ok(()) => admit_missing_source_error(
+                                &mut failure_owner,
+                                error.into(),
+                                string_table,
+                                path_fork,
+                            ),
+                            Err(record_error) => admit_missing_source_error(
+                                &mut failure_owner,
+                                record_error.into(),
+                                string_table,
+                                path_fork,
+                            ),
+                        }
                     }
                 }
             }
         }
     }
 
-    match first_error {
-        Some(error) => Err(error),
+    match failure_owner {
+        Some(failure) => Err(SourceDiscoveryError::Premerge(failure)),
         None => Ok(()),
     }
+}
+
+fn admit_missing_source_error(
+    failure_owner: &mut Option<PreparedFailure>,
+    error: SourceDiscoveryError,
+    string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
+) {
+    *failure_owner = Some(error.admit_into_owner(failure_owner.take(), string_table, path_fork));
 }
 
 /// Build the final source database and remap every synthetic prepared output before returning it.
@@ -350,20 +410,22 @@ pub(super) fn finalize_reachable_files(
             entry_file_path,
             Some(project_path_resolver),
             string_table,
-            path_fork.clone_path_builder(),
+            path_fork.fork_path_builder(),
         )?;
     let mut source_files = SourceDatabaseBuilder::new(source_files);
 
-    if let Err(error) = retain_known_discovery_sources(&files, &mut source_cache, &mut source_files)
+    if let Err(error) =
+        retain_known_discovery_sources(&files, &mut source_cache, &mut source_files, path_fork)
     {
-        return Err(discovery_finalization_error(error, source_files));
+        let failure = error.into_failure(string_table, Arc::new(path_fork.shared_table()));
+        return Err(finish_discovery_source_owner(failure, source_files));
     }
     let source_ids = match build_source_identity_map(&source_cache, source_files.sources()) {
         Ok(source_ids) => source_ids,
         Err(error) => return Err(discovery_finalization_error(error, source_files)),
     };
 
-    // Every cached preparation delta now has a final source identity, including the root sentinel.
+    // Every cached preparation delta has a final source identity, including the root sentinel.
     if failure.is_some()
         || source_cache
             .values()
@@ -376,6 +438,7 @@ pub(super) fn finalize_reachable_files(
             &source_ids,
             failure,
             string_table,
+            path_fork,
         ));
     }
 
@@ -391,10 +454,13 @@ pub(super) fn finalize_reachable_files(
     for source_file in &missing_sources {
         add_frontend_counter(FrontendCounter::Stage0SourceCacheMissCount, 1);
         if source_file.source_file.kind == SourceFileKind::Moth {
-            let error = CompilerError::compiler_error(format!(
-                "reachable Moth source {} has no prepared traversal output",
-                source_file.source_file.path.display()
-            ));
+            let error = InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "reachable Moth source {} has no prepared traversal output",
+                    source_file.source_file.path.display()
+                ),
+            );
             return Err(discovery_finalization_error(error, source_files));
         }
     }
@@ -404,10 +470,14 @@ pub(super) fn finalize_reachable_files(
         }
     }
     let load_results = load_missing_sources(missing_sources);
-    if let Err(error) = finalize_missing_source_loads(&files, load_results, &mut source_files) {
-        let failure = TraversalFailure {
-            error: SourceDiscoveryError::Infrastructure(error),
-        };
+    if let Err(error) = finalize_missing_source_loads(
+        &files,
+        load_results,
+        &mut source_files,
+        string_table,
+        path_fork,
+    ) {
+        let failure = TraversalFailure { error };
         return Err(finalize_failed_discovery(
             files,
             source_cache,
@@ -415,6 +485,7 @@ pub(super) fn finalize_reachable_files(
             &source_ids,
             Some(failure),
             string_table,
+            path_fork,
         ));
     };
     if let Err(error) =
@@ -434,21 +505,21 @@ pub(super) fn finalize_reachable_files(
 
     // All original tables are owned before the final source-kind/input assembly.
     // Cached prepared outputs are rebound to their final source identity immediately before freeze.
-    let normalized: Result<_, CompilerError> = (|| {
+    let normalized: Result<_, InfrastructureFailure> = (|| {
         let mut input_files = Vec::with_capacity(files.len());
         for source_file in files {
             let final_record = source_files
                 .sources()
                 .get_by_canonical_path(&source_file.path)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "final source database is missing reachable source {}",
                         source_file.path.display()
                     ))
                 })?;
             let final_source_id = final_record.id;
             let source_kind = final_record.kind.ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "final source identity {} has no lexical kind",
                     final_source_id.index()
                 ))
@@ -461,13 +532,13 @@ pub(super) fn finalize_reachable_files(
                         .get(&provisional_source_id)
                         .copied()
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(format!(
+                            InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                                 "cached discovery source identity {} has no final mapping",
                                 provisional_source_id.index()
                             ))
                         })?;
                 if mapped_source_id != final_source_id {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "cached discovery source identity {} maps to final identity {}, expected {}",
                         provisional_source_id.index(),
                         mapped_source_id.index(),
@@ -492,12 +563,10 @@ pub(super) fn finalize_reachable_files(
                         }
                     }
                     SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
-                        return Err(CompilerError::compiler_error(
-                            "plain Markdown cannot enter the prepared source cache",
-                        ));
+                        return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "plain Markdown cannot enter the prepared source cache"));
                     }
                     SourceKind::ProviderOwned => {
-                        return Err(CompilerError::compiler_error(format!(
+                        return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                             "final source identity {} is provider-owned and cannot be compiled",
                             final_source_id.index()
                         )));
@@ -509,7 +578,7 @@ pub(super) fn finalize_reachable_files(
                     .retained_text(final_source_id)
                     .is_none()
                 {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "source inventory slot for {} was not loaded",
                         source_file.path.display()
                     )));
@@ -519,10 +588,13 @@ pub(super) fn finalize_reachable_files(
                         SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown,
                     ) => PreparedSourceKind::Deferred,
                     SourceKind::Compiler(SourceFileKind::Moth) => {
-                        unreachable!("Moth sources were handled above")
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
+                            "Moth sources are always present in the selected cache before finalization; only MothTemplate and PlainMarkdown may be deferred without a cache hit"
+                        )
                     }
                     SourceKind::ProviderOwned => {
-                        return Err(CompilerError::compiler_error(format!(
+                        return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                             "final source identity {} is provider-owned and cannot be compiled",
                             final_source_id.index()
                         )));
@@ -535,7 +607,8 @@ pub(super) fn finalize_reachable_files(
             });
         }
         if !source_cache.is_empty() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "synthetic source cache contains an unreachable prepared source",
             ));
         }

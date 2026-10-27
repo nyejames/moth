@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TirSlotResolutionOverlay, TirView, TirWrapperApplicationMode, TirWrapperContext,
     TirWrapperContextOverlay, push_runtime_slot_contribution_source,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -52,12 +52,14 @@ fn assert_authority_error(
         TemplateError::Infrastructure(error) => {
             let error = &error.primary;
             assert!(
-                error.msg.contains(owner_marker),
+                error.message.contains(owner_marker),
                 "{context} should be rejected by the {owner_marker} owner, got: {}",
-                error.msg,
+                error.message,
             );
         }
-        TemplateError::Diagnostic(_) => {
+        TemplateError::Diagnostic(_)
+        | TemplateError::EmptyArguments(_)
+        | TemplateError::NonConstantReferenceInConstant(_) => {
             panic!("{context} must be an infrastructure error, not a user diagnostic",);
         }
     }
@@ -236,9 +238,11 @@ fn missing_structural_authority_propagates_through_runtime_slot_site_planner() {
 
     match error {
         TemplateError::Infrastructure(error) => {
-            assert_eq!(error.primary.error_type, ErrorType::Compiler);
+            assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
         }
-        TemplateError::Diagnostic(_) => {
+        TemplateError::Diagnostic(_)
+        | TemplateError::EmptyArguments(_)
+        | TemplateError::NonConstantReferenceInConstant(_) => {
             panic!("missing structural authority must not become a user diagnostic");
         }
     }

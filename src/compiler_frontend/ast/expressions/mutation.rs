@@ -60,11 +60,16 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::casts::evidence::lookup_builtin_evidence;
 use crate::compiler_frontend::builtins::casts::targets::builtin_cast_target_for_type;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
-    TypeMismatchContext, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, TypeMismatchContext,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -106,7 +111,7 @@ fn assignment_type_mismatch(
     actual_type_id: TypeId,
     span: Option<SourceSpan>,
 ) -> ExpressionParseError {
-    CompilerDiagnostic::type_mismatch(
+    types_borrows_targets::type_mismatch(
         expected_type_id,
         actual_type_id,
         TypeMismatchContext::Assignment,
@@ -141,7 +146,7 @@ pub(crate) fn compound_assignment_operator_for_tag(
 /// Input bundle for `evaluate_compound_assignment_value` to avoid a long parameter list.
 ///
 /// WHAT: carries the place target, its resolved type, and the operator that
-///       will be used to build the desugared RHS expression.
+///       is used to build the desugared RHS expression.
 /// WHY: compound assignment evaluation needs the same state as simple
 ///      assignment plus the operator; bundling keeps the signature readable.
 struct CompoundAssignmentInput<'a> {
@@ -421,15 +426,21 @@ fn build_mutation_from_target(
         } else {
             InvalidAssignmentTargetReason::ImmutableBinding
         };
-        let diagnostic = CompilerDiagnostic::invalid_assignment_target(
+        let diagnostic = names_declarations::invalid_assignment_target(
             reason,
             path_fork.component(variable_declaration.id),
-            Some(target_type_id),
             field_name,
             root_binding_name,
-            declaration_span,
             span,
         );
+        let diagnostic = if let Some(declaration_span) = declaration_span {
+            diagnostic.with_label(
+                Some(declaration_span),
+                Some(LabelDraftMessage::ImmutableBindingDeclaration),
+            )
+        } else {
+            diagnostic
+        };
         return Err(diagnostic.into());
     }
 
@@ -473,7 +484,8 @@ fn build_mutation_from_target(
                     Ok(ParsedReceiverValue::Retained(retained)) => {
                         Err(retained.into_deferral(&variable_declaration.value_mode))
                     }
-                    Ok(ParsedReceiverValue::NeedsSlotInference { .. }) => unreachable!(
+                    Ok(ParsedReceiverValue::NeedsSlotInference { .. }) => crate::compiler_bug!(
+                        CompilerStage::AstConstruction,
                         "an assignment receiver knows its target type; a value block cannot ask for slot inference"
                     ),
                     Err(error) => Err(error),
@@ -525,7 +537,7 @@ fn build_mutation_from_target(
                     .option_inner_type(expression_builder.view_owned(rhs)?.value_type_id()?)
                     .is_some()
             {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
+                return Err(choices_control_flow::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
                     Some(token_stream.current_span()),
                 )
@@ -544,11 +556,9 @@ fn build_mutation_from_target(
         compound_tag => {
             let Some((operator, _label)) = compound_assignment_operator_for_tag(compound_tag)
             else {
-                return Err(CompilerDiagnostic::invalid_assignment_target(
+                return Err(names_declarations::invalid_assignment_target(
                     InvalidAssignmentTargetReason::ExpectedAssignmentOperator,
                     path_fork.component(variable_declaration.id),
-                    Some(target_type_id),
-                    None,
                     None,
                     None,
                     span,
@@ -719,10 +729,8 @@ pub fn handle_mutation(
         // A pending receiver call has no value or place yet and can never be a mutation target; the
         // authored operator is the source boundary that reports it.
         ParsedPostfixExpression::RetainedOperand(_) => {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
+            return Err(names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -734,14 +742,8 @@ pub fn handle_mutation(
 
     let Some(target) = place_expression_from_expression(expression_builder, target_expression)?
     else {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        return Err(names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::TemporaryNotAssignable,
-            None,
-            expression_builder
-                .view_owned(target_expression)?
-                .success_types()
-                .first()
-                .copied(),
             None,
             None,
             None,

@@ -5,8 +5,11 @@
 //!      language surface area or hidden dependencies.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidPageMetadataReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::InvalidPageMetadataReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
 };
@@ -17,7 +20,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 const PAGE_TITLE: &str = "page_title";
 const PAGE_DESCRIPTION: &str = "page_description";
 const PAGE_LANG: &str = "page_lang";
@@ -64,22 +67,22 @@ pub(crate) struct HtmlPageMetadataPlan {
 ///
 /// WHAT: carries an authored-source rejection separately from an internal folded-string
 ///       failure while the HTML builder still owns its string table.
-/// WHY: the builder boundary maps each lane into `CompilerMessages` without converting
+/// WHY: the builder maps each lane into `PreparedFailure` without converting
 ///      the infrastructure failure into a user diagnostic.
 #[derive(Debug)]
 pub(crate) enum PageMetadataError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
-impl From<CompilerDiagnostic> for PageMetadataError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for PageMetadataError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for PageMetadataError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for PageMetadataError {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
@@ -89,15 +92,15 @@ pub(crate) fn extract_html_page_metadata(
     start_function: FunctionId,
     path_table: &PathTable,
     resources: &ModuleResourceTable,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<HtmlPageMetadataPlan, PageMetadataError> {
     let entry_scope = hir_module
         .side_table
         .function_name_path(start_function)
         .and_then(|path| path_table.parent(path));
 
-    let entry_scope_prefix =
-        entry_scope.map(|path| path_table.render_portable(path, string_table, &mut Vec::new()));
+    let entry_scope_prefix = entry_scope
+        .map(|path| path_table.render_portable(path, string_table.strings(), &mut Vec::new()));
     let mut metadata = HtmlPageMetadata::default();
     let mut resource_uses = Vec::new();
     let mut uses_site_root = false;
@@ -109,21 +112,27 @@ pub(crate) fn extract_html_page_metadata(
             continue;
         };
 
-        let key_id = string_table.intern(reserved_name);
         let authored_span = hir_module
             .const_facts
             .declarations
             .values()
             .find(|fact| {
-                path_table.render_portable(fact.declaration_path, string_table, &mut Vec::new())
-                    == module_constant.name
+                path_table.render_portable(
+                    fact.declaration_path,
+                    string_table.strings(),
+                    &mut Vec::new(),
+                ) == module_constant.name
             })
             .and_then(|fact| fact.span);
         let value = match &module_constant.value {
             HirConstValue::String(value) => OwnedFoldedString::Text(value.to_owned()),
             HirConstValue::StructuralString { pieces } => {
                 let structural_value = ConstStringValue::Pieces(pieces.clone());
-                owned_folded_string_from_const_string(&structural_value, resources, string_table)?
+                owned_folded_string_from_const_string(
+                    &structural_value,
+                    resources,
+                    string_table.strings(),
+                )?
             }
 
             // Every remaining constant shape genuinely holds a non-string value.
@@ -138,7 +147,7 @@ pub(crate) fn extract_html_page_metadata(
             | HirConstValue::OptionNone
             | HirConstValue::Choice { .. } => {
                 return Err(invalid_page_metadata_rejection(
-                    key_id,
+                    string_table.intern(reserved_name),
                     InvalidPageMetadataReason::NotAString,
                     authored_span,
                 ));
@@ -164,7 +173,7 @@ pub(crate) fn extract_html_page_metadata(
 
         if target_slot.is_some() {
             return Err(invalid_page_metadata_rejection(
-                key_id,
+                string_table.intern(reserved_name),
                 InvalidPageMetadataReason::DuplicateDeclaration,
                 authored_span,
             ));
@@ -202,26 +211,31 @@ fn record_metadata_structural_uses(
     }
 }
 
-fn reserved_metadata_name<'a>(
-    raw_name: &'a str,
+fn reserved_metadata_name(
+    raw_name: &str,
     entry_scope_prefix: Option<&str>,
-) -> Option<&'a str> {
-    if is_reserved_page_key(raw_name) {
-        return Some(raw_name);
+) -> Option<&'static str> {
+    if let Some(name) = canonical_reserved_page_name(raw_name) {
+        return Some(name);
     }
 
     let entry_scope_prefix = entry_scope_prefix?;
     let leaf_name = raw_name
         .strip_prefix(entry_scope_prefix)?
         .strip_prefix('/')?;
-    is_reserved_page_key(leaf_name).then_some(leaf_name)
+    canonical_reserved_page_name(leaf_name)
 }
 
-fn is_reserved_page_key(name: &str) -> bool {
-    matches!(
-        name,
-        PAGE_TITLE | PAGE_DESCRIPTION | PAGE_LANG | PAGE_FAVICON | PAGE_BODY_STYLE | PAGE_HEAD
-    )
+fn canonical_reserved_page_name(name: &str) -> Option<&'static str> {
+    match name {
+        PAGE_TITLE => Some(PAGE_TITLE),
+        PAGE_DESCRIPTION => Some(PAGE_DESCRIPTION),
+        PAGE_LANG => Some(PAGE_LANG),
+        PAGE_FAVICON => Some(PAGE_FAVICON),
+        PAGE_BODY_STYLE => Some(PAGE_BODY_STYLE),
+        PAGE_HEAD => Some(PAGE_HEAD),
+        _ => None,
+    }
 }
 
 /// Builds the page-metadata rejection shared by every invalid page-metadata arm.
@@ -230,9 +244,7 @@ fn invalid_page_metadata_rejection(
     reason: InvalidPageMetadataReason,
     span: Option<SourceSpan>,
 ) -> PageMetadataError {
-    PageMetadataError::Diagnostic(CompilerDiagnostic::invalid_page_metadata(
-        key_id, reason, span,
-    ))
+    PageMetadataError::Diagnostic(project_config::invalid_page_metadata(key_id, reason, span))
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //!
 //! Schema keys, placeholder occurrence order, loose-fill target and structural
 //! `has_slots` come from one cycle-guarded walk. Missing authority and cycles
-//! are `CompilerError`.
+//! are `InfrastructureFailure`.
 
 use super::super::ids::{TemplateIrId, TemplateIrNodeId};
 use super::super::node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind};

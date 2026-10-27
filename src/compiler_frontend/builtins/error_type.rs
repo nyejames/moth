@@ -9,7 +9,8 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
 use crate::compiler_frontend::ast::{ScopeContext, ScopeDeclarationRef};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ParameterContractKind;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -126,7 +127,7 @@ pub(crate) fn resolve_builtin_error_type_typed(
     context: &ScopeContext,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<ResolvedBuiltinType, CompilerError> {
+) -> Result<ResolvedBuiltinType, InfrastructureFailure> {
     resolve_builtin_named_type(context, ERROR_TYPE_NAME, span, string_table)
 }
 
@@ -135,25 +136,30 @@ fn resolve_builtin_named_type(
     type_name: &str,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<ResolvedBuiltinType, CompilerError> {
+) -> Result<ResolvedBuiltinType, InfrastructureFailure> {
     let symbol = string_table.intern(type_name);
     let Some(reference) = context.get_reference(&symbol) else {
-        return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' is missing from this compilation context."
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("Builtin type '{type_name}' is missing from this compilation context."),
+        ));
     };
     let type_id = match reference {
         ScopeDeclarationRef::Local { declaration, .. } => declaration.type_id,
         ScopeDeclarationRef::Shared(declaration) => declaration.type_id,
         ScopeDeclarationRef::PendingNumeric { .. } => {
-            return Err(CompilerError::compiler_error(format!(
-                "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
+                ),
+            ));
         }
         ScopeDeclarationRef::RouteParameter(_) => {
-            return Err(CompilerError::compiler_error(format!(
-                "Builtin type '{type_name}' resolved to a Route parameter at {span:?}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("Builtin type '{type_name}' resolved to a Route parameter at {span:?}."),
+            ));
         }
     };
 
@@ -161,9 +167,12 @@ fn resolve_builtin_named_type(
     // exists, so a placeholder id here means this symbol resolved before registration. The
     // display spelling cannot express that: a struct shell still spells `runtime_struct(NONE)`.
     if type_id == builtin_type_ids::NONE {
-        return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' resolved to a declaration without a canonical type identity at {span:?}.",
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "Builtin type '{type_name}' resolved to a declaration without a canonical type identity at {span:?}.",
+            ),
+        ));
     }
 
     Ok(ResolvedBuiltinType { type_id })
@@ -193,7 +202,7 @@ fn required_field(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Decl
 }
 
 /// The canonical `Error.code` identity: an unsigned 32-bit fixed-scalar field. Its default
-/// is carried in `folded_defaults_by_field_path` until the AST build materialises it.
+/// is carried in `folded_defaults_by_field_path`, which the AST build materialises.
 fn defaulted_u32_field(id: PathId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,

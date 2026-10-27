@@ -48,10 +48,10 @@ use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCall, DeferredCallArgument, DeferredExpressionCompletion, DeferredExpressionServices,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
@@ -122,10 +122,10 @@ pub(super) fn parse_struct_constructor_expression(
     token_stream.advance();
 
     if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
-        return Err(CompilerError::compiler_error(
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "Struct constructor parser called without an opening parenthesis",
-        )
-        .into());
+        );
     }
 
     // ------------------------
@@ -399,7 +399,7 @@ fn finish_struct_instance(
                 let field_name = path_fork
                     .component(field.name)
                     .unwrap_or_else(|| string_table.intern("<field>"));
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                return Err(choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                     Some(field_name),
                     field_span,
@@ -429,8 +429,12 @@ fn finish_struct_instance(
 
         struct_fields.push(CompletedConstructorField {
             name: field.name,
-            slot: u32::try_from(slot)
-                .map_err(|_| CompilerError::compiler_error("constructor field slot exceeds u32"))?,
+            slot: u32::try_from(slot).map_err(|_| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "constructor field slot exceeds u32",
+                )
+            })?,
             value,
         });
     }

@@ -46,18 +46,12 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
         Ok(_) => panic!("binding should reject a declaration that collides with a prelude symbol"),
         Err(bag) => bag,
     };
-    let diagnostic = binding_error
-        .diagnostics()
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.kind,
-                DiagnosticKind::Rule(RuleDiagnosticKind::ReservedBuiltinName)
-            )
-        })
-        .expect("binding should preserve the reserved builtin-name diagnostic");
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0027");
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
+    let diagnostics = compact_bag_for_test(binding_error, None);
+    let diagnostic =
+        find_diagnostic_family::<names_declarations::ReservedBuiltinNameView>(&diagnostics)
+            .expect("binding should preserve the reserved builtin-name diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0027");
+    assert_eq!(diagnostic_primary_span(diagnostic), Some(expected_span));
 }
 
 #[test]
@@ -97,15 +91,15 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
         Err(bag) => bag,
     };
     assert!(
-        binding_error.diagnostics().iter().any(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
-                    ..
-                }
-            )
-        }),
+        compact_bag_for_test(binding_error, None)
+            .views()
+            .any(|diagnostic| {
+                diagnostic
+                    .family_view::<names_declarations::InvalidDeclarationView>()
+                    .is_some()
+                    && diagnostic.reason_key()
+                        == Some("invalid_declaration.generic_parameter_name_collision")
+            }),
         "prelude-type generic parameter collision should be diagnosed during binding"
     );
 }

@@ -6,7 +6,7 @@
 use crate::compiler_frontend::compiler_messages::InvalidExpressionReason;
 use crate::compiler_frontend::instrumentation::lock_counter_test;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+
 use crate::mon::{
     Field, MonErrorCode, PathSegment, Schema, SchemaType, Span, Value, decode_document,
 };
@@ -112,7 +112,7 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         ]),
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0001",
-            reason: SourceReason::ExpectedToken(TokenTag::COMMA),
+            reason: SourceReason::ExpectedToken,
             site: in_literal(&missing_comma, "second", 1),
         },
         MonExpectation::Reject {
@@ -173,12 +173,8 @@ fn grouped_source_scalar_is_not_mon_document_data() {
     let case = "grouped_source_scalar_is_not_mon_document_data";
     let source = "data #= ((1))\n";
     let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
-        .unwrap_or_else(|diagnostic| {
-            panic!(
-                "source rejected grouped scalar case '{case}' with {} {:?}",
-                diagnostic.identity().code,
-                diagnostic.payload
-            )
+        .unwrap_or_else(|failure| {
+            panic!("source rejected grouped scalar case '{case}': {failure:?}")
         });
     let observed = observe_data_value(&build_result, &path_fork, &string_table)
         .unwrap_or_else(|| panic!("source case '{case}' had no observable data value"));

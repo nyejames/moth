@@ -9,14 +9,13 @@
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView, LogicalOperator,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::statements::HirStatement;
-use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
 use super::runtime::short_circuit_cfg::ShortCircuitPlan;
@@ -124,9 +123,13 @@ fn operator_operand<'e>(
 fn pop_operator_operand(
     values: &mut Vec<HirValueId>,
 ) -> Result<HirValueId, HirConstructionFailure> {
-    values
-        .pop()
-        .ok_or_else(|| CompilerError::compiler_error("Operator walk lost an operand value").into())
+    values.pop().ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::HirConstruction,
+            "Operator walk lost an operand value",
+        )
+        .into()
+    })
 }
 
 impl<'a> HirBuilder<'a> {
@@ -154,7 +157,11 @@ impl<'a> HirBuilder<'a> {
         values: &mut Vec<HirValueId>,
     ) -> Result<Option<LoweredExpression>, HirConstructionFailure> {
         let Some(parent_index) = frames.len().checked_sub(1) else {
-            return Err(CompilerError::compiler_error("Operator walk has no active frame").into());
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "Operator walk has no active frame",
+            )
+            .into());
         };
         let expression = frames[parent_index].expression;
         let operand_index = frames[parent_index].next_operand;
@@ -193,7 +200,7 @@ impl<'a> HirBuilder<'a> {
                 if needs_current_block {
                     // Earlier pending statements must land before a child that needs the block.
                     for statement in frames[parent_index].prelude.drain(..) {
-                        self.emit_statement_to_current_block(statement, &child.span())?;
+                        self.emit_statement_to_current_block(statement)?;
                     }
                     OperandDelivery::CurrentBlock
                 } else {
@@ -216,15 +223,8 @@ impl<'a> HirBuilder<'a> {
             return Ok(None);
         }
 
-        let child_span = child.span();
         let lowered = self.lower_expression(child)?;
-        self.deliver_operator_result(
-            &mut frames[parent_index].prelude,
-            values,
-            delivery,
-            lowered,
-            &child_span,
-        )?;
+        self.deliver_operator_result(&mut frames[parent_index].prelude, values, delivery, lowered)?;
         Ok(None)
     }
 
@@ -237,12 +237,12 @@ impl<'a> HirBuilder<'a> {
         values: &mut Vec<HirValueId>,
     ) -> Result<Option<LoweredExpression>, HirConstructionFailure> {
         let Some(frame) = frames.pop() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
                 "Operator walk finished without an active frame",
             )
             .into());
         };
-        let span = frame.expression.span();
         let lowered =
             self.finish_operator_frame(frame.expression, frame.state, frame.prelude, values)?;
         let Some(parent) = frames.last_mut() else {
@@ -250,9 +250,9 @@ impl<'a> HirBuilder<'a> {
         };
         if frame.expression.success_types().is_empty() {
             // Mirrors `lower_expression`, which requires exactly one success slot for a child.
-            self.single_result_value(Vec::new(), &span)?;
+            self.single_result_value(Vec::new())?;
         }
-        self.deliver_operator_result(&mut parent.prelude, values, frame.delivery, lowered, &span)?;
+        self.deliver_operator_result(&mut parent.prelude, values, frame.delivery, lowered)?;
         Ok(None)
     }
 
@@ -317,10 +317,10 @@ impl<'a> HirBuilder<'a> {
             }
             ExpressionOperationView::LogicalBinary { .. } => {
                 let OperatorState::LogicalRight(plan) = state else {
-                    return_hir_transformation_error!(
+                    return Err(InfrastructureFailure::hir_transformation(
                         "Logical operation reached HIR without its short-circuit branch",
-                        self.hir_error_location(&span)
-                    );
+                    )
+                    .into());
                 };
                 let right = pop_operator_operand(values)?;
                 self.finish_short_circuit_binary(plan, right, &span)?
@@ -340,10 +340,10 @@ impl<'a> HirBuilder<'a> {
                 self.finish_range_value(start, end, facts)?
             }
             _ => {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Non-operator expression reached the operator walk",
-                    self.hir_error_location(&span)
-                );
+                )
+                .into());
             }
         };
 
@@ -359,12 +359,11 @@ impl<'a> HirBuilder<'a> {
         values: &mut Vec<HirValueId>,
         delivery: OperandDelivery,
         lowered: LoweredExpression,
-        span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         match delivery {
             OperandDelivery::CurrentBlock => {
                 for statement in lowered.prelude {
-                    self.emit_statement_to_current_block(statement, span)?;
+                    self.emit_statement_to_current_block(statement)?;
                 }
             }
             OperandDelivery::PendingPrelude => pending_prelude.extend(lowered.prelude),

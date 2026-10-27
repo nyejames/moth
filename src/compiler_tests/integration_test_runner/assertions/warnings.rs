@@ -5,24 +5,19 @@
 //!      identity matching never needs to parse rendered warning prose.
 
 use super::super::WarningExpectation;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use std::collections::BTreeMap;
 
-pub(super) fn validate_warning_expectation<'diagnostic>(
-    actual_warnings: impl IntoIterator<Item = &'diagnostic CompilerDiagnostic>,
+pub(super) fn validate_warning_expectation<'code>(
+    actual_codes: impl IntoIterator<Item = &'code str>,
     expectation: &WarningExpectation,
 ) -> Option<String> {
-    let actual_warnings: Vec<&CompilerDiagnostic> = actual_warnings.into_iter().collect();
+    let actual_codes: Vec<&str> = actual_codes.into_iter().collect();
 
     match expectation {
         WarningExpectation::Ignore => None,
-        WarningExpectation::Forbid => (!actual_warnings.is_empty())
-            .then(|| format!("Expected no warnings, but found {}.", actual_warnings.len())),
+        WarningExpectation::Forbid => (!actual_codes.is_empty())
+            .then(|| format!("Expected no warnings, but found {}.", actual_codes.len())),
         WarningExpectation::Exact(exact) => {
-            let actual_codes = actual_warnings
-                .iter()
-                .map(|warning| warning.kind.code())
-                .collect::<Vec<_>>();
             compare_warning_code_multisets(&exact.expected_codes, &actual_codes)
         }
     }

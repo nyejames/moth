@@ -5,9 +5,9 @@
 //! WHY: compiler presentation and diagnostics must remain local without duplicating neutral name
 //! policy across frontend stages.
 
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, NamingConvention, ReservedNameOwner,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::{NamingConvention, ReservedNameOwner};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use moth_lexical::identifier::is_reserved_user_name;
@@ -79,7 +79,7 @@ pub(crate) fn naming_warning_for_identifier(
     span: Option<SourceSpan>,
     naming_kind: IdentifierNamingKind,
     string_table: &StringTable,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     let identifier = string_table.resolve(name);
     match naming_kind {
         IdentifierNamingKind::TypeLike => {
@@ -87,7 +87,7 @@ pub(crate) fn naming_warning_for_identifier(
                 return None;
             }
 
-            Some(CompilerDiagnostic::identifier_naming_convention(
+            Some(names_declarations::identifier_naming_convention(
                 name,
                 NamingConvention::CamelCase,
                 span,
@@ -98,7 +98,7 @@ pub(crate) fn naming_warning_for_identifier(
                 return None;
             }
 
-            Some(CompilerDiagnostic::identifier_naming_convention(
+            Some(names_declarations::identifier_naming_convention(
                 name,
                 NamingConvention::LowercaseWithUnderscores,
                 span,
@@ -111,7 +111,7 @@ pub(crate) fn naming_warning_for_identifier(
                 return None;
             }
 
-            Some(CompilerDiagnostic::identifier_naming_convention(
+            Some(names_declarations::identifier_naming_convention(
                 name,
                 NamingConvention::LowercaseOrUppercaseWithUnderscores,
                 span,
@@ -120,17 +120,10 @@ pub(crate) fn naming_warning_for_identifier(
     }
 }
 
-pub(crate) fn reserved_keyword_shadow_error(
-    name: StringId,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::reserved_name_collision(name, ReservedNameOwner::Keyword, span)
-}
-
 /// Direct diagnostic result for reserved-identifier checks.
 ///
 /// Most parser callers preserve this source diagnostic on their own typed boundary.
-type IdentifierPolicyResult<T> = Result<T, CompilerDiagnostic>;
+type IdentifierPolicyResult<T> = Result<T, DiagnosticDraft>;
 
 pub(crate) fn ensure_not_keyword_shadow_identifier(
     name: StringId,
@@ -139,7 +132,11 @@ pub(crate) fn ensure_not_keyword_shadow_identifier(
 ) -> IdentifierPolicyResult<()> {
     let identifier = string_table.resolve(name);
     if is_reserved_user_name(identifier) {
-        return Err(reserved_keyword_shadow_error(name, span));
+        return Err(names_declarations::reserved_name_collision(
+            name,
+            ReservedNameOwner::Keyword,
+            span,
+        ));
     }
 
     Ok(())

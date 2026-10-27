@@ -13,23 +13,22 @@ use super::super::{
     BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, SummaryCounts, TestCaseSpec,
 };
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
-use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
-use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_errors::RenderSourceContext;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NamingConvention,
-    RuleDiagnosticKind,
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, NamingConvention};
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::Config;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -81,71 +80,33 @@ fn expected_failure_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
     }
 }
 
-/// Minimal valid `BuildResult` for formatter tests. The real pipeline always
-/// produces a `BuildResult` when compilation succeeds, so a passed result
-/// carries `build_result: Some(_)`. This fixture preserves that invariant
-/// without coupling to semantic build pipeline internals.
-fn minimal_build_result() -> BuildResult {
-    let string_table = StringTable::new();
-    BuildResult {
-        project: Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("index.html"),
-                FileKind::Html(String::from("<html></html>")),
-            )],
-            entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
-            warnings: Vec::new(),
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        },
-        config: Config::new(PathBuf::from("main.moth")),
-        warnings: Vec::new(),
-        string_table,
-        source_database: None,
-        warning_source_contexts: Vec::new(),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Html,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    }
-}
-
-/// Valid passed result: a real successful compilation always carries a
-/// `BuildResult`. This preserves the production invariant.
+/// Minimal successful case result for terse formatter tests.
 fn passed_result() -> CaseExecutionResult {
     CaseExecutionResult {
         passed: true,
         panic_message: None,
-        build_result: Some(minimal_build_result()),
         messages: None,
         failure_reason: None,
         failure_kind: None,
     }
 }
 
-/// Valid failed result with messages: when build fails, the runner carries
-/// the `CompilerMessages` so diagnostics can be rendered.
+/// Valid failed result with diagnosed messages.
 fn failed_result(reason: &str, kind: FailureKind) -> CaseExecutionResult {
-    let messages = error_and_warning_messages();
     CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: None,
-        messages: Some(messages),
+        messages: Some(diagnostic_messages()),
         failure_reason: Some(reason.to_owned()),
         failure_kind: Some(kind),
     }
 }
 
-/// Valid unexpected success: the real runner carries `build_result: Some(_)`
-/// when build succeeded but the case expected failure.
+/// A failed result when a case expected a compilation failure but the build succeeded.
 fn unexpected_success_result() -> CaseExecutionResult {
     CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: Some(minimal_build_result()),
         messages: None,
         failure_reason: Some(
             "Expected a compilation failure, but the case built successfully.".to_owned(),
@@ -161,8 +122,6 @@ fn format_single_case(
 ) -> Vec<String> {
     let mut summary = SummaryCounts::default();
     summary.record(&case, &result);
-    let mut result = result;
-    result.finalize_build_result_report();
     format_terse_run_output(
         &[(case, result)],
         summary,
@@ -171,55 +130,42 @@ fn format_single_case(
     )
 }
 
-fn error_and_warning_messages() -> CompilerMessages {
-    let string_table = StringTable::new();
-    let error_diag = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        DiagnosticSeverity::Error,
+fn diagnostic_messages() -> CompilationResult<()> {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("missing_name");
+    let error_diag = names_declarations::unknown_value_name(name, None);
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(error_diag),
+        string_table,
         None,
-        DiagnosticPayload::None,
-    );
-    let warning_diag = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        DiagnosticSeverity::Warning,
         None,
-        DiagnosticPayload::None,
     );
-
-    CompilerMessages::from_diagnostics(vec![error_diag, warning_diag], string_table)
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
 }
 
-fn build_result_with_warning(
-    warning: CompilerDiagnostic,
+fn frozen_warning_for_test(
+    warning: DiagnosticDraft,
     string_table: StringTable,
-) -> BuildResult {
-    BuildResult {
-        project: Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("index.html"),
-                FileKind::Html(String::from("<html></html>")),
-            )],
-            entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
-            warnings: Vec::new(),
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        },
-        config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![warning],
+) -> DiagnosticReportSet {
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(warning),
         string_table,
-        source_database: None,
-        warning_source_contexts: Vec::new(),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Html,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    }
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator
+        .finish(InstallMode::Frozen)
+        .expect("test warning should freeze")
 }
 
 #[test]
-fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
+fn terse_frozen_warning_uses_donor_context_after_terminal_finalization() {
     let project_temp = tempfile::tempdir().expect("should create project temp dir");
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let project_root = project_temp.path().join("src");
@@ -275,7 +221,7 @@ fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span =
         LocalSpan::exact(0, 1, &mut span_builder).expect("warning span should fit inline");
-    let warning = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+    let warning = choices_control_flow::unreachable_match_arm(Some(SourceSpan::new(
         package_source_id,
         local_span,
     )))
@@ -283,24 +229,39 @@ fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
         package_identity.clone(),
     ));
 
-    let mut build_result = minimal_build_result();
-    build_result.warnings = vec![warning];
-    build_result.string_table = string_table;
-    build_result.warning_source_contexts = vec![RenderSourceContext {
-        diagnostic_range: 0..0,
-        source_database: Arc::clone(&package_database),
-        domain: Some(package_identity),
-    }];
-    build_result.source_database = Some(Arc::clone(&project_database));
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from(warning),
+        &string_table,
+        None,
+        || None,
+    )
+    .expect("the test warning should capture in the root string domain");
+    let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    warning_accumulator.append_prepared(batch, None);
+    let package_source_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::new(),
+        StringTable::new(),
+        None,
+        None,
+    );
+    warning_accumulator.append_prepared(
+        package_source_batch,
+        Some((Arc::clone(&package_database), Some(package_identity))),
+    );
     drop(package_database);
+    let warnings = warning_accumulator
+        .finish(InstallMode::Frozen)
+        .expect("test warning should freeze");
     drop(project_database);
 
     let case = expected_failure_case("unexpected_donor_warning", BackendId::Html);
     let result = CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: Some(build_result),
-        messages: None,
+        messages: Some(Ok(CompilationOutcome::Success {
+            value: (),
+            warnings: Some(warnings),
+        })),
         failure_reason: Some(
             "Expected a compilation failure, but the case built successfully.".to_owned(),
         ),
@@ -368,79 +329,21 @@ fn terse_expected_failure_success_shows_unexpected_success_header() {
 }
 
 #[test]
-fn terse_compiler_messages_render_error_before_warning_when_show_warnings() {
-    let case = success_case("diagnostics_case", BackendId::Html);
-    let messages = error_and_warning_messages();
-    let result = CaseExecutionResult {
-        passed: false,
-        panic_message: None,
-        build_result: None,
-        messages: Some(messages),
-        failure_reason: Some("Compilation failed.".to_owned()),
-        failure_kind: Some(FailureKind::ExpectationViolation),
-    };
-    let output = format_single_case(case, result, true);
-
-    let error_line_index = output
-        .iter()
-        .position(|line| line.starts_with("E|"))
-        .expect("an error line should appear");
-    let warning_line_index = output
-        .iter()
-        .position(|line| line.starts_with("W|"))
-        .expect("a warning line should appear");
-    assert!(
-        error_line_index < warning_line_index,
-        "error should appear before warning: {:?}",
-        output
-    );
-    assert!(
-        output.last().unwrap().starts_with("Tests:"),
-        "summary should be the final line: {:?}",
-        output
-    );
-}
-
-#[test]
-fn terse_compiler_messages_suppress_warnings_when_show_warnings_false() {
-    let case = success_case("warnings_case", BackendId::Html);
-    let messages = error_and_warning_messages();
-    let result = CaseExecutionResult {
-        passed: false,
-        panic_message: None,
-        build_result: None,
-        messages: Some(messages),
-        failure_reason: Some("Compilation failed.".to_owned()),
-        failure_kind: Some(FailureKind::ExpectationViolation),
-    };
-    let output = format_single_case(case, result, false);
-
-    assert!(
-        output.iter().any(|line| line.starts_with("E|")),
-        "error should remain: {:?}",
-        output
-    );
-    assert!(
-        !output.iter().any(|line| line.starts_with("W|")),
-        "no warning line should appear: {:?}",
-        output
-    );
-}
-
-#[test]
-fn terse_build_result_warnings_render_when_show_warnings() {
+fn terse_frozen_warnings_render_when_show_warnings() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("unused_value");
     let warning =
-        CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
-    let build_result = build_result_with_warning(warning, string_table);
+        names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, None);
+    let warnings = frozen_warning_for_test(warning, string_table);
 
     let case = expected_failure_case("unexpected_build", BackendId::Html);
     let result = CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: Some(build_result),
-        messages: None,
+        messages: Some(Ok(CompilationOutcome::Success {
+            value: (),
+            warnings: Some(warnings),
+        })),
         failure_reason: Some(
             "Expected a compilation failure, but the case built successfully.".to_owned(),
         ),
@@ -455,7 +358,7 @@ fn terse_build_result_warnings_render_when_show_warnings() {
     );
     assert!(
         output.iter().any(|line| line.starts_with("W|")),
-        "build-result warning should appear: {:?}",
+        "frozen warning should appear: {:?}",
         output
     );
     assert!(
@@ -471,7 +374,6 @@ fn terse_panic_message_is_labelled_single_line() {
     let result = CaseExecutionResult {
         passed: false,
         panic_message: Some("index out of bounds\n  at line 42\n  in function foo".to_owned()),
-        build_result: None,
         messages: None,
         failure_reason: Some("The compiler panicked.".to_owned()),
         failure_kind: Some(FailureKind::HarnessFailed),
@@ -559,7 +461,6 @@ fn terse_entry_failure_uses_its_own_label_and_generic_notice() {
     let result = CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: Some(minimal_build_result()),
         messages: None,
         failure_reason: Some(format!(
             "rendered_output: {}",

@@ -5,10 +5,10 @@
 //! in its independent Stage 0 boundary. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
-//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `CompilerDiagnostic`
-//! for diagnosed input and a typed `CompilerError` for infrastructure failures, plus a finalized
-//! form pairing a `PremergeFailure` with its finished `SourceDatabase`. Production discovery never
-//! constructs `CompilerMessages`; the parent single-file/test tail owns that single conversion.
+//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `DiagnosticDraft`
+//! for diagnosed input and a typed `InfrastructureFailure` for infrastructure failures, plus a finalized
+//! form pairing a `PreparedFailure` with its finished `SourceDatabase`. The final boundary appends
+//! that failure with its source owner directly to the accumulator.
 
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
@@ -18,10 +18,10 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
-    PremergeDiagnosticBatch, PremergeFailure,
+    DependencyClauseKind, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -41,7 +41,7 @@ use crate::compiler_frontend::project_globals::{
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceRegistrationIndex, SourceSpan, SourceSpanBuilders,
+    SourceRegistrationIndex, SourceSpanBuilders,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -65,7 +65,7 @@ use super::module_namespace::{ModuleNamespaceSet, ResolvedDependency};
 use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
-use super::source_loading::{SelectedSourceTextMap, read_source_code, source_read_error};
+use super::source_loading::{SelectedSourceTextMap, read_source_code};
 use super::source_preparation::{
     PreparedDiscoverySource, prepare_discovery_source, prepare_discovery_template_source,
 };
@@ -162,39 +162,34 @@ pub(super) struct CollectedReachableInputs {
 /// WHAT: carries the typed premerge failure plus the finished source database when
 ///       discovery finalization already finalized its owner before failing. Plain
 ///       pre-finalization failures carry `None` because no finished owner exists yet.
-/// WHY: the single-file final boundary converts the inner failure once and attaches the
-///      finished database as the render source context, instead of dropping snapshots on
-///      a diagnosed discovery failure.
+/// WHY: the single-file terminal boundary pairs the typed failure with its finalized source
+///      database exactly once, preserving snapshots for diagnosed discovery failures.
 #[derive(Debug)]
 pub(super) struct CollectReachableInputsError {
-    failure: Box<PremergeFailure>,
+    failure: PreparedFailure,
     source_database: Option<Box<SourceDatabase>>,
 }
 impl CollectReachableInputsError {
-    pub(super) fn into_parts(self) -> (PremergeFailure, Option<SourceDatabase>) {
+    pub(super) fn into_parts(self) -> (PreparedFailure, Option<SourceDatabase>) {
         let Self {
             failure,
             source_database,
         } = self;
-        (*failure, source_database.map(|database| *database))
+        (failure, source_database.map(|database| *database))
     }
 }
 /// One resolved dependency edge ready for direct insertion into the project module graph.
 ///
 /// WHAT: records that an authored structural provider reference resolved through the
-///       boundary-aware namespace from a consumer project module to a provider project
-///       module, carrying both `ModuleId` values and the exact authored dependency-clause
-///       span.
+///       boundary-aware namespace from a consumer project module to a provider project module,
+///       carrying both `ModuleId` values.
 /// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts a
-///      provider-before-consumer edge without a path-to-ID mapping step. The authored source
-///      span is retained in the graph side table so a later diagnostic owner can attribute the
-///      edge to the exact dependency clause without reparsing.
+///      provider-before-consumer edge without a path-to-ID mapping step.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
     pub(super) consumer_module_id: ModuleId,
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
-    pub(super) graph_span: Option<SourceSpan>,
 }
 
 /// One authored dependency from a module to a separately compiled source-package facade.
@@ -245,7 +240,7 @@ fn missing_source_load_input_index(result: &MissingSourceLoadResult) -> usize {
 /// Collect all reachable source files for a given entry point and load their content.
 ///
 /// Failures travel as [`CollectReachableInputsError`]; the final boundary converts the inner
-/// [`PremergeFailure`] once and attaches the finished source database when present.
+/// [`PreparedFailure`] once and attaches the finished source database when present.
 #[allow(
     clippy::too_many_arguments,
     reason = "reachable-input collection keeps the entry path, resolver, directives, and mutable external-import/kind/resource/path/string state as separate borrows"
@@ -276,14 +271,14 @@ pub(super) fn collect_reachable_input_files(
         Err(SourceDiscoveryError::Finalized(boxed)) => {
             let (failure, source_database) = boxed.into_parts();
             return Err(CollectReachableInputsError {
-                failure: Box::new(failure),
+                failure,
                 source_database: Some(Box::new(source_database)),
             });
         }
         Err(other) => {
-            let path_table = std::sync::Arc::new(path_fork.snapshot_table());
+            let path_table = std::sync::Arc::new(path_fork.shared_table());
             return Err(CollectReachableInputsError {
-                failure: Box::new(other.into_failure(string_table, path_table)),
+                failure: other.into_failure(string_table, path_table),
                 source_database: None,
             });
         }
@@ -301,4 +296,76 @@ pub(super) fn collect_reachable_input_files(
         resolved_file_references,
         source_package_dependencies,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deferred_source_infrastructure_failure_dominates_diagnostic_in_both_orders() {
+        let temp = tempfile::tempdir().expect("should create temporary source root");
+        let invalid_utf8_path = temp.path().join("invalid.md");
+        fs::write(&invalid_utf8_path, [0xff]).expect("should write invalid UTF-8 source");
+        let directory_path = temp.path().join("directory.md");
+        fs::create_dir(&directory_path).expect("should create directory where file is expected");
+        let invalid_utf8_path =
+            fs::canonicalize(invalid_utf8_path).expect("invalid UTF-8 source should canonicalize");
+        let directory_path =
+            fs::canonicalize(directory_path).expect("directory source should canonicalize");
+
+        for ordered_paths in [
+            [invalid_utf8_path.clone(), directory_path.clone()],
+            [directory_path.clone(), invalid_utf8_path.clone()],
+        ] {
+            let files = ordered_paths
+                .into_iter()
+                .map(|path| ReachableSourceFile {
+                    path,
+                    kind: SourceFileKind::PlainMarkdown,
+                })
+                .collect::<Vec<_>>();
+            let registration_index = SourceRegistrationIndex::from_rows(
+                files
+                    .iter()
+                    .map(|file| (file.path.as_path(), SourceKind::Compiler(file.kind))),
+            );
+            let mut string_table = StringTable::new();
+            let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+                &registration_index,
+                &files[0].path,
+                None,
+                &mut string_table,
+            )
+            .expect("deferred sources should register");
+            let mut source_builder = SourceDatabaseBuilder::new(source_files);
+            let missing_sources = files
+                .iter()
+                .enumerate()
+                .map(|(input_index, source_file)| MissingSourceFile {
+                    input_index,
+                    source_file: source_file.clone(),
+                })
+                .collect();
+            let load_results = discovery_missing_source_load::load_missing_sources(missing_sources);
+            let mut path_fork = source_builder.sources().fork_path_interner();
+
+            let error = discovery_finalization::finalize_missing_source_loads(
+                &files,
+                load_results,
+                &mut source_builder,
+                &mut string_table,
+                &mut path_fork,
+            )
+            .expect_err("the deferred directory read should fail");
+
+            assert!(
+                matches!(
+                    &error,
+                    SourceDiscoveryError::Premerge(PreparedFailure::Infrastructure(_))
+                ),
+                "infrastructure failure should dominate regardless of load order: {error:?}"
+            );
+        }
+    }
 }

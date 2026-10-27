@@ -5,9 +5,8 @@
 //! but need caller-specific diagnostic wording. One classifier distinguishes non-place,
 //! immutable-place and mutable-place receivers so each source state gets distinct guidance.
 //!
-//! Validation results carry plain `CompilerDiagnostic` values on the diagnosed
-//! lane. Callers that already hold `ExpressionParseError::Diagnostic` preserve
-//! that value through the direct conversion.
+//! Validation results carry `DiagnosticDraft` values on the diagnosed lane. Callers that already
+//! hold `ExpressionParseError::Diagnostic` preserve that draft through the direct conversion.
 
 use super::ReceiverAccessMode;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
@@ -16,9 +15,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::place_access::{
     ReceiverSourceState, classify_receiver_source_state,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverCallReason, ReceiverCallKind,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::{InvalidReceiverCallReason, ReceiverCallKind};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -59,7 +58,7 @@ pub(super) struct ReceiverAccessRequirement {
     pub diagnostic: ReceiverAccessDiagnostic,
 }
 
-type ReceiverAccessResult = Result<(), CompilerDiagnostic>;
+type ReceiverAccessResult = Result<(), DiagnosticDraft>;
 
 // --------------------------
 //  Validation entry point
@@ -324,7 +323,7 @@ fn reject(
     receiver_binding_name: Option<StringId>,
     span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
-    Err(CompilerDiagnostic::invalid_receiver_call(
+    Err(calls_data::invalid_receiver_call(
         reason,
         None,
         Some(access_diagnostic.method_name()),

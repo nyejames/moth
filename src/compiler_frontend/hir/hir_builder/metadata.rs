@@ -18,7 +18,8 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
@@ -52,7 +53,7 @@ impl<'a> HirBuilder<'a> {
             .merge(&occurrence.provenance);
     }
 
-    pub(super) fn assign_function_origins(&mut self) -> Result<(), CompilerError> {
+    pub(super) fn assign_function_origins(&mut self) -> Result<(), InfrastructureFailure> {
         // WHAT: classify every lowered function and retain stable origins for direct public
         // functions and receiver methods.
         // WHY: downstream public-interface finalization needs an explicit semantic join while
@@ -74,7 +75,7 @@ impl<'a> HirBuilder<'a> {
                 .side_table
                 .function_name_path(function.id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::HirConstruction, format!(
                         "HIR function-origin lowering is missing the declaration path for local function {:?}",
                         function.id
                     ))
@@ -94,7 +95,8 @@ impl<'a> HirBuilder<'a> {
                         .function_failure_facts
                         .get_mut(&function.id)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::HirConstruction,
                                 "HIR function-origin lowering is missing projected failure facts",
                             )
                         })?;
@@ -102,10 +104,13 @@ impl<'a> HirBuilder<'a> {
                         facts.boundary = HirBuiltinFailureBoundary::ExportedNoSlot;
                     }
                     if self.module.function_ids_by_origin.contains_key(&origin) {
-                        return Err(CompilerError::compiler_error(format!(
-                            "HIR function-origin lowering received duplicate stable origin {:?}",
-                            origin
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::HirConstruction,
+                            format!(
+                                "HIR function-origin lowering received duplicate stable origin {:?}",
+                                origin
+                            ),
+                        ));
                     }
                     self.module
                         .function_ids_by_origin
@@ -117,10 +122,13 @@ impl<'a> HirBuilder<'a> {
                         .function_ids_by_private_origin
                         .contains_key(&origin)
                     {
-                        return Err(CompilerError::compiler_error(format!(
-                            "HIR function-origin lowering received duplicate private origin {:?}",
-                            origin
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::HirConstruction,
+                            format!(
+                                "HIR function-origin lowering received duplicate private origin {:?}",
+                                origin
+                            ),
+                        ));
                     }
                     self.module
                         .function_ids_by_private_origin
@@ -166,7 +174,7 @@ impl<'a> HirBuilder<'a> {
             let NodeKind::Function(path, signature, _) = &node.kind else {
                 continue;
             };
-            let function_id = self.resolve_function_id_or_error(path, &node.span)?;
+            let function_id = self.resolve_function_id_or_error(path)?;
             let boundary = match signature.error_return_type_id() {
                 Some(error_type) if Some(error_type) == builtin_error_type => {
                     HirBuiltinFailureBoundary::BuiltinErrorSlot
@@ -175,7 +183,8 @@ impl<'a> HirBuilder<'a> {
                 None => HirBuiltinFailureBoundary::InferPrivate,
             };
             let pending = summaries.function_facts(*path).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "completed function has no converged AST failure facts",
                 )
             })?;
@@ -232,9 +241,9 @@ impl<'a> HirBuilder<'a> {
                     target,
                     arithmetic_span,
                 },
-                ImplicitFailureSource::PrivateCall(path) => HirBuiltinFailureSource::Call(
-                    self.resolve_call_target_or_error(&path, &contributor.span)?,
-                ),
+                ImplicitFailureSource::PrivateCall(path) => {
+                    HirBuiltinFailureSource::Call(self.resolve_call_target_or_error(&path)?)
+                }
             };
             contributors.push(HirBuiltinFailureContributor {
                 source,
@@ -245,7 +254,7 @@ impl<'a> HirBuilder<'a> {
         Ok(contributors)
     }
 
-    pub(super) fn resolve_doc_fragments(&mut self, ast: &Ast) -> Result<(), CompilerError> {
+    pub(super) fn resolve_doc_fragments(&mut self, ast: &Ast) {
         self.extracted_metadata.doc_fragments.clear();
 
         for fragment in &ast.doc_fragments {
@@ -261,7 +270,5 @@ impl<'a> HirBuilder<'a> {
                     span: fragment.span,
                 });
         }
-
-        Ok(())
     }
 }

@@ -1,8 +1,7 @@
 //! Core LIR identifiers and ABI-facing primitive types.
 //!
-//! These ids and types are the stable backend-local contract between HIR lowering and byte
-//! emission. A few variants are ahead of production lowering but are already exercised by emitter
-//! tests so future Wasm work can extend lowering without changing the ABI vocabulary.
+//! These identifiers and types define the stable backend-local contract between HIR lowering and
+//! byte emission.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WasmLirFunctionId(pub u32);
@@ -31,7 +30,6 @@ pub(crate) struct WasmLirSignature {
 pub(crate) enum WasmAbiType {
     I32,
     I64,
-    #[allow(dead_code)] // Wasm roadmap: f32 ABI lanes are emitter-tested before HIR maps to them.
     F32,
     F64,
     Handle,
@@ -63,9 +61,9 @@ pub(crate) enum WasmLocalRole {
     /// Runtime value/string handle.
     ValueHandle,
     /// Reserved for static-data pointer materialization.
-    #[allow(dead_code)] // Wasm roadmap: static-data pointer locals are emitter-tested first.
+    #[allow(dead_code)] // No production lowering or test constructs this role.
     StaticPtr,
     /// Reserved for static-data length materialization.
-    #[allow(dead_code)] // Wasm roadmap: static-data length locals are emitter-tested first.
+    #[allow(dead_code)] // No production lowering or test constructs this role.
     Length,
 }

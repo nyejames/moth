@@ -9,9 +9,16 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::InvalidValueReceiverView,
+    names_declarations::{ReservedNameCollisionView, ShadowedNameView},
+    token_lexical::{ExpectedTokenView, UnexpectedTokenShape, UnexpectedTokenView},
+    types_borrows_targets::TypeMismatchView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticToken,
-    InvalidMultiBindReason, ReservedNameOwner, RuleDiagnosticKind, TypeMismatchContext,
+    DiagnosticSeverity, DiagnosticToken, ReservedNameOwner, TypeMismatchContext,
     ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -21,9 +28,8 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_decla
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageRegistry, ExternalSymbolId,
 };
-use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
@@ -31,8 +37,9 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_build_result_with_registry,
-    parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+    ast_first_error_type_display, freeze_ast_diagnostic_failure, parse_single_file_ast,
+    parse_single_file_ast_build_result_with_registry, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
@@ -121,32 +128,38 @@ fn resolves_named_type_annotations_against_prior_structs() {
 
 #[test]
 fn rejects_user_declarations_named_error() {
-    let diagnostic = parse_single_file_ast_diagnostic("Error = 1\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::BuiltinType,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("Error = 1\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the diagnostic is a reserved-name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::BuiltinType);
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+        panic!("reserved-name rejection should produce a diagnosed result");
+    };
+    let (report, _) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("the failure contains its first error report");
+    assert_eq!(report.context().strings().resolve(facts.name), "Error");
 }
 
 #[test]
 fn rejects_struct_redefinition_of_reserved_error_symbol() {
-    let diagnostic = parse_single_file_ast_diagnostic("Error = |\n    message String,\n|\n");
-
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::ReservedNameCollision)
-    ));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::BuiltinType,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("Error = |\n    message String,\n|\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the diagnostic is a reserved-name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::BuiltinType);
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+        panic!("reserved-name rejection should produce a diagnosed result");
+    };
+    let (report, _) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("the failure contains its first error report");
+    assert_eq!(report.context().strings().resolve(facts.name), "Error");
 }
 
 #[test]
@@ -163,26 +176,27 @@ fn allows_user_declarations_named_old_error_family_symbols() {
 
 #[test]
 fn rejects_keyword_shadow_variable_declarations() {
-    let diagnostic = parse_single_file_ast_diagnostic("_true = 1\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::Keyword,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("_true = 1\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the diagnostic is a reserved-name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+        panic!("reserved-name rejection should produce a diagnosed result");
+    };
+    let (report, _) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("the failure contains its first error report");
+    assert_eq!(report.context().strings().resolve(facts.name), "_true");
 }
 
 #[test]
 fn shadowed_declaration_retains_exact_duplicate_name_span() {
     let source = "value = \"π\"\nvalue I32 = 2\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ShadowedName { name: _ }
-    ));
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
 
     let duplicate_start = source
         .rfind("value I32")
@@ -193,22 +207,28 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
             .expect("the duplicate name span should fit the inline representation");
 
     assert_eq!(
-        diagnostic.primary_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, expected_span))
+        ast_error_primary_span(diagnostic),
+        Some(crate::compiler_frontend::source::SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            expected_span,
+        ))
     );
-    assert_eq!(diagnostic.labels.len(), 1);
+    let labels = ast_error_label_spans(diagnostic);
+    assert_eq!(labels.len(), 1);
     assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::PreviousDeclaration)
-    );
-    assert_eq!(
-        diagnostic.labels[0].span,
-        Some(SourceSpan::new(
+        labels[0],
+        Some(crate::compiler_frontend::source::SourceSpan::new(
             SourceId::COMPILATION_ROOT,
             LocalSpan::exact(0, "value".len() as u32, &mut expected_builder)
                 .expect("the original name span should fit"),
         )),
     );
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::PreviousDeclaration
+    ));
 }
 
 fn body_prelude_registry() -> ExternalPackageRegistry {
@@ -248,37 +268,49 @@ fn body_local_prelude_collisions_retain_authored_name_span() {
             "host_line",
         ),
     ] {
-        let diagnostic =
+        let failure =
             parse_single_file_ast_build_result_with_registry(source, body_prelude_registry())
                 .err()
                 .expect("a body binding must not replace a visible prelude binding");
-        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
-        let DiagnosticPayload::ShadowedName {
-            name: authored_name,
-        } = diagnostic.payload
-        else {
-            panic!("the collision must retain the authored name payload");
+        let failure = freeze_ast_diagnostic_failure(failure);
+        let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+            panic!("the shadowed declaration should produce a diagnosed result");
         };
-        let mut authored = TestSourceContext::new("@page.moth");
-        authored
-            .tokenize(
-                source,
-                &mut PathInternerFork::empty(),
-                &StyleDirectiveRegistry::built_ins(),
-                TokenizerEntryMode::SourceFile,
-            )
-            .expect("the authored diagnostic source must tokenize");
-        assert_eq!(authored.preparation_parts().0.resolve(authored_name), name);
-        let start = source.rfind(name).expect("the authored name must occur") as u32;
-        let mut builder = ExtendedSpanBuilder::new();
-        let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
-            .expect("the authored name must fit");
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
+        let facts = diagnostic
+            .family_view::<ShadowedNameView>()
+            .expect("the diagnostic is a shadowed name");
+        let (report, _) = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("the failure contains its first error report");
         assert_eq!(
-            diagnostic.primary_span,
-            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            report.context().strings().resolve(facts.name),
+            name,
+            "{source}"
+        );
+        let duplicate_start = source
+            .rfind(name)
+            .expect("the duplicate declaration name must be present")
+            as u32;
+        let mut expected_builder = ExtendedSpanBuilder::new();
+        let expected_span =
+            LocalSpan::exact(duplicate_start, name.len() as u32, &mut expected_builder)
+                .expect("the duplicate name span must fit the inline representation");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, expected_span)),
             "{source}",
         );
-        assert!(diagnostic.labels.is_empty(), "{source}");
+        assert!(
+            ast_error_label_spans(diagnostic).is_empty(),
+            "{source}: prelude collisions have no secondary declaration label",
+        );
+        assert_eq!(
+            reports.iter().count(),
+            1,
+            "{source}: expected one shadowing diagnostic for {name}",
+        );
     }
 }
 
@@ -306,20 +338,27 @@ fn body_local_prelude_lookup_preserves_namespace_and_function_calls() {
 #[test]
 fn malformed_multi_bind_keeps_missing_target_priority_over_name_collision() {
     let source = "pair || -> I32, I32:\n    return 1, 2\n;\nio, = pair()\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0002",
+        Some("invalid_multi_bind.missing_target_after_comma"),
+    );
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("the diagnostic is an unexpected token");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMultiBind {
-            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+        facts.shape,
+        UnexpectedTokenShape::MultiBind {
             target_name: None,
+            ..
         }
     ));
     let comma = source.rfind(',').expect("the target comma must occur") as u32;
     let mut builder = ExtendedSpanBuilder::new();
     let span = LocalSpan::exact(comma, 1, &mut builder).expect("the comma span must fit");
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
     );
 }
@@ -327,68 +366,54 @@ fn malformed_multi_bind_keeps_missing_target_priority_over_name_collision() {
 #[test]
 fn body_local_prelude_malformed_host_statement_keeps_missing_parenthesis_diagnostic() {
     let source = "@core/io line as print\nprint\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0001");
-    let DiagnosticPayload::ExpectedToken { expected, found } = diagnostic.payload else {
-        panic!("the malformed host call must retain its expected-token payload");
-    };
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0001", None);
+    let facts = diagnostic
+        .family_view::<ExpectedTokenView>()
+        .expect("the diagnostic is an expected-token failure");
     assert_eq!(
-        expected,
+        facts.expected,
         DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
     );
     assert_eq!(
-        found,
+        facts.found,
         Some(DiagnosticToken::from_static_tag(TokenTag::NEWLINE)),
     );
     let mut builder = ExtendedSpanBuilder::new();
     let span = LocalSpan::exact((source.len() - 1) as u32, 1, &mut builder)
         .expect("the newline span must fit");
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
     );
 }
 
 #[test]
 fn rejects_unconsumed_source_config_qualifier_at_declaration_boundary() {
-    let diagnostic = parse_single_file_ast_diagnostic("analytics #Config of Bool = false\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: crate::compiler_frontend::compiler_messages::InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("analytics #Config of Bool = false\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_qualifier_invalid_placement"),
+    );
 }
 
 //  Type mismatch diagnostics
 // --------------------------
 
 #[test]
-fn rejects_initializer_type_mismatch_with_target_and_value_details() {
-    let diagnostic = parse_single_file_ast_diagnostic("result F64 = true\n");
-
-    let DiagnosticPayload::TypeMismatch {
-        expected,
-        found,
-        context,
-    } = &diagnostic.payload
-    else {
-        panic!("expected typed TypeMismatch diagnostic payload");
-    };
-
-    assert_eq!(*context, TypeMismatchContext::Declaration);
+fn rejects_initializer_type_mismatch() {
+    let failure = parse_single_file_ast_diagnostic("result F64 = true\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the diagnostic is a type mismatch");
+    assert_eq!(facts.context, TypeMismatchContext::Declaration);
     assert_eq!(
-        *expected,
-        builtin_type_ids::fixed_scalar(FixedScalar::F64),
-        "the declared F64 receiver is the expected identity"
+        ast_first_error_type_display(&failure, facts.expected),
+        "F64"
     );
-    assert_eq!(
-        *found,
-        builtin_type_ids::BOOL,
-        "the boolean value is the found identity"
-    );
+    assert_eq!(ast_first_error_type_display(&failure, facts.found), "Bool");
 }
 
 #[test]
@@ -402,13 +427,8 @@ fn rejects_multiline_regular_division_with_operator_at_end_of_line() {
 }
 
 fn assert_declaration_type_mismatch(source: &str) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert!(
-        matches!(diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }),
-        "expected TypeMismatch, got {:?}",
-        diagnostic.payload
-    );
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
 }
 
 // --------------------------
@@ -590,34 +610,24 @@ fn normal_collection_declaration() {
 
 #[test]
 fn fixed_and_growable_assignment_mismatch_is_rejected() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 growable {I32} = {1}
 items {2 I32} = growable
 "#,
     );
-
-    assert!(
-        matches!(diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }),
-        "expected TypeMismatch, got {:?}",
-        diagnostic.payload
-    );
+    assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
 }
 
 #[test]
 fn exact_fixed_capacity_mismatch_is_rejected() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 three {3 I32} = {1}
 items {2 I32} = three
 "#,
     );
-
-    assert!(
-        matches!(diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }),
-        "expected TypeMismatch, got {:?}",
-        diagnostic.payload
-    );
+    assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
 }
 
 #[test]
@@ -687,8 +697,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             let mut declaration_cursor =
                 crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(
                     canonical_cursor,
-                )
-                .expect("the tokenized source must expose canonical tokens");
+                );
             let declaration =
                 parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
                     .expect("the authored declaration must produce its shell");
@@ -748,9 +757,17 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .set_position(eof_position)
             .expect("initializer EOF position must be within its range");
         assert_eq!(initializer.current_span(), declaration_span);
-        sources
-            .install_extended_spans(file_id, builder.freeze())
-            .expect("the original table must install after the final span producer");
+        let mut source_builder = SourceDatabaseBuilder::new(sources);
+        source_builder.retain_span_builder(file_id, builder);
+        source_builder
+            .finish_source(file_id)
+            .expect("the original table must freeze after the final span producer");
+        source_builder
+            .assemble_finalized_tables()
+            .expect("the frozen declaration table should assemble");
+        let sources = source_builder
+            .finish()
+            .expect("the original source owner should satisfy lifecycle invariants");
         let range = initializer.current_span().byte_range(&sources);
         assert_eq!(
             (range.start(), range.end()),
@@ -771,19 +788,19 @@ fn single_declarations_reject_zero_and_multiple_success_slots() {
     ] {
         for receiver in ["value = none_here()", "value I32 = none_here()"] {
             let source = format!("{producer}\n{receiver}\n");
-            let diagnostic = parse_single_file_ast_diagnostic(&source);
-            assert!(
-                matches!(
-                    diagnostic.payload,
-                    DiagnosticPayload::InvalidValueReceiver {
-                        receiver: ValueReceiverContext::Declaration,
-                        target_count: 1,
-                        produced_count: actual,
-                    } if actual == produced_count
-                ),
-                "{diagnostic:?}"
+            let failure = parse_single_file_ast_diagnostic(&source);
+            let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+            assert!(ast_error_primary_span(diagnostic).is_some(), "{source}");
+            let facts = diagnostic
+                .family_view::<InvalidValueReceiverView>()
+                .expect("the diagnostic is an invalid value receiver");
+            assert_eq!(
+                facts.receiver,
+                ValueReceiverContext::Declaration,
+                "{source}"
             );
-            assert!(diagnostic.primary_span.is_some(), "{diagnostic:?}");
+            assert_eq!(facts.target_count, 1, "{source}");
+            assert_eq!(facts.produced_count, produced_count, "{source}");
         }
     }
 }
@@ -795,17 +812,13 @@ fn assignments_reject_zero_and_multiple_success_slots() {
         ("produce || -> I32, String:\n    return 1, \"one\"\n;\n", 2),
     ] {
         let source = format!("{producer}\nvalue ~= 0\nvalue = produce()\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidValueReceiver {
-                    receiver: ValueReceiverContext::Assignment,
-                    target_count: 1,
-                    produced_count: actual,
-                } if actual == produced_count
-            ),
-            "{diagnostic:?}"
-        );
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+        let facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the diagnostic is an invalid value receiver");
+        assert_eq!(facts.receiver, ValueReceiverContext::Assignment, "{source}");
+        assert_eq!(facts.target_count, 1, "{source}");
+        assert_eq!(facts.produced_count, produced_count, "{source}");
     }
 }

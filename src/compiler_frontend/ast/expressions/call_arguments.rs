@@ -52,11 +52,18 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 };
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
-    InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidExpressionReason,
-    InvalidGenericInstantiationReason, ValueReceiverContext,
+    CompileTimeEvaluationErrorReason, DiagnosticToken, InvalidBuiltinCallReason,
+    InvalidCallShapeReason, InvalidExpressionReason, InvalidGenericInstantiationReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -346,7 +353,8 @@ pub(crate) fn parse_call_arguments_with_receiving_context(
         ParsedCallArguments::Ready(arguments) => Ok(arguments),
         // This entry has no retained-argument completion lane.
         ParsedCallArguments::Retained(_) => Err(
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a call surface without numeric-call retention retained a numeric-dependent \
                  argument",
             )
@@ -462,7 +470,7 @@ pub(crate) fn parse_call_arguments_without_expectations(
 /// WHAT: gives every argument expression a `CastTargetContext` derived from its corresponding
 ///      parameter type, so `cast` can resolve at concrete source/receiver/host
 ///      parameters and generic parameter slots can reject `cast` with `TargetIsGenericParameter`.
-/// WHY: raw call parsing used to resolve arguments before validation. Threading expectations keeps
+/// WHY: threading expectations into argument parsing keeps
 ///      the cast-target channel narrow and local to the argument parser.
 #[allow(
     clippy::too_many_arguments,
@@ -633,7 +641,7 @@ fn parse_call_arguments_inner(
 ) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
     ast_log!("Creating function call arguments");
     let mut receiving_context = receiving_context;
-    let opening_span = current_span(token_stream);
+    let opening_span = Some(token_stream.current_span());
     if receiving_context.diagnostics.opening_span.is_none() {
         receiving_context.diagnostics = receiving_context
             .diagnostics
@@ -655,10 +663,10 @@ fn parse_call_arguments_inner(
     } = argument_syntax
     {
         if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
-            return Err(CompilerDiagnostic::invalid_builtin_call(
+            return Err(calls_data::invalid_builtin_call(
                 InvalidBuiltinCallReason::MissingParentheses,
                 Some(member_name),
-                current_span(token_stream),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -667,10 +675,10 @@ fn parse_call_arguments_inner(
         token_stream.skip_newlines();
 
         if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
-            return Err(CompilerDiagnostic::invalid_builtin_call(
+            return Err(calls_data::invalid_builtin_call(
                 InvalidBuiltinCallReason::TakesNoArguments,
                 Some(member_name),
-                current_span(token_stream),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -686,15 +694,15 @@ fn parse_call_arguments_inner(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
+                InfrastructureFailure::malformed_token_projection(
                     "call opening-delimiter diagnostic",
+                    error,
                 )
             })?;
-        return Err(CompilerDiagnostic::expected_token_from_tags(
-            TokenTag::OPEN_PARENTHESIS,
+        return Err(token_lexical::expected_token_from_projections(
+            DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
             found,
-            current_span(token_stream),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -719,7 +727,7 @@ fn parse_call_arguments_inner(
             break;
         }
 
-        let argument_span = current_span(token_stream);
+        let argument_span = Some(token_stream.current_span());
 
         reject_simple_generic_argument_type_ascription(token_stream, syntax_context)?;
         let lookahead_base = token_stream.position();
@@ -741,20 +749,21 @@ fn parse_call_arguments_inner(
                 if next_token_tag(token_stream) == Some(TokenTag::SYMBOL)
                     && lookahead_third_is_assign =>
             {
-                return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                return Err(token_lexical::unexpected_token_from_tag(
                     DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
 
             // Standard named argument: `name = expr`.
             TokenTag::SYMBOL if next_token_tag(token_stream) == Some(TokenTag::ASSIGN) => {
-                let target_span = current_span(token_stream);
+                let target_span = Some(token_stream.current_span());
                 let target_name = token_stream
                     .current_string_id_in(string_table)?
                     .ok_or_else(|| {
-                        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "named argument symbol had no string payload",
                         )
                     })?;
@@ -770,9 +779,9 @@ fn parse_call_arguments_inner(
                     && lookahead_third_is_close_paren
                     && lookahead_fourth_is_assign =>
             {
-                return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                return Err(token_lexical::unexpected_token_from_tag(
                     DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -791,20 +800,20 @@ fn parse_call_arguments_inner(
             let found = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
+                    InfrastructureFailure::malformed_token_projection(
                         "named-only argument diagnostic",
+                        error,
                     )
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
             let diagnostic = if matches!(argument_syntax, CallArgumentSyntax::AnonymousConstRecord)
             {
-                CompilerDiagnostic::invalid_expression(
+                token_lexical::invalid_expression(
                     InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
             } else {
-                CompilerDiagnostic::unexpected_token_from_tag(found, argument_span)
+                token_lexical::unexpected_token_from_tag(found, argument_span)
             };
             return Err(diagnostic.into());
         }
@@ -813,7 +822,7 @@ fn parse_call_arguments_inner(
             slot_router.route(named_target.as_ref(), argument_span, string_table)?;
 
         let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
-            let marker_span = current_span(token_stream);
+            let marker_span = Some(token_stream.current_span());
             token_stream.advance();
             (CallAccessMode::Mutable, marker_span)
         } else {
@@ -827,20 +836,20 @@ fn parse_call_arguments_inner(
             let found = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
+                    InfrastructureFailure::malformed_token_projection(
                         "call argument value diagnostic",
+                        error,
                     )
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
             let diagnostic = if matches!(argument_syntax, CallArgumentSyntax::AnonymousConstRecord)
             {
-                CompilerDiagnostic::invalid_expression(
+                token_lexical::invalid_expression(
                     InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
             } else {
-                CompilerDiagnostic::unexpected_token_from_tag(found, current_span(token_stream))
+                token_lexical::unexpected_token_from_tag(found, Some(token_stream.current_span()))
             };
             return Err(diagnostic.into());
         }
@@ -856,10 +865,10 @@ fn parse_call_arguments_inner(
                         | ExpectedParameterType::GenericParameter(type_id) => type_id,
                         ExpectedParameterType::ConstructionShape(_)
                         | ExpectedParameterType::UnknownExternal => {
-                            return Err(CompilerDiagnostic::invalid_call_shape(
+                            return Err(calls_data::invalid_call_shape(
                                 InvalidCallShapeReason::RouteArgumentNotDirect,
                                 None,
-                                current_span(token_stream),
+                                Some(token_stream.current_span()),
                             )
                             .into());
                         }
@@ -867,10 +876,10 @@ fn parse_call_arguments_inner(
                     if access_mode == CallAccessMode::Mutable
                         || token_stream.current_tag() != TokenTag::SYMBOL
                     {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
+                        return Err(calls_data::invalid_call_shape(
                             InvalidCallShapeReason::RouteArgumentNotDirect,
                             None,
-                            current_span(token_stream),
+                            Some(token_stream.current_span()),
                         )
                         .into());
                     }
@@ -887,7 +896,7 @@ fn parse_call_arguments_inner(
             .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
             && access_mode == CallAccessMode::Mutable
         {
-            return Err(CompilerDiagnostic::invalid_call_shape(
+            return Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::WireArgumentMutableMarker,
                 None,
                 marker_span,
@@ -962,7 +971,8 @@ fn parse_call_arguments_inner(
             let name = token_stream
                 .current_string_id_in(string_table)?
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "route argument symbol token had no string payload",
                     )
                 })?;
@@ -971,7 +981,8 @@ fn parse_call_arguments_inner(
             match route_reference {
                 Some(route_reference) => {
                     let route_context = route_argument_context.ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Route parameter lookup escaped its route argument context",
                         )
                     })?;
@@ -982,7 +993,7 @@ fn parse_call_arguments_inner(
                         route_input_type,
                         type_interner.environment(),
                     ) {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
+                        return Err(calls_data::invalid_call_shape(
                             InvalidCallShapeReason::RouteForwardingContractMismatch,
                             None,
                             Some(argument_source_span),
@@ -997,7 +1008,7 @@ fn parse_call_arguments_inner(
                         token_stream.current_tag(),
                         TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS
                     ) {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
+                        return Err(calls_data::invalid_call_shape(
                             InvalidCallShapeReason::RouteArgumentNotDirect,
                             None,
                             Some(argument_source_span),
@@ -1018,7 +1029,7 @@ fn parse_call_arguments_inner(
                 None => {
                     match context.get_reference(&name) {
                         Some(ScopeDeclarationRef::PendingNumeric { .. }) => {
-                            return Err(CompilerDiagnostic::invalid_call_shape(
+                            return Err(calls_data::invalid_call_shape(
                                 InvalidCallShapeReason::RouteArgumentNotDirect,
                                 None,
                                 Some(argument_source_span),
@@ -1092,7 +1103,7 @@ fn parse_call_arguments_inner(
                         _ => false,
                     };
                     if !direct_route_root {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
+                        return Err(calls_data::invalid_call_shape(
                             InvalidCallShapeReason::RouteArgumentNotDirect,
                             None,
                             argument_view.span(),
@@ -1111,7 +1122,7 @@ fn parse_call_arguments_inner(
                         context,
                         path_fork,
                     ) {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
+                        return Err(calls_data::invalid_call_shape(
                             InvalidCallShapeReason::WireArgumentOrigin,
                             None,
                             argument_view.span(),
@@ -1177,7 +1188,7 @@ fn parse_call_arguments_inner(
                 if route_argument_context.is_some()
                     && !retained_route_argument_is_constructor_root(&deferral.items)
                 {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::RouteArgumentNotDirect,
                         None,
                         deferral.span,
@@ -1194,7 +1205,7 @@ fn parse_call_arguments_inner(
                             [ExpressionRpnItem::PendingNumericBinding { is_copy: false, .. }]
                         ))
                 {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::WireArgumentOrigin,
                         None,
                         deferral.span,
@@ -1332,7 +1343,7 @@ fn parse_call_arguments_inner(
 
         let (argument, list_ended) = match token_stream.current_tag() {
             TokenTag::COMMA => {
-                let separator_span = current_span(token_stream);
+                let separator_span = Some(token_stream.current_span());
                 token_stream.advance();
                 token_stream.skip_newlines();
                 let argument = with_following_separator_span(argument, separator_span);
@@ -1346,9 +1357,9 @@ fn parse_call_arguments_inner(
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
+                        InfrastructureFailure::malformed_token_projection(
                             "call argument separator diagnostic",
+                            error,
                         )
                     })?
                     .unwrap_or_else(|| {
@@ -1359,13 +1370,16 @@ fn parse_call_arguments_inner(
                     CallArgumentNamingPolicy::NamedOnly
                 ) && current_token_starts_named_entry(token_stream)
                 {
-                    CompilerDiagnostic::expected_token_from_tags(
-                        TokenTag::COMMA,
+                    token_lexical::expected_token_from_projections(
+                        DiagnosticToken::from_static_tag(TokenTag::COMMA),
                         Some(found),
-                        current_span(token_stream),
+                        Some(token_stream.current_span()),
                     )
                 } else {
-                    CompilerDiagnostic::unexpected_token_from_tag(found, current_span(token_stream))
+                    token_lexical::unexpected_token_from_tag(
+                        found,
+                        Some(token_stream.current_span()),
+                    )
                 };
                 return Err(diagnostic.into());
             }
@@ -1596,12 +1610,12 @@ fn validate_argument_value_policy(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::compile_time_evaluation_error(
+    Err(choices_control_flow::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
         receiving_context
             .diagnostics
             .const_operation
-            .and_then(|operation| operation.diagnostic_callee_name(string_table)),
+            .map(|operation| operation.diagnostic_callee_name(string_table)),
         value.span(),
     )
     .into())
@@ -1658,12 +1672,17 @@ impl<'a> ParameterSlotRouter<'a> {
             && let Some((target_name, target_span)) = named_target
         {
             if let Some(first_span) = named_target_spans.get(target_name) {
-                return Err(CompilerDiagnostic::duplicate_declaration(
-                    *target_name,
-                    *first_span,
-                    *target_span,
-                )
-                .into());
+                let diagnostic =
+                    names_declarations::duplicate_declaration(*target_name, *target_span);
+                let diagnostic = if let Some(first_span) = first_span {
+                    diagnostic.with_label(
+                        Some(*first_span),
+                        Some(LabelDraftMessage::PreviousDeclaration),
+                    )
+                } else {
+                    diagnostic
+                };
+                return Err(diagnostic.into());
             }
             named_target_spans.insert(*target_name, *target_span);
         }
@@ -1676,7 +1695,7 @@ impl<'a> ParameterSlotRouter<'a> {
         {
             match self.receiving_context.diagnostics.syntax {
                 CallArgumentSyntax::UnsupportedCall { callee_name } => {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
                         callee_name,
                         *target_span,
@@ -1684,7 +1703,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     .into());
                 }
                 CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
+                    return Err(calls_data::invalid_builtin_call(
                         InvalidBuiltinCallReason::NamedArgumentsNotSupported,
                         member_name,
                         *target_span,
@@ -1694,7 +1713,7 @@ impl<'a> ParameterSlotRouter<'a> {
                 CallArgumentSyntax::Supported { .. }
                 | CallArgumentSyntax::Constructor { .. }
                 | CallArgumentSyntax::Assertion { .. } => {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
                         self.callee_name(string_table),
                         *target_span,
@@ -1719,7 +1738,7 @@ impl<'a> ParameterSlotRouter<'a> {
             self.saw_named_argument = true;
             match self.receiving_context.diagnostics.syntax {
                 CallArgumentSyntax::UnsupportedCall { callee_name } => {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
                         callee_name,
                         *target_span,
@@ -1727,7 +1746,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     .into());
                 }
                 CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
+                    return Err(calls_data::invalid_builtin_call(
                         InvalidBuiltinCallReason::NamedArgumentsNotSupported,
                         member_name,
                         *target_span,
@@ -1738,7 +1757,7 @@ impl<'a> ParameterSlotRouter<'a> {
                 | CallArgumentSyntax::Constructor { .. }
                 | CallArgumentSyntax::Assertion { .. } => {
                     let Some(slot) = self.parameter_name_to_slot.get(target_name).copied() else {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
+                        return Err(calls_data::invalid_call_shape(
                             InvalidCallShapeReason::NamedArgumentNotFound {
                                 name: *target_name,
                                 known_parameters: known_parameter_names(expectations),
@@ -1757,7 +1776,7 @@ impl<'a> ParameterSlotRouter<'a> {
         }
 
         if self.saw_named_argument {
-            return Err(CompilerDiagnostic::invalid_call_shape(
+            return Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::PositionalAfterNamed,
                 self.callee_name(string_table),
                 argument_span,
@@ -1776,7 +1795,7 @@ impl<'a> ParameterSlotRouter<'a> {
         }
 
         if self.positional_cursor >= slot_count {
-            return Err(CompilerDiagnostic::invalid_call_shape(
+            return Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::ExtraPositionalArgument {
                     expected_count: expectations.len(),
                 },
@@ -1804,7 +1823,7 @@ impl<'a> ParameterSlotRouter<'a> {
             .and_then(|expectation| expectation.name);
 
         if self.slot_is_occupied(slot) {
-            let diagnostic = CompilerDiagnostic::invalid_call_shape(
+            let diagnostic = calls_data::invalid_call_shape(
                 InvalidCallShapeReason::DuplicateArgument {
                     parameter_name,
                     parameter_index: slot,
@@ -1847,7 +1866,7 @@ impl<'a> ParameterSlotRouter<'a> {
             | CallArgumentSyntax::Assertion { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
             CallArgumentSyntax::Constructor { callee_name } => {
-                callee_name.diagnostic_callee_name(string_table)
+                Some(callee_name.diagnostic_callee_name(string_table))
             }
             CallArgumentSyntax::UnsupportedBuiltinMember { .. }
             | CallArgumentSyntax::AnonymousConstRecord => None,
@@ -1896,7 +1915,7 @@ fn reject_simple_generic_argument_type_ascription(
         return Ok(());
     };
 
-    Err(CompilerDiagnostic::invalid_generic_instantiation(
+    Err(generics_traits_api::invalid_generic_instantiation(
         function_name,
         InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
         Some(type_span),
@@ -1936,7 +1955,3 @@ fn starts_simple_value_with_attached_type(token_stream: &AstCursor) -> bool {
 #[cfg(test)]
 #[path = "tests/function_call_tests.rs"]
 mod function_call_tests;
-fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    // Call-argument spans are token-local facts on the canonical cursor view.
-    Some(token_stream.current_span())
-}

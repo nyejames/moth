@@ -25,7 +25,7 @@ pub(crate) struct WasmBackendRequest {
     /// External package metadata visible to this builder.
     ///
     /// WHAT: lets Wasm lowering name unsupported host calls accurately.
-    /// WHY: dynamic external package IDs are synthetic today, so diagnostics need registry
+    /// WHY: dynamic external package IDs are synthetic, so diagnostics need registry
     /// metadata to avoid reporting only `<synthetic>`.
     pub external_package_registry: Arc<ExternalPackageRegistry>,
     /// Builder-rendered text for structural strings in this physical output variant.
@@ -81,29 +81,30 @@ pub(crate) struct WasmHelperExportPolicy {
 /// Controls how CFG is mapped to Wasm structured control flow.
 ///
 /// WHAT: this is an explicit strategy seam for function-body structuring.
-/// WHY: the current emitter uses dispatcher-loop lowering, but the request contract should remain
-/// stable when a richer block/loop structuring algorithm is introduced.
+/// WHY: the backend request makes strategy selection explicit; the emitter accepts only
+///      `DispatcherLoop`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum WasmCfgLoweringStrategy {
     /// Uses an internal dispatch local with `block + loop + br` to represent arbitrary CFG.
     /// This is the current implementation.
     #[default]
     DispatcherLoop,
-    /// Reserved for future direct structured lowering (if/else/loop region construction).
-    #[allow(dead_code)] // Wasm roadmap: direct structured CFG lowering.
+    /// Direct if/else/loop-region lowering; rejected by the current emitter.
+    #[allow(dead_code)] // No production request selects this strategy.
     Structured,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct WasmTargetFeatures {
-    /// Placeholder for future GC proposal-specific codegen branches.
+    /// Requests GC-proposal codegen. The backend rejects this flag because the emitter
+    /// targets core linear-memory Wasm only.
     pub use_wasm_gc: bool,
-    /// Enables ownership-aware runtime scaffolding planning.
-    /// The current path remains transitional collected scaffolding either way. Final full-control
-    /// release lowering consumes `ValidatedMemoryPlan` and cannot fall back to tracing garbage
-    /// collection.
+    /// Ownership-aware runtime lowering flag. No lowering reads it; the debug dump reports it.
+    /// Ownership lowering emits `DropIfOwned` statements that call conservative no-op helpers,
+    /// and it does not consume `ValidatedMemoryPlan`. Release semantics are not implemented.
     pub enable_runtime_ownership: bool,
-    /// Reserved for user-facing memory/data-segment feature gating if needed.
+    /// Runtime helpers use bulk-memory instructions; `enable_bulk_memory` has no code-generation
+    /// effect.
     pub enable_bulk_memory: bool,
     /// Reserved feature toggle, currently rejected. Native scalar multi-result lowering
     /// works without this flag and fallible channels remain target-gated.

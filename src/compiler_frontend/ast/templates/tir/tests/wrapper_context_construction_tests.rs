@@ -377,7 +377,7 @@ fn missing_parent_template_is_an_internal_error() {
 
     let error = attach_wrapper_context_overlay(&mut reference, &[], &store)
         .expect_err("missing parent should be rejected");
-    assert!(error.msg.contains("owning template"));
+    assert!(error.message.contains("owning template"));
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn missing_child_template_is_an_internal_error() {
 
     let error = attach_wrapper_context_overlay(&mut reference, &[wrapper], &store)
         .expect_err("missing child should be rejected");
-    assert!(error.msg.contains("child template"));
+    assert!(error.message.contains("child template"));
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn missing_current_overlay_is_rejected_before_allocation() {
 
     let error = attach_wrapper_context_overlay(&mut reference, &[wrapper], &store)
         .expect_err("missing current overlay should be rejected");
-    assert!(error.msg.contains("expression overlay"));
+    assert!(error.message.contains("expression overlay"));
     assert_eq!(store.borrow().wrapper_set_count(), wrapper_count);
 }
 
@@ -461,7 +461,7 @@ fn missing_child_overlay_is_rejected_before_allocation() {
         .expect_err("missing child overlay should fail before allocation");
 
     assert!(
-        error.msg.contains("child reference") && error.msg.contains("expression overlay"),
+        error.message.contains("child reference") && error.message.contains("expression overlay"),
         "error must report the missing child overlay: {error:?}"
     );
     assert_eq!(

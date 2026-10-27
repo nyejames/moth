@@ -9,7 +9,12 @@ use crate::build_system::output::manifest::{
     BuildManifest, ManifestReadResult, ManifestRecoveryReason,
 };
 use crate::build_system::output::{BuilderKind, OutputOwner, WriteMode, WriteOptions};
-use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
+use crate::compiler_frontend::compiler_errors::CompilationResult;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,8 +24,20 @@ use crate::build_system::output::manifest::{
     validate_output_root_is_safe, write_build_manifest,
 };
 use crate::compiler_tests::test_fs::{assert_directory, assert_path_missing};
+
 use crate::compiler_tests::test_support::unused_temp_path;
 use std::collections::{BTreeSet, HashSet};
+
+fn assert_output_owner_conflict<T>(failure: &CompilationResult<T>) {
+    let (_, diagnostic) = diagnosed_reports(failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("owner conflict diagnostic should exist");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("owner conflict should retain typed invalid-config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::OutputManifestOwnerConflict);
+}
 
 fn html_owner(profile: BuildProfile) -> OutputOwner {
     OutputOwner {
@@ -68,11 +85,10 @@ fn cleanup_manifest_diff_removes_stale_managed_files() {
         ],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_a,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build A should succeed");
+    ));
 
     assert!(output_root.join("index.html").exists());
     assert!(output_root.join("about/index.html").exists());
@@ -87,11 +103,10 @@ fn cleanup_manifest_diff_removes_stale_managed_files() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_b,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build B should succeed");
+    ));
 
     assert!(output_root.join("index.html").exists());
     assert!(
@@ -130,11 +145,10 @@ fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_manifest() {
         ],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_a,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build A should succeed");
+    ));
 
     assert_eq!(
         read_html_manifest(&output_root),
@@ -155,11 +169,10 @@ fn cleanup_manifest_diff_removes_stale_tracked_byte_assets_from_manifest() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_b,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build B should succeed");
+    ));
 
     assert!(
         !output_root.join("assets/logo.png").exists(),
@@ -197,11 +210,10 @@ fn cleanup_missing_manifest_preserves_stale_html_route_alias() {
         )],
         Some(PathBuf::from("docs/basics/index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build should succeed");
+    ));
 
     assert!(
         output_root.join("docs/basics.html").exists(),
@@ -228,11 +240,10 @@ fn cleanup_first_build_writes_manifest_without_removing() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("first build should succeed");
+    ));
 
     assert!(output_root.join("index.html").exists());
     assert!(
@@ -262,11 +273,10 @@ fn cleanup_removes_empty_parent_directories_after_deleting_managed_files() {
         )],
         None,
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_a,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build A should succeed");
+    ));
     assert!(output_root.join("a/b/c/file.js").exists());
 
     let project_b = html_project(
@@ -276,11 +286,10 @@ fn cleanup_removes_empty_parent_directories_after_deleting_managed_files() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_b,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build B should succeed");
+    ));
 
     assert!(
         !output_root.join("a").exists(),
@@ -306,7 +315,6 @@ fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write valid prior manifest");
 
@@ -317,11 +325,10 @@ fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
         )],
         None,
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("directory-only build should succeed");
+    ));
 
     assert!(
         output_root.join("assets").is_dir(),
@@ -385,7 +392,6 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write v4 manifest");
 
@@ -396,11 +402,10 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build should succeed");
+    ));
 
     assert!(
         output_root.join("docs/basics").exists(),
@@ -422,8 +427,7 @@ fn validate_output_root_rejects_dangerous_paths() {
     ];
 
     for dangerous in dangerous_paths {
-        let result =
-            validate_output_root_is_safe(&dangerous, &project_dir, None, &StringTable::new());
+        let result = validate_output_root_is_safe(&dangerous, &project_dir, None);
         assert!(
             result.is_err(),
             "should reject dangerous path: {}",
@@ -438,7 +442,7 @@ fn validate_output_root_accepts_project_subdirectory() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("dev")).expect("should create output dir");
 
-    let result = validate_output_root_is_safe(&root.join("dev"), &root, None, &StringTable::new());
+    let result = validate_output_root_is_safe(&root.join("dev"), &root, None);
     assert!(
         result.is_ok(),
         "should accept output root inside project directory"
@@ -486,11 +490,24 @@ fn cleanup_unreadable_manifest_enters_recoverable_mode_and_preserves_existing_fi
         )],
         Some(PathBuf::from("docs/basics/index.html")),
     );
-    write_project_outputs(
+    let summary = successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build should succeed despite unreadable manifest");
+    ));
+    let warnings = summary.into_warning_messages();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "recoverable cleanup should report one warning"
+    );
+    assert!(
+        warnings[0].contains("build manifest is unreadable"),
+        "recoverable cleanup warning should identify the unreadable manifest: {warnings:?}"
+    );
+    assert!(
+        warnings[0].contains("stale artifacts were preserved intentionally"),
+        "recoverable cleanup warning should explain the preserved stale artifacts: {warnings:?}"
+    );
 
     assert!(
         output_root.join("docs/basics.html").exists(),
@@ -517,8 +534,10 @@ fn cleanup_disabled_skips_manifest_cleanup() {
         )],
         Some(PathBuf::from("docs/basics/index.html")),
     );
-    write_project_outputs(&project, &always_write_options(root.clone(), None))
-        .expect("build should succeed");
+    successful_compilation_value(write_project_outputs(
+        &project,
+        &always_write_options(root.clone(), None),
+    ));
 
     assert!(root.join("docs/basics/index.html").exists());
     assert!(
@@ -570,11 +589,10 @@ fn unsupported_manifest_preserves_existing_files_until_next_cleanup() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build should succeed");
+    ));
 
     assert!(
         output_root.join("about/index.html").exists(),
@@ -807,22 +825,11 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
             )],
             Some(PathBuf::from("index.html")),
         );
-        let messages = write_project_outputs(
+        let failure = write_project_outputs(
             &project,
             &always_write_options(output_root.clone(), Some(project_dir.clone())),
-        )
-        .expect_err("foreign profile ownership must fail before mutation");
-        assert!(matches!(
-            &messages
-                .error_diagnostics()
-                .next()
-                .expect("owner conflict diagnostic should exist")
-                .payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-                ..
-            }
-        ));
+        );
+        assert_output_owner_conflict(&failure);
         assert_eq!(
             fs::read(output_root.join("index.html")).expect("output should remain"),
             previous_output
@@ -856,22 +863,11 @@ fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    let messages = write_project_outputs(
+    let failure = write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect_err("foreign owner must fail even when a path record is not UTF-8");
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("owner conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    );
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("output should remain"),
         previous_output
@@ -927,11 +923,10 @@ fn matching_owner_with_case_variant_manifest_paths_preserves_stale_files() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("matching owner should rebuild without deleting ambiguous stale paths");
+    ));
 
     assert_eq!(
         fs::read(output_root.join("Pages/app.js")).expect("ambiguous stale output should remain"),
@@ -969,22 +964,11 @@ fn foreign_owner_with_case_variant_manifest_paths_fails_without_mutation() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    let messages = write_project_outputs(
+    let failure = write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect_err("foreign owner must fail before touching ambiguous manifest outputs");
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("owner conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    );
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("Pages/app.js")).expect("output should remain"),
         previous_output
@@ -1043,22 +1027,11 @@ fn assert_foreign_manifest_owner_fails_without_mutation(builder: &str, profile: 
         )],
         Some(PathBuf::from("index.html")),
     );
-    let messages = write_project_outputs(
+    let failure = write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect_err("foreign manifest ownership must fail before output mutation");
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("owner conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    );
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("index should remain"),
         previous_index
@@ -1139,11 +1112,10 @@ fn cleanup_extension_mismatch_preserves_stale_files_and_rewrites_manifest() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build should succeed");
+    ));
 
     // Recoverable mode preserves stale files while the extension ownership differs.
     assert!(
@@ -1185,7 +1157,6 @@ fn write_build_manifest_produces_sorted_output() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write manifest");
 
@@ -1223,7 +1194,6 @@ fn manifest_paths_round_trip_leading_and_interior_spaces() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write space-preserving manifest");
 
@@ -1329,11 +1299,10 @@ fn matching_v4_owner_performs_stale_cleanup() {
         ],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_a,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build A should succeed");
+    ));
 
     assert!(output_root.join("about/index.html").exists());
 
@@ -1344,11 +1313,10 @@ fn matching_v4_owner_performs_stale_cleanup() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project_b,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build B should succeed");
+    ));
 
     assert!(
         !output_root.join("about/index.html").exists(),
@@ -1380,11 +1348,10 @@ fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
         )],
         Some(PathBuf::from("alias.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &first_project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("first symlinked build should succeed");
+    ));
 
     let second_project = html_project(
         vec![OutputFile::new(
@@ -1393,11 +1360,10 @@ fn stale_cleanup_tracks_canonical_final_file_symlink_destination() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &second_project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("second symlinked build should succeed");
+    ));
 
     assert_path_missing(&output_root.join("real.html"));
     assert!(
@@ -1431,11 +1397,10 @@ fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
         )],
         Some(PathBuf::from("alias/old.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &first_project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("first directory-alias build should succeed");
+    ));
 
     fs::remove_file(output_root.join("alias")).expect("should remove old directory alias");
     symlink(&new_target, output_root.join("alias")).expect("should retarget directory alias");
@@ -1448,11 +1413,10 @@ fn stale_cleanup_does_not_follow_retargeted_directory_aliases() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &second_project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("second directory-alias build should succeed");
+    ));
 
     assert_path_missing(&old_target.join("old.html"));
     assert_eq!(
@@ -1477,11 +1441,10 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("dev build should succeed");
+    ));
     let previous_output = fs::read(output_root.join("index.html")).expect("output should exist");
     let previous_manifest =
         fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
@@ -1493,7 +1456,6 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
         )],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: CleanupPolicy::html(),
-        warnings: vec![],
         deferred_resources: Vec::new(),
         resource_inputs: ResourceInputRegistry::new(),
     };
@@ -1506,19 +1468,9 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
         ),
     );
 
-    let messages = result.expect_err("profile ownership conflict should fail the write");
-    assert_eq!(messages.error_count(), 1);
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    let reports = diagnosed_reports(&result);
+    assert_eq!(reports.counts().errors, 1);
+    assert_output_owner_conflict(&result);
     assert_eq!(
         fs::read(output_root.join("index.html"))
             .expect("output should remain")
@@ -1549,11 +1501,10 @@ fn builder_owner_conflict_fails_without_mutation() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("initial HTML build should succeed");
+    ));
     let previous_output = fs::read(output_root.join("index.html")).expect("output should exist");
     let previous_manifest =
         fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
@@ -1567,33 +1518,25 @@ fn builder_owner_conflict_fails_without_mutation() {
                 builder: BuilderKind::Test,
                 profile: BuildProfile::Dev,
             },
-            setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
     };
-    let messages = crate::build_system::output::write_project_outputs(
-        &mut project,
-        &conflicting_options,
-        &mut string_table,
-    )
-    .expect_err("a foreign builder must not claim the output root");
-    let diagnostic = messages
-        .error_diagnostics()
+    let prepared_failure =
+        write_project_outputs_with_table(&mut project, &conflicting_options, &mut string_table)
+            .expect_err("a foreign builder must not claim the output root");
+    let failure =
+        freeze_prepared_failure::<()>(prepared_failure, std::mem::take(&mut string_table));
+    assert_output_owner_conflict(&failure);
+    let (_, diagnostic) = diagnosed_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("owner conflict diagnostic should exist");
     assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
+        diagnostic.primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
     ));
-    assert_eq!(
-        diagnostic.primary_span, None,
-        "single-file output plans carry no authored config span",
-    );
     assert!(
-        format_terse_compiler_messages(&messages)
+        format_terse_compilation_result(&failure)
             .iter()
             .any(|line| line.contains("already owned")),
         "owner-conflict diagnostics should retain their reason text"
@@ -1624,7 +1567,6 @@ fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
         },
         &generic_policy,
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write manifest");
 
@@ -1691,11 +1633,10 @@ fn managed_extension_drift_preserves_old_files() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("build should succeed");
+    ));
 
     assert!(
         output_root.join("about/index.html").exists(),
@@ -1730,11 +1671,10 @@ fn failed_stale_deletion_remains_owned_in_next_manifest() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
-    )
-    .expect("failed stale deletion should not fail the build");
+    ));
 
     let manifest = read_html_manifest(&output_root);
     assert!(matches!(

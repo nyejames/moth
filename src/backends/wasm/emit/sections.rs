@@ -1,6 +1,5 @@
 //! Section planning and deterministic index assignment for Wasm emission.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::lir::function::WasmLirFunction;
 use crate::backends::wasm::lir::instructions::WasmLirStmt;
 use crate::backends::wasm::lir::linkage::WasmImportKind;
@@ -11,7 +10,7 @@ use crate::backends::wasm::lir::types::{
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use rustc_hash::FxHashMap;
 use std::fmt::Write as _;
@@ -59,7 +58,7 @@ pub(crate) struct WasmEmitPlan {
 pub(crate) fn build_emit_plan(
     module: &WasmLirModule,
     request: &WasmBackendRequest,
-) -> Result<WasmEmitPlan, CompilerError> {
+) -> Result<WasmEmitPlan, InfrastructureFailure> {
     // WHAT: plan all shared index spaces up front.
     // WHY: Wasm sections cross-reference by index, so deterministic assignment must happen
     // before any section payload is encoded.
@@ -155,10 +154,9 @@ pub(crate) fn build_emit_plan(
         && let Some(max_pages) = module.memory_plan.max_pages
         && initial_memory_pages > max_pages
     {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::wasm_generation(
             "Wasm binary-float formatting tables exceed the configured maximum memory",
-        )
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+        ));
     }
 
     Ok(WasmEmitPlan {
@@ -531,7 +529,7 @@ struct StaticDataLayoutResult {
 fn plan_static_data_layout(
     module: &WasmLirModule,
     float_format_needed: bool,
-) -> Result<StaticDataLayoutResult, CompilerError> {
+) -> Result<StaticDataLayoutResult, InfrastructureFailure> {
     // WHAT: place static segments by stable id, then append Ryu tables only for dynamic float
     // formatting. All segments are aligned to 8 bytes for deterministic heap placement.
     let mut data_offsets = FxHashMap::default();
@@ -602,9 +600,8 @@ fn intern_signature(
     index
 }
 
-fn static_data_layout_error(message: &str) -> CompilerError {
-    CompilerError::compiler_error(message)
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+fn static_data_layout_error(message: &str) -> InfrastructureFailure {
+    InfrastructureFailure::wasm_generation(message)
 }
 
 fn align_to(value: u32, alignment: u32) -> Option<u32> {

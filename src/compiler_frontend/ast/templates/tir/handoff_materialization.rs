@@ -23,6 +23,7 @@ use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::tir::preparation::{
     TemplatePreparation, TemplatePreparationOutcome,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
@@ -43,7 +44,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan;
 use crate::compiler_frontend::ast::templates::tir::view::{TirView, TirViewIdentity};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::SourceSpan;
@@ -58,7 +59,7 @@ pub(crate) fn owned_runtime_slot_handoff_for_prepared_view(
     const_values: &ConstValueStore,
     string_table: &StringTable,
     module_resources: Option<&ModuleResourceTable>,
-) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
+) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, InfrastructureFailure> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
     let mut materializer =
@@ -74,7 +75,7 @@ pub(crate) fn owned_runtime_template_handoff_for_prepared_view(
     const_values: &ConstValueStore,
     string_table: &StringTable,
     module_resources: Option<&ModuleResourceTable>,
-) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
+) -> Result<OwnedRuntimeTemplateHandoff, InfrastructureFailure> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
     let mut materializer =
@@ -82,10 +83,11 @@ pub(crate) fn owned_runtime_template_handoff_for_prepared_view(
     materializer.owned_runtime_template_handoff_for_template(&view, template_id)
 }
 
-fn template_id_for_view(view: &TirView<'_>) -> Result<TemplateIrId, CompilerError> {
+fn template_id_for_view(view: &TirView<'_>) -> Result<TemplateIrId, InfrastructureFailure> {
     let template_id = view.root_ref();
     view.root_template().map(|_| template_id).map_err(|_| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR HIR handoff view materialization referenced a missing template.",
         )
     })
@@ -94,15 +96,17 @@ fn template_id_for_view(view: &TirView<'_>) -> Result<TemplateIrId, CompilerErro
 fn validate_prepared_runtime(
     prepared: &TemplatePreparation,
     view: &TirView<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if prepared.identity != view.identity() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR runtime handoff preparation root/phase/context identity does not match the supplied view.",
         ));
     }
 
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Runtime(_)) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR runtime handoff received a non-runtime preparation outcome.",
         ));
     }
@@ -138,7 +142,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         &mut self,
         view: &TirView<'_>,
         id: TemplateIrId,
-    ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
+    ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, InfrastructureFailure> {
         let template = self.get_template(view, id)?;
         if template.conditional_child_wrapper_set.is_some() {
             // The direct slot result cannot carry a template-level conditional
@@ -158,7 +162,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         &mut self,
         view: &TirView<'_>,
         id: TemplateIrId,
-    ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateHandoff, InfrastructureFailure> {
         self.materialize_template(view, id, None, None)
     }
 
@@ -168,12 +172,13 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         id: TemplateIrId,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
-    ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateHandoff, InfrastructureFailure> {
         let identity = view.identity();
         if !self.active_views.insert(identity) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR handoff: exact view {identity:?} re-entered while still active."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR handoff: exact view {identity:?} re-entered while still active."),
+            ));
         }
 
         let result = self.materialize_template_body(view, id, active_slot_plan, injection);
@@ -187,7 +192,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         id: TemplateIrId,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
-    ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateHandoff, InfrastructureFailure> {
         let template = self.get_template(view, id)?;
         let span = template.span;
         let runtime_slot_plan = template.runtime_slot_plan;
@@ -216,7 +221,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 .store()
                 .get_wrapper_set(wrapper_set_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "TIR HIR handoff: conditional child wrapper set referenced by a template is missing.",
                     )
                 })?
@@ -259,7 +264,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         wrapper_root: TemplateIrNodeId,
         slot_plan_id: TemplateSlotPlanId,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
-    ) -> Result<OwnedRuntimeSlotApplicationHandoff, CompilerError> {
+    ) -> Result<OwnedRuntimeSlotApplicationHandoff, InfrastructureFailure> {
         let slot_plan = self.get_slot_plan(view, slot_plan_id)?;
         let wrapper = self.materialize_node_with_injection(
             view,
@@ -283,7 +288,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         slot_plan: &TemplateSlotPlan,
         slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<Vec<OwnedRuntimeSlotContributionSource>, CompilerError> {
+    ) -> Result<Vec<OwnedRuntimeSlotContributionSource>, InfrastructureFailure> {
         let mut sources = Vec::with_capacity(slot_plan.contribution_sources.len());
 
         for source in &slot_plan.contribution_sources {
@@ -291,7 +296,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 source: source.source,
                 render_root: self.materialize_node(view, source.render_root, Some(slot_plan_id))?,
                 renders_wrapper_unconditionally: source.renders_wrapper_unconditionally,
-                span: source.span,
             });
         }
 
@@ -303,7 +307,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         slot_plan: &TemplateSlotPlan,
         slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<Vec<OwnedRuntimeSlotSite>, CompilerError> {
+    ) -> Result<Vec<OwnedRuntimeSlotSite>, InfrastructureFailure> {
         let mut sites = Vec::with_capacity(slot_plan.slot_sites.len());
 
         for site in &slot_plan.slot_sites {
@@ -322,7 +326,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         id: TemplateIrNodeId,
         active_slot_plan: Option<TemplateSlotPlanId>,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         self.materialize_node_with_injection(view, id, active_slot_plan, None)
     }
 
@@ -341,7 +345,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         id: TemplateIrNodeId,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let node = view.effective_node(id)?;
 
         let owned_node = match &node.kind {
@@ -384,7 +388,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                         self.const_values.payload(id)
                 {
                     let resources = self.module_resources.ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "TIR runtime handoff reached a structural string without the issuing module resource table.",
                         )
                     })?;
@@ -485,19 +489,22 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
             TemplateIrNodeKind::RuntimeSlotSite { plan, site } => {
                 if Some(*plan) != active_slot_plan {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR HIR handoff materialization found a runtime slot site outside its owning slot application.",
                     ));
                 }
 
                 let slot_plan = self.get_slot_plan(view, *plan)?;
                 let Some(stored) = slot_plan.slot_sites.get(site.0) else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR HIR handoff materialization found an out-of-range runtime slot site.",
                     ));
                 };
                 if stored.site != *site {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR HIR handoff materialization found a slot site whose stored identity does not match its index.",
                     ));
                 }
@@ -510,18 +517,21 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
             TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
                 if Some(*plan) != active_slot_plan {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR HIR handoff materialization found a runtime slot contribution marker outside its owning slot application.",
                     ));
                 }
                 let slot_plan = self.get_slot_plan(view, *plan)?;
                 let Some(stored) = slot_plan.contribution_sources.get(source.0) else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR HIR handoff materialization found an out-of-range runtime slot contribution source.",
                     ));
                 };
                 if stored.source != *source {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR HIR handoff materialization found a contribution source whose stored identity does not match its index.",
                     ));
                 }
@@ -566,7 +576,8 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
             // A retained position is unfinished compiler scratch: body-root numeric completion
             // installs its value before any template reaches the runtime handoff.
-            TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+            TemplateIrNodeKind::RetainedNumericIntake(_) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR HIR handoff materialization reached a retained numeric intake position; \
                  body-root completion must install every retained value before handoff.",
             )),
@@ -580,9 +591,10 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         &self,
         view: &TirView<'store>,
         id: TemplateIrId,
-    ) -> Result<&'store TemplateIr, CompilerError> {
+    ) -> Result<&'store TemplateIr, InfrastructureFailure> {
         view.store().get_template(id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR HIR handoff materialization referenced a missing template.",
             )
         })
@@ -596,7 +608,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
         span: Option<SourceSpan>,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let child_view = view.structural_child(*reference)?;
         self.materialize_child_template_node_with_view(
             reference.root,
@@ -614,7 +626,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
         span: Option<SourceSpan>,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let handoff =
             self.materialize_template(&child_view, template_id, active_slot_plan, injection);
 
@@ -630,7 +642,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         sources: &[TemplateIrId],
         span: Option<SourceSpan>,
         active_slot_plan: Option<TemplateSlotPlanId>,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         if sources.is_empty() {
             return Ok(OwnedRuntimeTemplateNode::Slot { span });
         }
@@ -669,7 +681,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         source: &TemplateIrId,
         active_slot_plan: Option<TemplateSlotPlanId>,
         span: Option<SourceSpan>,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let source_view = view.resolved_slot_source(*source)?;
         self.materialize_child_template_node_with_view(
             *source,
@@ -691,7 +703,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         context: &TirWrapperContext,
         child_handoff: OwnedRuntimeTemplateNode,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         if context.skip_parent_child_wrappers {
             return Ok(child_handoff);
         }
@@ -704,7 +716,8 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             .store()
             .get_wrapper_set(wrapper_set_ref)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR HIR handoff: inherited wrapper set referenced by overlay is missing.",
                 )
             })?;
@@ -739,7 +752,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let mut current = child_handoff;
         for wrapper_reference in wrapper_references.iter() {
             current = self.apply_single_wrapper_template_around_child_handoff(
@@ -767,7 +780,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         if wrapper_references.is_empty() {
             return Ok(child_handoff);
         }
@@ -800,7 +813,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         wrapper_root: TemplateIrNodeId,
         fill_target_key: Option<SlotKey>,
         child_handoff: OwnedRuntimeTemplateNode,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         match fill_target_key {
             Some(fill_target_key) => materializer.materialize_node_with_injection(
                 view,
@@ -833,21 +846,25 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_reference: TemplateWrapperReference,
         child_handoff: OwnedRuntimeTemplateNode,
-    ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let wrapper_store = view.store();
 
         let (wrapper_root, has_runtime_slot_plan) = wrapper_store
             .get_template(wrapper_reference.root)
             .map(|template| (template.root, template.runtime_slot_plan.is_some()))
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR HIR handoff: wrapper template {} not found in the store.",
-                    wrapper_reference.root
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR HIR handoff: wrapper template {} not found in the store.",
+                        wrapper_reference.root
+                    ),
+                )
             })?;
 
         if has_runtime_slot_plan {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR HIR handoff: inherited wrapper template declares a runtime slot plan.",
             ));
         }
@@ -869,9 +886,10 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         &self,
         view: &TirView<'store>,
         id: TemplateSlotPlanId,
-    ) -> Result<&'store TemplateSlotPlan, CompilerError> {
+    ) -> Result<&'store TemplateSlotPlan, InfrastructureFailure> {
         view.store().get_slot_plan(id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR HIR handoff materialization referenced a missing slot plan.",
             )
         })

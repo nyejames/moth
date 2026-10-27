@@ -124,7 +124,7 @@ What comes back is folded content, not a finished artefact. It can still hold op
 ## What can fail here
 
 - invalid template structure, slot type or formatting operation
-- internal missing TIR authority (a `CompilerError`, not a casual user typo)
+- internal missing TIR authority (an `InfrastructureFailure`, not a casual user typo)
 
 TIR ownership must stay distinct from AST finalisation and HIR validation. Post-TIR parser optimisation plans may discuss performance. They do not redefine the semantic handoff.
 

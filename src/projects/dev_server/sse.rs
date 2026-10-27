@@ -45,10 +45,13 @@ pub fn broadcast_generation(state: &Arc<DevServerState>) -> usize {
     notified_count
 }
 
-/// The generation the build loop last published, or `None` once the lock is poisoned.
-fn published_generation(state: &DevServerState) -> Option<u64> {
-    let build_state = state.build_state.lock().ok()?;
-    Some(build_state.last_build_version)
+/// Read the generation under the publication lock; poisoning is a dev-host bug.
+fn published_generation(state: &DevServerState) -> u64 {
+    state
+        .build_state
+        .lock()
+        .expect("dev-server host bug: build-state lock poisoned")
+        .last_build_version
 }
 
 fn register_client(state: &Arc<DevServerState>, sender: SyncSender<()>) -> Option<u64> {
@@ -107,10 +110,7 @@ pub(super) fn handle_sse_connection_with_timeouts(
     let mut announce_generation = true;
     loop {
         if announce_generation {
-            // A poisoned publication lock ends the stream; the browser reconnects after recovery.
-            let Some(version) = published_generation(&state) else {
-                break;
-            };
+            let version = published_generation(&state);
             let event = format_generation_event(version);
             if stream.write_all(event.as_bytes()).is_err() || stream.flush().is_err() {
                 break;

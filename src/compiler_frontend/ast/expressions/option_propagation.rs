@@ -14,9 +14,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::EnclosingCallableOwner;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
@@ -34,7 +33,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     expression_builder: &mut AstExpressionBuilder,
     expression: OwnedExpr,
 ) -> Result<OwnedExpr, ExpressionParseError> {
-    let propagation_span = Some(token_stream.current_postfix_operator_span());
+    let propagation_span = Some(token_stream.current_span());
     token_stream.advance();
 
     let propagated = finish_option_propagation(
@@ -46,9 +45,9 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     )?;
 
     if token_stream.current_tag() == TokenTag::CATCH {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
-            Some(token_stream.current_postfix_operator_span()),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -82,7 +81,7 @@ pub(crate) fn finish_option_propagation(
     let Some(inner_type_id) =
         value_type_id.and_then(|type_id| type_environment.option_inner_type(type_id))
     else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::NotOptionExpression,
             propagation_span,
         )
@@ -94,14 +93,14 @@ pub(crate) fn finish_option_propagation(
         .as_deref()
         .filter(|contract| contract.owner == EnclosingCallableOwner::Function)
     else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
             propagation_span,
         )
         .into());
     };
     if contract.authored_success_slot_count > 1 {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns {
                 count: contract.authored_success_slot_count,
             },
@@ -110,7 +109,7 @@ pub(crate) fn finish_option_propagation(
         .into());
     }
     let [function_return_type_id] = contract.success_types.as_slice() else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
             propagation_span,
         )
@@ -119,7 +118,7 @@ pub(crate) fn finish_option_propagation(
     let function_return_type_id = *function_return_type_id;
 
     if !type_environment.is_option(function_return_type_id) {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
             propagation_span,
         )
@@ -131,7 +130,7 @@ pub(crate) fn finish_option_propagation(
         value_type_id.expect("optional operand was checked above"),
         type_environment,
     ) {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch,
             propagation_span,
         )

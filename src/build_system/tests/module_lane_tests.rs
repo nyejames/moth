@@ -6,7 +6,9 @@ use crate::build_system::create_project_modules::compiled_boundary::{
     CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation,
 };
 use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
-use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
+use crate::build_system::create_project_modules::module_artifact_store::{
+    ModuleArtifactStore, ProviderSlot,
+};
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
@@ -18,10 +20,19 @@ use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationConte
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
+use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    BoundaryAccumulator, SuccessfulWarningBoundary, SuccessfulWarningPosition,
+    SuccessfulWarningSink,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
+    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
@@ -236,7 +247,6 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: entry_point.clone(),
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity::default(),
             doc_fragments: vec![],
@@ -341,7 +351,6 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from("@page.moth"),
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity {
                 has_non_trivial_root_body: true,
@@ -361,14 +370,14 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             panic!("entry assembly invariant must remain an infrastructure error")
         }
     };
-    assert!(error.msg.contains("has no owning package"));
+    assert!(error.message.contains("has no owning package"));
 }
 
 #[test]
 fn frontend_compilation_retains_project_artefact_interfaces() {
     // WHAT: a successful project artefact keeps its published interface after the frontend
     //       handoff instead of being flattened into a bare `Module`.
-    // WHY: R5C1 retains completed artefacts so interface closure, fingerprints and link owners
+    // WHY: completed artefacts are retained so interface closure, fingerprints and link owners
     //      can consume them after `compile_project_frontend` returns.
     let module = minimal_lane_module(PathBuf::from("@page.moth"), true);
     let frontend = test_frontend_from_project_modules(vec![module]);
@@ -418,7 +427,7 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
     // WHAT: source-package artefacts are retained immutably (root activity intact) yet never
     //       selected as project entries. Entry selection resolves the project graph's normal
     //       entry identities through the retained mapping rather than mutating package metadata.
-    // WHY: R5C1 forbids clearing package `root_activity` to suppress entries; the separate graph
+    // WHY: package `root_activity` is never cleared to suppress entries; the separate graph
     //      boundaries keep package modules out of project entry selection.
     let active_project = minimal_lane_module(PathBuf::from("src/@page.moth"), true);
     let package_root = minimal_lane_module(PathBuf::from("packages/html/@mod.moth"), true);
@@ -637,39 +646,40 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
 }
 
 #[test]
-fn duplicate_declaration_inside_one_materialisation_context_fails_publication() {
+fn duplicate_declaration_inside_one_materialisation_context_raises_compiler_bug() {
     let identity = generated_test_identity("dup").declaration().clone();
-    let origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("dup"),
-        "dup".to_owned(),
-        ModuleRootRole::Normal,
+    let expected_message = format!(
+        "Generated declaration identity {:?} is duplicated inside one materialisation context",
+        identity
     );
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        origin,
-        PathBuf::from("@dup.moth"),
-        PathBuf::from("@dup.moth"),
-    )]);
     let mut store = ModuleArtifactStore::new(1);
     let mut module = minimal_lane_module(PathBuf::from("@dup.moth"), true);
     module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone(), identity]),
     ));
 
-    let error = store
-        .publish_success(
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.publish_success(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
                 interface: empty_test_interface("dup".to_owned()),
             },
         )
-        .unwrap_err();
-    assert!(
-        error
-            .msg
-            .contains("duplicated inside one materialisation context")
+    }))
+    .expect_err("duplicate materialisation identities must raise a compiler bug");
+    let report = payload
+        .downcast::<CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
+    assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
+    assert_eq!(report.message.as_ref(), expected_message.as_str());
+
+    assert_eq!(store.artifact_count(), 0);
+    assert_eq!(
+        store.slot(ModuleId::from_index(0)).unwrap(),
+        ProviderSlot::Unavailable
     );
-    let _ = graph;
+    assert_eq!(store.materialisation_locations().count(), 0);
 }
 
 #[test]
@@ -712,13 +722,17 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
         location.template_index, 1,
         "the row index must be the declaring context's own position, not the publication order"
     );
-    assert!(store.materialisation_context_at(location).is_ok());
+    let _context = store.materialisation_context_at(location);
     let _ = graph;
 }
 
 #[test]
 fn same_generated_declaration_across_project_and_package_boundaries_fails() {
     let identity = generated_test_identity("shared").declaration().clone();
+    let expected_message = format!(
+        "Generated declaration identity {:?} is published by both project module 0 and source package @html",
+        identity
+    );
     let mut project_module = minimal_lane_module(PathBuf::from("@page.moth"), true);
     project_module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone()]),
@@ -740,16 +754,17 @@ fn same_generated_declaration_across_project_and_package_boundaries_fails() {
         boundary: package,
     }]);
 
-    let error = match ProjectFrontendCompilation::new(
-        project,
-        registry,
-        ResourceInputRegistry::new(),
-        Vec::new(),
-    ) {
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ProjectFrontendCompilation::new(project, registry, ResourceInputRegistry::new(), Vec::new())
+    }));
+    let report = match payload {
+        Err(payload) => payload
+            .downcast::<CompilerBugReport>()
+            .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload")),
         Ok(_) => panic!("one declaration identity must not cross boundaries"),
-        Err(error) => error,
     };
-    assert!(error.msg.contains("both project"));
+    assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
+    assert_eq!(report.message.as_ref(), expected_message.as_str());
 }
 
 #[test]
@@ -862,11 +877,11 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
         diagnosed: vec![
             DiagnosedModule {
                 module_id: ModuleId::from_index(2),
-                diagnostics: test_module_diagnostics("z.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("z.moth", &mut string_table),
             },
             DiagnosedModule {
                 module_id: ModuleId::from_index(0),
-                diagnostics: test_module_diagnostics("a.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("a.moth", &mut string_table),
             },
         ],
         blocked: vec![
@@ -897,67 +912,188 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
     assert_eq!(blocked_order, vec![0, 1]);
 }
 
-fn test_module_diagnostics(
+fn test_prepared_diagnostics(
     _module_path: &str,
     string_table: &mut StringTable,
-) -> ModuleDiagnostics {
+) -> PreparedDiagnosticBatch {
     let name = string_table.intern("missing_name");
-    let diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(
-            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
-        ),
+    let diagnostic = names_declarations::unknown_value_name(name, None);
+    PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table.clone(),
         None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    );
-    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table.clone());
-    ModuleDiagnostics::from_messages(messages).expect("user diagnostic should classify")
+        None,
+    )
+    .classify_premerge()
+    .expect("user diagnostic should classify")
 }
 
 #[test]
-fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, None, None);
-    let rendered_codes = messages
-        .warnings()
-        .map(|warning| warning.kind.code().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        rendered_codes.len(),
-        2,
-        "project and source-package generated sidecar warnings should render"
-    );
-    assert!(
-        rendered_codes.windows(2).all(|pair| pair[0] == pair[1]),
-        "rendered generated warnings should share one code: {rendered_codes:?}"
-    );
+fn successful_warning_sink_preserves_boundary_and_lane_order() {
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
 
-    let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let compilation = ProjectCompilation::from_frontend(frontend)
-        .expect("generated sidecar boundaries should assemble");
-    let compilation_codes = compilation
-        .modules()
-        .flat_map(|module| {
-            module
-                .metadata
-                .warnings
-                .iter()
-                .map(|warning| warning.kind.code().to_owned())
+    {
+        let (strings, mut sink) = warning_owner.compiler_parts_mut();
+        let environment = TypeEnvironment::new();
+
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::Configuration,
+            "project_configuration.moth",
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::GeneratedSidecar(1),
+            "project_sidecar_1.moth",
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::BaseModule(2),
+            "project_base_2.moth",
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::BaseModule(0),
+            "project_base_0.moth",
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::GeneratedSidecar(0),
+            "project_sidecar_0.moth",
+        );
+
+        let package_1 = SuccessfulWarningBoundary::SourcePackage(1);
+        sink.set_source_package_identity(
+            package_1,
+            StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "package_1"),
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            package_1,
+            SuccessfulWarningPosition::BaseModule(0),
+            "package_1_base_0.moth",
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            package_1,
+            SuccessfulWarningPosition::GeneratedSidecar(0),
+            "package_1_sidecar_0.moth",
+        );
+
+        let package_0 = SuccessfulWarningBoundary::SourcePackage(0);
+        sink.set_source_package_identity(
+            package_0,
+            StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "package_0"),
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            package_0,
+            SuccessfulWarningPosition::GeneratedSidecar(0),
+            "package_0_sidecar_0.moth",
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            package_0,
+            SuccessfulWarningPosition::BaseModule(0),
+            "package_0_base_0.moth",
+        );
+
+        sink.commit_boundary(SuccessfulWarningBoundary::Project, None);
+        sink.commit_boundary(
+            package_0,
+            Some(Arc::new(
+                crate::compiler_frontend::source::SourceDatabase::empty(),
+            )),
+        );
+        sink.commit_boundary(
+            package_1,
+            Some(Arc::new(
+                crate::compiler_frontend::source::SourceDatabase::empty(),
+            )),
+        );
+        stage_successful_warning(
+            &mut sink,
+            strings,
+            &environment,
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::CommandTail,
+            "late_command.moth",
+        );
+        sink.commit_boundary(SuccessfulWarningBoundary::Project, None);
+    }
+
+    let messages = warning_owner
+        .finish_successful_warnings(())
+        .expect("staged successful warnings should freeze");
+    let messages = match messages {
+        CompilationOutcome::Success {
+            warnings: Some(messages),
+            ..
+        } => messages,
+        other => panic!("the staged warning lanes should produce reports: {other:?}"),
+    };
+    let rendered_names = messages
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(report, view)| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("warning should retain its typed name fact");
+            let context = DiagnosticRenderContext::for_report(report);
+            context.string_table.resolve(facts.name).to_owned()
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        compilation_codes.len(),
-        2,
-        "success-only compilation should retain project and source-package sidecar warnings"
+        rendered_names,
+        vec![
+            "project_configuration.moth",
+            "project_base_0.moth",
+            "project_base_2.moth",
+            "project_sidecar_0.moth",
+            "project_sidecar_1.moth",
+            "package_0_base_0.moth",
+            "package_0_sidecar_0.moth",
+            "package_1_base_0.moth",
+            "package_1_sidecar_0.moth",
+            "late_command.moth",
+        ],
+        "command warning publication order changed",
     );
     assert_eq!(
-        compilation_codes, rendered_codes,
-        "frontend rendering and success-only compilation must retain identical warning codes"
+        usize::try_from(messages.counts().warnings).expect("warning count should fit usize"),
+        rendered_names.len()
+    );
+    assert_eq!(messages.counts().errors, 0);
+    let rendered_codes = messages
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(rendered_codes.len(), rendered_names.len());
+    assert!(
+        rendered_codes.windows(2).all(|pair| pair[0] == pair[1]),
+        "all staged warning codes should remain identical: {rendered_codes:?}"
     );
 }
 
@@ -1156,7 +1292,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
         }
     };
     assert!(
-        error.msg.contains("in its calling boundary"),
+        error.message.contains("in its calling boundary"),
         "unexpected boundary-scoped resolution failure: {error:?}"
     );
 }
@@ -1400,7 +1536,6 @@ fn lane_module_with_generated_and_cross_module_calls(
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: if active_root {
                 ModuleRootActivity {
@@ -1480,7 +1615,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
         Err(error) => error,
     };
     assert!(
-        error.msg.contains("never reached a completed outcome"),
+        error.message.contains("never reached a completed outcome"),
         "unexpected frontend-boundary rejection: {error:?}"
     );
 }
@@ -1541,7 +1676,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: vec![DiagnosedModule {
             module_id: ModuleId::from_index(1),
-            diagnostics: test_module_diagnostics("diagnosed.moth", &mut string_table),
+            diagnostics: test_prepared_diagnostics("diagnosed.moth", &mut string_table),
         }],
         blocked: vec![BlockedModule {
             module_id: ModuleId::from_index(2),
@@ -1566,97 +1701,39 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         }
     };
     assert!(
-        error.msg.contains("boundary with diagnosed ModuleId"),
+        error.message.contains("boundary with diagnosed ModuleId"),
         "unexpected success-only rejection: {error:?}"
     );
 }
-
-fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFrontendCompilation {
-    let mut project_sidecar_module =
-        minimal_lane_module(PathBuf::from("@generated_project.moth"), true);
-    project_sidecar_module
-        .metadata
-        .warnings
-        .push(test_warning_diagnostic(
-            "generated_project.moth",
-            string_table,
-        ));
-    let mut project_generated = BoundaryGeneratedFunctionStore::default();
-    project_generated.push_completed_for_test(CompletedGeneratedFunction {
-        identity: generated_test_identity("generated_project"),
-        summary: generated_test_summary(),
-        sidecar: GeneratedFunctionSidecar::new(
-            generated_test_identity("generated_project"),
-            project_sidecar_module,
-        ),
-    });
-    let mut project = test_graph_boundary(
-        vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
-        "test",
-        "page",
-    );
-    project.generated = project_generated;
-
-    let mut package_sidecar_module =
-        minimal_lane_module(PathBuf::from("@generated_package.moth"), true);
-    package_sidecar_module
-        .metadata
-        .warnings
-        .push(test_warning_diagnostic(
-            "generated_package.moth",
-            string_table,
-        ));
-    let mut package_generated = BoundaryGeneratedFunctionStore::default();
-    package_generated.push_completed_for_test(CompletedGeneratedFunction {
-        identity: generated_test_identity("generated_package"),
-        summary: generated_test_summary(),
-        sidecar: GeneratedFunctionSidecar::new(
-            generated_test_identity("generated_package"),
-            package_sidecar_module,
-        ),
-    });
-    let mut package = test_graph_boundary(
-        vec![minimal_lane_module(
-            PathBuf::from("packages/warnpkg/@mod.moth"),
-            true,
-        )],
-        "warnpkg",
-        "",
-    );
-    package.generated = package_generated;
-
-    ProjectFrontendCompilation::new(
-        project,
-        test_package_registry(vec![CompiledSourcePackage {
-            package_identity: StablePackageIdentity::source_package(
-                PackageOrigin::ProjectLocal,
-                "warnpkg",
-            ),
-            root_module_id: ModuleId::from_index(0),
-            boundary: package,
-        }]),
-        ResourceInputRegistry::new(),
-        Vec::new(),
+fn stage_successful_warning(
+    sink: &mut SuccessfulWarningSink<'_>,
+    strings: &mut StringTable,
+    environment: &TypeEnvironment,
+    boundary: SuccessfulWarningBoundary,
+    position: SuccessfulWarningPosition,
+    name: &str,
+) {
+    let warning = test_warning_diagnostic(name, strings);
+    let batch = prepared_success_warning(warning, strings, environment);
+    sink.append(boundary, position, batch);
+}
+fn prepared_success_warning(
+    warning: DiagnosticDraft,
+    string_table: &StringTable,
+    environment: &TypeEnvironment,
+) -> PreparedDiagnosticBatch {
+    PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(vec![warning]),
+        string_table,
+        Some(environment),
+        || None,
     )
-    .expect("warning package frontend should validate")
+    .expect("warning drafts should capture against the command-owned string table")
 }
 
-fn test_warning_diagnostic(
-    _module_path: &str,
-    string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    let name = string_table.intern("unused_warning_name");
-    CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(
-            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
-        ),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    )
+fn test_warning_diagnostic(module_path: &str, string_table: &mut StringTable) -> DiagnosticDraft {
+    let name = string_table.intern(module_path);
+    names_declarations::unknown_value_name(name, None).with_severity(DiagnosticSeverity::Warning)
 }
 
 fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {
@@ -1711,7 +1788,6 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: if active_root {
                 ModuleRootActivity {
@@ -1751,12 +1827,16 @@ fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
     );
     boundary.diagnosed = vec![DiagnosedModule {
         module_id: ModuleId::from_index(0),
-        diagnostics: test_module_diagnostics("single.moth", &mut string_table),
+        diagnostics: test_prepared_diagnostics("single.moth", &mut string_table),
     }];
     let error = boundary
         .validate_invariants()
         .expect_err("a diagnosed record must hold the diagnosed slot");
-    assert!(error.msg.contains("does not hold the diagnosed store slot"));
+    assert!(
+        error
+            .message
+            .contains("does not hold the diagnosed store slot")
+    );
 
     // Slot diagnosed but no record.
     let mut store = ModuleArtifactStore::new(1);
@@ -1773,7 +1853,7 @@ fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
     let error = boundary
         .validate_invariants()
         .expect_err("a diagnosed slot must own a diagnosed record");
-    assert!(error.msg.contains("has no diagnosed record"));
+    assert!(error.message.contains("has no diagnosed record"));
 }
 
 #[test]
@@ -1801,7 +1881,11 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
     let error = boundary
         .validate_invariants()
         .expect_err("a blocked record must hold the blocked slot");
-    assert!(error.msg.contains("does not hold the blocked store slot"));
+    assert!(
+        error
+            .message
+            .contains("does not hold the blocked store slot")
+    );
 
     let mut store = ModuleArtifactStore::new(1);
     store
@@ -1817,7 +1901,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
     let error = boundary
         .validate_invariants()
         .expect_err("a blocked slot must own a blocked record");
-    assert!(error.msg.contains("has no blocked record"));
+    assert!(error.message.contains("has no blocked record"));
 }
 
 #[test]
@@ -1858,11 +1942,11 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         diagnosed: vec![
             DiagnosedModule {
                 module_id: ModuleId::from_index(0),
-                diagnostics: test_module_diagnostics("a.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("a.moth", &mut string_table),
             },
             DiagnosedModule {
                 module_id: ModuleId::from_index(0),
-                diagnostics: test_module_diagnostics("duplicate.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("duplicate.moth", &mut string_table),
             },
         ],
         blocked: Vec::new(),
@@ -1872,7 +1956,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         .expect_err("duplicate diagnosed records must be rejected");
     assert!(
         error
-            .msg
+            .message
             .contains("appears more than once in the diagnosed lane")
     );
 
@@ -1923,7 +2007,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         .expect_err("duplicate blocked records must be rejected");
     assert!(
         error
-            .msg
+            .message
             .contains("appears more than once in the blocked lane")
     );
 
@@ -1937,7 +2021,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: vec![DiagnosedModule {
             module_id: ModuleId::from_index(0),
-            diagnostics: test_module_diagnostics("overlap.moth", &mut string_table),
+            diagnostics: test_prepared_diagnostics("overlap.moth", &mut string_table),
         }],
         blocked: vec![BlockedModule {
             module_id: ModuleId::from_index(0),
@@ -1947,7 +2031,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
     let error = boundary
         .validate_invariants()
         .expect_err("diagnosed and blocked lanes must never overlap");
-    assert!(error.msg.contains("is both diagnosed and blocked"));
+    assert!(error.message.contains("is both diagnosed and blocked"));
 }
 
 #[test]
@@ -1983,7 +2067,7 @@ fn source_package_publication_rejects_unavailable_root_slot() {
         .expect_err("an unfinished package boundary must not publish");
 
     assert!(
-        error.msg.contains("never reached a completed outcome"),
+        error.message.contains("never reached a completed outcome"),
         "unexpected publication rejection: {error:?}"
     );
     assert_eq!(
@@ -2149,7 +2233,7 @@ fn late_package_duplicate_leaves_registry_unchanged() {
             &[],
         )
         .expect_err("one declaration identity must not cross package boundaries");
-    assert!(error.msg.contains("published by source packages"));
+    assert!(error.message.contains("published by source packages"));
     assert_eq!(
         registry.len(),
         1,

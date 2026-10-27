@@ -3,7 +3,8 @@
 use super::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::ids::TemplateSlotPlanId;
 use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// Reserved entries occupy a stable ID but are invisible through
 /// [`TemplateIrStore::get_slot_plan`]. A reserved ID must be committed exactly
@@ -35,18 +36,20 @@ impl TemplateIrStore {
         &mut self,
         id: TemplateSlotPlanId,
         slot_plan: TemplateSlotPlan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match self.slot_plans.get(id.index()) {
             Some(SlotPlanSlot::Reserved) => {}
             Some(SlotPlanSlot::Committed(_)) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR store slot plan {id} was committed more than once."
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("TIR store slot plan {id} was committed more than once."),
+                ));
             }
             None => {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR store cannot commit unknown slot plan {id}."
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("TIR store cannot commit unknown slot plan {id}."),
+                ));
             }
         }
 
@@ -57,48 +60,62 @@ impl TemplateIrStore {
                 *slot = SlotPlanSlot::Committed(slot_plan);
                 Ok(())
             }
-            Some(SlotPlanSlot::Committed(_)) => Err(CompilerError::compiler_error(format!(
-                "TIR store slot plan {id} was committed more than once."
-            ))),
-            None => Err(CompilerError::compiler_error(format!(
-                "TIR store cannot commit unknown slot plan {id}."
-            ))),
+            Some(SlotPlanSlot::Committed(_)) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store slot plan {id} was committed more than once."),
+            )),
+            None => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store cannot commit unknown slot plan {id}."),
+            )),
         }
     }
 
     fn validate_immediate_slot_plan_shape(
         &self,
         slot_plan: &TemplateSlotPlan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for (index, source) in slot_plan.contribution_sources.iter().enumerate() {
             if source.source.0 != index {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR store rejected slot-plan contribution source {} at index {index}.",
-                    source.source.0
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR store rejected slot-plan contribution source {} at index {index}.",
+                        source.source.0
+                    ),
+                ));
             }
 
             if self.get_node(source.render_root).is_none() {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR store rejected slot-plan contribution source {index} with missing render root {}.",
-                    source.render_root
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR store rejected slot-plan contribution source {index} with missing render root {}.",
+                        source.render_root
+                    ),
+                ));
             }
         }
 
         for (index, site) in slot_plan.slot_sites.iter().enumerate() {
             if site.site.0 != index {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR store rejected slot-plan site {} at index {index}.",
-                    site.site.0
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR store rejected slot-plan site {} at index {index}.",
+                        site.site.0
+                    ),
+                ));
             }
 
             if self.get_node(site.render_root).is_none() {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR store rejected slot-plan site {index} with missing render root {}.",
-                    site.render_root
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR store rejected slot-plan site {index} with missing render root {}.",
+                        site.render_root
+                    ),
+                ));
             }
         }
 

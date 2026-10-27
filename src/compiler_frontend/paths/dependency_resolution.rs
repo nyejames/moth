@@ -3,26 +3,28 @@
 //! `ProjectPathResolver` owns the public dependency-resolution entry point, while this module owns the
 //! dependency-specific boundary error and validation rules that are independent of resolver state.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::Path;
 
 /// Failure while resolving a dependency path.
 ///
-/// User-facing dependency failures remain plain `CompilerDiagnostic` values;
-/// filesystem and internal failures remain typed `CompilerError` values.
-#[derive(Clone, Debug)]
+/// User-facing dependency failures remain diagnostic drafts;
+/// filesystem and internal failures remain typed `InfrastructureFailure` values.
+#[derive(Debug)]
 pub(crate) enum DependencyPathResolutionError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
-impl From<CompilerError> for DependencyPathResolutionError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for DependencyPathResolutionError {
+    fn from(error: InfrastructureFailure) -> Self {
         DependencyPathResolutionError::Infrastructure(error)
     }
 }
@@ -60,7 +62,7 @@ fn validate_dependency_boundary_against_base(
             }
             _ => InvalidImportPathReason::EscapesProjectRoot,
         };
-        let diagnostic = CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
+        let diagnostic = imports::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
     Ok(())
@@ -76,7 +78,7 @@ pub(crate) fn validate_dependency_case_sensitivity(
     filesystem_base: &Path,
     canonical_file: &Path,
     is_parent_fallback: bool,
-    string_table: &mut StringTable,
+    strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<(), DependencyPathResolutionError> {
     let canonical_base =
         fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
@@ -90,6 +92,7 @@ pub(crate) fn validate_dependency_case_sensitivity(
 
     let mut path_components = Vec::new();
     let path_components = path_fork.resolve_components(dependency_path, &mut path_components);
+    let string_table = strings.strings();
     let user_components: Vec<String> = match base_kind {
         CompileTimePathBase::SourcePackageRoot => path_components
             .iter()
@@ -123,10 +126,10 @@ pub(crate) fn validate_dependency_case_sensitivity(
         first_case_mismatch(user_file_components, &canonical_components)
     {
         let reason = InvalidImportPathReason::CaseMismatch {
-            provided: string_table.intern(&provided),
-            expected: string_table.intern(&expected),
+            provided: strings.intern(&provided),
+            expected: strings.intern(&expected),
         };
-        let diagnostic = CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
+        let diagnostic = imports::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
 

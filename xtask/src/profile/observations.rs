@@ -66,8 +66,7 @@ pub(crate) struct ProfileObservation {
 /// WHAT: Executes one already-preflighted case through the shared validation
 /// authority and returns a `ProfileObservation`.
 /// WHY: This is the measured pass that provides the timer/counter data
-/// written beside Samply profiles. The wall time here is used for
-/// hotspot estimation in later phases.
+/// The wall time here is used for hotspot estimation.
 pub(crate) fn run_observation(
     context: &BenchmarkExecutionContext<'_>,
     case: &BenchmarkCase,

@@ -6,7 +6,9 @@
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::value_use::JsValueUse;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalJsLowering};
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::statements::HirLocalDestination;
@@ -25,7 +27,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn lower_call_target(
         &mut self,
         target: &CallTarget,
-    ) -> Result<LoweredCallTarget, CompilerError> {
+    ) -> Result<LoweredCallTarget, InfrastructureFailure> {
         match target {
             CallTarget::Local(function_id) => Ok(LoweredCallTarget::FunctionName(
                 self.function_name(*function_id)?.to_owned(),
@@ -37,7 +39,7 @@ impl<'hir> JsEmitter<'hir> {
                 .cloned()
                 .map(LoweredCallTarget::FunctionName)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                         "JavaScript backend received unresolved cross-module function target {origin:?}"
                     ))
                 }),
@@ -48,7 +50,7 @@ impl<'hir> JsEmitter<'hir> {
                 .cloned()
                 .map(LoweredCallTarget::FunctionName)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                         "JavaScript backend received unresolved module-private function target {identity:?}"
                     ))
                 }),
@@ -59,7 +61,7 @@ impl<'hir> JsEmitter<'hir> {
                 .cloned()
                 .map(LoweredCallTarget::FunctionName)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                         "JavaScript backend received unresolved generated function target {identity:?}"
                     ))
                 }),
@@ -70,13 +72,13 @@ impl<'hir> JsEmitter<'hir> {
                     .external_package_registry
                     .get_function_by_id(*id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                             "JavaScript backend: unknown external function '{}'",
                             id.name()
                         ))
                     })?;
                 let lowering = function_def.lowerings.js.as_ref().ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                         "JavaScript backend: no JS lowering registered for external function '{}'",
                         id.name()
                     ))
@@ -96,7 +98,7 @@ impl<'hir> JsEmitter<'hir> {
                                 crate::backends::js::external_module_export_glue_function_name(*id);
                             Ok(LoweredCallTarget::FunctionName(glue_name))
                         } else {
-                            Err(CompilerError::compiler_error(format!(
+                            Err(InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                                 "JavaScript backend: external module export '{}' requires generated HTML glue before lowering.",
                                 export_name
                             )))
@@ -116,7 +118,7 @@ impl<'hir> JsEmitter<'hir> {
         target: &CallTarget,
         args: HirValueRange,
         results: &[HirLocalDestination],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let call = self.lower_call_expression(target, args)?;
         match results {
             [] => self.emit_line(&format!("{call};")),
@@ -143,7 +145,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         target: &CallTarget,
         args: HirValueRange,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let lowered_target = self.lower_call_target(target)?;
         let hir = self.hir;
         let args = hir.expressions.values(args);
@@ -180,7 +182,7 @@ impl<'hir> JsEmitter<'hir> {
 pub(super) fn substitute_inline_expression(
     template: &str,
     args: &[String],
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let mut result = String::new();
     let mut seen_placeholders = vec![0usize; args.len()];
     let mut last_copied_byte = 0usize;
@@ -210,23 +212,29 @@ pub(super) fn substitute_inline_expression(
         let argument_index = template[digit_start_byte..digit_end_byte]
             .parse::<usize>()
             .map_err(|_| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                     "JavaScript backend: inline expression template contains invalid placeholder '{placeholder}'"
                 ))
             })?;
 
         let Some(argument) = args.get(argument_index) else {
-            return Err(CompilerError::compiler_error(format!(
-                "JavaScript backend: inline expression template contains placeholder '{placeholder}' but only {} argument(s) were provided.",
-                args.len()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!(
+                    "JavaScript backend: inline expression template contains placeholder '{placeholder}' but only {} argument(s) were provided.",
+                    args.len()
+                ),
+            ));
         };
 
         seen_placeholders[argument_index] += 1;
         if seen_placeholders[argument_index] > 1 {
-            return Err(CompilerError::compiler_error(format!(
-                "JavaScript backend: inline expression template contains duplicate placeholder '{placeholder}'. Each argument must be referenced at most once."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!(
+                    "JavaScript backend: inline expression template contains duplicate placeholder '{placeholder}'. Each argument must be referenced at most once."
+                ),
+            ));
         }
 
         result.push_str(&template[last_copied_byte..start_byte]);
@@ -239,9 +247,12 @@ pub(super) fn substitute_inline_expression(
     for (index, count) in seen_placeholders.iter().enumerate() {
         if *count == 0 {
             let placeholder = format!("#{index}");
-            return Err(CompilerError::compiler_error(format!(
-                "JavaScript backend: inline expression template is missing placeholder '{placeholder}'"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!(
+                    "JavaScript backend: inline expression template is missing placeholder '{placeholder}'"
+                ),
+            ));
         }
     }
 

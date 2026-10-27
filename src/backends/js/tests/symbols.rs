@@ -29,7 +29,7 @@ fn unicode_field_spellings_use_exact_utf8_hex_abi_names() {
 }
 
 #[test]
-fn missing_field_name_metadata_is_an_internal_compiler_error() {
+fn missing_field_name_metadata_is_an_internal_infrastructure_failure() {
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -57,7 +57,7 @@ fn missing_field_name_metadata_is_an_internal_compiler_error() {
         .build_symbol_maps()
         .expect_err("missing field metadata must reject malformed HIR");
 
-    assert!(error.msg.contains("no source name for FieldId(0)"));
+    assert!(error.message.contains("no source name for FieldId(0)"));
 }
 
 /// Verifies that a function whose name is a JS reserved word gets an underscore prefix. [names]

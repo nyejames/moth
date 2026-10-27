@@ -165,10 +165,9 @@ pub(crate) fn transfer_terminator(
         }
 
         HirTerminator::Uninitialized => {
-            return Err(context.diagnostics.internal_error(
-                "Uninitialized terminator reached borrow validation",
-                location,
-            ));
+            return Err(context
+                .diagnostics
+                .internal_error("Uninitialized terminator reached borrow validation"));
         }
 
         HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {}

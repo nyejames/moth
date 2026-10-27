@@ -13,10 +13,10 @@ fn builder_cannot_override_frontend_owned_directive_by_name() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("cannot override frontend-owned directive"),
         "unexpected error message: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -32,10 +32,10 @@ fn builder_cannot_override_frontend_owned_markdown_directive_by_name() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("cannot override frontend-owned directive"),
         "unexpected error message: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -69,10 +69,10 @@ fn builder_cannot_register_core_directive_behavior() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("cannot be registered as a core directive"),
         "unexpected error message: {}",
-        error.msg
+        error.message
     );
 }
 

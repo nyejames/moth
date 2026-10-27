@@ -362,11 +362,11 @@ fn projection_with_missing_source_state_is_rejected() {
         .expect_err("projection with missing source state must fail");
 
     assert!(
-        error.msg.contains("projection event")
-            && error.msg.contains("EventId(0)")
-            && error.msg.contains("source place PlaceId(0)")
-            && error.msg.contains("destination place PlaceId(1)")
-            && error.msg.contains("origin state is missing"),
+        error.message.contains("projection event")
+            && error.message.contains("EventId(0)")
+            && error.message.contains("source place PlaceId(0)")
+            && error.message.contains("destination place PlaceId(1)")
+            && error.message.contains("origin state is missing"),
         "expected the projection error to name event, places and missing origin state, got: {error:?}"
     );
 }
@@ -378,11 +378,11 @@ fn copy_with_missing_source_state_is_rejected() {
         .expect_err("copy with missing source state must fail");
 
     assert!(
-        error.msg.contains("copy event")
-            && error.msg.contains("EventId(0)")
-            && error.msg.contains("source place PlaceId(0)")
-            && error.msg.contains("destination place PlaceId(1)")
-            && error.msg.contains("origin state is missing"),
+        error.message.contains("copy event")
+            && error.message.contains("EventId(0)")
+            && error.message.contains("source place PlaceId(0)")
+            && error.message.contains("destination place PlaceId(1)")
+            && error.message.contains("origin state is missing"),
         "expected the copy error to name event, places and missing origin state, got: {error:?}"
     );
 }
@@ -394,11 +394,11 @@ fn aggregate_with_missing_field_source_state_is_rejected() {
         .expect_err("aggregate with a missing field state must fail");
 
     assert!(
-        error.msg.contains("aggregate event")
-            && error.msg.contains("EventId(1)")
-            && error.msg.contains("field source place PlaceId(2)")
-            && error.msg.contains("destination place PlaceId(1)")
-            && error.msg.contains("origin state is missing"),
+        error.message.contains("aggregate event")
+            && error.message.contains("EventId(1)")
+            && error.message.contains("field source place PlaceId(2)")
+            && error.message.contains("destination place PlaceId(1)")
+            && error.message.contains("origin state is missing"),
         "expected the aggregate error to name the event, the failing field place and the \
          destination place, got: {error:?}"
     );

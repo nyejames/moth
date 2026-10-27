@@ -49,10 +49,14 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionContextInputs, resolve_parsed_type_annotation,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow, names_declarations, token_lexical, types_borrows_targets,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidControlFlowStatementReason,
-    InvalidMultiBindReason, TypeMismatchContext,
+    InvalidAssignmentTargetReason, InvalidControlFlowStatementReason, InvalidMultiBindReason,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -264,7 +268,7 @@ pub(crate) fn parse_multi_bind_statement(
     };
 
     if slot_facts.rhs_slots.len() != parsed_targets.len() {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::ArityMismatch {
                 expected: parsed_targets.len(),
                 found: slot_facts.rhs_slots.len(),
@@ -327,11 +331,9 @@ fn validate_multi_bind_target_identifiers(
         ensure_not_keyword_shadow_identifier(target.name, target.span, string_table)?;
 
         if context.is_assignment_target_unavailable(target.name) {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
+            return Err(names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
                 Some(target.name),
-                None,
-                None,
                 None,
                 None,
                 target.span,
@@ -377,32 +379,35 @@ fn parse_target_list(
 
     loop {
         if token_stream.current_tag() == TokenTag::THIS {
-            return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+            return Err(token_lexical::invalid_multi_bind_syntax(
                 InvalidMultiBindReason::ThisTargetReserved,
+                None,
                 Some(token_stream.current_span()),
             )
             .into());
         }
 
         if token_stream.current_tag() != TokenTag::SYMBOL {
-            return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+            return Err(token_lexical::invalid_multi_bind_syntax(
                 if continuation_comma.is_some() {
                     InvalidMultiBindReason::MissingTargetAfterComma
                 } else {
                     InvalidMultiBindReason::ExpectedTargetName
                 },
+                None,
                 continuation_comma.unwrap_or_else(|| Some(token_stream.current_span())),
             )
             .into());
         }
 
         let Some(name) = token_stream.current_string_id_in(string_table)? else {
-            return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+            return Err(token_lexical::invalid_multi_bind_syntax(
                 if continuation_comma.is_some() {
                     InvalidMultiBindReason::MissingTargetAfterComma
                 } else {
                     InvalidMultiBindReason::ExpectedTargetName
                 },
+                None,
                 continuation_comma.unwrap_or_else(|| Some(token_stream.current_span())),
             )
             .into());
@@ -411,7 +416,7 @@ fn parse_target_list(
         token_stream.advance();
         let target_syntax = {
             let (target_syntax, next_index) = {
-                let mut declaration_cursor = token_stream.declaration_cursor()?;
+                let mut declaration_cursor = token_stream.declaration_cursor();
                 let target_syntax = parse_binding_target_syntax(
                     name,
                     &mut declaration_cursor,
@@ -448,8 +453,9 @@ fn parse_target_list(
                     token_stream.current_tag(),
                     TokenTag::COMMA | TokenTag::ASSIGN | TokenTag::END | TokenTag::EOF
                 ) {
-                    return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+                    return Err(token_lexical::invalid_multi_bind_syntax(
                         InvalidMultiBindReason::MissingTargetAfterComma,
+                        None,
                         comma_location,
                     )
                     .into());
@@ -459,16 +465,18 @@ fn parse_target_list(
             TokenTag::ASSIGN => break,
 
             TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
-                return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+                return Err(token_lexical::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::MissingAssignmentOperator,
+                    None,
                     Some(token_stream.current_span()),
                 )
                 .into());
             }
 
             _ => {
-                return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+                return Err(token_lexical::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::InvalidTokenAfterTarget,
+                    None,
                     Some(token_stream.current_span()),
                 )
                 .into());
@@ -488,7 +496,7 @@ fn parse_target_list(
         .iter()
         .find(|target| target.binding_mode.is_compile_time())
     {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::CompileTimeMarkerOnTarget,
             Some(target.name),
             target.span,
@@ -508,14 +516,13 @@ fn validate_target_mutability(target_syntax: &ParsedMultiBindTarget) -> MultiBin
     if target_syntax.binding_mode.is_mutable()
         && target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred)
     {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::MutableTargetNeedsExplicitType,
             Some(target_syntax.name),
             target_syntax.span,
         )
         .into());
     }
-
     Ok(())
 }
 
@@ -527,7 +534,7 @@ fn validate_unique_target_names(
     let mut seen_target_names = HashSet::new();
     for target in parsed_targets {
         if !seen_target_names.insert(target.name) {
-            return Err(CompilerDiagnostic::invalid_multi_bind(
+            return Err(calls_data::invalid_multi_bind(
                 InvalidMultiBindReason::DuplicateTarget,
                 Some(target.name),
                 target.span,
@@ -559,8 +566,9 @@ fn parse_multi_bind_rhs_expression(
         token_stream.current_tag(),
         TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF
     ) {
-        return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+        return Err(token_lexical::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MissingRightHandExpression,
+            None,
             Some(token_stream.current_span()),
         )
         .into());
@@ -589,8 +597,9 @@ fn parse_multi_bind_rhs_expression(
     };
 
     if token_stream.current_tag() == TokenTag::COMMA {
-        return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
+        return Err(token_lexical::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MultipleRightHandExpressions,
+            None,
             Some(token_stream.current_span()),
         )
         .into());
@@ -653,8 +662,7 @@ fn retain_multi_bind_value(error: ExpressionParseError) -> MultiBindResult<Parse
 }
 
 fn unsupported_multi_bind_rhs(span: Option<SourceSpan>) -> ExpressionParseError {
-    CompilerDiagnostic::invalid_multi_bind(InvalidMultiBindReason::UnsupportedRhs, None, span)
-        .into()
+    calls_data::invalid_multi_bind(InvalidMultiBindReason::UnsupportedRhs, None, span).into()
 }
 
 /// The ordered slot types and producer routes of one retained multi-bind value.
@@ -695,13 +703,15 @@ fn retained_multi_bind_slot_facts(
             let Some(ExpressionRpnItem::PendingNumericExpression { expression, .. }) =
                 single_operand(&deferred.items)
             else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained multi-bind value block lost its single deferred value-block item",
                 )
                 .into());
             };
             let DeferredExpression::ValueBlock(block) = expression.as_ref() else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained multi-bind expression was not owned by the value-block constructor",
                 )
                 .into());
@@ -711,7 +721,7 @@ fn retained_multi_bind_slot_facts(
                 block.multi_bind_producer_facts(&state, expression_builder, const_values)?
             };
             if slot_expected_types.len() != producer_facts.len() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a retained multi-bind block's authored slot contract disagreed with its producer list",
                 )
                 .into());
@@ -775,14 +785,16 @@ fn retained_catch_slots(payload: &DeferredCatchHandler) -> MultiBindResult<Vec<M
     }
 
     let StatementExpression::Retained(deferred) = &payload.handled else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained multi-bind catch carried neither authored site facts nor a retained \
              source call",
         )
         .into());
     };
     if !matches!(deferred.suffix, DeferredExpressionSuffix::None) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained multi-bind catch protected a value with an authored propagation suffix",
         )
         .into());
@@ -796,7 +808,7 @@ fn retained_catch_slots(payload: &DeferredCatchHandler) -> MultiBindResult<Vec<M
         // single-result fragment) is ordinary multi-bind source misuse, not corrupted construction
         // state: report the same structured RHS shape diagnostic the completed classifier reports,
         // at the authored span, instead of a construction invariant failure.
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::RhsNotMultiValue,
             None,
             deferred.span,
@@ -824,7 +836,7 @@ fn retained_bare_call_slots(call: &DeferredCall) -> MultiBindResult<Vec<MultiBin
             | DeferredCall::Choice(_)
             | DeferredCall::GenericNominal(_)
     ) {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::UnsupportedRhs,
             None,
             call.call_span(),
@@ -848,7 +860,8 @@ fn retained_call_slots(call: RetainedTerminalCall<'_>) -> MultiBindResult<Vec<Mu
             .collect());
     }
     let Some(slots) = call.success_return_type_ids() else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a non-generic retained call reported no parsed success slot types",
         )
         .into());
@@ -982,14 +995,14 @@ fn classify_multi_bind_rhs(expression: ExpressionView<'_>) -> MultiBindResult<()
         ExpressionOperationView::Call(_) => Ok(()),
 
         ExpressionOperationView::ValueBlock(_) if expression.success_types().len() >= 2 => Ok(()),
-        ExpressionOperationView::ValueBlock(_) => Err(CompilerDiagnostic::invalid_multi_bind(
+        ExpressionOperationView::ValueBlock(_) => Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::RhsNotMultiValue,
             None,
             expression.span(),
         )
         .into()),
 
-        _ => Err(CompilerDiagnostic::invalid_multi_bind(
+        _ => Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::UnsupportedRhs,
             None,
             expression.span(),
@@ -1004,7 +1017,7 @@ fn extract_rhs_slot_types(rhs_expression: ExpressionView<'_>) -> MultiBindResult
 
     let slots = rhs_expression.success_types();
     if slots.len() < 2 {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::RhsNotMultiValue,
             None,
             rhs_expression.span(),
@@ -1054,7 +1067,8 @@ fn resolve_multi_bind_targets(
         .enumerate()
     {
         let producers = slot_facts.producer_facts.get(slot_index).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind target resolution lost its corresponding producer slot",
             )
         })?;
@@ -1072,7 +1086,7 @@ fn resolve_multi_bind_targets(
             if let (Some(explicit_type_id), Some(rhs_type)) = (explicit_type_id, rhs_type)
                 && explicit_type_id != rhs_type
             {
-                return Err(CompilerDiagnostic::type_mismatch(
+                return Err(types_borrows_targets::type_mismatch(
                     explicit_type_id,
                     rhs_type,
                     TypeMismatchContext::General,
@@ -1080,10 +1094,9 @@ fn resolve_multi_bind_targets(
                 )
                 .into());
             }
-
             let target_id = path_fork
                 .try_intern_child(context.scope, target_syntax.name)
-                .expect("path table exhausted while creating multi-bind target");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             let target_span = target_syntax.span;
 
             // An unannotated generic slot takes the exact type of its shape once every receiver is
@@ -1120,7 +1133,7 @@ fn resolve_multi_bind_targets(
                 }
                 let producers = pending_multi_bind_producers(producers);
                 if producers.is_empty() {
-                    return Err(CompilerDiagnostic::invalid_control_flow_statement(
+                    return Err(choices_control_flow::invalid_control_flow_statement(
                         InvalidControlFlowStatementReason::ValueIfNoProducingPath,
                         slot_facts.rhs_span,
                     )
@@ -1184,7 +1197,8 @@ fn resolve_multi_bind_targets(
                 // A generic slot without its own type takes the declaration's type.
                 Some(_) => slot_type.unwrap_or(declaration.type_id),
                 None => slot_type.ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a ready multi-bind target had no known producer type",
                     )
                 })?,
@@ -1212,13 +1226,14 @@ fn resolve_multi_bind_targets(
             .pending_binding()
             .expect("a non-ready reference is a pending numeric binding");
         let Some(mutable) = context.pending_numeric_is_mutable(binding) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind target has a stale pending numeric binding",
             )
             .into());
         };
         if target_syntax.binding_mode.is_mutable() {
-            return Err(CompilerDiagnostic::invalid_multi_bind(
+            return Err(calls_data::invalid_multi_bind(
                 InvalidMultiBindReason::ExistingTargetMutableMarker,
                 Some(target_syntax.name),
                 target_syntax.span,
@@ -1226,7 +1241,7 @@ fn resolve_multi_bind_targets(
             .into());
         }
         if !mutable {
-            return Err(CompilerDiagnostic::invalid_multi_bind(
+            return Err(calls_data::invalid_multi_bind(
                 InvalidMultiBindReason::ExistingTargetImmutable,
                 Some(target_syntax.name),
                 target_syntax.span,
@@ -1236,7 +1251,7 @@ fn resolve_multi_bind_targets(
         if let (Some(explicit_type_id), Some(slot_type)) = (explicit_type_id, slot_type)
             && explicit_type_id != slot_type
         {
-            return Err(CompilerDiagnostic::type_mismatch(
+            return Err(types_borrows_targets::type_mismatch(
                 explicit_type_id,
                 slot_type,
                 TypeMismatchContext::General,
@@ -1417,7 +1432,8 @@ fn require_ready_multi_bind_targets(
         .into_iter()
         .map(|target| match target {
             DeferredMultiBindTarget::Ready(target) => Ok(target),
-            DeferredMultiBindTarget::Pending { .. } => Err(CompilerError::compiler_error(
+            DeferredMultiBindTarget::Pending { .. } => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a completed multi-bind value retained a pending target route",
             )
             .into()),
@@ -1445,7 +1461,7 @@ fn resolve_existing_target(
     _type_environment: &TypeEnvironment,
 ) -> MultiBindResult<MultiBindTarget> {
     if target_syntax.binding_mode.is_mutable() {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetMutableMarker,
             Some(target_syntax.name),
             target_syntax.span,
@@ -1454,7 +1470,7 @@ fn resolve_existing_target(
     }
 
     if !existing_declaration.value_mode.is_mutable() {
-        return Err(CompilerDiagnostic::invalid_multi_bind(
+        return Err(calls_data::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetImmutable,
             Some(target_syntax.name),
             target_syntax.span,
@@ -1465,7 +1481,7 @@ fn resolve_existing_target(
     if let Some(explicit_type_id) = explicit_type_id
         && *explicit_type_id != existing_declaration.type_id
     {
-        return Err(CompilerDiagnostic::type_mismatch(
+        return Err(types_borrows_targets::type_mismatch(
             existing_declaration.type_id,
             *explicit_type_id,
             TypeMismatchContext::General,
@@ -1475,7 +1491,7 @@ fn resolve_existing_target(
     }
 
     if existing_declaration.type_id != slot_type {
-        return Err(CompilerDiagnostic::type_mismatch(
+        return Err(types_borrows_targets::type_mismatch(
             existing_declaration.type_id,
             slot_type,
             TypeMismatchContext::General,

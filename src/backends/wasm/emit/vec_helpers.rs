@@ -13,16 +13,13 @@
 //!   offset 8: capacity  (i32) — allocated element capacity (in elements, not bytes)
 
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use wasm_encoder::{Function, Instruction, MemArg, ValType};
 
 /// Emit the function body for one of the four vec-handle runtime helpers.
 ///
 /// `alloc_index` is the Wasm function index of `rt_alloc`, required by VecNew and VecPushHandle.
-pub(crate) fn emit_vec_helper(
-    helper: WasmRuntimeHelper,
-    alloc_index: u32,
-) -> Result<Function, CompilerError> {
+pub(crate) fn emit_vec_helper(helper: WasmRuntimeHelper, alloc_index: u32) -> Function {
     let mut function = match helper {
         WasmRuntimeHelper::VecNew => {
             // no params  |  local 0: vec_handle
@@ -34,11 +31,10 @@ pub(crate) fn emit_vec_helper(
             Function::new(vec![(4, ValType::I32)])
         }
         WasmRuntimeHelper::VecLen | WasmRuntimeHelper::VecGet => Function::new(Vec::new()),
-        _ => {
-            return Err(CompilerError::compiler_error(
-                "emit_vec_helper called with non-vec helper variant",
-            ));
-        }
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "emit_vec_helper called with non-vec helper variant"
+        ),
     };
 
     match helper {
@@ -221,7 +217,7 @@ pub(crate) fn emit_vec_helper(
     }
 
     function.instruction(&Instruction::End);
-    Ok(function)
+    function
 }
 
 fn memarg(offset: u64) -> MemArg {

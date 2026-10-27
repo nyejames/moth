@@ -6,7 +6,7 @@ use super::runtime_modules::emit_build_runtime_modules;
 use super::source::{generate_fallible_wrapper, generate_infallible_wrapper};
 use super::*;
 use crate::build_system::build::FileKind;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
@@ -144,7 +144,7 @@ fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
         .err()
         .expect("unknown emitted callable must fail before glue emission");
 
-        assert_eq!(error.error_type, ErrorType::Compiler);
+        assert_eq!(error.kind, InfrastructureFailureKind::Internal);
         for detail in [
             "HTML JS glue preparation",
             "validated runtime metadata is inconsistent",
@@ -153,12 +153,12 @@ fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
             "no definition in the supplied registry",
         ] {
             assert!(
-                error.msg.contains(detail),
+                error.message.contains(detail),
                 "missing {detail:?}: {}",
-                error.msg
+                error.message
             );
         }
-        assert!(!error.msg.contains("Synthetic(405)"));
+        assert!(!error.message.contains("Synthetic(405)"));
     }
 }
 
@@ -200,7 +200,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
         );
         if needs_lowering {
             let error = result.err().expect("missing JS lowering must fail");
-            assert_eq!(error.error_type, ErrorType::Compiler);
+            assert_eq!(error.kind, InfrastructureFailureKind::Internal);
             for detail in [
                 "HTML JS glue preparation",
                 "validated runtime metadata is inconsistent",
@@ -210,12 +210,12 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
                 "no applicable JavaScript lowering",
             ] {
                 assert!(
-                    error.msg.contains(detail),
+                    error.message.contains(detail),
                     "missing {detail:?}: {}",
-                    error.msg
+                    error.message
                 );
             }
-            assert!(error.msg.contains(&format!("{function_id:?}")));
+            assert!(error.message.contains(&format!("{function_id:?}")));
         } else {
             let glue = result.expect("non-module JS lowerings need no provider asset");
             assert!(glue.glue_output_files.is_empty());
@@ -277,7 +277,7 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
         .err()
         .expect("inconsistent selected runtime metadata must fail before source emission");
 
-        assert_eq!(error.error_type, ErrorType::Compiler);
+        assert_eq!(error.kind, InfrastructureFailureKind::Internal);
         for detail in [
             "HTML JS glue preparation",
             "validated runtime metadata is inconsistent",
@@ -288,13 +288,13 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
             reason,
         ] {
             assert!(
-                error.msg.contains(detail),
+                error.message.contains(detail),
                 "missing {detail:?}: {}",
-                error.msg
+                error.message
             );
         }
-        assert!(error.msg.contains(&format!("{function_id:?}")));
-        assert!(error.msg.contains(&format!("{package_id:?}")));
+        assert!(error.message.contains(&format!("{function_id:?}")));
+        assert!(error.message.contains(&format!("{package_id:?}")));
         crate::compiler_frontend::compiler_messages::render::assert_compiler_bug_views(
             error,
             "validated runtime metadata is inconsistent",
@@ -1035,7 +1035,11 @@ fn glue_rejects_optional_numeric_metadata_instead_of_forwarding_it() {
         &[],
     )
     .expect_err("optional numeric metadata has no adapter representation");
-    assert!(error.msg.contains("optional numeric signature metadata"));
+    assert!(
+        error
+            .message
+            .contains("optional numeric signature metadata")
+    );
 }
 
 /// Executes every generated integer-result wrapper configuration against one shared assertion
@@ -1322,8 +1326,7 @@ fn emit_build_runtime_modules_dedupes_by_specifier() {
         module_b.link_facts.external_import_candidates.as_slice(),
     ]);
     let mut occupied = HashSet::new();
-    let string_table = StringTable::new();
-    let files = emit_build_runtime_modules(&plan, &mut occupied, &string_table)
+    let files = emit_build_runtime_modules(&plan, &mut occupied)
         .expect("runtime module emission should succeed");
 
     // Only one runtime module emitted despite two modules requiring it.
@@ -1342,17 +1345,12 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
         .external_import_candidates
         .as_slice()]);
     let mut occupied = HashSet::new();
-    let string_table = StringTable::new();
-    let error = match emit_build_runtime_modules(&plan, &mut occupied, &string_table) {
+    let error = match emit_build_runtime_modules(&plan, &mut occupied) {
         Ok(_) => panic!("unregistered runtime module should fail"),
         Err(error) => error,
     };
-    let error = error
-        .primary_infrastructure_error()
-        .expect("runtime module failure should be an infrastructure error");
-
     assert!(
-        error.msg.contains("@moth/missing"),
+        error.message.contains("@moth/missing"),
         "expected unregistered module name in error"
     );
 }

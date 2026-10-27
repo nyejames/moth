@@ -1,4 +1,6 @@
-# Authored for Phase 5B.2 and unobserved until the parent harness run. The grouped String? subject uses the same known-option literal rule as option_value_if_literal_predicate_rejected; the body starts on the predicate line, so the literal is rejected. No html_wasm block is declared.
+# The grouped String? subject uses the same known-option literal rule as
+# option_value_if_literal_predicate_rejected; the body starts on the predicate line, so the
+# literal is rejected. No html_wasm block is declared.
 
 [backends.html]
 mode = "failure"

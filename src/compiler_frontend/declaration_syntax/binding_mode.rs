@@ -17,8 +17,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHAT: captures which of the mutually exclusive binding markers the user wrote, or the default
 /// when no marker is present.
 ///
-/// WHY: a single enum replaces the old `mutable_marker: bool` while keeping the supported runtime
-/// and compile-time declaration modes explicit.
+/// WHY: one enum keeps the supported runtime and compile-time declaration modes explicit
+/// instead of a `mutable_marker: bool` flag.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BindingMode {
     /// No marker: runtime immutable binding (`name = value`, `name Type = value`).

@@ -11,7 +11,8 @@ use crate::compiler_frontend::builtins::member_rules::BuiltinMemberRule;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
@@ -27,17 +28,12 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashSet;
 
 impl HirValidator<'_> {
-    pub(super) fn builtin_error_type(
-        &self,
-        anchor: Option<HirLocation>,
-    ) -> Result<TypeId, CompilerError> {
+    pub(super) fn builtin_error_type(&self) -> Result<TypeId, InfrastructureFailure> {
         self.type_environment
             .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
                 CanonicalBuiltinType::Error,
             ))
-            .ok_or_else(|| {
-                self.error_with_hir("Invoke requires registered builtin Error type", anchor)
-            })
+            .ok_or_else(|| self.error_with_hir("Invoke requires registered builtin Error type"))
     }
 
     pub(super) fn validate_call_channels(
@@ -47,23 +43,22 @@ impl HirValidator<'_> {
         results: impl ExactSizeIterator<Item = LocalId>,
         fallible: bool,
         anchor: Option<HirLocation>,
-    ) -> Result<Option<TypeId>, CompilerError> {
-        let args = self.value_ids(args, anchor)?;
+    ) -> Result<Option<TypeId>, InfrastructureFailure> {
+        let args = self.value_ids(args)?;
         for arg in args {
             self.validate_expression(*arg, anchor)?;
         }
         if let CallTarget::External(function_id) = target {
             if let Some(op) = CollectionBuiltinOp::from_external_function_id(*function_id) {
                 let receiver = args.first().ok_or_else(|| {
-                    self.error_with_hir("Collection builtin call is missing its receiver", anchor)
+                    self.error_with_hir("Collection builtin call is missing its receiver")
                 })?;
                 let shape = self
                     .type_environment
-                    .collection_shape(self.expression_row(*receiver, anchor)?.ty)
+                    .collection_shape(self.expression_row(*receiver)?.ty)
                     .ok_or_else(|| {
                         self.error_with_hir(
                             "Collection builtin receiver must have a collection type",
-                            anchor,
                         )
                     })?;
                 if matches!(op, CollectionBuiltinOp::PushFixed) && shape.fixed_capacity.is_none()
@@ -72,7 +67,6 @@ impl HirValidator<'_> {
                 {
                     return Err(self.error_with_hir(
                         "Collection push operation does not match receiver capacity",
-                        anchor,
                     ));
                 }
                 let rule = op.rule(
@@ -83,7 +77,7 @@ impl HirValidator<'_> {
                 );
                 self.validate_builtin_member_slots(rule, &args[1..], results, fallible, anchor)?;
                 return if rule.fallible {
-                    Ok(Some(self.builtin_error_type(anchor)?))
+                    Ok(Some(self.builtin_error_type()?))
                 } else {
                     Ok(None)
                 };
@@ -91,43 +85,34 @@ impl HirValidator<'_> {
             let function = self
                 .external_packages
                 .get_function_by_id(*function_id)
-                .ok_or_else(|| {
-                    self.error_with_hir("Call references missing external function", anchor)
-                })?;
+                .ok_or_else(|| self.error_with_hir("Call references missing external function"))?;
             if function.is_fallible() != fallible {
                 return Err(self.error_with_hir(
                     "Call channel compatibility does not match external signature",
-                    anchor,
                 ));
             }
             if args.len() != function.parameters.len() || results.len() != function.returns.len() {
                 return Err(self.error_with_hir(
                     "Call argument/result slot arity does not match external signature",
-                    anchor,
                 ));
             }
             for (arg, parameter) in args.iter().zip(&function.parameters) {
                 if !self.external_signature_matches(
                     &parameter.language_type,
-                    self.expression_row(*arg, anchor)?.ty,
-                    anchor,
+                    self.expression_row(*arg)?.ty,
                 )? {
-                    return Err(self.error_with_hir(
-                        "Call argument type does not match external signature",
-                        anchor,
-                    ));
+                    return Err(
+                        self.error_with_hir("Call argument type does not match external signature")
+                    );
                 }
             }
             for (result, expected) in results.zip(&function.returns) {
-                self.require_local_id(result, anchor)?;
-                if !self.external_signature_matches(
-                    &expected.value_type,
-                    self.local_types[&result],
-                    anchor,
-                )? {
+                self.require_local_id(result)?;
+                if !self
+                    .external_signature_matches(&expected.value_type, self.local_types[&result])?
+                {
                     return Err(self.error_with_hir(
                         "Call result slot type does not match external signature",
-                        anchor,
                     ));
                 }
             }
@@ -156,27 +141,23 @@ impl HirValidator<'_> {
                 .call_result_contracts
                 .get(target)
                 .ok_or_else(|| {
-                    self.error_with_hir("Nonlocal call has no resolved result contract", anchor)
+                    self.error_with_hir("Nonlocal call has no resolved result contract")
                 })?;
             if contract.error_return.is_some() != fallible {
                 return Err(self.error_with_hir(
                     "Call channel compatibility does not match resolved contract",
-                    anchor,
                 ));
             }
             if results.len() != contract.returns.len() {
-                return Err(self.error_with_hir(
-                    "Call result slot arity does not match resolved contract",
-                    anchor,
-                ));
+                return Err(
+                    self.error_with_hir("Call result slot arity does not match resolved contract")
+                );
             }
             for (result, expected) in results.zip(contract.returns.iter()) {
-                self.require_local_id(result, anchor)?;
+                self.require_local_id(result)?;
                 if self.local_types.get(&result) != Some(expected) {
-                    return Err(self.error_with_hir(
-                        "Call result slot type does not match resolved contract",
-                        anchor,
-                    ));
+                    return Err(self
+                        .error_with_hir("Call result slot type does not match resolved contract"));
                 }
             }
             return Ok(contract.error_return);
@@ -186,34 +167,30 @@ impl HirValidator<'_> {
             .functions
             .iter()
             .find(|function| function.id == function_id)
-            .ok_or_else(|| self.error_with_hir("Call references missing local function", anchor))?;
+            .ok_or_else(|| self.error_with_hir("Call references missing local function"))?;
         if function.error_return.is_some() != fallible {
-            return Err(self.error_with_hir(
-                "Call channel compatibility does not match function signature",
-                anchor,
-            ));
+            return Err(
+                self.error_with_hir("Call channel compatibility does not match function signature")
+            );
         }
         if args.len() != function.params.len() || results.len() != function.returns.len() {
             return Err(self.error_with_hir(
                 "Call argument/result slot arity does not match function signature",
-                anchor,
             ));
         }
         for (arg, parameter) in args.iter().zip(&function.params) {
-            if Some(&self.expression_row(*arg, anchor)?.ty) != self.local_types.get(parameter) {
-                return Err(self.error_with_hir(
-                    "Call argument type does not match function parameter",
-                    anchor,
-                ));
+            if Some(&self.expression_row(*arg)?.ty) != self.local_types.get(parameter) {
+                return Err(
+                    self.error_with_hir("Call argument type does not match function parameter")
+                );
             }
         }
         for (result, expected) in results.zip(function.returns.iter()) {
-            self.require_local_id(result, anchor)?;
+            self.require_local_id(result)?;
             if self.local_types.get(&result) != Some(expected) {
-                return Err(self.error_with_hir(
-                    "Call result slot type does not match function signature",
-                    anchor,
-                ));
+                return Err(
+                    self.error_with_hir("Call result slot type does not match function signature")
+                );
             }
         }
         Ok(function.error_return)
@@ -224,7 +201,7 @@ impl HirValidator<'_> {
         block: BlockId,
         terminator: &HirTerminator,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let HirTerminator::Invoke {
             id,
             operation,
@@ -235,31 +212,25 @@ impl HirValidator<'_> {
             ..
         } = terminator
         else {
-            return Err(
-                self.error_with_hir("Invoke validation requires an Invoke terminator", anchor)
-            );
+            return Err(self.error_with_hir("Invoke validation requires an Invoke terminator"));
         };
         let error = *error_result;
         let mut destinations = FxHashSet::default();
         for result in results {
             if !destinations.insert(*result) {
-                return Err(
-                    self.error_with_hir("Invoke success destinations must be unique", anchor)
-                );
+                return Err(self.error_with_hir("Invoke success destinations must be unique"));
             }
         }
         if destinations.contains(&error) {
-            return Err(
-                self.error_with_hir("Invoke success/error destinations must be disjoint", anchor)
-            );
+            return Err(self.error_with_hir("Invoke success/error destinations must be disjoint"));
         }
         for target in [*success, *failure] {
-            self.require_block_id(target, anchor)?;
-            self.require_same_function_cfg_owner(block, target, anchor)?;
+            self.require_block_id(target)?;
+            self.require_same_function_cfg_owner(block, target)?;
         }
         for local in results.iter().copied().chain(std::iter::once(error)) {
-            self.require_local_in_function(local, self.block_owner_by_id[&block], anchor)?;
-            self.require_local_not_parameter_definition(local, anchor)?;
+            self.require_local_in_function(local, self.block_owner_by_id[&block])?;
+            self.require_local_not_parameter_definition(local)?;
         }
         if let HirFallibleOperation::Call { target, args } = operation {
             let expected_error =
@@ -272,12 +243,11 @@ impl HirValidator<'_> {
                     .get_function_by_id(*function_id)
                     .and_then(|function| function.error_return_type.as_ref())
                     .ok_or_else(|| {
-                        self.error_with_hir("Invoke external function has no error slot", anchor)
+                        self.error_with_hir("Invoke external function has no error slot")
                     })?;
-                if !self.external_signature_matches(signature, self.local_types[&error], anchor)? {
+                if !self.external_signature_matches(signature, self.local_types[&error])? {
                     return Err(self.error_with_hir(
                         "Invoke error destination type does not match external signature",
-                        anchor,
                     ));
                 }
             }
@@ -286,16 +256,14 @@ impl HirValidator<'_> {
             {
                 return Err(self.error_with_hir(
                     "Invoke error destination type does not match function error slot",
-                    anchor,
                 ));
             }
             return Ok(());
         }
-        if self.local_types.get(&error) != Some(&self.builtin_error_type(anchor)?) {
-            return Err(self.error_with_hir(
-                "Invoke builtin error destination has the wrong error type",
-                anchor,
-            ));
+        if self.local_types.get(&error) != Some(&self.builtin_error_type()?) {
+            return Err(
+                self.error_with_hir("Invoke builtin error destination has the wrong error type")
+            );
         }
         if let HirFallibleOperation::MapOp { op, receiver, args } = operation {
             return self.validate_map_channels(
@@ -313,9 +281,7 @@ impl HirValidator<'_> {
             1
         };
         if results.len() != arity {
-            return Err(
-                self.error_with_hir("Invoke operation success slot arity is invalid", anchor)
-            );
+            return Err(self.error_with_hir("Invoke operation success slot arity is invalid"));
         }
         if arity == 0 {
             return Ok(());
@@ -327,9 +293,8 @@ impl HirValidator<'_> {
                 let target_type = self.local_types[&results[0]];
                 self.validate_cast_channels(
                     *policy,
-                    self.expression_row(*source, anchor)?.ty,
+                    self.expression_row(*source)?.ty,
                     target_type,
-                    anchor,
                 )?;
                 return Ok(());
             }
@@ -351,7 +316,12 @@ impl HirValidator<'_> {
             },
             HirFallibleOperation::Call { .. }
             | HirFallibleOperation::MapOp { .. }
-            | HirFallibleOperation::RangeStepFailure { .. } => unreachable!("handled above"),
+            | HirFallibleOperation::RangeStepFailure { .. } => {
+                crate::compiler_bug!(
+                    CompilerStage::HirConstruction,
+                    "Call and MapOp already returned from validate_invoke; RangeStepFailure already returned after the zero-arity check"
+                )
+            }
         };
         self.validate_statement(
             &HirStatement {
@@ -371,14 +341,12 @@ impl HirValidator<'_> {
         results: impl ExactSizeIterator<Item = LocalId>,
         fallible: bool,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.validate_expression(receiver, anchor)?;
         let shape = self
             .type_environment
-            .map_shape(self.expression_row(receiver, anchor)?.ty)
-            .ok_or_else(|| {
-                self.error_with_hir("Map operation receiver must have a map type", anchor)
-            })?;
+            .map_shape(self.expression_row(receiver)?.ty)
+            .ok_or_else(|| self.error_with_hir("Map operation receiver must have a map type"))?;
         let op = match op {
             HirMapOp::Get => MapBuiltinOp::Get,
             HirMapOp::Contains => MapBuiltinOp::Contains,
@@ -395,13 +363,7 @@ impl HirValidator<'_> {
                 FixedScalar::I32,
             ),
         );
-        self.validate_builtin_member_slots(
-            rule,
-            self.value_ids(args, anchor)?,
-            results,
-            fallible,
-            anchor,
-        )
+        self.validate_builtin_member_slots(rule, self.value_ids(args)?, results, fallible, anchor)
     }
 
     fn validate_builtin_member_slots(
@@ -411,11 +373,10 @@ impl HirValidator<'_> {
         mut results: impl ExactSizeIterator<Item = LocalId>,
         fallible: bool,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if rule.fallible != fallible {
             return Err(self.error_with_hir(
                 "Builtin operation channel compatibility does not match semantic signature",
-                anchor,
             ));
         }
         if args.len() != rule.arguments.len()
@@ -423,31 +384,25 @@ impl HirValidator<'_> {
         {
             return Err(self.error_with_hir(
                 "Builtin operation argument/result slot arity does not match semantic signature",
-                anchor,
             ));
         }
         for (index, arg) in args.iter().enumerate() {
             self.validate_expression(*arg, anchor)?;
-            if rule.arguments.get(index) != Some(self.expression_row(*arg, anchor)?.ty) {
+            if rule.arguments.get(index) != Some(self.expression_row(*arg)?.ty) {
                 return Err(self.error_with_hir(
                     "Builtin operation argument type does not match semantic signature",
-                    anchor,
                 ));
             }
         }
         if let Some(expected) = rule.success {
             // Arity validation above proves there is exactly one result.
             let result = results.next().ok_or_else(|| {
-                self.error_with_hir(
-                    "Builtin operation is missing its result destination",
-                    anchor,
-                )
+                self.error_with_hir("Builtin operation is missing its result destination")
             })?;
-            self.require_local_id(result, anchor)?;
+            self.require_local_id(result)?;
             if self.local_types.get(&result) != Some(&expected) {
                 return Err(self.error_with_hir(
                     "Builtin operation result type does not match semantic signature",
-                    anchor,
                 ));
             }
         }
@@ -459,8 +414,7 @@ impl HirValidator<'_> {
         policy: BuiltinCastPolicyId,
         source: TypeId,
         target: TypeId,
-        anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let pair = match policy {
             BuiltinCastPolicyId::NumericConversion { source, target } => (
                 BuiltinCastTarget::from(source),
@@ -508,16 +462,13 @@ impl HirValidator<'_> {
             }
         };
         let row = lookup_builtin_evidence(pair.0, pair.1)
-            .ok_or_else(|| self.error_with_hir("Cast policy has no builtin evidence", anchor))?;
+            .ok_or_else(|| self.error_with_hir("Cast policy has no builtin evidence"))?;
         if row.policy != policy || row.fallibility != BuiltinCastFallibility::Fallible {
-            return Err(self.error_with_hir("Cast policy has the wrong fallibility", anchor));
+            return Err(self.error_with_hir("Cast policy has the wrong fallibility"));
         }
-        let expected_target = self.cast_target_type(pair.1, anchor)?;
-        if source != self.cast_target_type(pair.0, anchor)? || target != expected_target {
-            return Err(self.error_with_hir(
-                "Cast policy source/target type does not match policy",
-                anchor,
-            ));
+        let expected_target = self.cast_target_type(pair.1)?;
+        if source != self.cast_target_type(pair.0)? || target != expected_target {
+            return Err(self.error_with_hir("Cast policy source/target type does not match policy"));
         }
         Ok(())
     }
@@ -526,8 +477,7 @@ impl HirValidator<'_> {
         &self,
         signature: &crate::compiler_frontend::external_packages::ExternalSignatureType,
         ty: TypeId,
-        anchor: Option<HirLocation>,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         use crate::compiler_frontend::external_packages::{ExternalAbiType, ExternalSignatureType};
         let builtins = self.type_environment.builtins();
         Ok(match signature {
@@ -542,38 +492,32 @@ impl HirValidator<'_> {
             ExternalSignatureType::Abi(ExternalAbiType::Char) => ty == builtins.char,
             ExternalSignatureType::Abi(ExternalAbiType::Inferred) => true,
             ExternalSignatureType::Abi(ExternalAbiType::Void | ExternalAbiType::Handle) => false,
-            ExternalSignatureType::BuiltinError => ty == self.builtin_error_type(anchor)?,
+            ExternalSignatureType::BuiltinError => ty == self.builtin_error_type()?,
             ExternalSignatureType::External(expected) => matches!(
                 self.type_environment.get(ty),
                 Some(crate::compiler_frontend::datatypes::definitions::TypeDefinition::External(definition)) if definition.type_id == *expected
             ),
-            ExternalSignatureType::Optional(inner) => match self
-                .type_environment
-                .option_inner_type(ty)
-            {
-                Some(inner_type) => self.external_signature_matches(inner, inner_type, anchor)?,
-                None => false,
-            },
+            ExternalSignatureType::Optional(inner) => {
+                match self.type_environment.option_inner_type(ty) {
+                    Some(inner_type) => self.external_signature_matches(inner, inner_type)?,
+                    None => false,
+                }
+            }
         })
     }
 
-    fn cast_target_type(
-        &self,
-        target: BuiltinCastTarget,
-        anchor: Option<HirLocation>,
-    ) -> Result<TypeId, CompilerError> {
+    fn cast_target_type(&self, target: BuiltinCastTarget) -> Result<TypeId, InfrastructureFailure> {
         let builtins = self.type_environment.builtins();
         Ok(match target {
             BuiltinCastTarget::Bool => builtins.bool,
             BuiltinCastTarget::String => builtins.string,
             BuiltinCastTarget::Char => builtins.char,
-            BuiltinCastTarget::Error => self.builtin_error_type(anchor)?,
+            BuiltinCastTarget::Error => self.builtin_error_type()?,
             BuiltinCastTarget::Fixed(scalar) => {
                 crate::compiler_frontend::datatypes::ids::builtin_type_ids::fixed_scalar(scalar)
             }
             BuiltinCastTarget::Number(scale) => self.numeric_scalar_type_id(
                 crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Number(scale),
-                anchor,
             )?,
         })
     }

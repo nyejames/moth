@@ -1,22 +1,19 @@
 //! Tests for the frontend-only `check` command flow.
 
-use super::execute_check;
+#[cfg(feature = "timers")]
+use super::CheckCommandReport;
 #[cfg(feature = "timers")]
 use super::run_check_for_tests;
-#[cfg(feature = "timers")]
-use super::{CheckCommandReport, CheckOutcome, run_check_command};
+use super::{
+    CheckOutcome, check_completion, execute_check, execute_check_messages_with_record_limit,
+    run_check_command,
+};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-#[cfg(feature = "timers")]
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-#[cfg(unix)]
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
-};
-use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -32,6 +29,38 @@ use std::time::Duration;
 /// The builder every check test compiles under.
 fn test_project_builder() -> ProjectBuilder {
     ProjectBuilder::new(HtmlProjectBuilder::new())
+}
+
+fn diagnostic_reports<T>(messages: &CompilationResult<T>) -> &DiagnosticReportSet {
+    match messages {
+        Ok(CompilationOutcome::Success {
+            warnings: Some(reports),
+            ..
+        })
+        | Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { warnings: None, .. }) => {
+            panic!("expected diagnostic reports")
+        }
+        Err(errors) => panic!("expected diagnostics, got infrastructure failure: {errors:?}"),
+    }
+}
+
+fn has_errors(messages: &CompilationResult<()>) -> bool {
+    match messages {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports.counts().errors > 0,
+        Ok(CompilationOutcome::Success { .. }) => false,
+        Err(_) => true,
+    }
+}
+
+fn warning_count(messages: &CompilationResult<()>) -> usize {
+    match messages {
+        Ok(CompilationOutcome::Success { warnings, .. }) => warnings
+            .as_ref()
+            .map_or(0, |reports| reports.counts().warnings as usize),
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports.counts().warnings as usize,
+        Err(_) => 0,
+    }
 }
 
 #[test]
@@ -50,11 +79,11 @@ fn check_compiles_single_file_without_writing_artifacts() {
         &test_project_builder(),
     );
     assert!(
-        !outcome.messages.has_errors(),
+        !has_errors(&outcome.messages),
         "single-file check should compile without errors"
     );
     assert_eq!(
-        outcome.messages.warning_count(),
+        warning_count(&outcome.messages),
         0,
         "warning-free single-file input should produce no check warnings"
     );
@@ -63,6 +92,48 @@ fn check_compiles_single_file_without_writing_artifacts() {
         1,
         "check should not write output artifacts to the source folder"
     );
+}
+#[test]
+fn warning_capacity_failure_marks_check_completion_as_failed() {
+    let warning_source = "\
+value ~= \"hello\"
+result ~= \"unset\"
+
+if value is:
+    \"hello\" => result = \"one\"
+    \"hello\" => result = \"two\"
+    \"hello\" => result = \"three\"
+    \"hello\" => result = \"four\"
+    else => result = \"other\"
+;
+
+[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
+";
+    let (_temporary, root) = write_page_project("warning_capacity_failure", warning_source);
+    let messages = execute_check_messages_with_record_limit(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        2,
+    );
+    let outcome = CheckOutcome { messages };
+    let completion = check_completion(&outcome);
+
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &outcome.messages else {
+        panic!("warning capacity exhaustion should diagnose check completion");
+    };
+    assert_eq!(reports.counts().errors, 1);
+    assert_eq!(reports.counts().warnings, 0);
+    let codes = reports
+        .iter()
+        .map(|(_, view)| view.descriptor().code)
+        .collect::<Vec<_>>();
+    assert_eq!(codes, vec!["MOTH-SYNTAX-0037"]);
 }
 
 #[cfg(unix)]
@@ -95,16 +166,12 @@ fn check_rejects_config_filename_namesake_source_contract() {
         &test_project_builder(),
     );
 
-    assert!(outcome.messages.has_errors());
-    assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                ..
-            }
-        )
-    }));
+    assert!(
+        diagnostic_reports(&outcome.messages)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.reason_key()
+                == Some("invalid_config.config_qualifier_invalid_placement"))
+    );
 }
 
 #[cfg(unix)]
@@ -133,16 +200,11 @@ fn check_reports_missing_config_input_from_unselected_source() {
         &test_project_builder(),
     );
 
-    assert!(outcome.messages.has_errors());
-    assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::MissingConfigInput,
-                ..
-            }
-        )
-    }));
+    assert!(
+        diagnostic_reports(&outcome.messages)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.reason_key() == Some("invalid_config.missing_config_input"))
+    );
 }
 
 #[test]
@@ -168,10 +230,9 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
     );
 
     assert!(
-        outcome
-            .messages
-            .error_diagnostics()
-            .any(|diagnostic| { diagnostic.identity().code == "MOTH-RULE-0023" })
+        diagnostic_reports(&outcome.messages)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.descriptor().code == "MOTH-RULE-0023")
     );
 }
 
@@ -206,7 +267,7 @@ fn check_compiles_unselected_same_module_source_closure() {
     );
 
     assert!(
-        !outcome.messages.has_errors(),
+        !has_errors(&outcome.messages),
         "same-module source closure should compile in check mode"
     );
 }
@@ -232,7 +293,7 @@ fn successful_check_finishes_bootstrap_before_frontend() {
     );
     let snapshot = timing_session.finish();
 
-    assert!(!outcome.messages.has_errors());
+    assert!(!has_errors(&outcome.messages));
     assert_timing_sequence(
         &snapshot,
         &[
@@ -266,7 +327,7 @@ fn config_ast_timers_use_dedicated_identities() {
     );
     let snapshot = timing_session.finish();
 
-    assert!(!outcome.messages.has_errors());
+    assert!(!has_errors(&outcome.messages));
     assert_timing_sequence(
         &snapshot,
         &[
@@ -326,12 +387,102 @@ fn check_retains_source_package_warning() {
         &test_project_builder(),
     );
     assert!(
-        !outcome.messages.has_errors(),
+        !has_errors(&outcome.messages),
         "check should not treat a source-package warning as an error"
     );
     assert!(
-        outcome.messages.warning_count() >= 1,
+        warning_count(&outcome.messages) >= 1,
         "check should retain the source-package warning"
+    );
+    let leaked_warning_reports = match outcome.messages {
+        Ok(CompilationOutcome::Success {
+            warnings: Some(reports),
+            ..
+        }) => reports,
+        other => panic!("warning fixture should retain its report set: {other:?}"),
+    };
+    let expected_warning_count = leaked_warning_reports.counts().warnings as usize;
+    let diagnosed_with_warning: CompilationResult<()> =
+        Ok(CompilationOutcome::Diagnosed(leaked_warning_reports));
+    assert_eq!(
+        warning_count(&diagnosed_with_warning),
+        expected_warning_count,
+        "negative checks must observe warnings if they leak into diagnosed reports"
+    );
+}
+
+#[test]
+fn check_freezes_project_local_generic_warning_identity() {
+    let source = "\
+choose_generic type T |value T| -> I32:
+    if \"one\" is:
+        \"one\" => return 1
+        \"one\" => return 1
+        else => return 1
+    ;
+    return 1
+;
+
+result I32 = choose_generic(1)
+";
+    let (_temporary, root) = write_page_project("project_generic_warning", source);
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+    let warnings = match &outcome.messages {
+        Ok(CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        }) => warnings,
+        other => panic!("project-local generic warning should remain successful: {other:?}"),
+    };
+    let (report, view) = warnings
+        .iter_severity(DiagnosticSeverity::Warning)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0022")
+        .expect("generic instantiation should retain its unreachable-arm warning");
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("named project identity should resolve the generic warning source");
+    assert_eq!(
+        position.host_path,
+        Some(
+            root.canonicalize()
+                .expect("project root should canonicalize")
+                .join("src/@page.moth")
+                .as_path()
+        )
+    );
+}
+
+#[test]
+fn check_counts_infrastructure_failure_as_one_error() {
+    let temporary = tempfile::tempdir().expect("should create temporary directory");
+    let missing = temporary.path().join("missing.moth");
+    let completion = run_check_command(
+        missing
+            .to_str()
+            .expect("temporary path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| {
+            assert_eq!(report.error_count, 1);
+            assert_eq!(report.warning_count, 0);
+            assert!(
+                report.messages.is_err(),
+                "the check renderer must receive the infrastructure failure"
+            );
+        },
+    );
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert!(
+        completion.diagnostic_counts.is_none(),
+        "infrastructure failures should keep diagnostic counts on the renderer path"
     );
 }
 
@@ -340,16 +491,16 @@ fn check_retains_source_package_warning() {
 fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
     use std::os::unix::fs::symlink;
 
-    for (_case_name, target_name, expected_reason) in [
+    for (_case_name, target_name, expected_reason_key) in [
         (
             "sibling",
             "outside",
-            InvalidOutputFolderReason::ResolvesOutsideProjectRoot,
+            "invalid_config.invalid_output_folder.resolves_outside_project_root",
         ),
         (
             "entry",
             "src",
-            InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+            "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
         ),
     ] {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -379,19 +530,11 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             &BuildConfigInputSet::new(),
             &test_project_builder(),
         );
-        assert!(outcome.messages.has_errors());
-        assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::InvalidOutputFolder {
-                        reason,
-                        ..
-                    },
-                    ..
-                } if *reason == expected_reason
-            )
-        }));
+        assert!(
+            diagnostic_reports(&outcome.messages)
+                .iter_severity(DiagnosticSeverity::Error)
+                .any(|(_, view)| view.reason_key() == Some(expected_reason_key))
+        );
         assert_path_missing(&outside.join("index.html"));
         assert_path_missing(&source_root.join("index.html"));
 
@@ -417,30 +560,25 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
     (temp, root)
 }
 
-/// Collect ordered frontend diagnostic identity rows for parity comparison.
+/// Collect ordered identity rows for the selected severity from compiler reports.
 ///
-/// WHAT: maps each diagnostic to its stable code, optional reason key, normalized source file
-/// name, and one-based start line.
-/// WHY: comparing typed identity instead of rendered prose keeps the assertion stable across
-/// wording changes and proves the shared frontend contract is preserved.
-fn diagnostic_identity_sequence<'a>(
-    diagnostics: impl IntoIterator<Item = &'a CompilerDiagnostic>,
-    string_table: &StringTable,
-    source_database: &SourceDatabase,
+/// WHAT: records each report view's stable code and reason key, plus its frozen source path and
+///       one-based start line.
+/// WHY: check/build parity must exercise the same immutable report data that production renders.
+fn diagnostic_identity_sequence<T>(
+    messages: &CompilationResult<T>,
+    severity: DiagnosticSeverity,
     project_root: &std::path::Path,
 ) -> Vec<DiagnosticIdentityRow> {
     let canonical_project_root = project_root
         .canonicalize()
         .expect("diagnostic fixture root should canonicalize");
-    let render_context = DiagnosticRenderContext::new(string_table)
-        .with_optional_source_database(Some(source_database));
 
-    diagnostics
-        .into_iter()
-        .map(|diagnostic| {
-            let identity = diagnostic.identity();
-            let position = render_context
-                .primary_position(diagnostic)
+    diagnostic_reports(messages)
+        .iter_severity(severity)
+        .map(|(report, view)| {
+            let position = DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
                 .expect("frontend diagnostics should retain a resolvable primary source span");
             let relative_path = position
                 .path
@@ -451,41 +589,12 @@ fn diagnostic_identity_sequence<'a>(
                 .expect("diagnostic logical path should be valid UTF-8")
                 .replace('\\', "/");
             let line = position.start.line.saturating_add(1) as i32;
-            (identity.code, identity.reason_key, normalized_path, line)
-        })
-        .collect()
-}
-
-/// Collect diagnostic identity rows through the canonical frozen identity context.
-fn diagnostic_identity_sequence_frozen<'a>(
-    diagnostics: impl IntoIterator<Item = &'a CompilerDiagnostic>,
-    string_table: &'a StringTable,
-    frozen_identity: &'a FrozenIdentityContext,
-    project_root: &std::path::Path,
-) -> Vec<DiagnosticIdentityRow> {
-    let canonical_project_root = project_root
-        .canonicalize()
-        .expect("diagnostic fixture root should canonicalize");
-    let render_context =
-        DiagnosticRenderContext::new(string_table).with_frozen_identity(frozen_identity);
-
-    diagnostics
-        .into_iter()
-        .map(|diagnostic| {
-            let identity = diagnostic.identity();
-            let position = render_context
-                .primary_position(diagnostic)
-                .expect("frontend diagnostics should retain a resolvable primary source span");
-            let relative_path = position
-                .path
-                .strip_prefix(&canonical_project_root)
-                .unwrap_or(position.path.as_path());
-            let normalized_path = relative_path
-                .to_str()
-                .expect("diagnostic logical path should be valid UTF-8")
-                .replace('\\', "/");
-            let line = position.start.line.saturating_add(1) as i32;
-            (identity.code, identity.reason_key, normalized_path, line)
+            (
+                view.descriptor().code,
+                view.reason_key(),
+                normalized_path,
+                line,
+            )
         })
         .collect()
 }
@@ -525,18 +634,30 @@ if value is:
         &test_project_builder(),
     );
     assert!(
-        !check_warning_outcome.messages.has_errors(),
+        !has_errors(&check_warning_outcome.messages),
         "warning fixture should not produce frontend errors"
     );
-    let build_warning_result = build_project(
+    let build_warning_outcome = match build_project(
         &builder,
         warning_root
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
         &[],
         &BuildConfigInputSet::new(),
-    )
-    .expect("warning fixture should build successfully");
+    ) {
+        Ok(CompilationOutcome::Success { value, .. }) => value.finish_output(Ok(())),
+        result => result,
+    };
+    assert!(
+        matches!(
+            &build_warning_outcome,
+            Ok(CompilationOutcome::Success {
+                warnings: Some(_),
+                ..
+            })
+        ),
+        "warning fixture should build successfully with success warnings"
+    );
 
     assert_path_missing(&warning_root.join("dev"));
     assert_path_missing(&warning_root.join("release"));
@@ -550,24 +671,14 @@ if value is:
             && remaining.iter().any(|name| name == "src"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
-    let check_warning_identity_context = check_warning_outcome
-        .messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("check warnings should retain their frozen identity context");
-    let build_warning_source_database = build_warning_result
-        .source_database
-        .as_deref()
-        .expect("build warnings should retain their source database");
-    let check_warning_identity = diagnostic_identity_sequence_frozen(
-        check_warning_outcome.messages.diagnostic_slice().iter(),
-        &check_warning_outcome.messages.string_table,
-        check_warning_identity_context,
+    let check_warning_identity = diagnostic_identity_sequence(
+        &check_warning_outcome.messages,
+        DiagnosticSeverity::Warning,
         &warning_root,
     );
     let build_warning_identity = diagnostic_identity_sequence(
-        build_warning_result.warnings.iter(),
-        &build_warning_result.string_table,
-        build_warning_source_database,
+        &build_warning_outcome,
+        DiagnosticSeverity::Warning,
         &warning_root,
     );
 
@@ -610,40 +721,30 @@ increment(count)
         &test_project_builder(),
     );
     assert!(
-        check_error_outcome.messages.has_errors(),
+        has_errors(&check_error_outcome.messages),
         "error fixture should produce frontend errors"
     );
 
-    let Err(build_error_messages) = build_project(
+    let build_error_outcome = build_project(
         &builder,
         error_root
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
         &[],
         &BuildConfigInputSet::new(),
-    ) else {
-        panic!("error fixture should fail the build frontend");
-    };
+    );
+    assert!(
+        matches!(&build_error_outcome, Ok(CompilationOutcome::Diagnosed(_))),
+        "error fixture should diagnose the build frontend"
+    );
 
-    let check_error_identity_context = check_error_outcome
-        .messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("check errors should retain their frozen identity context");
-    let build_error_identity_context = build_error_messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("build errors should retain their frozen identity context");
-    let check_error_identity = diagnostic_identity_sequence_frozen(
-        check_error_outcome.messages.diagnostic_slice().iter(),
-        &check_error_outcome.messages.string_table,
-        check_error_identity_context,
+    let check_error_identity = diagnostic_identity_sequence(
+        &check_error_outcome.messages,
+        DiagnosticSeverity::Error,
         &error_root,
     );
-    let build_error_identity = diagnostic_identity_sequence_frozen(
-        build_error_messages.diagnostic_slice().iter(),
-        &build_error_messages.string_table,
-        build_error_identity_context,
-        &error_root,
-    );
+    let build_error_identity =
+        diagnostic_identity_sequence(&build_error_outcome, DiagnosticSeverity::Error, &error_root);
 
     let expected_error_identity = vec![(
         "MOTH-RULE-0054",
@@ -710,8 +811,10 @@ fn check_command_total_excludes_renderer_work() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
 
     let outcome = CheckOutcome {
-        messages: CompilerMessages::empty(StringTable::new()),
-        status: crate::projects::ProjectCommandStatus::Success,
+        messages: Ok(CompilationOutcome::Success {
+            value: (),
+            warnings: None,
+        }),
     };
     let scripted_duration = Duration::from_millis(37);
     let renderer_calls = AtomicUsize::new(0);
@@ -725,7 +828,7 @@ fn check_command_total_excludes_renderer_work() {
             // measurement of this callback.
             assert_eq!(report.duration, scripted_duration);
             assert!(
-                !report.messages.has_errors(),
+                !has_errors(&report.messages),
                 "renderer receives an outcome whose classification is already decided"
             );
             renderer_calls.fetch_add(1, Ordering::SeqCst);
@@ -1011,12 +1114,21 @@ fn check_source_on_budgeted_thread(source: String) -> (Vec<String>, usize) {
                 &BuildConfigInputSet::new(),
                 &test_project_builder(),
             );
-            let error_codes: Vec<String> = outcome
-                .messages
-                .error_diagnostics()
-                .map(|diagnostic| diagnostic.identity().code.to_owned())
-                .collect();
-            (error_codes, outcome.messages.warning_count())
+            let error_codes = match &outcome.messages {
+                Ok(CompilationOutcome::Success {
+                    warnings: Some(reports),
+                    ..
+                })
+                | Ok(CompilationOutcome::Diagnosed(reports)) => reports
+                    .iter_severity(DiagnosticSeverity::Error)
+                    .map(|(_, view)| view.descriptor().code.to_owned())
+                    .collect(),
+                Ok(CompilationOutcome::Success { warnings: None, .. }) => Vec::new(),
+                Err(errors) => {
+                    panic!("budgeted check should not fail as infrastructure: {errors:?}")
+                }
+            };
+            (error_codes, warning_count(&outcome.messages))
         })
         .expect("should spawn the stack-budgeted check thread");
 

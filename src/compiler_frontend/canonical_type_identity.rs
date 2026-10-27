@@ -22,7 +22,8 @@
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{
@@ -248,12 +249,13 @@ impl GenericDeclarationOrigin {
     ///
     /// Compiler-internal: only structs and choices declare generic parameters. A transparent
     /// alias is not a generic declaration owner and must not appear as one.
-    pub(crate) fn nominal_type(origin: OriginTypeId) -> Result<Self, CompilerError> {
+    pub(crate) fn nominal_type(origin: OriginTypeId) -> Result<Self, InfrastructureFailure> {
         match origin.category() {
             OriginTypeCategory::Struct | OriginTypeCategory::Choice => Ok(Self {
                 inner: GenericDeclarationOriginInner::NominalType(origin),
             }),
-            OriginTypeCategory::TransparentAlias => Err(CompilerError::compiler_error(
+            OriginTypeCategory::TransparentAlias => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a transparent alias is not a valid exported generic declaration owner; only structs and choices declare generic parameters",
             )),
         }
@@ -264,12 +266,13 @@ impl GenericDeclarationOrigin {
     /// Compiler-internal: only free functions declare standalone exported generic parameters.
     /// A receiver method lives on its receiver type's surface and is not an independent generic
     /// declaration owner, so a `FunctionOriginKind::Receiver` origin must not appear here.
-    pub(crate) fn free_function(origin: OriginFunctionId) -> Result<Self, CompilerError> {
+    pub(crate) fn free_function(origin: OriginFunctionId) -> Result<Self, InfrastructureFailure> {
         match origin.kind() {
             FunctionOriginKind::Free => Ok(Self {
                 inner: GenericDeclarationOriginInner::FreeFunction(origin),
             }),
-            FunctionOriginKind::Receiver(_) => Err(CompilerError::compiler_error(
+            FunctionOriginKind::Receiver(_) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a receiver method is not a valid exported generic declaration owner; only free \
                  functions declare standalone generic parameters",
             )),
@@ -487,16 +490,16 @@ impl StableTraitRequirementIdentity {
 /// WHAT: the projection receives this resolver so it can map source nominal struct/choice types
 /// to their stable cross-module origin without embedding donor-local `NominalTypeId` values in
 /// the canonical identity.
-/// WHY: a missing source nominal origin is a `CompilerError`, never a silently omitted fact. The
+/// WHY: a missing source nominal origin is an `InfrastructureFailure`, never a silently omitted fact. The
 /// resolver is supplied by the public semantic surface projection owner, not by the projection
 /// itself. For focused tests a simple map-backed implementation is sufficient.
 pub(crate) trait NominalOriginResolver {
-    /// Returns the stable origin identity for a module-local nominal, or a `CompilerError` when
+    /// Returns the stable origin identity for a module-local nominal, or an `InfrastructureFailure` when
     /// the nominal has no exported origin.
     fn resolve_nominal_origin(
         &self,
         nominal_id: NominalTypeId,
-    ) -> Result<OriginTypeId, CompilerError>;
+    ) -> Result<OriginTypeId, InfrastructureFailure>;
 }
 
 /// Resolves a module-local `GenericParameterId` to its stable exported generic-parameter
@@ -505,17 +508,17 @@ pub(crate) trait NominalOriginResolver {
 /// WHAT: the projection receives this resolver so it can map an exported generic parameter to
 /// its stable cross-module identity without embedding donor-local `GenericParameterId` values
 /// in the canonical identity.
-/// WHY: a missing exported generic-parameter identity is a `CompilerError`, never a silently
+/// WHY: a missing exported generic-parameter identity is an `InfrastructureFailure`, never a silently
 /// omitted fact or a guess from the parameter name alone. The resolver is supplied by the
 /// public semantic surface projection owner, not by the projection itself. For focused tests a
 /// simple map-backed implementation is sufficient.
 pub(crate) trait GenericParameterOriginResolver {
     /// Returns the stable exported identity for a module-local generic parameter, or a
-    /// `CompilerError` when the parameter has no exported origin.
+    /// `InfrastructureFailure` when the parameter has no exported origin.
     fn resolve_generic_parameter_origin(
         &self,
         parameter_id: GenericParameterId,
-    ) -> Result<ExportedGenericParameterIdentity, CompilerError>;
+    ) -> Result<ExportedGenericParameterIdentity, InfrastructureFailure>;
 }
 
 /// Explicit context for projecting a `TypeId` into a canonical identity.
@@ -575,10 +578,10 @@ impl<'a> CanonicalTypeProjectionContext<'a> {
 /// generic-parameter origin resolver, resolves binding-backed opaque types through the external
 /// registry, and recursively projects constructed and generic-instance arguments.
 /// WHY: this is the single owner of the `TypeId -> CanonicalTypeIdentity` conversion. It
-/// returns `CompilerError` for every incomplete or unsupported state instead of returning
+/// returns `InfrastructureFailure` for every incomplete or unsupported state instead of returning
 /// `None`, using a sentinel, guessing from rendered names or panicking.
 ///
-/// The following states return `CompilerError` with precise invariant context:
+/// The following states return `InfrastructureFailure` with precise invariant context:
 /// - missing source nominal origin (the nominal has no exported `OriginTypeId`)
 /// - missing exported generic-parameter identity (the `GenericParameterId` has no resolver entry)
 /// - missing external stable identity (the `ExternalTypeId` was never registered)
@@ -594,13 +597,13 @@ pub(crate) fn project_type_id_to_canonical_identity(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<CanonicalTypeIdentity, CompilerError> {
+) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
     if let Some(identity) = type_environment.canonical_identity_for_type_id(type_id) {
         return Ok(identity.clone());
     }
 
     let definition = type_environment.get(type_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
+        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "canonical type projection received an unregistered TypeId({}); the TypeEnvironment \
              has no definition for it, so this is an internal invariant violation",
             type_id.0
@@ -616,11 +619,11 @@ pub(crate) fn project_type_id_to_canonical_identity(
                 .nominal_origins
                 .resolve_nominal_origin(def.id)
                 .map_err(|error| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "canonical type projection could not resolve a source-nominal origin for \
                          struct NominalTypeId({}): {error_msg}",
                         def.id.0,
-                        error_msg = error.msg
+                        error_msg = error.message
                     ))
                 })?;
             Ok(CanonicalTypeIdentity::SourceNominal(origin))
@@ -630,11 +633,11 @@ pub(crate) fn project_type_id_to_canonical_identity(
                 .nominal_origins
                 .resolve_nominal_origin(def.id)
                 .map_err(|error| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "canonical type projection could not resolve a source-nominal origin for \
                          choice NominalTypeId({}): {error_msg}",
                         def.id.0,
-                        error_msg = error.msg
+                        error_msg = error.message
                     ))
                 })?;
             Ok(CanonicalTypeIdentity::SourceNominal(origin))
@@ -644,13 +647,16 @@ pub(crate) fn project_type_id_to_canonical_identity(
                 .external_registry
                 .resolve_type_package_and_symbol_path(def.type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "canonical type projection could not resolve a stable package/symbol \
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "canonical type projection could not resolve a stable package/symbol \
                          identity for ExternalTypeId({}); the type was not registered through \
                          the single registration path, so this is an inconsistent-registry \
                          invariant",
-                        def.type_id.0
-                    ))
+                            def.type_id.0
+                        ),
+                    )
                 })?;
             Ok(CanonicalTypeIdentity::ExternalOpaque(
                 ExternalOpaqueTypeIdentity::new(package, symbol_path.clone()),
@@ -662,20 +668,23 @@ pub(crate) fn project_type_id_to_canonical_identity(
         TypeDefinition::GenericInstance(instance) => {
             project_generic_instance(instance, type_environment, context)
         }
-        TypeDefinition::Function(_) => Err(CompilerError::compiler_error(format!(
-            "canonical type projection does not support function types; TypeId({}) is a function \
+        TypeDefinition::Function(_) => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "canonical type projection does not support function types; TypeId({}) is a function \
              type, which is not a closed canonical type identity",
-            type_id.0
-        ))),
+                type_id.0
+            ),
+        )),
         TypeDefinition::GenericParameter(parameter) => {
             let identity = context
                 .generic_parameter_origins
                 .resolve_generic_parameter_origin(parameter.id)
                 .map_err(|error| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "canonical type projection could not resolve an exported generic-parameter identity for GenericParameterId({}): {error_msg}",
                         parameter.id.0,
-                        error_msg = error.msg
+                        error_msg = error.message
                     ))
                 })?;
             Ok(CanonicalTypeIdentity::GenericParameter(identity))
@@ -753,7 +762,7 @@ fn project_constructed(
     constructed: &crate::compiler_frontend::datatypes::definitions::ConstructedTypeDefinition,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<CanonicalTypeIdentity, CompilerError> {
+) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
     let arguments = constructed.arguments.as_ref();
     match &constructed.constructor {
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { fixed_capacity }) => {
@@ -796,12 +805,12 @@ fn project_generic_instance(
     instance: &crate::compiler_frontend::datatypes::definitions::GenericInstanceDefinition,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<CanonicalTypeIdentity, CompilerError> {
+) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
     let expected_arity = validate_generic_instance_base_arity(instance.base, type_environment)?;
     let base_type_id = type_environment
         .type_id_for_nominal_id(instance.base)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "canonical type projection could not resolve a TypeId for generic-instance base NominalTypeId({})",
                 instance.base.0,
             ))
@@ -810,9 +819,10 @@ fn project_generic_instance(
         Some(CanonicalTypeIdentity::SourceNominal(origin)) => Some(Ok(origin.clone())),
         Some(CanonicalTypeIdentity::ModulePrivateNominal(_)) => None,
         Some(identity) => {
-            return Err(CompilerError::compiler_error(format!(
-                "canonical generic-instance base has non-nominal identity {identity:?}",
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("canonical generic-instance base has non-nominal identity {identity:?}",),
+            ));
         }
         None => Some(
             context
@@ -822,13 +832,16 @@ fn project_generic_instance(
     };
 
     if instance.arguments.len() != expected_arity {
-        return Err(CompilerError::compiler_error(format!(
-            "canonical type projection found a malformed generic-instance arity: \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "canonical type projection found a malformed generic-instance arity: \
              NominalTypeId({}) declares {expected_arity} generic parameters but the instance \
              carries {} concrete arguments",
-            instance.base.0,
-            instance.arguments.len()
-        )));
+                instance.base.0,
+                instance.arguments.len()
+            ),
+        ));
     }
 
     let mut projected_arguments = Vec::with_capacity(instance.arguments.len());
@@ -842,10 +855,10 @@ fn project_generic_instance(
     if let Some(base_origin) = private_base {
         return Ok(CanonicalTypeIdentity::GenericInstance {
             base: base_origin.map_err(|error| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "canonical type projection could not resolve a source-nominal origin for generic-instance base NominalTypeId({}): {error_msg}",
                     instance.base.0,
-                    error_msg = error.msg,
+                    error_msg = error.message,
                 ))
             })?,
             arguments,
@@ -854,7 +867,8 @@ fn project_generic_instance(
     let Some(CanonicalTypeIdentity::ModulePrivateNominal(base)) =
         type_environment.canonical_identity_for_type_id(base_type_id)
     else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "canonical private generic-instance base lost its private nominal identity",
         ));
     };
@@ -875,7 +889,7 @@ fn project_generic_instance(
 fn validate_generic_instance_base_arity(
     nominal_id: NominalTypeId,
     type_environment: &TypeEnvironment,
-) -> Result<usize, CompilerError> {
+) -> Result<usize, InfrastructureFailure> {
     let (generic_parameters, kind) = match (
         type_environment.struct_definition(nominal_id),
         type_environment.choice_definition(nominal_id),
@@ -883,42 +897,58 @@ fn validate_generic_instance_base_arity(
         (Some(def), _) => (def.generic_parameters, "struct"),
         (None, Some(def)) => (def.generic_parameters, "choice"),
         (None, None) => {
-            return Err(CompilerError::compiler_error(format!(
-                "canonical type projection found a generic-instance base NominalTypeId({}) that \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "canonical type projection found a generic-instance base NominalTypeId({}) that \
                  is neither a registered struct nor a choice; a generic instance must be built \
                  from a known nominal base",
-                nominal_id.0
-            )));
+                    nominal_id.0
+                ),
+            ));
         }
     };
 
     let list_id = generic_parameters.ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "canonical type projection found a generic instance of {kind} \
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "canonical type projection found a generic instance of {kind} \
              NominalTypeId({}) whose generic parameter list is absent; a generic instance \
              requires a base that actually declares generic parameters",
-            nominal_id.0
-        ))
+                nominal_id.0
+            ),
+        )
     })?;
 
     let list = type_environment
         .generic_parameters(list_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "canonical type projection found a generic instance of {kind} \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "canonical type projection found a generic instance of {kind} \
              NominalTypeId({}) whose declared generic parameter list \
              GenericParameterListId({}) is missing from the TypeEnvironment",
-                nominal_id.0, list_id.0
-            ))
+                    nominal_id.0, list_id.0
+                ),
+            )
         })?;
 
     Ok(list.parameters.len())
 }
 
-/// Constructs a `CompilerError` for a malformed constructed-type arity.
-fn malformed_arity_error(constructor_name: &str, expected: usize, actual: usize) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "canonical type projection found a malformed {constructor_name} arity: expected \
+/// Constructs an `InfrastructureFailure` for a malformed constructed-type arity.
+fn malformed_arity_error(
+    constructor_name: &str,
+    expected: usize,
+    actual: usize,
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "canonical type projection found a malformed {constructor_name} arity: expected \
          {expected} argument(s) but the constructed type carries {actual}"
-    ))
+        ),
+    )
 }

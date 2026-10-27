@@ -8,8 +8,12 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolCategory;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
@@ -53,7 +57,7 @@ use super::{
 /// WHAT: carries ordinary user-facing dependency diagnostics separately from internal
 ///       successful-interface invariant failures.
 /// WHY: dependency resolution passes structured diagnostics through several recursive helpers, and
-///      provider agreement failures must reach the `CompilerError` lane without first degrading
+///      provider agreement failures must reach the `InfrastructureFailure` lane without first degrading
 ///      into a source diagnostic.
 type BuilderResult<T> = Result<T, BindingEnvironmentError>;
 
@@ -105,13 +109,13 @@ struct PublicProviderSelectionInput<'a> {
 ///       semantic keys. A malformed successful artefact may publish one key from more than one
 ///       provider; first-provider-wins would make the accepted facts depend on dependency order.
 /// WHY: this is an internal successful-interface invariant, so disagreement is a
-///      `CompilerError`, never a user-facing source diagnostic.
+///      `InfrastructureFailure`, never a user-facing source diagnostic.
 pub(super) fn insert_agreed<K, V>(
     table: &mut FxHashMap<K, V>,
     key: K,
     value: &V,
     fact_class: &str,
-) -> Result<(), CompilerError>
+) -> Result<(), InfrastructureFailure>
 where
     K: std::hash::Hash + Eq + Debug,
     V: Eq + Debug + Clone,
@@ -119,10 +123,13 @@ where
     match table.entry(key) {
         std::collections::hash_map::Entry::Occupied(existing) => {
             if existing.get() != value {
-                return Err(CompilerError::compiler_error(format!(
-                    "provider {fact_class} {:?} disagrees across dependency providers",
-                    existing.key()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    format!(
+                        "provider {fact_class} {:?} disagrees across dependency providers",
+                        existing.key()
+                    ),
+                ));
             }
         }
         std::collections::hash_map::Entry::Vacant(slot) => {
@@ -142,7 +149,7 @@ pub(crate) struct BindingEnvironmentBuilder<'a> {
     pub(super) string_table: &'a mut StringTable,
     pub(super) path_fork: &'a mut PathInternerFork,
     pub(super) environment: HeaderBindingEnvironment,
-    pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
+    pub(super) warnings: crate::compiler_frontend::compiler_messages::DiagnosticBag,
     /// Provider IDs whose closed semantics have already been imported into the module-wide
     /// header environment.
     ///
@@ -226,24 +233,30 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 ..
             }
         ) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                 "external provider dependency retained a local source identity",
             )
             .into());
         }
 
         let Some(source_record) = self.source_files.get(local_source_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "retained local dependency references missing source identity {}",
-                local_source_id.index()
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "retained local dependency references missing source identity {}",
+                    local_source_id.index()
+                ),
+            )
             .into());
         };
         if !matches!(source_record.kind, Some(SourceKind::Compiler(_))) {
-            return Err(CompilerError::compiler_error(format!(
-                "retained local dependency references non-compiler source identity {}",
-                local_source_id.index()
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "retained local dependency references non-compiler source identity {}",
+                    local_source_id.index()
+                ),
+            )
             .into());
         }
         if !self
@@ -252,7 +265,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .values()
             .any(|source_id| *source_id == local_source_id)
         {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "retained local dependency identity {} is outside the prepared module source slots",
                 local_source_id.index()
             ))
@@ -266,26 +279,30 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             string_table: self.string_table,
             path_fork: &*self.path_fork,
         }) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained local dependency path does not resolve to a prepared source file",
             )
             .into());
         };
         let ResolvedNamespaceTarget::SourceFile(target_path) = namespace_target else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained local dependency path resolves to a non-source namespace target",
             )
             .into());
         };
         let Some(target_source_id) = self.module_symbols.source_ids_by_source.get(&target_path)
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained local dependency target path has no prepared source identity",
             )
             .into());
         };
         if *target_source_id != local_source_id {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained local dependency identity disagrees with its resolved source path",
             )
             .into());
@@ -631,16 +648,22 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .exported_origin(public_name_text)
             .cloned()
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "provider interface {:?} has no declaration export for public name '{}'",
-                    provider_id, public_name_text
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    format!(
+                        "provider interface {:?} has no declaration export for public name '{}'",
+                        provider_id, public_name_text
+                    ),
+                )
             })?;
         let declaration = view.declaration(&origin).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "provider interface {:?} has no declaration record for exported origin {:?}",
-                provider_id, origin
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "provider interface {:?} has no declaration record for exported origin {:?}",
+                    provider_id, origin
+                ),
+            )
         })?;
 
         self.emit_alias_case_warning_if_needed(local_alias, public_name);
@@ -746,7 +769,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .source_provider_dependencies
             .resolve_reexport(provider_selection.shell)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                     "public provider selection {:?} has no resolved provider for diagnostic path {:?}",
                     provider_selection, diagnostic_path
                 ))
@@ -778,7 +801,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                         "public provider selection {:?} has an unresolvable binding target for '{}'",
                         provider_selection, provider_name
                     ))
@@ -796,10 +819,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             );
         }
 
-        Err(CompilerError::compiler_error(format!(
-            "public provider selection {:?} has no exported provider member '{}'",
-            provider_selection, provider_name
-        ))
+        let interface = self.source_provider_dependencies.interface(provider_id)?;
+        Err(super::provider_public_surface_diagnostic(
+            selected_path,
+            interface,
+            Some(selection.source_span),
+            self.string_table,
+        )
         .into())
     }
 
@@ -831,7 +857,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 let local_path = self
                     .path_fork
                     .try_intern_child(dependency.dependency.path, public_name_id)
-                    .expect("path interner fork exhausted while binding provider declaration");
+                    .ok_or_else(token_lexical::logical_path_capacity)?;
                 self.register_provider_declaration_binding(
                     file_visibility,
                     registry,
@@ -853,7 +879,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .resolve_canonical_symbol(&binding.target)
                 else {
                     return Err(self
-                        .provider_public_surface_diagnostic(dependency, selection, interface)
+                        .provider_public_surface_diagnostic(dependency, selection, interface)?
                         .into());
                 };
                 self.register_external_import(
@@ -871,7 +897,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
 
             return Err(self
-                .provider_public_surface_diagnostic(dependency, selection, interface)
+                .provider_public_surface_diagnostic(dependency, selection, interface)?
                 .into());
         }
         Ok(())
@@ -882,18 +908,18 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         dependency: &RetainedDependencyClause,
         selection: &DependencySelection,
         interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
-    ) -> CompilerDiagnostic {
+    ) -> BuilderResult<DiagnosticDraft> {
         let selected_path = self
             .path_fork
             .try_intern_child(dependency.dependency.path, selection.source_name)
-            .expect("path interner fork exhausted while building provider diagnostic path");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
 
-        super::provider_public_surface_diagnostic(
+        Ok(super::provider_public_surface_diagnostic(
             &selected_path,
             interface,
             Some(selection.source_span),
             self.string_table,
-        )
+        ))
     }
 
     fn register_source_provider_namespace_binding(
@@ -939,7 +965,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let local_path = self
                 .path_fork
                 .try_intern_child(dependency.dependency.path, name)
-                .expect("path interner fork exhausted while binding imported declaration");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             let target = SourceDeclarationTarget::Imported {
                 origin: binding.origin().clone(),
                 local_path,
@@ -1067,7 +1093,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let method_path = self
                 .path_fork
                 .try_intern_child(*imported_type_path, method_name)
-                .expect("path interner fork exhausted while binding receiver method");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             let target = SourceFunctionTarget::Imported {
                 origin: method.method_origin.clone(),
                 local_path: method_path,
@@ -1235,7 +1261,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 let synthetic_path = self
                     .path_fork
                     .try_intern_components(&[package_name, name_id])
-                    .expect("implicit package constant path must fit the path table");
+                    .ok_or_else(token_lexical::logical_path_capacity)?;
                 self.environment
                     .imported_declarations_by_local_path
                     .entry(synthetic_path)
@@ -1442,7 +1468,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let selected_path = self
                 .path_fork
                 .try_intern_child(dependency.dependency.path, selection.source_name)
-                .expect("path interner fork exhausted while resolving selected dependency");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             self.resolve_and_register_selected_dependency(
                 file_visibility,
                 registry,
@@ -1487,7 +1513,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             path_fork: &mut *self.path_fork,
         };
 
-        if let Some(public_export_result) = resolve_public_export_boundary(&mut public_export_input)
+        if let Some(public_export_result) =
+            resolve_public_export_boundary(&mut public_export_input)?
         {
             match public_export_result {
                 PublicExportLookupResult::ExportedSource {
@@ -1660,7 +1687,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let selected_path = self
                 .path_fork
                 .try_intern_child(dependency.dependency.path, selection.source_name)
-                .expect("path interner fork exhausted while resolving external dependency");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
                 dependency_path: &selected_path,
                 external_package_registry: self.external_package_registry,
@@ -1722,7 +1749,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             self.string_table,
             &*self.path_fork,
         ) {
-            return Err(CompilerDiagnostic::explicit_moth_extension(
+            return Err(imports::explicit_moth_extension(
                 dependency.dependency.path,
                 Some(dependency.dependency.span),
             )
@@ -1755,7 +1782,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // concrete file/package resolution so `@module` exposes the module root's public
         // surface, not a private implementation path or a missing direct symbol.
         let namespace_target = self
-            .resolve_public_export_namespace_target(dependency, source_file)
+            .resolve_public_export_namespace_target(dependency, source_file)?
             .or_else(|| {
                 resolve_namespace_target(NamespaceTargetResolutionInput {
                     dependency_path: &dependency.dependency.path,
@@ -1792,20 +1819,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         // If normal resolution succeeds for a bare dependency, it's a direct symbol-path dependency.
         match target {
-            ResolvedDependencyTarget::Source { symbol_path, .. } => {
-                Err(CompilerDiagnostic::direct_symbol_path_import(
-                    symbol_path,
-                    Some(dependency.dependency.span),
-                )
-                .into())
-            }
-            ResolvedDependencyTarget::External { .. } => {
-                Err(CompilerDiagnostic::direct_symbol_path_import(
-                    dependency.dependency.path,
-                    Some(dependency.dependency.span),
-                )
-                .into())
-            }
+            ResolvedDependencyTarget::Source { symbol_path, .. } => Err(
+                imports::direct_symbol_path_import(symbol_path, Some(dependency.dependency.span))
+                    .into(),
+            ),
+            ResolvedDependencyTarget::External { .. } => Err(imports::direct_symbol_path_import(
+                dependency.dependency.path,
+                Some(dependency.dependency.span),
+            )
+            .into()),
         }
     }
 }

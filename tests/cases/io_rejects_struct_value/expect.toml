@@ -1,5 +1,5 @@
-# TODO(display): When io.line() accepts values through the Display-style coercion path,
-# replace this negative test with a positive struct display/coercion fixture.
+# io.line() does not accept struct values through the Display-style coercion path,
+# so this negative fixture pins that rejection.
 
 [backends.html]
 mode = "failure"

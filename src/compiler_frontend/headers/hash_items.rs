@@ -4,10 +4,13 @@
 //! WHY: the parser keeps hash-prefixed top-level forms in one place so `file_parser` can remain a
 //! high-level loop over classified items.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, InvalidConfigReason};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
@@ -26,13 +29,15 @@ fn source_tag_at_cursor(
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "hash item source token owner does not match its file identity",
             ),
         ));
     }
     cursor.current().map(|token| token.tag()).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "hash item cursor exceeded its source token owner",
         ))
     })
@@ -47,15 +52,17 @@ fn record_start_body_token_from_source(
     let source_tokens = cursor.source_tokens();
     if source_tokens.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "hash item source token owner does not match its file identity",
             ),
         ));
     }
     let token = source_tokens.token(index).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "hash item token index exceeded its source token owner: {error:?}",
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("hash item token index exceeded its source token owner: {error:?}",),
+        ))
     })?;
     state
         .record_start_body_token_ref(token)
@@ -89,7 +96,7 @@ pub(super) fn handle_hash_item(
     match source_tag_at_cursor(cursor, file_id)? {
         TokenTag::TEMPLATE_HEAD => {
             if state.export_mode.is_public() {
-                return Err(CompilerDiagnostic::invalid_export_target(Some(current_span)).into());
+                return Err(generics_traits_api::invalid_export_target(Some(current_span)).into());
             }
 
             handle_top_level_const_template(
@@ -115,7 +122,7 @@ fn handle_top_level_const_template(
     current_span: SourceSpan,
 ) -> Result<(), HeaderParseFailure> {
     if context.file_role == FileRole::Normal {
-        return Err(CompilerDiagnostic::deferred_feature(
+        return Err(names_declarations::deferred_feature(
             context
                 .string_table
                 .intern("top-level const templates in ordinary source files"),
@@ -126,7 +133,8 @@ fn handle_top_level_const_template(
 
     if context.file_role == FileRole::ImportedModuleRoot {
         let opening = cursor.current().ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "runtime template opening exceeded its source token owner",
             ))
         })?;
@@ -139,9 +147,10 @@ fn handle_top_level_const_template(
         )?;
         let canonical = cursor.source_tokens();
         let cursor = canonical.cursor(range).map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "discarded template range exceeds its source token owner: {error:?}",
-            )))
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("discarded template range exceeds its source token owner: {error:?}",),
+            ))
         })?;
         if let Some((marker_span, adjacent)) = find_config_qualifier_marker_in_cursor(
             cursor,
@@ -149,13 +158,13 @@ fn handle_top_level_const_template(
             context.span_builder,
         ) {
             let diagnostic = if adjacent {
-                CompilerDiagnostic::invalid_config_reason(
+                project_config::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigQualifierInvalidPlacement,
                     Some(marker_span),
                 )
             } else {
-                CompilerDiagnostic::common_syntax_mistake(
+                token_lexical::common_syntax_mistake(
                     CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
                     Some(marker_span),
                 )
@@ -167,12 +176,13 @@ fn handle_top_level_const_template(
 
     if context.file_role == FileRole::ActiveApiOnlyModuleRoot {
         return Err(
-            CompilerDiagnostic::invalid_top_level_runtime_statement(Some(current_span)).into(),
+            names_declarations::invalid_top_level_runtime_statement(Some(current_span)).into(),
         );
     }
 
     let opening = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "const-template opening exceeded its source token owner",
         ))
     })?;
@@ -182,7 +192,8 @@ fn handle_top_level_const_template(
         .const_template_offset
         .checked_add(state.const_template_count)
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "const-template number overflowed its module source range",
             ))
         })?;
@@ -206,7 +217,8 @@ fn handle_top_level_const_template(
     )?;
 
     state.const_template_count = state.const_template_count.checked_add(1).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "const-template count overflowed its source state",
         ))
     })?;
@@ -217,7 +229,8 @@ fn handle_top_level_const_template(
         .runtime_fragment_offset
         .checked_add(state.runtime_fragment_count)
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "runtime insertion index overflowed its module source range",
             ))
         })?;

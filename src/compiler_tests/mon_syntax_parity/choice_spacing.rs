@@ -4,8 +4,9 @@
 //! WHY: `Choice::Variant` is one lexical header in both parsers, while spaced `Name ::` remains
 //! valid only for source choice declarations.
 
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::TypeUsedAsValueView;
 use crate::compiler_frontend::compiler_messages::{
-    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticPayload, NameNamespace,
+    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, NameNamespace,
 };
 use crate::compiler_frontend::instrumentation::lock_counter_test;
 use crate::mon::{
@@ -56,17 +57,22 @@ fn invalid_separator_fixture(
         ChoiceVariantSeparatorGap::After => MonErrorCode::InvalidIdentifier,
     };
 
+    let source_code = "MOTH-SYNTAX-0031";
+    let source_reason =
+        SourceReason::CommonSyntaxMistake(CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing {
+            gap,
+        });
+    let site = in_literal(literal, "::", 1);
+
     fixture(
         name,
         literal,
         "Theme :: Ready;\n",
         theme_schema(),
         SourceExpectation::Reject {
-            code: "MOTH-SYNTAX-0031",
-            reason: SourceReason::CommonSyntaxMistake(
-                CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
-            ),
-            site: in_literal(literal, "::", 1),
+            code: source_code,
+            reason: source_reason,
+            site,
         },
         MonExpectation::Reject {
             code: mon_code,
@@ -137,24 +143,21 @@ fn source_and_mon_reject_pre_separator_line_breaks_and_comments() {
             "status = Theme -- note\n::Ready",
         ),
     ] {
-        let source = format!("Theme :: Ready;\n{literal}\n");
-        let diagnostic =
+        let source = format!("Theme :: Ready;\n{literal}");
+        let failure =
             crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
                 &source,
             );
-        assert_eq!(
-            diagnostic.identity().code,
+        let diagnostic = crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+            &failure,
             "MOTH-RULE-0037",
-            "source case: {name}"
+            None,
         );
-        assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::NamespaceMisuse {
-                expected: NameNamespace::Value,
-                found: NameNamespace::Type,
-                ..
-            }
-        ));
+        let facts = diagnostic
+            .family_view::<TypeUsedAsValueView>()
+            .expect("type-used-as-value diagnostic should retain typed namespaces");
+        assert_eq!(facts.expected, NameNamespace::Value);
+        assert_eq!(facts.found, NameNamespace::Type);
 
         let error = decode_document(literal, &prepared_schema)
             .expect_err("MON must reject trivia before a qualified separator");

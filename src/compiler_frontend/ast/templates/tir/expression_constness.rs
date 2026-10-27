@@ -4,6 +4,7 @@
 //! selection and the small structural query needed by runtime contribution
 //! planning. It does not classify complete template views, slots or insert overlays.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::HashSet;
 
 use crate::compiler_frontend::ast::const_eval::registered_external_const_eval_op;
@@ -27,7 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::node::{
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -37,7 +38,7 @@ pub(crate) fn effective_branch_selector_for_view(
     expressions: &AstExpressionBuilder,
     selector: &TemplateBranchSelector,
     site_id: ExpressionSiteId,
-) -> Result<Option<TemplateBranchSelector>, CompilerError> {
+) -> Result<Option<TemplateBranchSelector>, InfrastructureFailure> {
     let Some(expression) = view.effective_expression_for_site(expressions, site_id)? else {
         return Ok(None);
     };
@@ -58,7 +59,7 @@ pub(crate) fn effective_loop_header_for_view(
     expressions: &AstExpressionBuilder,
     header: &TemplateLoopHeader,
     header_sites: TemplateLoopHeaderExpressionSites,
-) -> Result<Option<TemplateLoopHeader>, CompilerError> {
+) -> Result<Option<TemplateLoopHeader>, InfrastructureFailure> {
     match (header, header_sites) {
         (
             TemplateLoopHeader::Conditional { condition: _ },
@@ -80,7 +81,8 @@ pub(crate) fn effective_loop_header_for_view(
                     view.effective_expression_for_site(expressions, step_site_id)?
                 }
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR range-loop header/site step shape mismatch.",
                     ));
                 }
@@ -118,7 +120,8 @@ pub(crate) fn effective_loop_header_for_view(
                 bindings: bindings.clone(),
                 iterable: expression.id(),
             })),
-        _ => Err(CompilerError::compiler_error(
+        _ => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR loop header shape does not match its expression sites.",
         )),
     }
@@ -227,9 +230,10 @@ impl StructuralConstness<'_> {
         standalone: bool,
     ) -> Result<bool, TemplateError> {
         let node = self.store.get_node(node_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR runtime contribution constness referenced missing node {node_id}."
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR runtime contribution constness referenced missing node {node_id}."),
+            )
         })?;
         match &node.kind {
             TemplateIrNodeKind::Sequence { children } => {
@@ -312,9 +316,10 @@ impl StructuralConstness<'_> {
             .store
             .get_template(id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR runtime contribution constness referenced missing template {id}."
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("TIR runtime contribution constness referenced missing template {id}."),
+                )
             })?
             .root;
         if !self.visiting_templates.insert(id) {

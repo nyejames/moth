@@ -6,22 +6,32 @@ use crate::build_system::create_project_modules::{
 };
 use crate::builder_surface::{BuilderSurface, PackageOrigin};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_diagnostics_html_with_context;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::unreachable_match_arm;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::import_name_collision;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    duplicate_declaration, unknown_value_name,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    DurableLabelMessage, GenericSubstitutionDiagnostic, LabelDraftMessage,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
+use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::terminal::{
-    format_label_messages_with_context, format_label_messages_with_context_from_root,
-    format_terminal_source_frame_for_test,
+    format_label_messages_view, format_terminal_source_frame_for_test,
 };
-use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, ResolvedDiagnosticLabel, diagnostic_type_name, primary_caret_padding,
-    primary_underline_length, resolve_label_render_facts_from_root,
-};
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
-    TypeMismatchContext,
+    DiagnosticRenderContext, compact_label_message_text, primary_caret_padding,
+    primary_underline_length,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
@@ -32,6 +42,43 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 use std::fs;
 use std::sync::Arc;
+
+fn compact_draft_for_test(draft: DiagnosticDraft) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(draft), None)
+}
+
+fn frozen_failure_for_test(
+    draft: DiagnosticDraft,
+    string_table: StringTable,
+    source_database: Option<SourceDatabase>,
+) -> CompilationResult<()> {
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(draft),
+        string_table,
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(
+        prepared,
+        source_database.map(|database| (Arc::new(database), None)),
+    );
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
+}
+
+fn diagnosed_reports<T>(
+    result: &CompilationResult<T>,
+) -> &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Err(_) => panic!("expected diagnosed result, got infrastructure errors"),
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("expected diagnosed result, got successful compilation")
+        }
+    }
+}
 
 #[test]
 fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
@@ -61,12 +108,19 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span =
         LocalSpan::exact(0, 6, &mut span_builder).expect("primary span should fit inline");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(SourceSpan::new(source_id, local_span)));
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-
-    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+    let diagnostic = unknown_value_name(name, Some(SourceSpan::new(source_id, local_span)));
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, Some((Arc::new(source_database), None)));
+    let failure: CompilationResult<()> = accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
 
     assert!(
         rendered.contains("compiled snapshot"),
@@ -75,6 +129,41 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
     assert!(
         !rendered.contains("newer disk version"),
         "the source frame must not reread the mutated source file: {rendered}"
+    );
+}
+
+#[test]
+fn unresolved_source_span_without_owner_has_no_frozen_position_or_frame() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("undefined_thing");
+    let diagnostic = unknown_value_name(name, Some(inline_span(SourceId::from_index(1), 0, 5)));
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, None);
+    let failure: CompilationResult<()> = accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed);
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the unresolved diagnostic should remain in the frozen report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert!(
+        context.site_position(view.primary_site()).is_none(),
+        "a source span without an owning database must remain position-less"
+    );
+
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
+    assert!(rendered.contains("undefined_thing"));
+    assert!(
+        !rendered.contains("source-frame"),
+        "an unresolved source span must not fabricate a source frame: {rendered}"
     );
 }
 
@@ -103,9 +192,9 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
 
     // Return only the report. The complete module transaction, provider preparation, caller
     // configuration and mutable source owners end before any source or type is rendered.
-    let messages = {
+    let failure: CompilationResult<()> = {
         let mut config = Config::new(project_directory.path().to_path_buf());
-        let mut strings = StringTable::new();
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let mut surface = BuilderSurface::with_mandatory_core();
         surface.source_packages.register_filesystem_root(
             "pkg",
@@ -113,88 +202,88 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
             PackageOrigin::Builder,
         );
         let mut source_files = None;
+        let mut project_source_builder = None;
         let frontend = compile_project_frontend_with_inputs(
             &mut config,
             BuildProfile::Dev,
             None,
             &StyleDirectiveRegistry::built_ins(),
             &mut surface,
-            &mut strings,
+            &mut warning_owner,
             &mut source_files,
+            &mut project_source_builder,
             &BuildConfigInputSet::new(),
             FrontendCompilationMode::Canonical,
         )
         .expect("the generated source diagnosis should return its complete transaction");
-        assert!(frontend.has_diagnosed_or_blocked());
-        frontend.into_render_messages_with_frozen_identity(&mut strings, source_files.take(), None)
+        let CompilationOutcome::Diagnosed(reports) = frontend else {
+            panic!("generated source diagnosis should use the diagnosed result lane");
+        };
+        Ok(CompilationOutcome::Diagnosed(reports))
     };
     fs::write(&requester_path, "requester disk replacement\n")
         .expect("the requester should be replaced");
     fs::write(&donor_path, "donor disk replacement\n").expect("the donor should be replaced");
 
-    let diagnostics = messages.diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
-    let DiagnosticPayload::TypeMismatch {
-        expected,
-        found,
-        context: mismatch_context,
-    } = &diagnostic.payload
-    else {
-        panic!("the concrete donor call must retain a typed mismatch");
-    };
-    assert_eq!(*mismatch_context, TypeMismatchContext::FunctionArgument);
-    let context = messages.diagnostic_render_context(0);
-    assert!(context.type_environment.is_some());
-    assert_eq!(diagnostic_type_name(*expected, context), "String");
-    assert_eq!(diagnostic_type_name(*found, context), "I32");
+    let mut reports = diagnosed_reports(&failure).iter();
+    let (report, view) = reports
+        .next()
+        .expect("the concrete donor call must retain one typed mismatch");
+    assert!(reports.next().is_none());
+    let context = DiagnosticRenderContext::for_report(report);
+
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("the retained requester span should resolve");
     assert_eq!(primary.host_path, Some(requester_path.as_path()));
     assert_eq!(primary.line, "value I32 = outer(1)");
     assert_eq!(primary.start.line, 1);
-    assert_eq!(diagnostic.labels.len(), 3);
+
+    let labels = view.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 3);
+    let rendered_labels = labels
+        .iter()
+        .map(|label| {
+            compact_label_message_text(label.message, view.types(), context)
+                .expect("each retained label has a message")
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+        rendered_labels,
+        vec![
+            "generic body operation failed here".to_owned(),
+            "generic function declared here".to_owned(),
+            "generic substitution: T = I32".to_owned(),
+        ]
     );
-    assert_eq!(
-        diagnostic.labels[1].message,
-        Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
-    );
-    let Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }) =
-        &diagnostic.labels[2].message
+    let DurableLabelMessage::GenericInstantiationSubstitutions(substitutions) = labels[2].message
     else {
-        panic!("the final label should retain concrete substitution provenance");
+        panic!("the last label should retain generic substitutions");
     };
-    assert_eq!(substitutions.len(), 1);
-    assert_eq!(
-        diagnostic_type_name(substitutions[0].concrete_type_id, context),
-        "I32"
+    assert_eq!(substitutions.iter().count(), 1);
+
+    let terse = format_terse_diagnostic_view(view, context);
+    assert!(
+        terse.contains("Type mismatch in function argument: expected String, found I32"),
+        "the frozen type mismatch must retain direction and context: {terse}"
     );
-    for (label, expected_line) in diagnostic.labels.iter().zip([
+
+    for (label, expected_line) in labels.iter().zip([
         "        return inner(value, 1)",
         "    outer type T |value T| -> I32:",
     ]) {
         let donor = context
-            .label_position(label)
+            .site_position(label.site)
             .expect("the retained donor label should resolve in its own domain");
         assert_eq!(donor.host_path, Some(donor_path.as_path()));
         assert_eq!(donor.line, expected_line);
         assert_eq!(
-            label
-                .span
-                .expect("the donor label retains its source")
-                .source(),
-            diagnostic
-                .primary_span
-                .expect("the requester retains its source")
-                .source(),
+            primary.source, donor.source,
             "colliding source IDs still resolve through their explicit provenance"
         );
     }
-    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+
+    let rendered = render_compilation_result_html(&failure, project_directory.path());
     assert!(
         rendered.contains(r#"<span class="source-line">value I32 = outer(1)</span>"#),
         "the source frame should render the exact compiled requester line: {rendered}"
@@ -202,19 +291,6 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
     assert!(rendered.contains("String") && rendered.contains("I32"));
     assert!(!rendered.contains("disk replacement"));
     assert_eq!(rendered.matches("source-frame").count(), 1);
-    let label_facts =
-        resolve_label_render_facts_from_root(diagnostic, context, project_directory.path());
-    assert_eq!(
-        label_facts
-            .iter()
-            .map(|label| label.message.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "generic body operation failed here",
-            "generic function declared here",
-            "generic substitution: T = I32",
-        ]
-    );
 }
 
 /// Build one database whose single source is `src/<relative_name>` with the given retained text.
@@ -265,47 +341,17 @@ fn empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt() {
         &mut string_table,
     );
     let name = string_table.intern("eof");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 0)));
-
-    {
-        let context = DiagnosticRenderContext::new(&string_table)
-            .with_optional_source_database(Some(&source_database));
-        let position = context
-            .primary_position(&diagnostic)
-            .expect("empty-file EOF should resolve in the mutable source database");
-        assert_eq!(position.source, source_id);
-        assert_eq!(position.path, std::path::PathBuf::from("src/main.moth"));
-        assert_eq!(position.start.line, 0);
-        assert_eq!(position.start.column, 0);
-        assert_eq!(position.end.line, 0);
-        assert_eq!(position.end.column, 0);
-        assert_eq!(position.line, "");
-
-        let invalid_source = CompilerDiagnostic::unknown_value_name(
-            name,
-            Some(SourceSpan::new(
-                SourceId::from_index(99),
-                LocalSpan::source_start(),
-            )),
-        );
-        assert!(
-            context.primary_position(&invalid_source).is_none(),
-            "an unknown source identity must remain unresolved"
-        );
-        let invalid_range =
-            CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 1, 0)));
-        assert!(
-            context.primary_position(&invalid_range).is_none(),
-            "an out-of-range empty-file offset must remain unresolved"
-        );
-    }
 
     let frozen_identity = FrozenIdentityContext::from_parts(string_table, source_database);
     let frozen_context = DiagnosticRenderContext::new(frozen_identity.strings())
         .with_frozen_identity(&frozen_identity);
+    let compact =
+        compact_draft_for_test(unknown_value_name(name, Some(inline_span(source_id, 0, 0))));
+    let view = compact
+        .first()
+        .expect("the compact diagnostic should remain");
     let position = frozen_context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("empty-file EOF should resolve in the frozen source database");
     assert_eq!(position.source, source_id);
     assert_eq!(position.path, std::path::PathBuf::from("src/main.moth"));
@@ -315,21 +361,31 @@ fn empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt() {
     assert_eq!(position.end.column, 0);
     assert_eq!(position.line, "");
 
-    let invalid_source = CompilerDiagnostic::unknown_value_name(
+    let invalid_source = compact_draft_for_test(unknown_value_name(
         name,
         Some(SourceSpan::new(
             SourceId::from_index(99),
             LocalSpan::source_start(),
         )),
-    );
+    ));
+    let invalid_source_view = invalid_source
+        .first()
+        .expect("the invalid-source diagnostic should remain");
     assert!(
-        frozen_context.primary_position(&invalid_source).is_none(),
+        frozen_context
+            .site_position(invalid_source_view.primary_site())
+            .is_none(),
         "an unknown source identity must remain unresolved in the frozen database"
     );
     let invalid_range =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 1, 0)));
+        compact_draft_for_test(unknown_value_name(name, Some(inline_span(source_id, 1, 0))));
+    let invalid_range_view = invalid_range
+        .first()
+        .expect("the invalid-range diagnostic should remain");
     assert!(
-        frozen_context.primary_position(&invalid_range).is_none(),
+        frozen_context
+            .site_position(invalid_range_view.primary_site())
+            .is_none(),
         "an out-of-range empty-file offset must remain unresolved in the frozen database"
     );
 }
@@ -337,32 +393,63 @@ fn empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt() {
 #[test]
 fn spanless_message_label_renders_without_a_source_position() {
     let mut string_table = StringTable::new();
-    let label_text = string_table.intern("message-only label");
-    let diagnostic = CompilerDiagnostic::unreachable_match_arm(None).with_labels(vec![
-        DiagnosticLabel::secondary(None, Some(DiagnosticLabelMessage::RenderedText(label_text))),
-        DiagnosticLabel::secondary(
+    let name = string_table.intern("value");
+    let diagnostic = duplicate_declaration(name, None)
+        .with_label(None, Some(LabelDraftMessage::PreviousDeclaration))
+        .with_label(
             Some(SourceSpan::new(
                 SourceId::from_index(99),
                 LocalSpan::source_start(),
             )),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        ),
-    ]);
-
-    let rendered = format_label_messages_with_context(
-        &diagnostic,
-        DiagnosticRenderContext::new(&string_table),
-    );
+            Some(LabelDraftMessage::PreviousDeclaration),
+        );
+    let compact = compact_draft_for_test(diagnostic);
+    let view = compact
+        .first()
+        .expect("the compact diagnostic should remain");
+    let rendered = format_label_messages_view(view, DiagnosticRenderContext::new(&string_table));
 
     assert_eq!(
         rendered,
-        vec!["info: - message-only label"],
+        vec!["info: - previous declaration here"],
         "spanless labels render their message while unresolved spans remain omitted"
     );
 }
 
 #[test]
-fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
+fn message_less_label_on_a_compact_family_renders_only_its_location() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("value");
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "alpha\nbeta\n",
+        &mut string_table,
+    );
+    let identity = Arc::new(FrozenIdentityContext::from_parts(
+        string_table,
+        source_database,
+    ));
+    let diagnostic = duplicate_declaration(name, Some(inline_span(source_id, 6, 4)))
+        .with_label(Some(inline_span(source_id, 0, 5)), None);
+    let compact = compact_draft_for_test(diagnostic);
+    let view = compact
+        .first()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::new(identity.strings()).with_frozen_identity(&identity);
+
+    let rendered = format_label_messages_view(view, context);
+
+    assert_eq!(
+        rendered,
+        vec!["info: 1:1"],
+        "a message-less label renders only its location"
+    );
+}
+
+#[test]
+fn aggregated_diagnostics_keep_their_own_snapshot_across_prepared_appends() {
     let alpha_directory = tempfile::tempdir().expect("should create alpha directory");
     let beta_directory = tempfile::tempdir().expect("should create beta directory");
     let mut string_table = StringTable::new();
@@ -386,32 +473,35 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
     let beta_name = string_table.intern("beta_value");
     let mut alpha_builder = ExtendedSpanBuilder::new();
     let alpha_span = LocalSpan::exact(0, 5, &mut alpha_builder).unwrap();
-    let mut alpha_messages = CompilerMessages::from_diagnostic(
-        CompilerDiagnostic::unknown_value_name(
-            alpha_name,
-            Some(SourceSpan::new(alpha_source, alpha_span)),
-        ),
-        string_table.clone(),
-    );
-    alpha_messages.set_source_database(Arc::new(alpha_database));
     let mut beta_builder = ExtendedSpanBuilder::new();
     let beta_span = LocalSpan::exact(0, 4, &mut beta_builder).unwrap();
-    let mut beta_messages = CompilerMessages::from_diagnostic(
-        CompilerDiagnostic::unknown_value_name(
+    let alpha_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(vec![
+            unreachable_match_arm(None),
+            unknown_value_name(alpha_name, Some(SourceSpan::new(alpha_source, alpha_span))),
+        ]),
+        string_table.clone(),
+        None,
+        None,
+    );
+    let beta_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(unknown_value_name(
             beta_name,
             Some(SourceSpan::new(beta_source, beta_span)),
-        ),
+        )),
         string_table,
+        None,
+        None,
     );
-    beta_messages.set_source_database(Arc::new(beta_database));
 
-    // Both aggregation directions shift the recorded ranges.
-    alpha_messages.prepend_diagnostics_preserving_context(vec![
-        CompilerDiagnostic::unreachable_match_arm(None),
-    ]);
-    alpha_messages.append_messages_preserving_context(beta_messages);
-
-    let rendered = render_compiler_messages_html(&alpha_messages, alpha_directory.path());
+    // Direct prepared appends preserve push order and each batch's source snapshot.
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(alpha_batch, Some((Arc::new(alpha_database), None)));
+    accumulator.append_prepared(beta_batch, Some((Arc::new(beta_database), None)));
+    let failure: CompilationResult<()> = accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed);
+    let rendered = render_compilation_result_html(&failure, alpha_directory.path());
     let alpha_frame = rendered
         .split("<article")
         .find(|article| article.contains("alpha_value"))
@@ -430,6 +520,7 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
         "the beta diagnostic must render its own snapshot: {beta_frame}"
     );
 }
+
 #[test]
 fn rendered_source_lines_match_tokenizer_line_breaks() {
     let cases: &[(&str, &[&str])] = &[
@@ -449,46 +540,49 @@ fn rendered_source_lines_match_tokenizer_line_breaks() {
             &mut string_table,
         );
         let line_name = string_table.intern("line");
-        {
-            let context = DiagnosticRenderContext::new(&string_table)
-                .with_optional_source_database(Some(&source_database));
+        let eof_name = string_table.intern("eof");
+        let frozen_identity = FrozenIdentityContext::from_parts(string_table, source_database);
+        let context = DiagnosticRenderContext::new(frozen_identity.strings())
+            .with_frozen_identity(&frozen_identity);
 
-            let mut offset = 0u32;
-            for (line_number, expected_line) in expected_lines.iter().enumerate() {
-                let diagnostic = CompilerDiagnostic::unknown_value_name(
-                    line_name,
-                    Some(inline_span(source_id, offset, expected_line.len() as u32)),
-                );
-                let position = context
-                    .primary_position(&diagnostic)
-                    .expect("an exact source span should resolve to a position");
-                assert_eq!(position.start.line, line_number as u32);
-                assert_eq!(position.line, *expected_line);
+        let mut offset = 0u32;
+        for (line_number, expected_line) in expected_lines.iter().enumerate() {
+            let compact = compact_draft_for_test(unknown_value_name(
+                line_name,
+                Some(inline_span(source_id, offset, expected_line.len() as u32)),
+            ));
+            let view = compact
+                .first()
+                .expect("the compact diagnostic should remain");
+            let position = context
+                .site_position(view.primary_site())
+                .expect("an exact source span should resolve to a position");
+            assert_eq!(position.start.line, line_number as u32);
+            assert_eq!(position.line, *expected_line);
 
-                offset += expected_line.len() as u32;
-                if let Some(next) = text.as_bytes().get(offset as usize) {
-                    if *next == b'\r' {
-                        offset += 1;
-                        if text.as_bytes().get(offset as usize) == Some(&b'\n') {
-                            offset += 1;
-                        }
-                    } else if *next == b'\n' {
+            offset += expected_line.len() as u32;
+            if let Some(next) = text.as_bytes().get(offset as usize) {
+                if *next == b'\r' {
+                    offset += 1;
+                    if text.as_bytes().get(offset as usize) == Some(&b'\n') {
                         offset += 1;
                     }
+                } else if *next == b'\n' {
+                    offset += 1;
                 }
             }
         }
 
         if text.ends_with('\r') || text.ends_with('\n') {
-            let eof_name = string_table.intern("eof");
-            let context = DiagnosticRenderContext::new(&string_table)
-                .with_optional_source_database(Some(&source_database));
-            let eof = CompilerDiagnostic::unknown_value_name(
+            let compact = compact_draft_for_test(unknown_value_name(
                 eof_name,
                 Some(inline_span(source_id, text.len() as u32, 0)),
-            );
+            ));
+            let view = compact
+                .first()
+                .expect("the compact EOF diagnostic should remain");
             let position = context
-                .primary_position(&eof)
+                .site_position(view.primary_site())
                 .expect("EOF after a terminator should resolve to the final authored line");
             assert_eq!(
                 position.start.line,
@@ -525,12 +619,19 @@ fn rendered_crlf_source_line_matches_str_lines() {
     );
 
     let name = string_table.intern("undefined_thing");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)));
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-
-    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+    let diagnostic = unknown_value_name(name, Some(inline_span(source_id, 0, 5)));
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, Some((Arc::new(source_database), None)));
+    let failure: CompilationResult<()> = accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"<span class="source-line">hello</span>"#),
         "the source frame must render the CRLF line without a trailing CR: {rendered}"
@@ -553,13 +654,18 @@ fn renderers_resolve_multibyte_primary_span_to_scalar_columns() {
     );
 
     let name = string_table.intern("bad");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 4, 3)));
-
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 4, 3))),
+        string_table,
+        Some(source_database),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
     assert_eq!(position.start.line, 0);
     assert_eq!(position.start.column, 2);
@@ -567,14 +673,13 @@ fn renderers_resolve_multibyte_primary_span_to_scalar_columns() {
     assert_eq!(position.end.column, 5);
     assert_eq!(primary_underline_length(&position, "éébad"), 3);
 
-    let terse = format_terse_diagnostic_with_context(&diagnostic, context);
+    let terse = format_terse_diagnostic_view(view, context);
     assert!(
         terse.contains("|1:3|"),
         "terse output used stale columns: {terse}"
     );
 
-    let rendered =
-        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(":1:3</a>"),
         "HTML output used stale columns: {rendered}"
@@ -597,20 +702,24 @@ fn renderers_underline_half_open_reanchored_span_exactly() {
     );
 
     let name = string_table.intern("café");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 3, 5)));
-
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 3, 5))),
+        string_table,
+        Some(source_database),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
     assert_eq!(position.start.column, 3);
     assert_eq!(position.end.column, 7);
     assert_eq!(primary_underline_length(&position, "xx café!"), 4);
 
-    let rendered =
-        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"class="source-caret">   ^^^^</span>"#),
         "half-open span must underline exactly four authored scalars: {rendered}"
@@ -632,19 +741,23 @@ fn renderers_expand_a_preceding_tab_to_the_configured_stop_for_carets() {
     );
 
     let name = string_table.intern("b");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 2, 1)));
-
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 2, 1))),
+        string_table,
+        Some(source_database),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
     assert_eq!(position.start.column, 2);
     assert_eq!(primary_underline_length(&position, "a\tb"), 1);
 
-    let rendered =
-        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"class="source-caret">        ^</span>"#),
         "caret must start after eight display cells: {rendered}"
@@ -674,27 +787,36 @@ fn terminal_source_and_caret_rows_share_gutter_and_tab_geometry() {
         &mut string_table,
     );
     let name = string_table.intern("b");
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let frozen_identity = FrozenIdentityContext::from_parts(string_table, source_database);
+    let context = DiagnosticRenderContext::new(frozen_identity.strings())
+        .with_frozen_identity(&frozen_identity);
 
     for (line, offset) in target_lines.into_iter().zip(target_offsets) {
-        let diagnostic = CompilerDiagnostic::unknown_value_name(
+        let compact = compact_draft_for_test(unknown_value_name(
             name,
             Some(inline_span(source_id, (offset + 1) as u32, 1)),
-        );
-        let frame = format_terminal_source_frame_for_test(&diagnostic, context)
-            .expect("the terminal source frame should resolve");
+        ));
+        let view = compact
+            .first()
+            .expect("the compact diagnostic should remain");
+        let position = context
+            .site_position(view.primary_site())
+            .expect("the terminal source position should resolve");
+        assert_eq!(position.start.line, line as u32);
+
+        let frame = format_terminal_source_frame_for_test(view, context)
+            .expect("the production terminal source frame should be available");
         let rows = frame.lines().collect::<Vec<_>>();
+        let gutter_width = (line + 1).to_string().len().max(3);
+        let expected_source_label = format!("{:>width$} | ", line + 1, width = gutter_width);
         assert_eq!(
             rows.len(),
             3,
             "line {line} should emit marker, source and caret rows"
         );
-        let gutter_width = (line + 1).to_string().len().max(3);
-        let expected_source_label = format!("{:>width$} | ", line + 1, width = gutter_width);
         assert!(
             rows[1].starts_with(&expected_source_label),
-            "line {} should use the expected source gutter width: {frame}",
+            "line {} should use the expected source gutter width",
             line + 1
         );
         let source_b = rows[1]
@@ -734,19 +856,23 @@ fn renderers_count_a_wide_cjk_scalar_as_two_cells_for_carets() {
     );
 
     let name = string_table.intern("x");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 3, 1)));
-
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 3, 1))),
+        string_table,
+        Some(source_database),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
     assert_eq!(position.start.column, 1);
     assert_eq!(primary_underline_length(&position, "あx"), 1);
 
-    let rendered =
-        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"class="source-caret">  ^</span>"#),
         "caret must start after two display cells: {rendered}"
@@ -754,7 +880,7 @@ fn renderers_count_a_wide_cjk_scalar_as_two_cells_for_carets() {
 }
 #[test]
 fn renderers_count_a_combining_mark_as_zero_cells_for_carets() {
-    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
     let mut string_table = StringTable::new();
     let (source_database, source_id) = retained_source_database(
         temporary_directory.path(),
@@ -764,19 +890,23 @@ fn renderers_count_a_combining_mark_as_zero_cells_for_carets() {
     );
 
     let name = string_table.intern("x");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 3, 1)));
-
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 3, 1))),
+        string_table,
+        Some(source_database),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
     assert_eq!(position.start.column, 2);
     assert_eq!(primary_underline_length(&position, "éx"), 1);
 
-    let rendered =
-        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"class="source-caret"> ^</span>"#),
         "caret must start after one display cell: {rendered}"
@@ -795,19 +925,24 @@ fn renderers_measure_a_zwj_emoji_sequence_as_two_display_cells_for_carets() {
     );
 
     let name = string_table.intern("x");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 11, 1)));
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let compact = compact_draft_for_test(unknown_value_name(
+        name,
+        Some(inline_span(source_id, 11, 1)),
+    ));
+    let view = compact
+        .first()
+        .expect("the compact diagnostic should remain");
+    let frozen_identity = FrozenIdentityContext::from_parts(string_table, source_database);
+    let context = DiagnosticRenderContext::new(frozen_identity.strings())
+        .with_frozen_identity(&frozen_identity);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
 
     assert_eq!(position.start.column, 3);
     assert_eq!(primary_caret_padding(&position, "👩‍💻x"), 2);
     assert_eq!(primary_underline_length(&position, "👩‍💻x"), 1);
 }
-
 #[test]
 fn renderers_measure_a_variation_selector_sequence_as_two_display_cells_for_carets() {
     let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
@@ -820,12 +955,16 @@ fn renderers_measure_a_variation_selector_sequence_as_two_display_cells_for_care
     );
 
     let name = string_table.intern("x");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 6, 1)));
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let compact =
+        compact_draft_for_test(unknown_value_name(name, Some(inline_span(source_id, 6, 1))));
+    let view = compact
+        .first()
+        .expect("the compact diagnostic should remain");
+    let frozen_identity = FrozenIdentityContext::from_parts(string_table, source_database);
+    let context = DiagnosticRenderContext::new(frozen_identity.strings())
+        .with_frozen_identity(&frozen_identity);
     let position = context
-        .primary_position(&diagnostic)
+        .site_position(view.primary_site())
         .expect("the primary span should resolve against the retained source");
 
     assert_eq!(position.start.column, 2);
@@ -845,10 +984,15 @@ fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
         &mut primary_strings,
     );
     let missing_name = primary_strings.intern("missing");
+    let primary_report_strings = primary_strings.clone();
     let primary_identity = Arc::new(FrozenIdentityContext::from_parts(
         primary_strings,
         primary_database,
     ));
+    let primary_handle = FrozenIdentityHandle::new();
+    primary_handle
+        .install(Arc::clone(&primary_identity))
+        .expect("primary identity should install exactly once");
 
     let mut donor_strings = StringTable::new();
     let (donor_database, donor_source) = retained_source_database(
@@ -866,47 +1010,36 @@ fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
         .install(Arc::clone(&donor_identity))
         .expect("donor identity should install exactly once");
 
-    let diagnostic = CompilerDiagnostic::unknown_value_name(
-        missing_name,
-        Some(inline_span(primary_source, 0, 7)),
-    )
-    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
-        Some(inline_span(donor_source, 0, 7)),
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-        donor_handle,
-    )]);
-    let context = DiagnosticRenderContext::new(primary_identity.strings())
-        .with_frozen_identity(&primary_identity);
+    let diagnostic = unknown_value_name(missing_name, Some(inline_span(primary_source, 0, 7)))
+        .with_label(
+            Some(inline_span(donor_source, 0, 7)),
+            Some(LabelDraftMessage::GenericInstantiationBodySite),
+        )
+        .with_label_frozen_identity_handle(0, donor_handle)
+        .with_primary_frozen_identity_handle(primary_handle);
+    let failure = frozen_failure_for_test(diagnostic, primary_report_strings, None);
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
     let label_facts =
-        resolve_label_render_facts_from_root(&diagnostic, context, primary_directory.path());
-    assert_eq!(
-        label_facts,
-        vec![ResolvedDiagnosticLabel {
-            style: DiagnosticLabelStyle::Secondary,
-            path: Some("src/donor.moth".to_owned()),
-            line: Some(1),
-            column: Some(1),
-            message: "generic body operation failed here".to_owned(),
-        }],
-        "shared label resolution should expose facts without terminal presentation text",
-    );
+        DiagnosticSubject::new(view).resolved_labels(context, primary_directory.path());
+    assert_eq!(label_facts.len(), 1);
+    let label = &label_facts[0];
+    assert_eq!(label.path.as_deref(), Some("src/donor.moth"));
+    assert_eq!(label.line, Some(1));
+    assert_eq!(label.column, Some(1));
+    assert_eq!(label.message, "generic body operation failed here");
 
-    let terminal_labels = format_label_messages_with_context_from_root(
-        &diagnostic,
-        context,
-        primary_directory.path(),
-    );
+    let terminal_labels = format_label_messages_view(view, context);
     assert_eq!(
         terminal_labels,
         vec!["info: src/donor.moth:1:1 - generic body operation failed here"],
         "terminal related-site output should retain the resolved donor path and label message",
     );
 
-    let html = render_diagnostics_html_with_context(
-        std::slice::from_ref(&diagnostic),
-        primary_directory.path(),
-        context,
-    );
+    let html = render_compilation_result_html(&failure, primary_directory.path());
     assert!(
         html.contains(
             r#"class="diagnostic-label">info: src/donor.moth:1:1 - generic body operation failed here</p>"#,
@@ -935,45 +1068,35 @@ fn span_only_secondary_label_surfaces_its_own_location() {
     );
 
     let name = string_table.intern("value");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 5, 5)))
-            .with_labels(vec![DiagnosticLabel::secondary(
-                Some(inline_span(source_id, 0, 4)),
-                None,
-            )]);
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 5, 5)))
+            .with_label(Some(inline_span(source_id, 0, 4)), None),
+        string_table,
+        Some(source_database),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
 
     let label_facts =
-        resolve_label_render_facts_from_root(&diagnostic, context, temporary_directory.path());
-    assert_eq!(
-        label_facts,
-        vec![ResolvedDiagnosticLabel {
-            style: DiagnosticLabelStyle::Secondary,
-            path: Some("src/main.moth".to_owned()),
-            line: Some(1),
-            column: Some(1),
-            message: String::new(),
-        }],
-        "a span-only label must keep its resolved location with an empty message",
-    );
+        DiagnosticSubject::new(view).resolved_labels(context, temporary_directory.path());
+    assert_eq!(label_facts.len(), 1);
+    let label = &label_facts[0];
+    assert_eq!(label.path.as_deref(), Some("src/main.moth"));
+    assert_eq!(label.line, Some(1));
+    assert_eq!(label.column, Some(1));
+    assert_eq!(label.message, "");
 
-    let terminal_labels = format_label_messages_with_context_from_root(
-        &diagnostic,
-        context,
-        temporary_directory.path(),
-    );
+    let terminal_labels = format_label_messages_view(view, context);
     assert_eq!(
         terminal_labels,
         vec!["info: 1:1"],
         "the terminal label line must show the distinct location without an empty message suffix",
     );
 
-    let html = render_diagnostics_html_with_context(
-        std::slice::from_ref(&diagnostic),
-        temporary_directory.path(),
-        context,
-    );
+    let html = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         html.contains("src/main.moth:2:1"),
         "the primary location must still render: {html}",
@@ -1000,16 +1123,13 @@ fn html_escapes_dynamic_relative_source_paths() {
         &mut string_table,
     );
     let name = string_table.intern("value");
-    let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)));
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
-
-    let html = render_diagnostics_html_with_context(
-        std::slice::from_ref(&diagnostic),
-        temporary_directory.path(),
-        context,
+    let failure = frozen_failure_for_test(
+        unknown_value_name(name, Some(inline_span(source_id, 0, 5))),
+        string_table,
+        Some(source_database),
     );
+
+    let html = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         html.contains("src/bad&amp;.moth:1:1"),
         "relative source paths must be HTML escaped in location text: {html}",
@@ -1031,36 +1151,37 @@ fn html_escapes_related_label_messages_without_terminal_presentation_text() {
         &mut string_table,
     );
     let name = string_table.intern("value");
-    let label_text = string_table.intern("<label> &");
+    let substitution_name = string_table.intern("<label> &");
+    let previous_declaration = inline_span(source_id, 0, 5);
     let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)))
-            .with_labels(vec![DiagnosticLabel::secondary(
+        import_name_collision(name, Some(previous_declaration), Some(previous_declaration))
+            .with_label(
                 None,
-                Some(DiagnosticLabelMessage::RenderedText(label_text)),
-            )]);
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+                Some(LabelDraftMessage::GenericInstantiationSubstitutions {
+                    substitutions: vec![GenericSubstitutionDiagnostic {
+                        parameter_name: substitution_name,
+                        concrete_type_id: crate::compiler_frontend::datatypes::ids::TypeId(1),
+                    }],
+                }),
+            );
+    let failure = frozen_failure_for_test(diagnostic, string_table, Some(source_database));
 
-    let html = render_diagnostics_html_with_context(
-        std::slice::from_ref(&diagnostic),
-        temporary_directory.path(),
-        context,
-    );
+    let html = render_compilation_result_html(&failure, temporary_directory.path());
 
     assert!(
-        html.contains(r#"class="diagnostic-label">info: - &lt;label&gt; &amp;</p>"#),
-        "label message text must be escaped independently in HTML: {html}",
+        html.contains("generic substitution: &lt;label&gt; &amp; = TypeId(1)"),
+        "related label message must be escaped independently in HTML: {html}",
     );
     assert!(
-        !html.contains(r#"class="diagnostic-label">info: - <label> &</p>"#),
-        "raw label message markup must never be emitted: {html}",
+        !html.contains("generic substitution: <label> & = TypeId(1)"),
+        "raw related label markup must never be emitted: {html}",
     );
 }
 /// A compilation-root span names no physical source, so renderers omit a source frame even when
 /// another retained snapshot is attached.
 #[test]
 fn compilation_root_primary_spans_render_without_a_physical_source_frame() {
-    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
     let mut string_table = StringTable::new();
     let (source_database, _) = retained_source_database(
         temporary_directory.path(),
@@ -1070,30 +1191,35 @@ fn compilation_root_primary_spans_render_without_a_physical_source_frame() {
     );
 
     let name = string_table.intern("project_wide");
-    let diagnostic = CompilerDiagnostic::unknown_value_name(
-        name,
-        Some(SourceSpan::new(
-            SourceId::COMPILATION_ROOT,
-            LocalSpan::source_start(),
-        )),
+    let failure = frozen_failure_for_test(
+        unknown_value_name(
+            name,
+            Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                LocalSpan::source_start(),
+            )),
+        ),
+        string_table,
+        Some(source_database),
     );
-
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_source_database(Some(&source_database));
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("the compact diagnostic should remain");
+    let context = DiagnosticRenderContext::for_report(report);
 
     assert!(
-        context.primary_position(&diagnostic).is_none(),
+        context.site_position(view.primary_site()).is_none(),
         "the compilation root has no physical source position"
     );
 
-    let terse = format_terse_diagnostic_with_context(&diagnostic, context);
+    let terse = format_terse_diagnostic_view(view, context);
     assert!(
         !terse.contains("main.moth"),
         "the root span must not resolve through the attached snapshot's path: {terse}"
     );
 
-    let rendered =
-        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         !rendered.contains("snapshot text"),
         "the compilation root must not render a physical source frame: {rendered}"

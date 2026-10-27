@@ -132,8 +132,10 @@ fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
 
 #[test]
 fn generic_parameters_reserve_dec_family_and_reclaim_number_names() {
-    use crate::compiler_frontend::compiler_messages::{
-        DiagnosticPayload, InvalidDeclarationReason,
+    use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+    use crate::compiler_frontend::compiler_messages::diagnostics::{
+        families::names_declarations::{self, InvalidDeclarationCode, InvalidDeclarationView},
+        test_support::compact_bag_for_test,
     };
 
     for name in [
@@ -141,7 +143,7 @@ fn generic_parameters_reserve_dec_family_and_reclaim_number_names() {
     ] {
         let mut string_table = StringTable::new();
         let (list, _) = single_generic_parameter_list(name, &mut string_table);
-        let Err(diagnostic) = GenericParameterScope::from_parameter_list(
+        let Err(failure) = GenericParameterScope::from_parameter_list(
             &list,
             None,
             &FxHashSet::default(),
@@ -149,14 +151,23 @@ fn generic_parameters_reserve_dec_family_and_reclaim_number_names() {
         ) else {
             panic!("{name} must be reserved as a generic parameter");
         };
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::ReservedGenericParameterName { .. },
-                    ..
-                }
-            ),
+        let compacted = compact_bag_for_test(
+            DiagnosticBag::from(names_declarations::invalid_declaration(
+                failure.reason,
+                None,
+                failure.parameter_span,
+            )),
+            None,
+        );
+        let diagnostic = compacted
+            .first()
+            .expect("reserved generic parameters should emit a diagnostic");
+        let view = diagnostic
+            .family_view::<InvalidDeclarationView>()
+            .expect("the diagnostic should be an invalid declaration");
+        assert_eq!(
+            view.code,
+            InvalidDeclarationCode::ReservedGenericParameterName,
             "{name} must fail through the reserved generic-name diagnostic"
         );
     }
@@ -179,7 +190,7 @@ fn generic_parameters_reserve_dec_family_and_reclaim_number_names() {
     for name in ["number", "dec2extra"] {
         let mut string_table = StringTable::new();
         let (list, _) = single_generic_parameter_list(name, &mut string_table);
-        let Err(diagnostic) = GenericParameterScope::from_parameter_list(
+        let Err(failure) = GenericParameterScope::from_parameter_list(
             &list,
             None,
             &FxHashSet::default(),
@@ -187,14 +198,23 @@ fn generic_parameters_reserve_dec_family_and_reclaim_number_names() {
         ) else {
             panic!("{name} should fail the generic-name shape rule");
         };
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::InvalidGenericParameterName { .. },
-                    ..
-                }
-            ),
+        let compacted = compact_bag_for_test(
+            DiagnosticBag::from(names_declarations::invalid_declaration(
+                failure.reason,
+                None,
+                failure.parameter_span,
+            )),
+            None,
+        );
+        let diagnostic = compacted
+            .first()
+            .expect("invalid generic parameter names should emit a diagnostic");
+        let view = diagnostic
+            .family_view::<InvalidDeclarationView>()
+            .expect("the diagnostic should be an invalid declaration");
+        assert_eq!(
+            view.code,
+            InvalidDeclarationCode::InvalidGenericParameterName,
             "{name} must fail the generic-name shape rule, not reservation"
         );
     }
@@ -843,13 +863,11 @@ fn type_id_to_type_identity_key_preserves_fixed_capacity() {
     let mut type_environment = TypeEnvironment::new();
     let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
-    // Round-trip a fixed-capacity collection
     let fixed_64 = type_environment.intern_collection(int, Some(64));
     let key = type_environment
         .type_id_to_type_identity_key(fixed_64)
         .expect("should produce key");
 
-    // Verify the key carries fixed_capacity
     match &key {
         TypeIdentityKey::Collection {
             element: _,
@@ -858,7 +876,6 @@ fn type_id_to_type_identity_key_preserves_fixed_capacity() {
         _ => panic!("expected Collection key, got {key:?}"),
     }
 
-    // Round-trip back
     let round_tripped =
         type_identity_key_to_type_id(&key, &mut type_environment).expect("should round-trip");
     assert_eq!(round_tripped, fixed_64);
@@ -902,7 +919,6 @@ fn substitute_preserves_fixed_capacity() {
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
     let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
-    // Build a fixed-capacity collection parameterized by T
     let template_fixed = type_environment.intern_collection(parameter_type_id, Some(64));
 
     // Substitute T -> I32
@@ -911,7 +927,6 @@ fn substitute_preserves_fixed_capacity() {
 
     let substituted = type_environment.substitute_type_id(template_fixed, &mapping);
 
-    // Verify substitution produced the correct fixed-collection type
     let expected = type_environment.intern_collection(int_type_id, Some(64));
     assert_eq!(substituted, expected);
 
@@ -934,7 +949,6 @@ fn substitute_preserves_fixed_capacity_element_only_substitution() {
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
     let string_type_id = type_environment.builtins().string;
 
-    // Build a growable collection parameterized by T
     let template = type_environment.intern_collection(parameter_type_id, None);
 
     let mut mapping = FxHashMap::default();

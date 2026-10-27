@@ -9,49 +9,61 @@
 //! reachability logic. Those responsibilities belong to their focused owners.
 
 use crate::backends::js::JsEmitter;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, LocalId};
 
 impl<'hir> JsEmitter<'hir> {
-    pub(crate) fn function_name(&self, function_id: FunctionId) -> Result<&str, CompilerError> {
+    pub(crate) fn function_name(
+        &self,
+        function_id: FunctionId,
+    ) -> Result<&str, InfrastructureFailure> {
         self.function_name_by_id
             .get(&function_id)
             .map(String::as_str)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JavaScript backend: missing function symbol for {function_id:?}",
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
+                    format!("JavaScript backend: missing function symbol for {function_id:?}",),
+                )
             })
     }
 
-    pub(crate) fn local_name(&self, local_id: LocalId) -> Result<&str, CompilerError> {
+    pub(crate) fn local_name(&self, local_id: LocalId) -> Result<&str, InfrastructureFailure> {
         self.local_name_by_id
             .get(&local_id)
             .map(String::as_str)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JavaScript backend: missing local symbol for {local_id:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
+                    format!("JavaScript backend: missing local symbol for {local_id:?}"),
+                )
             })
     }
 
-    pub(crate) fn field_name(&self, field_id: FieldId) -> Result<&str, CompilerError> {
+    pub(crate) fn field_name(&self, field_id: FieldId) -> Result<&str, InfrastructureFailure> {
         self.field_name_by_id
             .get(&field_id)
             .map(String::as_str)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JavaScript backend: missing field symbol for {field_id:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
+                    format!("JavaScript backend: missing field symbol for {field_id:?}"),
+                )
             })
     }
 
-    pub(crate) fn block_by_id(&self, block_id: BlockId) -> Result<&'hir HirBlock, CompilerError> {
+    pub(crate) fn block_by_id(
+        &self,
+        block_id: BlockId,
+    ) -> Result<&'hir HirBlock, InfrastructureFailure> {
         self.blocks_by_id.get(&block_id).copied().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "JavaScript backend: block {block_id:?} not found in HIR module"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!("JavaScript backend: block {block_id:?} not found in HIR module"),
+            )
         })
     }
 }

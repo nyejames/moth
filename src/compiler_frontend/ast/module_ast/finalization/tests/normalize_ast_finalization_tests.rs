@@ -1509,12 +1509,17 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
             "runtime-plan module constants must not report the old internal fold transformation error"
         );
     };
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::NonFoldableConstTemplate,
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("the module constant diagnostic should compact");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("the diagnostic should use the template-structure family");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::NonFoldableConstTemplate
+    );
 }
 
 #[test]

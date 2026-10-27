@@ -3,7 +3,13 @@ use super::super::file_reference_resolution::{
 };
 use super::super::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidCompileTimePathCode, InvalidCompileTimePathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_resolved_failure_for_test;
+#[cfg(unix)]
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceFailure;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, PreparedFileReferenceClass,
 };
@@ -11,7 +17,33 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
 use std::fs;
+
+#[cfg(unix)]
+fn invalid_path_reason(
+    failure: ResolvedFileReferenceFailure,
+) -> Option<InvalidCompileTimePathCode> {
+    let compact = compact_resolved_failure_for_test(failure);
+    compact
+        .views()
+        .next()?
+        .family_view::<InvalidCompileTimePathView>()
+        .map(|facts| facts.reason)
+}
+
+#[cfg(unix)]
+fn has_invalid_path_reason(
+    outcome: SingleFileReferenceOutcome,
+    expected: InvalidCompileTimePathCode,
+) -> bool {
+    match outcome {
+        SingleFileReferenceOutcome::Diagnostic(diagnostic) => {
+            invalid_path_reason(diagnostic) == Some(expected)
+        }
+        _ => false,
+    }
+}
 
 #[test]
 fn case_mismatch_evidence_is_sorted_and_unicode_lowercased() {
@@ -51,10 +83,9 @@ fn synthetic_physical_resolution_cache_reuses_settled_outcome() {
     let path = path_fork
         .try_intern_portable_path("assets/logo.svg", &mut strings)
         .expect("test path fits");
-    let path_syntax_id = path_syntax.push(
-        path,
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
     let reference = PreparedFileReference {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         source_file: SourceId::COMPILATION_ROOT,
@@ -96,10 +127,9 @@ fn synthetic_moth_value_skips_physical_resolution_for_missing_target() {
     let path = path_fork
         .try_intern_portable_path("missing.moth", &mut strings)
         .expect("test path fits");
-    let path_syntax_id = path_syntax.push(
-        path,
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
     let reference = PreparedFileReference {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         source_file: SourceId::COMPILATION_ROOT,
@@ -145,10 +175,9 @@ fn synthetic_not_a_directory_is_a_typed_path_failure() {
     let path = path_fork
         .try_intern_portable_path("not_a_directory/value.mtf", &mut strings)
         .expect("test path fits");
-    let path_syntax_id = path_syntax.push(
-        path,
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
     let reference = PreparedFileReference {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         source_file: SourceId::COMPILATION_ROOT,
@@ -167,18 +196,25 @@ fn synthetic_not_a_directory_is_a_typed_path_failure() {
     let SingleFileReferenceOutcome::Diagnostic(diagnostic) = resolved.outcome else {
         panic!("NotADirectory should remain a typed path diagnostic");
     };
+    let compact = compact_resolved_failure_for_test(diagnostic);
+    let diagnostic = compact
+        .first()
+        .expect("file-reference diagnostic should have a compact view");
+    let primary_span = match diagnostic.primary_site() {
+        SiteRef::Absent => panic!("file-reference diagnostic should retain its authored span"),
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+    };
     assert_eq!(
-        diagnostic.primary_span,
-        Some(reference.span),
+        primary_span, reference.span,
         "synthetic file-reference diagnostics must retain the authored source span"
     );
-    assert!(matches!(
-        diagnostic.payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-            reason: InvalidCompileTimePathReason::TargetNotRegular,
-            ..
-        }
-    ));
+    assert_eq!(
+        diagnostic
+            .family_view::<InvalidCompileTimePathView>()
+            .expect("file-reference diagnostic should retain typed path facts")
+            .reason,
+        InvalidCompileTimePathCode::TargetNotRegular,
+    );
     assert!(resource_inputs.missing_watch_interests().is_empty());
 }
 
@@ -205,10 +241,9 @@ fn synthetic_in_owner_dangling_alias_watches_resolved_physical_prefix() {
     let path = path_fork
         .try_intern_portable_path("alias/leaf.svg", &mut strings)
         .expect("test path fits");
-    let path_syntax_id = path_syntax.push(
-        path,
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
     let reference = PreparedFileReference {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         source_file: SourceId::COMPILATION_ROOT,
@@ -221,16 +256,9 @@ fn synthetic_in_owner_dangling_alias_watches_resolved_physical_prefix() {
         let resolved = resolver
             .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
             .expect("in-owner dangling alias should settle");
-        assert!(matches!(
+        assert!(has_invalid_path_reason(
             resolved.outcome,
-            SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                if matches!(
-                    diagnostic.payload,
-                    crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-                        reason: InvalidCompileTimePathReason::MissingTarget,
-                        ..
-                    }
-                )
+            InvalidCompileTimePathCode::MissingTarget,
         ));
     }
 
@@ -268,10 +296,9 @@ fn synthetic_dangling_alias_resolves_nested_symlink_targets_before_parent_segmen
     let path = path_fork
         .try_intern_portable_path("alias/missing.svg", &mut strings)
         .expect("test path fits");
-    let path_syntax_id = path_syntax.push(
-        path,
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
     let reference = PreparedFileReference {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         source_file: SourceId::COMPILATION_ROOT,
@@ -288,16 +315,9 @@ fn synthetic_dangling_alias_resolves_nested_symlink_targets_before_parent_segmen
             &path_fork,
         )
         .expect("nested dangling alias should settle");
-    assert!(matches!(
+    assert!(has_invalid_path_reason(
         resolved.outcome,
-        SingleFileReferenceOutcome::Diagnostic(diagnostic)
-            if matches!(
-                diagnostic.payload,
-                crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-                    reason: InvalidCompileTimePathReason::EscapesSymlink,
-                    ..
-                }
-            )
+        InvalidCompileTimePathCode::EscapesSymlink,
     ));
     assert!(resource_inputs.missing_watch_interests().is_empty());
 }
@@ -339,10 +359,13 @@ fn synthetic_dangling_symlink_cycles_and_excessive_depth_are_infrastructure_erro
         let authored_path = path_fork
             .try_intern_portable_path(path, strings)
             .expect("test path fits");
-        let path_syntax_id = path_syntax.push(
-            authored_path,
-            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-        );
+        let path_syntax_id = path_syntax
+            .try_push_for_source(
+                authored_path,
+                SourceId::COMPILATION_ROOT,
+                LocalSpan::source_start(),
+            )
+            .expect("test path syntax row should fit");
         let reference = PreparedFileReference {
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
@@ -437,10 +460,13 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
         let authored_path = path_fork
             .try_intern_portable_path(path, strings)
             .expect("test path fits");
-        let path_syntax_id = path_syntax.push(
-            authored_path,
-            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-        );
+        let path_syntax_id = path_syntax
+            .try_push_for_source(
+                authored_path,
+                SourceId::COMPILATION_ROOT,
+                LocalSpan::source_start(),
+            )
+            .expect("test path syntax row should fit");
         let reference = PreparedFileReference {
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
@@ -494,16 +520,9 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
     ] {
         let resolved = resolve(&mut resolver, path, class, &mut strings, &mut path_syntax);
         assert!(
-            matches!(
+            has_invalid_path_reason(
                 resolved.outcome,
-                SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                    if matches!(
-                        diagnostic.payload,
-                        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-                            reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
-                            ..
-                        }
-                    )
+                InvalidCompileTimePathCode::EscapesModuleBoundary,
             ),
             "expected module-boundary rejection for {path}"
         );
@@ -523,17 +542,7 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
             &mut path_syntax,
         );
         assert!(
-            matches!(
-                resolved.outcome,
-                SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                    if matches!(
-                        diagnostic.payload,
-                        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-                            reason: InvalidCompileTimePathReason::EscapesSymlink,
-                            ..
-                        }
-                    )
-            ),
+            has_invalid_path_reason(resolved.outcome, InvalidCompileTimePathCode::EscapesSymlink,),
             "expected symlink escape rejection for {path}"
         );
     }

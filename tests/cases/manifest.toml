@@ -2043,6 +2043,27 @@ contract = "language.generics.instantiated_generic_receiver_rejected"
 role = "boundary"
 
 [[case]]
+id = "adversarial_public_receiver_generic_owner_alignment_rejected"
+path = "adversarial_public_receiver_generic_owner_alignment_rejected"
+tags = ["integration","generics","receiver-methods","diagnostics"]
+contract = "language.generics.receiver_method_generic_owner_alignment_rejected"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_public_receiver_generic_parameter_alignment_rejected"
+path = "adversarial_public_receiver_generic_parameter_alignment_rejected"
+tags = ["integration","generics","receiver-methods","diagnostics"]
+contract = "language.generics.receiver_method_generic_parameter_alignment_rejected"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_public_receiver_duplicate_trait_bound_rejected"
+path = "adversarial_public_receiver_duplicate_trait_bound_rejected"
+tags = ["integration","generics","receiver-methods","traits","diagnostics"]
+contract = "language.generics.receiver_method_duplicate_trait_bound_rejected"
+role = "adversarial"
+
+[[case]]
 id = "generic_choice_receiver_method_success"
 path = "generic_choice_receiver_method_success"
 tags = ["integration","generics","choices","receiver-methods"]
@@ -3862,6 +3883,8 @@ tags = ["integration", "html"]
 contract = "backend.html.resource_root_folder"
 role = "primary"
 
+
+
 [[case]]
 id = "html_resource_match_guard_reachable"
 path = "html_resource_match_guard_reachable"
@@ -4379,6 +4402,13 @@ path = "js_import_generic_opaque_type_rejected"
 tags = ["integration", "dependencies", "external-imports", "diagnostics", "js-backend"]
 contract = "language.dependencies.js_generic_declaration_rejected"
 role = "boundary"
+
+[[case]]
+id = "js_import_invalid_utf8_source_rejected"
+path = "js_import_invalid_utf8_source_rejected"
+tags = ["integration", "dependencies", "external-imports", "diagnostics", "js-backend"]
+contract = "language.dependencies.js_source_not_utf8_rejected"
+role = "adversarial"
 
 [[case]]
 id = "js_mutable_param_reassignment"
@@ -5172,6 +5202,13 @@ contract = "language.patterns.non_exhaustive_match_rejected"
 role = "boundary"
 
 [[case]]
+id = "match_generic_struct_zero_arms_rejected"
+path = "match_generic_struct_zero_arms_rejected"
+tags = ["integration", "control-flow", "diagnostics"]
+contract = "language.patterns.non_exhaustive_match_rejected"
+role = "adversarial"
+
+[[case]]
 id = "option_match_none_non_option_rejected"
 path = "option_match_none_non_option_rejected"
 tags = ["integration", "language", "optionals", "match", "diagnostics"]
@@ -5583,7 +5620,6 @@ path = "result_multi_success_postfix_call_arg_rejected"
 tags = ["integration", "results", "diagnostics"]
 contract = "language.results.multi_success_postfix_call_arg_rejected"
 role = "primary"
-
 
 [[case]]
 id = "result_empty_catch_handler_binding_rejected"
@@ -10660,7 +10696,6 @@ tags = ["integration", "language", "external-packages", "core-packages", "time",
 contract = "language.dependencies.core_time_duration_arithmetic_acceptance"
 role = "boundary"
 
-
 [[case]]
 id = "unary_minus_requires_numeric_operand"
 path = "unary_minus_requires_numeric_operand"
@@ -11667,6 +11702,13 @@ id = "unresolved_type_in_struct_field_rejected"
 path = "unresolved_type_in_struct_field_rejected"
 tags = ["integration", "diagnostics", "structs", "type-resolution", "regression"]
 contract = "language.structs.unresolved_field_type_rejected"
+role = "primary"
+
+[[case]]
+id = "struct_recursive_runtime_cycle_rejected"
+path = "struct_recursive_runtime_cycle_rejected"
+tags = ["integration", "diagnostics", "structs"]
+contract = "language.structs.recursive_runtime_cycle_rejected"
 role = "primary"
 
 [[case]]
@@ -13069,7 +13111,6 @@ tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"
 contract = "language.numeric.range_step_uses_builtin_failure"
 role = "primary"
 
-
 [[case]]
 id = "numeric_failure_known_int32_overflow_rejected"
 path = "numeric_failure_known_int32_overflow_rejected"
@@ -13658,7 +13699,6 @@ tags = ["integration", "html", "templates", "formatting"]
 contract = "builder.html.code_template_whitespace_normalization"
 role = "primary"
 
-
 [[case]]
 id = "html_code_highlighting"
 path = "html_code_highlighting"
@@ -13832,7 +13872,6 @@ path = "map_compile_time_resource_key_rejected"
 tags = ["integration", "paths", "diagnostics", "file-values"]
 contract = "language.paths.compile_time_map_resource_key_rejected"
 role = "boundary"
-
 
 [[case]]
 id = "anonymous_const_record_success"
@@ -14013,7 +14052,6 @@ path = "build_config_source_cross_file"
 tags = ["integration", "configuration", "control-flow"]
 contract = "language.configuration.source_config_cross_file_binding"
 role = "primary"
-
 
 [[case]]
 id = "project_globals_explicit_binding"
@@ -17899,7 +17937,6 @@ tags = ["integration", "wiring", "generics", "routes", "runtime"]
 contract = "language.wiring.generic_choice_route_output_inferred"
 role = "primary"
 
-
 [[case]]
 id = "wiring_imported_route_forwarding_runtime"
 path = "wiring_imported_route_forwarding_runtime"
@@ -18017,3 +18054,156 @@ path = "wiring_generic_choice_route_retained_expected_runtime"
 tags = ["integration", "wiring", "generics", "routes", "runtime"]
 contract = "language.wiring.retained_generic_choice_route_input_expected_inference"
 role = "primary"
+[[case]]
+id = "missing_config_input_rejected"
+path = "missing_config_input_rejected"
+tags = ["adversarial", "compiler-diagnostic"]
+contract = "compiler.config.missing_input_is_diagnosed"
+role = "adversarial"
+
+[[case]]
+id = "choice_missing_separator_rejected"
+path = "choice_missing_separator_rejected"
+tags = ["adversarial", "compiler-diagnostic"]
+contract = "compiler.choice.missing_separator_is_diagnosed"
+role = "adversarial"
+
+[[case]]
+id = "match_guard_prelude_rejected"
+path = "match_guard_prelude_rejected"
+tags = ["adversarial", "compiler-diagnostic"]
+contract = "compiler.hir.match_guard_prelude_is_diagnosed"
+role = "adversarial"
+
+[[case]]
+id = "public_selection_not_exported_rejected"
+path = "public_selection_not_exported_rejected"
+tags = ["adversarial", "compiler-diagnostic"]
+contract = "compiler.import.public_selection_must_be_exported"
+role = "adversarial"
+
+[[case]]
+id = "html_single_file_empty_route_name_rejected"
+path = "html_single_file_empty_route_name_rejected"
+tags = ["adversarial", "bug-hunt"]
+contract = "backend.html.single_file_route_name_must_not_be_empty"
+role = "adversarial"
+
+[[case]]
+id = "missing_js_provider_prefix_rejected"
+path = "missing_js_provider_prefix_rejected"
+tags = ["adversarial", "bug-hunt"]
+contract = "build.imports.missing_provider_prefix_is_a_diagnostic"
+role = "adversarial"
+
+[[case]]
+id = "project_entry_extension_required"
+path = "project_entry_extension_required"
+tags = ["adversarial", "bug-hunt"]
+contract = "build.project_entry_files_require_moth_extension"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_external_js_void_parameter_rejected"
+path = "adversarial_external_js_void_parameter_rejected"
+tags = ["integration", "dependencies", "external-imports", "diagnostics"]
+contract = "language.dependencies.external_js_void_parameter_rejected"
+role = "primary"
+
+[[case]]
+id = "wasm_unary_not_rejected"
+path = "wasm_unary_not_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_non_empty_collection_rejected"
+path = "wasm_non_empty_collection_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_struct_construction_rejected"
+path = "wasm_struct_construction_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_bool_template_chunk_rejected"
+path = "wasm_bool_template_chunk_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_choice_match_rejected"
+path = "wasm_choice_match_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_variant_payload_construction_rejected"
+path = "wasm_variant_payload_construction_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_generic_function_call_rejected"
+path = "wasm_generic_function_call_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_projected_place_rejected"
+path = "wasm_projected_place_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_projected_assignment_rejected"
+path = "wasm_projected_assignment_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_operator_only_not_rejected"
+path = "adversarial_operator_only_not_rejected"
+tags = ["integration", "diagnostics"]
+contract = "compiler.syntax.operator_only_initializer_is_diagnosed"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_trailing_dot_bounded_type_rejected"
+path = "adversarial_trailing_dot_bounded_type_rejected"
+tags = ["integration", "diagnostics"]
+contract = "compiler.syntax.trailing_dot_type_annotation_is_diagnosed"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_external_js_void_parameter_lowercase_rejected"
+path = "adversarial_external_js_void_parameter_lowercase_rejected"
+tags = ["integration", "dependencies", "external-imports", "diagnostics"]
+contract = "language.dependencies.external_js_void_like_parameter_rejected"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_moth_non_utf8_source_rejected"
+path = "adversarial_moth_non_utf8_source_rejected"
+tags = ["integration", "diagnostics"]
+contract = "compiler.syntax.moth_source_not_utf8_rejected"
+role = "adversarial"
+
+[[case]]
+id = "adversarial_source_package_dependency_cycle_rejected"
+path = "adversarial_source_package_dependency_cycle_rejected"
+tags = ["integration", "dependencies", "source-packages", "diagnostics"]
+contract = "language.dependencies.source_package_dependency_cycle_rejected"
+role = "adversarial"

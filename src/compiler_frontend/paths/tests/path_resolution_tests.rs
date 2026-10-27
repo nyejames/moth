@@ -3,11 +3,18 @@
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, terse::format_terse_diagnostic_with_context,
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    AmbiguousImportTargetView, ExplicitSourceExtensionView, InvalidImportPathCode,
+    InvalidImportPathView, MissingImportTargetView, UnsupportedSourceFileKindView,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidImportPathReason,
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, terse::format_terse_diagnostic_view,
 };
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
@@ -73,7 +80,6 @@ impl TestHarness {
         let project_root = temp_dir.path().to_path_buf();
         let entry_root = project_root.join("src");
 
-        // Create entry root and some fixtures.
         fs::create_dir_all(&entry_root).unwrap();
         fs::create_dir_all(entry_root.join("assets/images")).unwrap();
         fs::create_dir_all(entry_root.join("pages")).unwrap();
@@ -89,8 +95,7 @@ impl TestHarness {
             prepared_source_package_roots(source_packages),
             source_file_kinds,
             ModuleRootTable::empty(),
-        )
-        .expect("resolver creation should succeed");
+        );
 
         TestHarness {
             project_root,
@@ -119,40 +124,29 @@ impl TestHarness {
 }
 
 fn rendered_error_msg(
-    error: &DependencyPathResolutionError,
+    diagnostic: DiagnosticView<'_>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> String {
-    match error {
-        DependencyPathResolutionError::Diagnostic(diagnostic) => {
-            format_terse_diagnostic_with_context(
-                diagnostic,
-                DiagnosticRenderContext::new(string_table).with_path_fork(path_fork),
-            )
-        }
-        DependencyPathResolutionError::Infrastructure(error) => error.msg.clone(),
-    }
-}
-
-fn dependency_diagnostic_payload(error: &DependencyPathResolutionError) -> &DiagnosticPayload {
-    let diagnostic = typed_dependency_diagnostic(error);
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::InvalidImportPath)
-    );
-
-    &diagnostic.payload
+    format_terse_diagnostic_view(
+        diagnostic,
+        DiagnosticRenderContext::new(string_table).with_path_fork(path_fork),
+    )
 }
 
 fn typed_dependency_diagnostic(
-    error: &DependencyPathResolutionError,
-) -> &crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+    error: DependencyPathResolutionError,
+) -> CompactDiagnosticBagForTest {
     let DependencyPathResolutionError::Diagnostic(diagnostic) = error else {
         panic!("expected typed dependency diagnostic, got infrastructure error");
     };
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
+}
 
-    diagnostic
+fn dependency_view(diagnostics: &CompactDiagnosticBagForTest) -> DiagnosticView<'_> {
+    diagnostics
+        .first()
+        .expect("the dependency diagnostic bag contains one record")
 }
 
 #[test]
@@ -181,8 +175,7 @@ fn source_package_dependency_resolves_to_package_root() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -196,7 +189,7 @@ fn source_package_dependency_resolves_to_package_root() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect("source-backed package dependency should resolve");
 
@@ -237,8 +230,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -252,7 +244,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect("source-backed package dependency should resolve");
 
@@ -306,16 +298,15 @@ fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic
             &mut h.string_table,
         )
         .expect_err("unsupported .mtf dependency should fail");
-    let diagnostic = typed_dependency_diagnostic(&error);
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedSourceFileKind)
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0025");
+    assert!(
+        diagnostic
+            .family_view::<UnsupportedSourceFileKindView>()
+            .is_some(),
     );
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::UnsupportedSourceFileKind { .. }
-    ));
 }
 
 #[test]
@@ -338,16 +329,15 @@ fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
             &mut h.string_table,
         )
         .expect_err("direct .mtf dependency should fail");
-    let diagnostic = typed_dependency_diagnostic(&error);
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ExplicitSourceExtension)
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0024");
+    assert!(
+        diagnostic
+            .family_view::<ExplicitSourceExtensionView>()
+            .is_some(),
     );
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::ExplicitSourceExtension { .. }
-    ));
 }
 
 #[test]
@@ -371,11 +361,14 @@ fn moth_template_and_moth_same_stem_are_ambiguous() {
             &mut h.string_table,
         )
         .expect_err("same-stem .moth and .mtf should be ambiguous");
-    let diagnostic = typed_dependency_diagnostic(&error);
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0006");
+    assert!(
+        diagnostic
+            .family_view::<AmbiguousImportTargetView>()
+            .is_some()
     );
 }
 
@@ -399,11 +392,14 @@ fn moth_template_and_folder_same_stem_are_ambiguous() {
             &mut h.string_table,
         )
         .expect_err(".mtf and folder with same stem should be ambiguous");
-    let diagnostic = typed_dependency_diagnostic(&error);
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0006");
+    assert!(
+        diagnostic
+            .family_view::<AmbiguousImportTargetView>()
+            .is_some()
     );
 }
 
@@ -427,8 +423,7 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
         prepared_source_package_roots(&source_packages),
         &registry,
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -440,11 +435,14 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
     let error = resolver
         .resolve_dependency_to_source_file(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("source resolution must not hide .mtf/folder ambiguity");
-    let diagnostic = typed_dependency_diagnostic(&error);
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0006");
+    assert!(
+        diagnostic
+            .family_view::<AmbiguousImportTargetView>()
+            .is_some()
     );
 }
 
@@ -471,8 +469,7 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let canonical_root = fs::canonicalize(&package_root).expect("should canonicalize package root");
     assert_eq!(
@@ -521,8 +518,7 @@ fn package_scan_root_name_is_not_package_prefix() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -536,7 +532,7 @@ fn package_scan_root_name_is_not_package_prefix() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect("entry-root fallback dependency should resolve");
 
@@ -573,8 +569,7 @@ fn package_direct_child_is_package_prefix() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -588,7 +583,7 @@ fn package_direct_child_is_package_prefix() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect("source-backed package dependency should resolve");
 
@@ -617,8 +612,7 @@ fn entry_root_dependency_fallback_success() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -632,7 +626,7 @@ fn entry_root_dependency_fallback_success() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect("entry-root fallback dependency should resolve");
 
@@ -672,8 +666,7 @@ fn source_package_prefix_wins_consistently() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -687,7 +680,7 @@ fn source_package_prefix_wins_consistently() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect("source-backed package dependency should resolve");
 
@@ -703,7 +696,7 @@ fn source_package_prefix_wins_consistently() {
 }
 
 // -----------------------------------------------------------------------
-// Phase 4 — Dependency path restriction and canonicalization hardening
+// Dependency path restrictions and canonicalisation
 // -----------------------------------------------------------------------
 
 #[test]
@@ -722,8 +715,7 @@ fn dependency_dotdot_rejected() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -737,10 +729,12 @@ fn dependency_dotdot_rejected() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect_err("'..' in dependencies should be rejected");
-    let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
+    let diagnostics = typed_dependency_diagnostic(err);
+    let diagnostic = dependency_view(&diagnostics);
+    let rendered_msg = rendered_error_msg(diagnostic, &string_table, &path_fork);
 
     assert!(
         rendered_msg.contains("'..' are not supported"),
@@ -765,8 +759,7 @@ fn missing_dependency_target_is_typed_diagnostic() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -780,19 +773,18 @@ fn missing_dependency_target_is_typed_diagnostic() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect_err("missing dependency should be rejected");
-    let diagnostic = typed_dependency_diagnostic(&err);
+    let diagnostics = typed_dependency_diagnostic(err);
+    let diagnostic = dependency_view(&diagnostics);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget)
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0005");
+    assert!(
+        diagnostic
+            .family_view::<MissingImportTargetView>()
+            .is_some()
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::MissingImportTarget { .. }
-    ));
 }
 
 #[test]
@@ -811,8 +803,7 @@ fn dependency_escape_project_root_rejected() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -826,18 +817,16 @@ fn dependency_escape_project_root_rejected() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect_err("dependency escaping project root should be rejected");
-    assert!(matches!(
-        dependency_diagnostic_payload(&err),
-        DiagnosticPayload::InvalidImportPath {
-            reason: InvalidImportPathReason::ParentDirectorySegment,
-            ..
-        }
-    ));
-    let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
-
+    let diagnostics = typed_dependency_diagnostic(err);
+    let diagnostic = dependency_view(&diagnostics);
+    let facts = diagnostic
+        .family_view::<InvalidImportPathView>()
+        .expect("the diagnostic is an invalid import path");
+    assert_eq!(facts.reason, InvalidImportPathCode::ParentDirectorySegment);
+    let rendered_msg = rendered_error_msg(diagnostic, &string_table, &path_fork);
     assert!(
         rendered_msg.contains("'..' are not supported"),
         "expected '..' rejection, got: {}",
@@ -870,8 +859,7 @@ fn dependency_escape_package_root_rejected() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -885,18 +873,16 @@ fn dependency_escape_package_root_rejected() {
             path,
             &path_fork,
             &declaring_source,
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
         )
         .expect_err("dependency escaping package root should be rejected");
-    assert!(matches!(
-        dependency_diagnostic_payload(&err),
-        DiagnosticPayload::InvalidImportPath {
-            reason: InvalidImportPathReason::ParentDirectorySegment,
-            ..
-        }
-    ));
-    let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
-
+    let diagnostics = typed_dependency_diagnostic(err);
+    let diagnostic = dependency_view(&diagnostics);
+    let facts = diagnostic
+        .family_view::<InvalidImportPathView>()
+        .expect("the diagnostic is an invalid import path");
+    assert_eq!(facts.reason, InvalidImportPathCode::ParentDirectorySegment);
+    let rendered_msg = rendered_error_msg(diagnostic, &string_table, &path_fork);
     assert!(
         rendered_msg.contains("'..' are not supported"),
         "expected '..' rejection, got: {}",
@@ -923,8 +909,7 @@ fn concrete_file_dependency_inside_module_root_is_accepted() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1005,8 +990,7 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("resolver creation should succeed");
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1019,27 +1003,25 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
         path,
         &path_fork,
         &declaring_source,
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
     );
 
     #[cfg(target_os = "macos")]
     {
         let err = result.expect_err("case mismatch should be rejected on macOS");
-        assert!(matches!(
-            dependency_diagnostic_payload(&err),
-            DiagnosticPayload::InvalidImportPath {
-                reason: InvalidImportPathReason::CaseMismatch { .. },
-                ..
-            }
-        ));
-        let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
+        let diagnostics = typed_dependency_diagnostic(err);
+        let diagnostic = dependency_view(&diagnostics);
+        let facts = diagnostic
+            .family_view::<InvalidImportPathView>()
+            .expect("the diagnostic is an invalid import path");
+        assert_eq!(facts.reason, InvalidImportPathCode::CaseMismatch);
+        let rendered_msg = rendered_error_msg(diagnostic, &string_table, &path_fork);
         assert!(
             rendered_msg.contains("case mismatch"),
             "expected case mismatch error, got: {}",
             rendered_msg
         );
     }
-
     #[cfg(not(target_os = "macos"))]
     {
         // On case-sensitive filesystems the file simply won't be found.
@@ -1097,11 +1079,13 @@ fn markdown_dependency_rejected_when_unsupported() {
             &mut h.string_table,
         )
         .expect_err("unregistered .md dependency should be rejected");
-    let diagnostic = typed_dependency_diagnostic(&error);
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedSourceFileKind)
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0025");
+    assert!(
+        diagnostic
+            .family_view::<UnsupportedSourceFileKindView>()
+            .is_some()
     );
 }
 
@@ -1126,11 +1110,13 @@ fn markdown_and_moth_same_stem_are_ambiguous() {
             &mut h.string_table,
         )
         .expect_err("same-stem .moth and .md should be ambiguous");
-    let diagnostic = typed_dependency_diagnostic(&error);
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0006");
+    assert!(
+        diagnostic
+            .family_view::<AmbiguousImportTargetView>()
+            .is_some()
     );
 }
 
@@ -1154,11 +1140,13 @@ fn markdown_and_folder_same_stem_are_ambiguous() {
             &mut h.string_table,
         )
         .expect_err(".md and folder with same stem should be ambiguous");
-    let diagnostic = typed_dependency_diagnostic(&error);
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0006");
+    assert!(
+        diagnostic
+            .family_view::<AmbiguousImportTargetView>()
+            .is_some()
     );
 }
 
@@ -1184,11 +1172,13 @@ fn markdown_and_moth_template_same_stem_are_ambiguous() {
             &mut h.string_table,
         )
         .expect_err("same-stem .mtf and .md should be ambiguous");
-    let diagnostic = typed_dependency_diagnostic(&error);
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget)
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0006");
+    assert!(
+        diagnostic
+            .family_view::<AmbiguousImportTargetView>()
+            .is_some()
     );
 }
 
@@ -1208,7 +1198,6 @@ fn resolver_with_prepared_source_package_roots(roots: &[(&str, &str)]) -> Projec
         &SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
     )
-    .expect("resolver should build")
 }
 
 #[test]

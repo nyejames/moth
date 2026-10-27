@@ -8,7 +8,7 @@
 //! flags (those belong in the orchestration layer and `visible_names.rs`).
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::external_packages::{ExternalPackageRegistry, ExternalSymbolId};
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::module_symbols::PublicExportEntry;
@@ -117,7 +117,7 @@ pub(crate) fn resolve_external_package_symbol(
 /// the caller will later prove a more specific internal or public export access surface.
 pub(crate) fn resolve_dependency_target(
     input: DependencyTargetResolutionInput<'_>,
-) -> Result<ResolvedDependencyTarget, CompilerDiagnostic> {
+) -> Result<ResolvedDependencyTarget, DiagnosticDraft> {
     // Resolve as a source symbol dependency first.
     match resolve_dependency_target_path(
         input.dependency_path,

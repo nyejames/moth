@@ -1102,7 +1102,6 @@ fn expression_sites_share_one_document_order_counter() {
             None,
         );
 
-        // Read back the site IDs.
         let expr_site = match &store.get_node(expr_node).expect("expr").kind {
             TemplateIrNodeKind::DynamicExpression { site_id, .. } => *site_id,
             other => panic!("expected DynamicExpression, got {other:?}"),

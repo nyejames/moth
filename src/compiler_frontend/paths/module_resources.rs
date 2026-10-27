@@ -19,12 +19,12 @@
 //! through `StableResourceOriginId` first. The table owns no `PathBuf`, output path or rendered
 //! URL.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Dense module-local handle for one resolved resource origin.
@@ -130,13 +130,16 @@ impl ModuleResourceTable {
     pub(crate) fn try_origin(
         &self,
         resource: ResourceId,
-    ) -> Result<&ModuleResourceOrigin, CompilerError> {
+    ) -> Result<&ModuleResourceOrigin, InfrastructureFailure> {
         self.origins.get(resource.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "resource handle {} is outside a module resource table of {} origins",
-                resource.0,
-                self.origins.len()
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "resource handle {} is outside a module resource table of {} origins",
+                    resource.0,
+                    self.origins.len()
+                ),
+            )
         })
     }
 
@@ -149,9 +152,6 @@ impl ModuleResourceTable {
     pub(crate) fn origins(&self) -> &[ModuleResourceOrigin] {
         &self.origins
     }
-
-    /// Source spans contain no interned string IDs and therefore need no remapping.
-    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 }
 
 #[cfg(test)]

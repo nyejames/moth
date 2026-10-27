@@ -7,7 +7,8 @@
 
 use super::super::problem::from_hir;
 use super::{BoracleReport, BoracleSolver, OracleBounds, compare_reference_and_experiments};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
 
@@ -268,17 +269,20 @@ impl BoracleModuleReport {
 pub(crate) fn run_hir_module(
     input: &BoracleModuleInput,
     options: BoracleServiceOptions,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let selection = options.rule_selection;
     // The differential dump enumerates reference mode and every legality-changing experiment
     // itself, so a requested experiment set could not be honoured and must not be reported as
     // though it had been.
     if options.dump == BoracleDump::Differential && !selection.experiments.is_empty() {
-        return Err(CompilerError::compiler_error(format!(
-            "Boracle differential dump compares every legality-changing experiment and cannot \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            format!(
+                "Boracle differential dump compares every legality-changing experiment and cannot \
              also select experiments '{}'",
-            selection.experiment_names()
-        )));
+                selection.experiment_names()
+            ),
+        ));
     }
     let entry_point = input.entry_point.to_string_lossy();
     if options.dump == BoracleDump::Differential {
@@ -287,14 +291,18 @@ pub(crate) fn run_hir_module(
         return render_differential_module_report(problems, entry_point.as_ref(), &selection);
     }
     let report = solve_hir_module_parts(&input.hir, &input.external_package_registry, &selection)?;
-    render_module_report(&report, entry_point.as_ref(), options.dump)
+    Ok(render_module_report(
+        &report,
+        entry_point.as_ref(),
+        options.dump,
+    ))
 }
 
 /// Solve one compiler-produced HIR module without flattening its typed results into a dump.
 #[cfg(test)]
 pub(crate) fn solve_hir_module(
     input: &BoracleModuleInput,
-) -> Result<BoracleModuleReport, CompilerError> {
+) -> Result<BoracleModuleReport, InfrastructureFailure> {
     solve_hir_module_parts(
         &input.hir,
         &input.external_package_registry,
@@ -305,13 +313,14 @@ pub(crate) fn solve_hir_module(
 fn ordered_hir_functions<'module>(
     module: &'module HirModule,
     rule_selection: &BoracleRuleSelection,
-) -> Result<Vec<&'module HirFunction>, CompilerError> {
-    rule_selection
-        .validate()
-        .map_err(CompilerError::compiler_error)?;
+) -> Result<Vec<&'module HirFunction>, InfrastructureFailure> {
+    rule_selection.validate().map_err(|message| {
+        InfrastructureFailure::internal(CompilerStage::BorrowChecking, message)
+    })?;
 
     if module.functions.is_empty() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
             "Boracle source service received a HIR module without functions",
         ));
     }
@@ -325,7 +334,7 @@ fn build_hir_module_problems(
     module: &HirModule,
     external_package_registry: &Arc<ExternalPackageRegistry>,
     rule_selection: &BoracleRuleSelection,
-) -> Result<Vec<BoracleFunctionProblem>, CompilerError> {
+) -> Result<Vec<BoracleFunctionProblem>, InfrastructureFailure> {
     let functions = ordered_hir_functions(module, rule_selection)?;
 
     let mut problems = Vec::with_capacity(functions.len());
@@ -349,7 +358,7 @@ fn solve_hir_module_parts(
     module: &HirModule,
     external_package_registry: &Arc<ExternalPackageRegistry>,
     rule_selection: &BoracleRuleSelection,
-) -> Result<BoracleModuleReport, CompilerError> {
+) -> Result<BoracleModuleReport, InfrastructureFailure> {
     let functions = ordered_hir_functions(module, rule_selection)?;
     let mut reports = Vec::with_capacity(functions.len());
     for function in functions {
@@ -402,7 +411,7 @@ fn render_differential_module_report(
     problems: Vec<BoracleFunctionProblem>,
     entry_point: &str,
     rule_selection: &BoracleRuleSelection,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let mut output = String::new();
     append_module_header(
         &mut output,
@@ -428,7 +437,7 @@ fn render_module_report(
     module_report: &BoracleModuleReport,
     entry_point: &str,
     dump: BoracleDump,
-) -> Result<String, CompilerError> {
+) -> String {
     let mut output = String::new();
     append_module_header(
         &mut output,
@@ -442,7 +451,7 @@ fn render_module_report(
         output.push_str(&render_dump(&function.problem, &function.report, dump));
     }
 
-    Ok(output)
+    output
 }
 
 fn render_dump(
@@ -459,7 +468,10 @@ fn render_dump(
         BoracleDump::LastUse => report.last_use_debug_dump(),
         BoracleDump::Conflicts => report.conflicts_debug_dump(),
         BoracleDump::Witnesses => report.witnesses_debug_dump(),
-        BoracleDump::Differential => unreachable!("differential dumps use the comparison set"),
+        BoracleDump::Differential => crate::compiler_bug!(
+            CompilerStage::BorrowChecking,
+            "differential dumps use the comparison set"
+        ),
     }
 }
 

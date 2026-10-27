@@ -25,7 +25,7 @@
 //!   index of source nominals targeted by retained public exports. Direct public declarations,
 //!   imported project-graph nominals and private normal-file nominals exposed through a public
 //!   alias resolve to their owning module origin; unexported, unregistered and source-package
-//!   nominals without a project-module owner fail through `CompilerError`.
+//!   nominals without a project-module owner fail through `InfrastructureFailure`.
 //!
 //! - [`TransientGenericParameterOriginResolver`]: maps `GenericParameterId` to
 //!   `ExportedGenericParameterIdentity` from the roots' own generic parameter lists and the
@@ -33,7 +33,7 @@
 //!   generic declaration owners; receiver methods reuse their receiver nominal's parameters and
 //!   must not become owners.
 
-use super::direct_projection::FoldedValueJoinContext;
+use super::direct_projection::{FoldedValueJoinContext, PublicInterfaceDraftBuildFailure};
 use super::model::{
     PublicChoiceVariantSurface, PublicFieldTypeSlot, PublicFunctionCategory,
     PublicFunctionSemantics, PublicGenericParameterSurface, PublicGenericTemplateDescriptor,
@@ -55,7 +55,12 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeProjectionContext, ExportedGenericParameterIdentity, GenericDeclarationOrigin,
     GenericParameterOriginResolver, NominalOriginResolver, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidGenericParameterReason, InvalidReceiverDeclarationReason,
+};
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantPayloadDefinition, StructTypeDefinition, TypeDefinition,
@@ -71,6 +76,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeId,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -106,7 +112,7 @@ pub(super) struct ProjectedReceiverMethodSignature {
 /// through the transient expanded public source-nominal origin index. Direct public declarations,
 /// imported project-graph nominals and private normal-file nominals exposed through a public alias
 /// resolve to their owning module origin; unexported, unregistered and source-package nominals
-/// without a project-module owner fail through `CompilerError`.
+/// without a project-module owner fail through `InfrastructureFailure`.
 pub(super) struct TransientNominalOriginResolver<'a> {
     type_environment: &'a TypeEnvironment,
     public_source_nominal_type_origins: &'a FxHashMap<PathId, OriginTypeId>,
@@ -128,12 +134,12 @@ impl NominalOriginResolver for TransientNominalOriginResolver<'_> {
     fn resolve_nominal_origin(
         &self,
         nominal_id: NominalTypeId,
-    ) -> Result<OriginTypeId, CompilerError> {
+    ) -> Result<OriginTypeId, InfrastructureFailure> {
         let path = self
             .type_environment
             .nominal_path_by_id(nominal_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "defined public type-surface projection: NominalTypeId({}) has no registered \
                  path in the TypeEnvironment",
                     nominal_id.0
@@ -144,12 +150,15 @@ impl NominalOriginResolver for TransientNominalOriginResolver<'_> {
             .get(path)
             .cloned()
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: NominalTypeId({}) resolves to a \
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "defined public type-surface projection: NominalTypeId({}) resolves to a \
                      path that is not targeted by a retained public source export with a stable \
                      owning source-module origin",
-                    nominal_id.0
-                ))
+                        nominal_id.0
+                    ),
+                )
             })
     }
 }
@@ -164,7 +173,7 @@ impl NominalOriginResolver for TransientNominalOriginResolver<'_> {
 /// WHAT: built once from the resolved public type roots and the stable declaration origins.
 /// Free functions and struct/choice declarations are the only generic declaration owners.
 /// Receiver methods reuse their receiver nominal's parameters and never add entries.
-/// A `GenericParameterId` with no registered owner fails through `CompilerError`.
+/// A `GenericParameterId` with no registered owner fails through `InfrastructureFailure`.
 pub(super) struct TransientGenericParameterOriginResolver {
     origins: FxHashMap<GenericParameterId, ExportedGenericParameterIdentity>,
 }
@@ -183,11 +192,11 @@ impl TransientGenericParameterOriginResolver {
         list_id: GenericParameterListId,
         declaration_origin: GenericDeclarationOrigin,
         string_table: &StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let list = type_environment
             .generic_parameters(list_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "defined public type-surface projection: GenericParameterListId({}) is missing \
                  from the TypeEnvironment while registering generic-parameter origins",
                     list_id.0
@@ -202,12 +211,15 @@ impl TransientGenericParameterOriginResolver {
                 authored_name,
             );
             if self.origins.insert(parameter.id, identity).is_some() {
-                return Err(CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: GenericParameterId({}) is \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "defined public type-surface projection: GenericParameterId({}) is \
                      registered under two different declaration origins; ambiguous generic \
                      ownership",
-                    parameter.id.0
-                )));
+                        parameter.id.0
+                    ),
+                ));
             }
         }
 
@@ -220,20 +232,23 @@ impl TransientGenericParameterOriginResolver {
     /// WHAT: used by receiver-method parameter aliasing so the method's local parameter ID
     /// maps to the receiver nominal's stable exported identity without making the method a
     /// generic declaration owner. A donor-local ID already registered under the same identity
-    /// is idempotent; under a conflicting identity it is a `CompilerError`.
+    /// is idempotent; under a conflicting identity it is an `InfrastructureFailure`.
     fn register_aligned_parameter_alias(
         &mut self,
         parameter_id: GenericParameterId,
         identity: ExportedGenericParameterIdentity,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match self.origins.get(&parameter_id) {
             Some(existing) if existing == &identity => Ok(()),
-            Some(existing) => Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: GenericParameterId({}) is already \
+            Some(existing) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: GenericParameterId({}) is already \
                  registered under a different stable identity ({:?}); receiver-method \
                  parameter aliasing cannot override an existing registration",
-                parameter_id.0, existing
-            ))),
+                    parameter_id.0, existing
+                ),
+            )),
             None => {
                 self.origins.insert(parameter_id, identity);
                 Ok(())
@@ -246,15 +261,18 @@ impl GenericParameterOriginResolver for TransientGenericParameterOriginResolver 
     fn resolve_generic_parameter_origin(
         &self,
         parameter_id: GenericParameterId,
-    ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
+    ) -> Result<ExportedGenericParameterIdentity, InfrastructureFailure> {
         self.origins.get(&parameter_id).cloned().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "defined public type-surface projection: GenericParameterId({}) has no \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: GenericParameterId({}) has no \
                  registered exported generic declaration owner; receiver methods must not become \
                  generic declaration owners and private or unregistered parameters cannot \
                  enter the public type surface",
-                parameter_id.0
-            ))
+                    parameter_id.0
+                ),
+            )
         })
     }
 }
@@ -270,7 +288,7 @@ impl GenericParameterOriginResolver for TransientGenericParameterOriginResolver 
 /// root's declaration path. Building this index by name lets the projection iterate over the
 /// already-sorted export bindings and find each matching root without re-scanning headers.
 ///
-/// Construction is total: a root without a resolvable name is a `CompilerError`, and two roots
+/// Construction is total: a root without a resolvable name is an `InfrastructureFailure`, and two roots
 /// sharing a public name is a duplicate that is rejected rather than silently overwriting the
 /// first. Roots are removed as bindings consume them, so a root left unmatched after every
 /// binding has joined is a stale/extra root that is reported explicitly.
@@ -283,32 +301,38 @@ impl<'a> RootIndex<'a> {
         roots: &'a [ResolvedPublicTypeRoot],
         string_table: &StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut roots_by_name = FxHashMap::default();
         for root in roots {
             let name = path_fork
                 .component(root.path)
                 .map(|component| string_table.resolve(component))
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "defined public type-surface projection: a public type root has no \
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "defined public type-surface projection: a public type root has no \
                          resolvable defining name (path: {:?})",
-                        root.path
-                    ))
+                            root.path
+                        ),
+                    )
                 })?;
             if roots_by_name.insert(name.to_owned(), root).is_some() {
-                return Err(CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: two public type roots share the \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "defined public type-surface projection: two public type roots share the \
                      public name '{}'; a duplicate public root must not silently overwrite the \
                      first",
-                    name
-                )));
+                        name
+                    ),
+                ));
             }
         }
         Ok(Self { roots_by_name })
     }
 
-    /// Remove and return the root for an export binding, or `CompilerError` when no root matches.
+    /// Remove and return the root for an export binding, or `InfrastructureFailure` when no root matches.
     ///
     /// Roots retain their defining declaration names while bindings retain public aliases. The
     /// stable origin joins those two identities without adding a duplicate alias entry that would
@@ -316,16 +340,19 @@ impl<'a> RootIndex<'a> {
     pub(super) fn take_for_binding(
         &mut self,
         binding: &ExportBinding,
-    ) -> Result<&'a ResolvedPublicTypeRoot, CompilerError> {
+    ) -> Result<&'a ResolvedPublicTypeRoot, InfrastructureFailure> {
         let defining_name = binding.origin().defining_name();
         self.roots_by_name.remove(defining_name).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "defined public type-surface projection: the export binding '{}' for defining \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: the export binding '{}' for defining \
                  declaration '{}' has no matching public type root; every non-trait binding must \
                  join exactly one root",
-                binding.public_name(),
-                defining_name
-            ))
+                    binding.public_name(),
+                    defining_name
+                ),
+            )
         })
     }
 
@@ -364,7 +391,7 @@ pub(super) fn register_generic_parameter_origins(
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), PublicInterfaceDraftBuildFailure> {
     // Build a defining-name-to-function-origin lookup from the export bindings. Public aliases
     // remain spelling only and must not affect generic declaration identity.
     let mut function_origin_by_name: FxHashMap<&str, &OriginFunctionId> = FxHashMap::default();
@@ -387,7 +414,7 @@ pub(super) fn register_generic_parameter_origins(
                     .component(root.path)
                     .map(|component| string_table.resolve(component))
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "defined public type-surface projection: a public free-function root \
                              has no resolvable name (path: {:?})",
                             root.path
@@ -398,11 +425,14 @@ pub(super) fn register_generic_parameter_origins(
                     .get(function_name)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "defined public type-surface projection: the generic free \
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "defined public type-surface projection: the generic free \
                                  function '{}' has no matching export binding",
-                            function_name
-                        ))
+                                function_name
+                            ),
+                        )
                     })?;
 
                 let declaration_origin =
@@ -464,16 +494,19 @@ fn register_nominal_generic_origins(
     type_environment: &TypeEnvironment,
     nominal_resolver: &TransientNominalOriginResolver,
     string_table: &StringTable,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (nominal_id, generic_parameter_list_id) = match type_environment.get(type_id) {
         Some(TypeDefinition::Struct(def)) => (def.id, def.generic_parameters),
         Some(TypeDefinition::Choice(def)) => (def.id, def.generic_parameters),
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: a nominal root TypeId({}) is neither a \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: a nominal root TypeId({}) is neither a \
                  struct nor a choice definition",
-                type_id.0
-            )));
+                    type_id.0
+                ),
+            ));
         }
     };
 
@@ -501,7 +534,7 @@ fn register_receiver_method_generic_parameter_aliases(
     generic_function_templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
-) -> Result<(), CompilerError> {
+) -> Result<(), PublicInterfaceDraftBuildFailure> {
     for entry in receiver_method_entries {
         let Some(template) = generic_function_templates.get(&entry.function_path) else {
             continue;
@@ -510,23 +543,30 @@ fn register_receiver_method_generic_parameter_aliases(
         let receiver_path = match &entry.receiver {
             ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => path,
             ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: a receiver method with a \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "defined public type-surface projection: a receiver method with a \
                      validated generic template carries a non-nominal receiver key ({:?}); \
                      aligned generic parameters require a nominal receiver",
-                    entry.receiver
-                )));
+                        entry.receiver
+                    ),
+                )
+                .into());
             }
         };
 
         let nominal_id = type_environment
             .nominal_id_for_path(receiver_path)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: a generic receiver method's \
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "defined public type-surface projection: a generic receiver method's \
                      receiver path is not a registered nominal (path: {:?})",
-                    receiver_path
-                ))
+                        receiver_path
+                    ),
+                )
             })?;
 
         let nominal_generic_list_id = match type_environment.struct_definition(nominal_id) {
@@ -534,22 +574,25 @@ fn register_receiver_method_generic_parameter_aliases(
             None => match type_environment.choice_definition(nominal_id) {
                 Some(def) => def.generic_parameters,
                 None => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "defined public type-surface projection: a generic receiver method's \
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "defined public type-surface projection: a generic receiver method's \
                          nominal ID ({}) is neither a struct nor a choice definition",
-                        nominal_id.0
-                    )));
+                            nominal_id.0
+                        ),
+                    )
+                    .into());
                 }
             },
         };
 
         let Some(nominal_list_id) = nominal_generic_list_id else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: a generic receiver method on \
-                 non-generic nominal {:?} has a validated generic template; a generic \
-                 receiver method requires a generic receiver nominal",
-                receiver_path
-            )));
+            return Err(generics_traits_api::invalid_receiver_declaration(
+                InvalidReceiverDeclarationReason::GenericOwnerAlignment,
+                template.declaration_span,
+            )
+            .into());
         };
 
         alias_aligned_generic_parameters(
@@ -558,6 +601,7 @@ fn register_receiver_method_generic_parameter_aliases(
             nominal_list_id,
             template.generic_parameter_list_id,
             string_table,
+            template.declaration_span,
         )?;
     }
 
@@ -572,37 +616,42 @@ fn alias_aligned_generic_parameters(
     nominal_list_id: GenericParameterListId,
     method_list_id: GenericParameterListId,
     string_table: &StringTable,
-) -> Result<(), CompilerError> {
+    diagnostic_span: Option<SourceSpan>,
+) -> Result<(), PublicInterfaceDraftBuildFailure> {
     let nominal_list = type_environment
         .generic_parameters(nominal_list_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "defined public type-surface projection: the receiver nominal's \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: the receiver nominal's \
                  GenericParameterListId({}) is missing from the TypeEnvironment while \
                  aliasing receiver-method generic parameters",
-                nominal_list_id.0
-            ))
+                    nominal_list_id.0
+                ),
+            )
         })?;
 
     let method_list = type_environment
         .generic_parameters(method_list_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "defined public type-surface projection: the receiver method's \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: the receiver method's \
                  GenericParameterListId({}) is missing from the TypeEnvironment while \
                  aliasing receiver-method generic parameters",
-                method_list_id.0
-            ))
+                    method_list_id.0
+                ),
+            )
         })?;
 
     if nominal_list.parameters.len() != method_list.parameters.len() {
-        return Err(CompilerError::compiler_error(format!(
-            "defined public type-surface projection: a generic receiver method has {} \
-             generic parameters but its receiver nominal has {}; aligned parameters \
-             must match in count",
-            method_list.parameters.len(),
-            nominal_list.parameters.len()
-        )));
+        return Err(generics_traits_api::invalid_receiver_declaration(
+            InvalidReceiverDeclarationReason::GenericParameterAlignment,
+            diagnostic_span,
+        )
+        .into());
     }
 
     for (nominal_param, method_param) in nominal_list
@@ -613,12 +662,11 @@ fn alias_aligned_generic_parameters(
         let nominal_name = string_table.resolve(nominal_param.name);
         let method_name = string_table.resolve(method_param.name);
         if nominal_name != method_name {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: a generic receiver method's \
-                 parameter '{}' does not match the receiver nominal's parameter '{}'; \
-                 aligned parameters must match in authored name and order",
-                method_name, nominal_name
-            )));
+            return Err(generics_traits_api::invalid_receiver_declaration(
+                InvalidReceiverDeclarationReason::GenericParameterAlignment,
+                diagnostic_span,
+            )
+            .into());
         }
 
         // The nominal's GenericParameterId is already registered; resolve its stable identity
@@ -642,7 +690,7 @@ fn alias_aligned_generic_parameters(
 /// source trait ([`ResolvedTraitSourceFact::Imported`]) resolves to the provider origin it
 /// carries; a core trait ([`ResolvedTraitSourceFact::Core`]) resolves to its stable
 /// [`CanonicalCoreTraitIdentity`]. A local source trait whose canonical path has no retained
-/// public source-trait origin is a `CompilerError`.
+/// public source-trait origin is an `InfrastructureFailure`.
 /// WHY: this is the single source/core mapping owner shared by generic-bound projection,
 /// direct public trait incompatibility projection and evidence projection, so every path
 /// resolves a retained trait source fact to the same canonical identity through one
@@ -653,14 +701,17 @@ fn alias_aligned_generic_parameters(
 pub(super) fn project_trait_source_fact_to_canonical_identity(
     source_fact: &ResolvedTraitSourceFact,
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
-) -> Result<CanonicalTraitIdentity, CompilerError> {
+) -> Result<CanonicalTraitIdentity, InfrastructureFailure> {
     match source_fact {
         ResolvedTraitSourceFact::Source(path) => {
             let Some(origin) = public_source_trait_origins.get(path) else {
-                return Err(CompilerError::compiler_error(format!(
-                    "defined public type-surface projection: a trait source path {:?} has no retained public source-trait origin; a private, unexported or unowned trait must not enter the public type surface",
-                    path
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "defined public type-surface projection: a trait source path {:?} has no retained public source-trait origin; a private, unexported or unowned trait must not enter the public type surface",
+                        path
+                    ),
+                ));
             };
             Ok(CanonicalTraitIdentity::Source(origin.clone()))
         }
@@ -689,7 +740,8 @@ fn project_generic_parameter_bounds(
     type_environment: &TypeEnvironment,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
-) -> Result<Vec<CanonicalTraitIdentity>, CompilerError> {
+    diagnostic_span: Option<SourceSpan>,
+) -> Result<Vec<CanonicalTraitIdentity>, PublicInterfaceDraftBuildFailure> {
     let Some(bounds) = type_environment.trait_bounds_for_generic_parameter(parameter_id) else {
         return Ok(Vec::new());
     };
@@ -697,10 +749,13 @@ fn project_generic_parameter_bounds(
     let mut canonical_bounds = Vec::with_capacity(bounds.len());
     for trait_id in bounds {
         let Some(source_fact) = trait_source_facts.get(trait_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: a generic parameter bound TraitId({}) has no retained trait source fact; a missing local mapping is an internal invariant violation",
-                trait_id.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: a generic parameter bound TraitId({}) has no retained trait source fact; a missing local mapping is an internal invariant violation",
+                    trait_id.0
+                ),
+            ).into());
         };
 
         let canonical_identity = project_trait_source_fact_to_canonical_identity(
@@ -710,10 +765,11 @@ fn project_generic_parameter_bounds(
 
         // Reject a duplicate canonical bound identity.
         if canonical_bounds.contains(&canonical_identity) {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: two generic parameter bounds resolved to the same canonical trait identity {:?}; a duplicate bound identity must not enter the public type surface",
-                canonical_identity
-            )));
+            return Err(generics_traits_api::invalid_generic_parameter(
+                InvalidGenericParameterReason::DuplicateTraitBound,
+                diagnostic_span,
+            )
+            .into());
         }
 
         canonical_bounds.push(canonical_identity);
@@ -731,13 +787,14 @@ pub(super) fn project_exported_generic_parameter_surfaces(
     expected_origin: &GenericDeclarationOrigin,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
-) -> Result<Vec<PublicGenericParameterSurface>, CompilerError> {
+    diagnostic_span: Option<SourceSpan>,
+) -> Result<Vec<PublicGenericParameterSurface>, PublicInterfaceDraftBuildFailure> {
     let Some(list_id) = generic_parameter_list_id else {
         return Ok(Vec::new());
     };
 
     let list = type_environment.generic_parameters(list_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
+        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "defined public type-surface projection: GenericParameterListId({}) is missing from the TypeEnvironment while projecting exported generic parameter surfaces",
             list_id.0
         ))
@@ -749,18 +806,24 @@ pub(super) fn project_exported_generic_parameter_surfaces(
         let identity = generic_resolver.resolve_generic_parameter_origin(parameter.id)?;
 
         if identity.declaration_origin() != expected_origin {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: an exported generic parameter resolved to declaration origin {:?} but its root owner is {:?}; a wrong-owner parameter must not enter the public type surface",
-                identity.declaration_origin(),
-                expected_origin,
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: an exported generic parameter resolved to declaration origin {:?} but its root owner is {:?}; a wrong-owner parameter must not enter the public type surface",
+                    identity.declaration_origin(),
+                    expected_origin,
+                ),
+            ).into());
         }
 
         if surfaces.iter().any(|surface| surface.identity == identity) {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: two exported generic parameters resolved to the same identity {:?}; a duplicate parameter identity must not enter the public type surface",
-                identity,
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: two exported generic parameters resolved to the same identity {:?}; a duplicate parameter identity must not enter the public type surface",
+                    identity,
+                ),
+            ).into());
         }
 
         let bounds = project_generic_parameter_bounds(
@@ -768,6 +831,7 @@ pub(super) fn project_exported_generic_parameter_surfaces(
             type_environment,
             trait_source_facts,
             public_source_trait_origins,
+            diagnostic_span,
         )?;
 
         surfaces.push(PublicGenericParameterSurface { identity, bounds });
@@ -801,7 +865,8 @@ pub(super) fn project_free_function_semantics(
     string_table: &StringTable,
     path_fork: &PathInternerFork,
     folded_value_context: &FoldedValueJoinContext<'_>,
-) -> Result<PublicFunctionSemantics, CompilerError> {
+    diagnostic_span: Option<SourceSpan>,
+) -> Result<PublicFunctionSemantics, PublicInterfaceDraftBuildFailure> {
     let expected_origin = GenericDeclarationOrigin::free_function(function_origin.clone())?;
 
     let generic_parameters = project_exported_generic_parameter_surfaces(
@@ -811,6 +876,7 @@ pub(super) fn project_free_function_semantics(
         &expected_origin,
         trait_source_facts,
         public_source_trait_origins,
+        diagnostic_span,
     )?;
 
     let parameters = signature
@@ -839,7 +905,7 @@ pub(super) fn project_free_function_semantics(
                 )?,
             })
         })
-        .collect::<Result<Vec<_>, CompilerError>>()?;
+        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
     let (returns, error_return) =
         project_return_slots(&signature.returns, type_environment, context)?;
@@ -881,23 +947,33 @@ pub(super) fn project_struct_parts(
     string_table: &StringTable,
     path_fork: &PathInternerFork,
     folded_value_context: &FoldedValueJoinContext<'_>,
-) -> Result<(Vec<PublicGenericParameterSurface>, Vec<PublicFieldTypeSlot>), CompilerError> {
+) -> Result<
+    (Vec<PublicGenericParameterSurface>, Vec<PublicFieldTypeSlot>),
+    PublicInterfaceDraftBuildFailure,
+> {
     let definition = type_environment.get(type_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "defined public type-surface projection: struct root TypeId({}) is not registered \
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "defined public type-surface projection: struct root TypeId({}) is not registered \
              in the TypeEnvironment",
-            type_id.0
-        ))
+                type_id.0
+            ),
+        )
     })?;
 
     let struct_definition = match definition {
         TypeDefinition::Struct(def) => def,
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: struct root TypeId({}) does not \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: struct root TypeId({}) does not \
                  resolve to a struct definition",
-                type_id.0
-            )));
+                    type_id.0
+                ),
+            )
+            .into());
         }
     };
 
@@ -907,11 +983,15 @@ pub(super) fn project_struct_parts(
         .nominal_origins()
         .resolve_nominal_origin(struct_definition.id)?;
     if resolved_origin != type_origin {
-        return Err(CompilerError::compiler_error(format!(
-            "defined public type-surface projection: struct root TypeId({}) resolves to \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "defined public type-surface projection: struct root TypeId({}) resolves to \
              origin {:?} but the export binding carries origin {:?}",
-            type_id.0, resolved_origin, type_origin
-        )));
+                type_id.0, resolved_origin, type_origin
+            ),
+        )
+        .into());
     }
 
     let expected_origin = GenericDeclarationOrigin::nominal_type(type_origin.clone())?;
@@ -923,6 +1003,7 @@ pub(super) fn project_struct_parts(
         &expected_origin,
         trait_source_facts,
         public_source_trait_origins,
+        None,
     )?;
 
     let projected_fields = project_fields_with_defaults(
@@ -961,24 +1042,31 @@ pub(super) fn project_choice_parts(
         Vec<PublicGenericParameterSurface>,
         Vec<PublicChoiceVariantSurface>,
     ),
-    CompilerError,
+    PublicInterfaceDraftBuildFailure,
 > {
     let definition = type_environment.get(type_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "defined public type-surface projection: choice root TypeId({}) is not registered \
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "defined public type-surface projection: choice root TypeId({}) is not registered \
              in the TypeEnvironment",
-            type_id.0
-        ))
+                type_id.0
+            ),
+        )
     })?;
 
     let choice_definition = match definition {
         TypeDefinition::Choice(def) => def,
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: choice root TypeId({}) does not \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: choice root TypeId({}) does not \
                  resolve to a choice definition",
-                type_id.0
-            )));
+                    type_id.0
+                ),
+            )
+            .into());
         }
     };
 
@@ -988,11 +1076,15 @@ pub(super) fn project_choice_parts(
         .nominal_origins()
         .resolve_nominal_origin(choice_definition.id)?;
     if resolved_origin != type_origin {
-        return Err(CompilerError::compiler_error(format!(
-            "defined public type-surface projection: choice root TypeId({}) resolves to \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "defined public type-surface projection: choice root TypeId({}) resolves to \
              origin {:?} but the export binding carries origin {:?}",
-            type_id.0, resolved_origin, type_origin
-        )));
+                type_id.0, resolved_origin, type_origin
+            ),
+        )
+        .into());
     }
 
     let expected_origin = GenericDeclarationOrigin::nominal_type(type_origin.clone())?;
@@ -1004,6 +1096,7 @@ pub(super) fn project_choice_parts(
         &expected_origin,
         trait_source_facts,
         public_source_trait_origins,
+        None,
     )?;
 
     let variants = project_choice_variants(
@@ -1021,7 +1114,7 @@ pub(super) fn project_alias_target(
     target_type_id: TypeId,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<CanonicalTypeIdentity, CompilerError> {
+) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
     project_type_id_to_canonical_identity(target_type_id, type_environment, context)
 }
 
@@ -1033,7 +1126,7 @@ pub(super) fn project_constant_type_identity(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<CanonicalTypeIdentity, CompilerError> {
+) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
     project_type_id_to_canonical_identity(type_id, type_environment, context)
 }
 
@@ -1043,18 +1136,19 @@ pub(super) fn project_constant_type_identity(
 
 /// Project success and error return slots, returning them separately.
 ///
-/// A resolved public signature slot missing `TypeId` is `CompilerError`; no slot is omitted.
+/// A resolved public signature slot missing `TypeId` is `InfrastructureFailure`; no slot is omitted.
 pub(super) fn project_return_slots(
     return_slots: &[ReturnSlot],
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<(Vec<PublicReturnTypeSlot>, Option<CanonicalTypeIdentity>), CompilerError> {
+) -> Result<(Vec<PublicReturnTypeSlot>, Option<CanonicalTypeIdentity>), InfrastructureFailure> {
     let mut returns = Vec::new();
     let mut error_return = None;
 
     for slot in return_slots {
         let type_id = slot.type_id.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "defined public type-surface projection: a resolved public signature return \
                  slot has no TypeId; the signature was not fully resolved before projection",
             )
@@ -1067,7 +1161,8 @@ pub(super) fn project_return_slots(
             ReturnChannel::Success => returns.push(PublicReturnTypeSlot { type_identity }),
             ReturnChannel::Error => {
                 if error_return.is_some() {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "defined public type-surface projection: a public signature carries \
                          multiple error-channel return slots",
                     ));
@@ -1096,14 +1191,17 @@ fn project_fields_with_defaults(
     string_table: &StringTable,
     path_fork: &PathInternerFork,
     folded_value_context: &FoldedValueJoinContext<'_>,
-) -> Result<Vec<PublicFieldTypeSlot>, CompilerError> {
+) -> Result<Vec<PublicFieldTypeSlot>, InfrastructureFailure> {
     if struct_definition.fields.len() != field_declarations.len() {
-        return Err(CompilerError::compiler_error(format!(
-            "defined public type-surface projection: struct root TypeId({}) has {} canonical fields but {} retained field declarations; the retained declaration count must match the canonical struct definition",
-            root_type_id.0,
-            struct_definition.fields.len(),
-            field_declarations.len(),
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "defined public type-surface projection: struct root TypeId({}) has {} canonical fields but {} retained field declarations; the retained declaration count must match the canonical struct definition",
+                root_type_id.0,
+                struct_definition.fields.len(),
+                field_declarations.len(),
+            ),
+        ));
     }
 
     let mut seen_names: FxHashSet<StringId> = FxHashSet::default();
@@ -1118,40 +1216,49 @@ fn project_fields_with_defaults(
         let declaration_name_id = path_fork.component(declaration.id);
 
         if canonical_name_id != declaration_name_id {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: struct root TypeId({}) has a field name or order mismatch at canonical field {:?}; the retained declaration carries {:?}; the retained declarations must match the canonical field order",
-                root_type_id.0, canonical_field.name, declaration.id,
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: struct root TypeId({}) has a field name or order mismatch at canonical field {:?}; the retained declaration carries {:?}; the retained declarations must match the canonical field order",
+                    root_type_id.0, canonical_field.name, declaration.id,
+                ),
+            ));
         }
 
         if let Some(name_id) = canonical_name_id
             && !seen_names.insert(name_id)
         {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: struct root TypeId({}) has a duplicate \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: struct root TypeId({}) has a duplicate \
                  field name {:?}; canonical struct definitions must not contain duplicates",
-                root_type_id.0, canonical_field.name,
-            )));
+                    root_type_id.0, canonical_field.name,
+                ),
+            ));
         }
 
         let name = path_fork
             .component(canonical_field.name)
             .map(|name| string_table.resolve(name).to_owned())
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "defined public type-surface projection: a struct field has no resolvable name (path: {:?})",
                     canonical_field.name
                 ))
             })?;
 
         if canonical_field.type_id != declaration.type_id {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection: struct root TypeId({}) field {:?} has a TypeId mismatch: canonical TypeId({}) vs retained declaration TypeId({}); the retained declaration must agree with the canonical struct definition",
-                root_type_id.0,
-                canonical_field.name,
-                canonical_field.type_id.0,
-                declaration.type_id.0,
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public type-surface projection: struct root TypeId({}) field {:?} has a TypeId mismatch: canonical TypeId({}) vs retained declaration TypeId({}); the retained declaration must agree with the canonical struct definition",
+                    root_type_id.0,
+                    canonical_field.name,
+                    canonical_field.type_id.0,
+                    declaration.type_id.0,
+                ),
+            ));
         }
 
         let type_identity = project_type_id_to_canonical_identity(
@@ -1178,7 +1285,7 @@ fn project_choice_variants(
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<PublicChoiceVariantSurface>, CompilerError> {
+) -> Result<Vec<PublicChoiceVariantSurface>, InfrastructureFailure> {
     let mut variants = Vec::with_capacity(choice_definition.variants.len());
     for variant in choice_definition.variants.iter() {
         let name = string_table.resolve(variant.name).to_owned();
@@ -1192,11 +1299,14 @@ fn project_choice_variants(
                         .component(field.name)
                         .map(|name| string_table.resolve(name).to_owned())
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(format!(
-                                "defined public type-surface projection: a choice variant \
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
+                                format!(
+                                    "defined public type-surface projection: a choice variant \
                                  payload field has no resolvable name (path: {:?})",
-                                field.name
-                            ))
+                                    field.name
+                                ),
+                            )
                         })?;
 
                     let type_identity = project_type_id_to_canonical_identity(
@@ -1231,7 +1341,7 @@ fn project_choice_variants(
 pub(super) fn project_folded_default(
     default: Option<ConstValueId>,
     folded_value_context: &FoldedValueJoinContext<'_>,
-) -> Result<Option<PublicFoldedValue>, CompilerError> {
+) -> Result<Option<PublicFoldedValue>, InfrastructureFailure> {
     default
         .map(|value_id| {
             convert_const_value_to_folded_value(
@@ -1248,14 +1358,14 @@ pub(super) fn project_folded_default(
 pub(super) fn project_defaults_provenance(
     defaults: impl IntoIterator<Item = Option<ConstValueId>>,
     const_values: &ConstValueStore,
-) -> Result<SyntheticInterfaceProvenance, CompilerError> {
+) -> Result<SyntheticInterfaceProvenance, InfrastructureFailure> {
     let mut provenance = SyntheticInterfaceProvenance::empty();
     for default in defaults {
         let Some(value_id) = default else {
             continue;
         };
         let metadata = const_values.metadata(value_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "public-interface default provenance: a folded default is outside its constant owner",
             )
         })?;
@@ -1277,7 +1387,7 @@ pub(super) fn project_parameter_contract(
     contract: ParameterContract,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<PublicParameterContract, CompilerError> {
+) -> Result<PublicParameterContract, InfrastructureFailure> {
     match contract {
         ParameterContract::Value => Ok(PublicParameterContract::Value),
         ParameterContract::Wire => Ok(PublicParameterContract::Wire),
@@ -1291,16 +1401,19 @@ pub(super) fn project_parameter_contract(
     }
 }
 
-/// Construct a `CompilerError` for a root-to-binding origin category mismatch.
+/// Construct an `InfrastructureFailure` for a root-to-binding origin category mismatch.
 pub(super) fn origin_category_mismatch_error(
     expected: &str,
     binding: &ExportBinding,
-) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "defined public type-surface projection: a {} root matched an export binding with \
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "defined public type-surface projection: a {} root matched an export binding with \
          origin {:?} (public name '{}'); the root category and binding origin category disagree",
-        expected,
-        binding.origin(),
-        binding.public_name()
-    ))
+            expected,
+            binding.origin(),
+            binding.public_name()
+        ),
+    )
 }

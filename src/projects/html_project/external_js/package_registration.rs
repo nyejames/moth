@@ -6,7 +6,8 @@
 //!      builder-owned packages such as `@web/canvas`.
 
 use crate::builder_surface::external_import_providers::provider::RequiredRuntimeImport;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalConstantDef, ExternalConstantValue,
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalPackageId,
@@ -29,6 +30,20 @@ pub struct RegisteredJsModule {
     pub exported_free_functions:
         Vec<crate::compiler_frontend::external_packages::ExternalFunctionId>,
 }
+/// Registration errors distinguish user-authored signature rejection from registry failures.
+#[derive(Debug)]
+pub enum JsModuleRegistrationError {
+    /// The package registry could not accept a symbol.
+    Infrastructure(InfrastructureFailure),
+    /// A parsed signature type was not representable by the JS module ABI.
+    ParserDiagnostic { parser_detail: String },
+}
+
+impl From<InfrastructureFailure> for JsModuleRegistrationError {
+    fn from(error: InfrastructureFailure) -> Self {
+        Self::Infrastructure(error)
+    }
+}
 
 /// Registers parsed JS module symbols into the external package registry.
 ///
@@ -40,7 +55,7 @@ pub fn register_parsed_js_module(
     package_id: ExternalPackageId,
     parsed: &ParsedJsModule,
     registry: &mut ExternalPackageRegistry,
-) -> Result<RegisteredJsModule, CompilerError> {
+) -> Result<RegisteredJsModule, JsModuleRegistrationError> {
     let mut type_id_by_opaque_name: HashMap<
         String,
         crate::compiler_frontend::external_packages::ExternalTypeId,
@@ -62,10 +77,11 @@ pub fn register_parsed_js_module(
     let mut exported_free_functions = Vec::new();
 
     if let Some(receiver_method) = parsed.receiver_methods.first() {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "JS package registration reached receiver-style signature '{}'. External packages expose free functions, literal constants and opaque types, not receiver methods.",
             receiver_method.moth_name
-        )));
+        );
     }
 
     for function in &parsed.free_functions {
@@ -118,14 +134,18 @@ fn convert_parsed_function_to_spec(
         String,
         crate::compiler_frontend::external_packages::ExternalTypeId,
     >,
-) -> Result<ExternalFunctionSpec, CompilerError> {
+) -> Result<ExternalFunctionSpec, JsModuleRegistrationError> {
     assert_parsed_signature_receiver_invariants(&function.signature);
 
     let mut parameters = Vec::new();
 
     for parameter in &function.signature.parameters {
-        let language_type =
-            parsed_type_to_signature_type(&parameter.type_name, type_id_by_opaque_name)?;
+        let language_type = parsed_type_to_signature_type(
+            &parameter.type_name,
+            &function.moth_name,
+            true,
+            type_id_by_opaque_name,
+        )?;
         let access_kind = if parameter.is_mutable {
             ExternalAccessKind::Mutable
         } else {
@@ -142,8 +162,12 @@ fn convert_parsed_function_to_spec(
     let mut error_return_type: Option<ExternalSignatureType> = None;
 
     for return_type in &function.signature.returns {
-        let signature_type =
-            parsed_type_to_signature_type(&return_type.type_name, type_id_by_opaque_name)?;
+        let signature_type = parsed_type_to_signature_type(
+            &return_type.type_name,
+            &function.moth_name,
+            false,
+            type_id_by_opaque_name,
+        )?;
         returns.push(ExternalReturnSlot::fresh(signature_type));
     }
 
@@ -202,11 +226,13 @@ fn assert_parsed_signature_receiver_invariants(signature: &ParsedSignature) {
 
 fn parsed_type_to_signature_type(
     type_name: &str,
+    function_name: &str,
+    void_parameter_is_diagnostic: bool,
     type_id_by_opaque_name: &HashMap<
         String,
         crate::compiler_frontend::external_packages::ExternalTypeId,
     >,
-) -> Result<ExternalSignatureType, CompilerError> {
+) -> Result<ExternalSignatureType, JsModuleRegistrationError> {
     match type_name {
         // The delivered foreign subset: only the fixed scalars the JS glue has an adapter for
         // (`FixedScalarAdapter::for_scalar`). Any other fixed scalar is an ordinary unknown name
@@ -239,14 +265,33 @@ fn parsed_type_to_signature_type(
         _ => {
             if let Some(type_id) = type_id_by_opaque_name.get(type_name) {
                 Ok(ExternalSignatureType::External(*type_id))
+            } else if void_parameter_is_diagnostic && is_void_like_signature_spelling(type_name) {
+                Err(JsModuleRegistrationError::ParserDiagnostic {
+                    parser_detail: format!(
+                        "Unknown external type `{type_name}` in `@moth.sig` for `{function_name}`. Declare it with `@moth.opaque {type_name}` before using it in Moth JS module signatures."
+                    ),
+                })
             } else {
-                Err(CompilerError::compiler_error(format!(
-                    "JS provider reached registry conversion with unknown parsed type '{}'.",
-                    type_name
-                )))
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "JS provider reached registry conversion with unknown parsed type '{}'.",
+                        type_name
+                    ),
+                )
+                .into())
             }
         }
     }
+}
+
+/// Spellings exempted from known-type validation in `@moth.sig` and rejected as void-like
+/// parameters. Must stay aligned with `parser/binding.rs` `should_validate_known_type_name`.
+fn is_void_like_signature_spelling(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "Void" | "void" | "None" | "none" | "Unit" | "unit" | "()"
+    )
 }
 
 #[cfg(test)]

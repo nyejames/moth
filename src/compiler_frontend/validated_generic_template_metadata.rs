@@ -6,7 +6,8 @@
 //! without constructing the deleted body-only template store or another compatibility lane.
 
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::public_interface::CallableSeed;
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics, PublicInterfaceDraft,
@@ -32,13 +33,14 @@ pub(in crate::compiler_frontend) fn validate_materialisation_context_templates(
     draft: &PublicInterfaceDraft,
     callable_seeds: &[CallableSeed],
     templates: &mut FxHashMap<PathId, GenericFunctionTemplate>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let expected_callables = collect_public_callable_origins(draft)?;
     validate_callable_seeds(&expected_callables, callable_seeds)?;
 
     for (path, template) in templates.iter() {
         if *path != template.function_path {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation context generic template map key does not match its template path",
             ));
         }
@@ -46,12 +48,14 @@ pub(in crate::compiler_frontend) fn validate_materialisation_context_templates(
 
     for seed in callable_seeds.iter().filter(|seed| seed.generic_template) {
         let template = templates.get_mut(&seed.path).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation context omitted an exported generic callable template",
             )
         })?;
         if template.body_tokens.is_none() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Declaring materialisation context retained an imported contract instead of its generic body",
             ));
         }
@@ -61,7 +65,8 @@ pub(in crate::compiler_frontend) fn validate_materialisation_context_templates(
 
     for seed in callable_seeds.iter().filter(|seed| !seed.generic_template) {
         if templates.contains_key(&seed.path) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation context retained a generic template for a non-generic public callable",
             ));
         }
@@ -72,7 +77,7 @@ pub(in crate::compiler_frontend) fn validate_materialisation_context_templates(
 
 fn collect_public_callable_origins(
     draft: &PublicInterfaceDraft,
-) -> Result<FxHashMap<OriginFunctionId, bool>, CompilerError> {
+) -> Result<FxHashMap<OriginFunctionId, bool>, InfrastructureFailure> {
     let mut callables = FxHashMap::default();
 
     for PublicDeclarationRecord {
@@ -82,15 +87,19 @@ fn collect_public_callable_origins(
         match semantics {
             PublicDeclarationSemantics::Function(function) => {
                 let OriginDeclarationId::Function(function_origin) = origin else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "validated generic-template extraction found free-function semantics under a non-function declaration origin",
                     ));
                 };
                 if function_origin.receiver().is_some() {
-                    return Err(CompilerError::compiler_error(format!(
-                        "validated generic-template extraction found receiver origin {:?} in a free-function declaration record",
-                        function_origin
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
+                        format!(
+                            "validated generic-template extraction found receiver origin {:?} in a free-function declaration record",
+                            function_origin
+                        ),
+                    ));
                 }
                 insert_public_callable_origin(
                     &mut callables,
@@ -128,19 +137,23 @@ fn insert_receiver_callable_origins(
     callables: &mut FxHashMap<OriginFunctionId, bool>,
     receiver_declaration: &OriginDeclarationId,
     methods: &[PublicReceiverMethodSemantics],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let OriginDeclarationId::Type(receiver_origin) = receiver_declaration else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "validated generic-template extraction found receiver methods under a non-type declaration origin",
         ));
     };
 
     for method in methods {
         if method.method_origin.receiver() != Some(receiver_origin) {
-            return Err(CompilerError::compiler_error(format!(
-                "validated generic-template extraction found receiver method origin {:?} attached to {:?}",
-                method.method_origin, receiver_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "validated generic-template extraction found receiver method origin {:?} attached to {:?}",
+                    method.method_origin, receiver_origin
+                ),
+            ));
         }
         insert_public_callable_origin(
             callables,
@@ -159,12 +172,15 @@ fn insert_public_callable_origin(
     callables: &mut FxHashMap<OriginFunctionId, bool>,
     origin: OriginFunctionId,
     generic_template: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if callables.insert(origin.clone(), generic_template).is_some() {
-        return Err(CompilerError::compiler_error(format!(
-            "validated generic-template extraction found duplicate public callable origin {:?}",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            format!(
+                "validated generic-template extraction found duplicate public callable origin {:?}",
+                origin
+            ),
+        ));
     }
     Ok(())
 }
@@ -172,7 +188,7 @@ fn insert_public_callable_origin(
 fn validate_callable_seeds(
     expected_callables: &FxHashMap<OriginFunctionId, bool>,
     seeds: &[CallableSeed],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut seen_paths: FxHashMap<PathId, bool> = FxHashMap::default();
     let mut seen_origins = FxHashSet::default();
 
@@ -180,29 +196,41 @@ fn validate_callable_seeds(
         if let Some(previous_generic) = seen_paths.insert(seed.path, seed.generic_template)
             && (previous_generic || seed.generic_template)
         {
-            return Err(CompilerError::compiler_error(format!(
-                "validated generic-template extraction found duplicate generic public callable declaration path {:?}",
-                seed.path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "validated generic-template extraction found duplicate generic public callable declaration path {:?}",
+                    seed.path
+                ),
+            ));
         }
         if !seen_origins.insert(seed.origin.clone()) {
-            return Err(CompilerError::compiler_error(format!(
-                "validated generic-template extraction found duplicate public callable origin {:?}",
-                seed.origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "validated generic-template extraction found duplicate public callable origin {:?}",
+                    seed.origin
+                ),
+            ));
         }
 
         let Some(expected_generic) = expected_callables.get(&seed.origin) else {
-            return Err(CompilerError::compiler_error(format!(
-                "validated generic-template extraction found public callable seed {:?} with no matching draft origin",
-                seed.origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "validated generic-template extraction found public callable seed {:?} with no matching draft origin",
+                    seed.origin
+                ),
+            ));
         };
         if *expected_generic != seed.generic_template {
-            return Err(CompilerError::compiler_error(format!(
-                "validated generic-template extraction found generic/non-generic mismatch for public callable origin {:?}",
-                seed.origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!(
+                    "validated generic-template extraction found generic/non-generic mismatch for public callable origin {:?}",
+                    seed.origin
+                ),
+            ));
         }
     }
 
@@ -210,10 +238,13 @@ fn validate_callable_seeds(
         let missing = expected_callables
             .keys()
             .find(|origin| !seen_origins.contains(*origin));
-        return Err(CompilerError::compiler_error(format!(
-            "validated generic-template extraction is missing the exact public callable seed for origin {:?}",
-            missing
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            format!(
+                "validated generic-template extraction is missing the exact public callable seed for origin {:?}",
+                missing
+            ),
+        ));
     }
 
     Ok(())

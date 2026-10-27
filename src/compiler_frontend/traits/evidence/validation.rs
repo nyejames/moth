@@ -14,8 +14,9 @@ use super::target_resolution::{
     resolve_trait_reference,
 };
 use crate::compiler_frontend::ast::ReceiverMethodCatalog;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTraitConformanceReason,
+use crate::compiler_frontend::compiler_messages::InvalidTraitConformanceReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    draft::DiagnosticDraft, families::generics_traits_api,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -30,9 +31,9 @@ use rustc_hash::FxHashMap;
 
 /// Result for trait-evidence conformance validation.
 ///
-/// Diagnosed failures remain plain `CompilerDiagnostic` values at this
-/// boundary; infrastructure failures use their typed outer lane.
-type TraitEvidenceValidationResult<T = ()> = Result<T, CompilerDiagnostic>;
+/// Diagnosed failures remain drafts at this boundary; infrastructure failures
+/// use their typed outer lane.
+type TraitEvidenceValidationResult<T = ()> = Result<T, DiagnosticDraft>;
 
 /// Inputs needed to validate evidence after trait definitions and receiver methods exist.
 pub(crate) struct ValidateTraitEvidenceInput<'a> {
@@ -123,7 +124,7 @@ pub(crate) fn validate_trait_evidence(
         };
         let target = resolve_conformance_target(&conformance.target, target_context).map_err(
             |mut diagnostic| {
-                diagnostic.primary_span = Some(conformance.target.span);
+                diagnostic.set_primary_span(Some(conformance.target.span));
                 diagnostic
             },
         )?;
@@ -136,7 +137,7 @@ pub(crate) fn validate_trait_evidence(
                 input.string_table,
             )
             .map_err(|mut diagnostic| {
-                diagnostic.primary_span = Some(trait_ref.span);
+                diagnostic.set_primary_span(Some(trait_ref.span));
                 diagnostic
             })?;
 
@@ -201,10 +202,10 @@ pub(crate) fn validate_trait_evidence(
 
     for pending in pending_evidence {
         let Some(trait_definition) = input.trait_environment.get(pending.trait_id) else {
-            let mut diagnostic =
-                CompilerDiagnostic::unknown_trait_name(pending.trait_name, pending.trait_span);
-            diagnostic.primary_span = pending.trait_span;
-            return Err(diagnostic);
+            return Err(generics_traits_api::unknown_trait(
+                pending.trait_name,
+                pending.trait_span,
+            ));
         };
 
         let mut requirement_context = RequirementValidationContext {
@@ -213,7 +214,6 @@ pub(crate) fn validate_trait_evidence(
             target_name: pending.target_name,
             trait_name: pending.trait_name,
             conformance_span: pending.declaration_span,
-            string_table: input.string_table,
         };
         let requirement_methods = validate_requirements(
             trait_definition,

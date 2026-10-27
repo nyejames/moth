@@ -4,6 +4,7 @@
 //! WHY: HIR must distinguish assignable places from value expressions before later alias and
 //! mutation analysis can reason about them.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValuePayload};
@@ -11,7 +12,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView, PlaceProjectionView, PlaceView,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
@@ -24,7 +25,6 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, 
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
 
@@ -37,7 +37,7 @@ impl<'a> HirBuilder<'a> {
         let metadata = place.metadata();
         let (mut prelude, mut hir_place, mut current_type) =
             if let Some(local) = self.locals_by_name.get(&metadata.root).copied() {
-                let ty = self.local_type_id_or_error(local, &metadata.span)?;
+                let ty = self.local_type_id_or_error(local)?;
                 (Vec::new(), HirPlace::local(local), ty)
             } else {
                 let value_id = self
@@ -45,7 +45,10 @@ impl<'a> HirBuilder<'a> {
                     .get(&metadata.root)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error("Place root has no local or constant binding")
+                        InfrastructureFailure::internal(
+                            CompilerStage::HirConstruction,
+                            "Place root has no local or constant binding",
+                        )
                     })?;
                 let lowered = self.lower_const_store_expression(value_id, &metadata.span)?;
                 let ty = self.module.expressions.expression(lowered).ty;
@@ -64,11 +67,7 @@ impl<'a> HirBuilder<'a> {
         for projection in place.projections() {
             match projection {
                 PlaceProjectionView::Field { field, result_type } => {
-                    let field_id = self.resolve_field_id_for_type_or_error(
-                        current_type,
-                        field,
-                        &metadata.span,
-                    )?;
+                    let field_id = self.resolve_field_id_for_type_or_error(current_type, field)?;
                     hir_place = hir_place.with_field(
                         field_id,
                         &mut self.module.expressions,
@@ -101,9 +100,9 @@ impl<'a> HirBuilder<'a> {
             return Ok(lowered);
         }
 
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let (prelude, place) = self.lower_expression_to_place(base, field, span)?;
-        let ty = self.lower_type_id(result_type_id, span)?;
+        let ty = self.lower_type_id(result_type_id)?;
 
         Ok(LoweredExpression {
             prelude,
@@ -137,7 +136,7 @@ impl<'a> HirBuilder<'a> {
             (place, row.ty)
         };
         if let Some(base_place) = base_place {
-            let field_id = self.resolve_field_id_for_type_or_error(base_type, field, span)?;
+            let field_id = self.resolve_field_id_for_type_or_error(base_type, field)?;
             return Ok((
                 lowered.prelude,
                 base_place.with_field(field_id, &mut self.module.expressions, *span)?,
@@ -159,7 +158,7 @@ impl<'a> HirBuilder<'a> {
         prelude.push(assign_statement);
 
         let root_place = HirPlace::local(temp_local);
-        let field_id = self.resolve_field_id_for_type_or_error(base_type, field, span)?;
+        let field_id = self.resolve_field_id_for_type_or_error(base_type, field)?;
 
         Ok((
             prelude,
@@ -179,7 +178,8 @@ impl<'a> HirBuilder<'a> {
                 .module_const_values
                 .metadata(base_value_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
                         "HIR const-record base points outside the folded-value store",
                     )
                 })?;
@@ -191,33 +191,32 @@ impl<'a> HirBuilder<'a> {
                 self.module_const_values
                     .field_value(base_value_id, field, &*self.path_fork)
             else {
-                return_hir_transformation_error!(
-                    format!(
-                        "Const record field '{}' was not present during HIR field lowering",
-                        self.string_table.resolve(field)
-                    ),
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "Const record field '{}' was not present during HIR field lowering",
+                    self.string_table.resolve(field)
+                ))
+                .into());
             };
 
             let metadata = self
                 .module_const_values
                 .metadata(field_value_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
                         "HIR const-record field points outside the folded-value store",
                     )
                 })?;
             if metadata.const_record_state == ConstRecordState::ConstRecord {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "HIR invariant: nested const-record field access still produces a record",
-                    self.hir_error_location(span)
-                );
+                )
+                .into());
             }
 
             let value = self.lower_const_store_expression(field_value_id, span)?;
-            let ty = self.lower_type_id(result_type_id, span)?;
-            let region = self.current_region_or_error(span)?;
+            let ty = self.lower_type_id(result_type_id)?;
+            let region = self.current_region_or_error()?;
             let value = self.replace_expression_metadata(value, span, Some(ty), Some(region))?;
             return Ok(Some(LoweredExpression {
                 prelude: vec![],
@@ -226,10 +225,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         if base.is_const_record_value() {
-            return_hir_transformation_error!(
-                "HIR invariant: const-record field access reached HIR without a folded store binding",
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation("HIR invariant: const-record field access reached HIR without a folded store binding").into());
         }
 
         Ok(None)
@@ -258,8 +254,8 @@ impl<'a> HirBuilder<'a> {
         type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let region = self.current_region_or_error(span)?;
-        let ty = self.lower_type_id(type_id, span)?;
+        let region = self.current_region_or_error()?;
+        let ty = self.lower_type_id(type_id)?;
 
         if let Some(local_id) = self.locals_by_name.get(name).copied() {
             return Ok(LoweredExpression {
@@ -286,13 +282,11 @@ impl<'a> HirBuilder<'a> {
             });
         }
 
-        return_hir_transformation_error!(
-            format!(
-                "Unresolved local '{}' during HIR expression lowering",
-                self.symbol_name_for_diagnostics(name)
-            ),
-            self.hir_error_location(span)
-        )
+        Err(InfrastructureFailure::hir_transformation(format!(
+            "Unresolved local '{}' during HIR expression lowering",
+            self.symbol_name_for_diagnostics(name)
+        ))
+        .into())
     }
 
     fn try_lower_module_constant_reference(
@@ -305,7 +299,8 @@ impl<'a> HirBuilder<'a> {
         };
 
         let metadata = self.module_const_values.metadata(value_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
                 "HIR module constant name index points outside the folded-value store",
             )
         })?;
@@ -316,26 +311,20 @@ impl<'a> HirBuilder<'a> {
             self.module_const_values.payload(value_id),
             Some(ConstValuePayload::Template { folded: None, .. })
         ) {
-            return_hir_transformation_error!(
-                format!(
+            return Err(InfrastructureFailure::hir_transformation(format!(
                     "HIR invariant: non-renderable template constant '{}' reached HIR expression lowering",
                     self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(span)
-            );
+                )).into());
         }
 
         // INVARIANT: const-record runtime use should have been rejected in AST.
         // If a const record reaches HIR reference lowering, push validation earlier
         // instead of converting this into a user diagnostic here.
         if metadata.const_record_state == ConstRecordState::ConstRecord {
-            return_hir_transformation_error!(
-                format!(
+            return Err(InfrastructureFailure::hir_transformation(format!(
                     "HIR invariant: const record '{}' reached HIR reference lowering without field access",
                     self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(span)
-            );
+                )).into());
         }
 
         Ok(Some(self.lower_const_store_expression(value_id, span)?))
@@ -347,16 +336,13 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_function_id_or_error(
         &self,
         name: &PathId,
-        span: &Option<SourceSpan>,
     ) -> Result<FunctionId, HirConstructionFailure> {
         let Some(function_id) = self.functions_by_name.get(name).copied() else {
-            return_hir_transformation_error!(
-                format!(
-                    "Unresolved function '{}' during HIR expression lowering",
-                    self.symbol_name_for_diagnostics(name)
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Unresolved function '{}' during HIR expression lowering",
+                self.symbol_name_for_diagnostics(name)
+            ))
+            .into());
         };
 
         Ok(function_id)
@@ -365,7 +351,6 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_call_target_or_error(
         &self,
         name: &PathId,
-        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::external_packages::CallTarget, HirConstructionFailure>
     {
         use crate::compiler_frontend::external_packages::CallTarget;
@@ -385,20 +370,19 @@ impl<'a> HirBuilder<'a> {
                 SourceFunctionTarget::ModulePrivate { identity, .. } => {
                     Ok(CallTarget::ModulePrivate(identity.clone()))
                 }
-                SourceFunctionTarget::Local(_) => Err(CompilerError::compiler_error(
+                SourceFunctionTarget::Local(_) => Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "Imported function contract carried a local function target",
                 )
                 .into()),
             };
         }
 
-        return_hir_transformation_error!(
-            format!(
-                "Unresolved function '{}' during HIR expression lowering",
-                self.symbol_name_for_diagnostics(name)
-            ),
-            self.hir_error_location(span)
-        );
+        Err(InfrastructureFailure::hir_transformation(format!(
+            "Unresolved function '{}' during HIR expression lowering",
+            self.symbol_name_for_diagnostics(name)
+        ))
+        .into())
     }
 
     // WHAT: resolves a field path within one nominal struct declaration.
@@ -408,21 +392,18 @@ impl<'a> HirBuilder<'a> {
         &self,
         struct_id: StructId,
         field_name: &PathId,
-        span: &Option<SourceSpan>,
     ) -> Result<FieldId, HirConstructionFailure> {
         let Some(field_id) = self
             .fields_by_struct_and_name
             .get(&(struct_id, field_name.to_owned()))
             .copied()
         else {
-            return_hir_transformation_error!(
-                format!(
-                    "Field '{}' is not registered for struct {:?}",
-                    self.symbol_name_for_diagnostics(field_name),
-                    struct_id
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Field '{}' is not registered for struct {:?}",
+                self.symbol_name_for_diagnostics(field_name),
+                struct_id
+            ))
+            .into());
         };
 
         Ok(field_id)
@@ -431,16 +412,13 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_struct_id_from_nominal_path(
         &self,
         nominal_path: &PathId,
-        span: &Option<SourceSpan>,
     ) -> Result<StructId, HirConstructionFailure> {
         let Some(struct_id) = self.structs_by_name.get(nominal_path).copied() else {
-            return_hir_transformation_error!(
-                format!(
-                    "Unresolved struct '{}' during HIR lowering",
-                    self.symbol_name_for_diagnostics(nominal_path)
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Unresolved struct '{}' during HIR lowering",
+                self.symbol_name_for_diagnostics(nominal_path)
+            ))
+            .into());
         };
 
         Ok(struct_id)
@@ -450,17 +428,14 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         base_type: TypeId,
         field_name: StringId,
-        span: &Option<SourceSpan>,
     ) -> Result<FieldId, HirConstructionFailure> {
-        let struct_id = self.resolve_struct_id_for_type_or_error(base_type, span)?;
+        let struct_id = self.resolve_struct_id_for_type_or_error(base_type)?;
         let Some(struct_path) = self.side_table.struct_name_path(struct_id) else {
-            return_hir_transformation_error!(
-                format!(
-                    "Struct {:?} is missing a side-table path binding",
-                    struct_id
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Struct {:?} is missing a side-table path binding",
+                struct_id
+            ))
+            .into());
         };
 
         let field_id =
@@ -474,14 +449,12 @@ impl<'a> HirBuilder<'a> {
                 });
 
         let Some(field_id) = field_id else {
-            return_hir_transformation_error!(
-                format!(
-                    "Field '{}' is not registered for struct {:?}",
-                    self.string_table.resolve(field_name),
-                    struct_id
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Field '{}' is not registered for struct {:?}",
+                self.string_table.resolve(field_name),
+                struct_id
+            ))
+            .into());
         };
 
         Ok(field_id)
@@ -490,19 +463,16 @@ impl<'a> HirBuilder<'a> {
     fn resolve_struct_id_for_type_or_error(
         &mut self,
         type_id: TypeId,
-        span: &Option<SourceSpan>,
     ) -> Result<StructId, HirConstructionFailure> {
         let generic_base = match self.type_environment.get(type_id) {
             Some(TypeDefinition::Struct(def)) => {
                 let path = def.path;
                 let Some(struct_id) = self.structs_by_name.get(&path).copied() else {
-                    return_hir_transformation_error!(
-                        format!(
-                            "Struct '{}' is not registered in HIR builder",
-                            self.symbol_name_for_diagnostics(&path)
-                        ),
-                        self.hir_error_location(span)
-                    );
+                    return Err(InfrastructureFailure::hir_transformation(format!(
+                        "Struct '{}' is not registered in HIR builder",
+                        self.symbol_name_for_diagnostics(&path)
+                    ))
+                    .into());
                 };
                 return Ok(struct_id);
             }
@@ -515,10 +485,10 @@ impl<'a> HirBuilder<'a> {
                 instance.base
             }
             _ => {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Field access base does not resolve to a struct value in this HIR phase",
-                    self.hir_error_location(span)
                 )
+                .into());
             }
         };
 
@@ -527,20 +497,20 @@ impl<'a> HirBuilder<'a> {
             .nominal_path_by_id(generic_base)
             .copied()
         else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Generic struct instance is missing nominal path metadata",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
         let Some(TypeIdentityKey::GenericInstance(key)) =
             self.type_environment.type_id_to_type_identity_key(type_id)
         else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Generic struct instance is missing a canonical key during field access lowering",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
 
-        self.resolve_or_register_generic_struct(&key, &nominal_path, type_id, span)
+        self.resolve_or_register_generic_struct(&key, &nominal_path, type_id)
     }
 }

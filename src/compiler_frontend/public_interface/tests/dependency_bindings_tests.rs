@@ -3,9 +3,9 @@
 //! WHAT: proves `SourceProviderDependencySet` resolves retained dependency shells by `DependencyShellId`,
 //!       assigns one dense `ProviderInterfaceId` per unique interface, rejects duplicate shells
 //!       and implicit scopes, and fails deterministically when equal module origins disagree.
-//! WHY: R5C2A replaces optional shell/prefix/boolean provider states and module-origin cache
-//!       keys with one exact build-local provider identity; these hidden join invariants are
-//!       not observable through end-to-end output.
+//! WHY: one exact build-local provider identity replaces optional shell/prefix/boolean
+//!      provider states and module-origin cache keys; these hidden join invariants are
+//!      not observable through end-to-end output.
 
 use super::super::{
     ProviderDependencyKind, ProviderInterfaceId, PublicSemanticInterface, SourceProviderDependency,
@@ -58,9 +58,9 @@ fn same_suffix_bindings_resolve_by_shell_identity_only() {
     let provider = provider_interface("provider");
     let nested = provider_interface("nested");
 
-    // Both bindings share the same authored-path suffix shape in the old matcher
-    // (`nested/provider/item` ends with `provider/item`). Only the shell identity separates
-    // them, and the lookup must never fall back to path text.
+    // Both bindings share an authored-path suffix (`nested/provider/item` ends with
+    // `provider/item`), so a suffix match cannot tell them apart. Only the shell identity
+    // separates them, and the lookup must never fall back to path text.
     let set = SourceProviderDependencySet::new(vec![
         authored(
             DependencyShellId::new(SourceId::from_index(1), 0),
@@ -113,7 +113,7 @@ fn duplicate_shell_fails_instead_of_overwriting() {
     ])
     .expect_err("one retained shell must not resolve to two provider interfaces");
 
-    assert!(error.msg.contains("resolved dependency shell"));
+    assert!(error.message.contains("resolved dependency shell"));
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn duplicate_implicit_template_scope_fails() {
     ])
     .expect_err("one implicit scope prefix must not register twice");
 
-    assert!(error.msg.contains("implicit template scope @html"));
+    assert!(error.message.contains("implicit template scope @html"));
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn equal_origins_with_differing_interfaces_fail_in_either_input_order() {
 
         assert!(
             error
-                .msg
+                .message
                 .contains("disagrees with an equal-origin provider interface")
         );
     }

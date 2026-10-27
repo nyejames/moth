@@ -1,5 +1,9 @@
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+use super::create_project_modules_tests::successful_compilation_value;
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use super::*;
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -173,9 +177,12 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
     let counter_guard =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
 
-    let modules =
-        discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-            .expect("directory discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(
         modules.len(),

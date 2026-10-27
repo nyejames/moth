@@ -10,8 +10,7 @@
 
 use super::module_identity::ModuleId;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -91,20 +90,22 @@ impl ModuleArtifactStore {
         module_id: ModuleId,
         artifact: &CompiledModuleArtifact,
         expected_origin: &StableModuleOriginIdentity,
-    ) -> Result<ModuleSuccessPublication, CompilerError> {
+    ) -> Result<ModuleSuccessPublication, InfrastructureFailure> {
         if self.slot(module_id)? != ProviderSlot::Unavailable {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "Provider slot for ModuleId {} was published more than once",
                 module_id.index()
-            )));
+            );
         }
         if artifact.interface.module_origin != *expected_origin {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "ModuleId {} artefact interface origin {:?} disagrees with graph node origin {:?}",
                 module_id.index(),
                 artifact.interface.module_origin,
                 expected_origin
-            )));
+            );
         }
 
         let artifact_id = CompiledModuleArtifactId(self.artifacts.len());
@@ -116,20 +117,22 @@ impl ModuleArtifactStore {
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
             for (identity, template_index) in context.declaration_rows() {
                 if !seen_rows.insert(identity) {
-                    return Err(CompilerError::compiler_error(format!(
+                    crate::compiler_bug!(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                         "Generated declaration identity {:?} is duplicated inside one materialisation context",
                         identity
-                    )));
+                    );
                 }
                 if let Some(existing) = self.contexts_by_declaration.get(identity) {
-                    return Err(CompilerError::compiler_error(format!(
+                    crate::compiler_bug!(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                         "Generated declaration identity {:?} was published by more than one materialisation context (artifact {} row {} and artifact {} row {})",
                         identity,
                         existing.artifact_id.0,
                         existing.template_index,
                         artifact_id.0,
                         template_index
-                    )));
+                    );
                 }
                 rows.push((
                     identity.clone(),
@@ -170,21 +173,30 @@ impl ModuleArtifactStore {
         self.slots[publication.module_index] = ProviderSlot::Successful(publication.artifact_id);
     }
 
-    pub(crate) fn mark_diagnosed(&mut self, module_id: ModuleId) -> Result<(), CompilerError> {
+    pub(crate) fn mark_diagnosed(
+        &mut self,
+        module_id: ModuleId,
+    ) -> Result<(), InfrastructureFailure> {
         self.transition_unavailable(module_id, ProviderSlot::Diagnosed)
     }
 
-    pub(crate) fn mark_blocked(&mut self, module_id: ModuleId) -> Result<(), CompilerError> {
+    pub(crate) fn mark_blocked(
+        &mut self,
+        module_id: ModuleId,
+    ) -> Result<(), InfrastructureFailure> {
         self.transition_unavailable(module_id, ProviderSlot::Blocked)
     }
 
-    pub(crate) fn slot(&self, module_id: ModuleId) -> Result<ProviderSlot, CompilerError> {
+    pub(crate) fn slot(&self, module_id: ModuleId) -> Result<ProviderSlot, InfrastructureFailure> {
         self.slots.get(module_id.index()).copied().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Provider store received out-of-range ModuleId {} for {} slots",
-                module_id.index(),
-                self.slots.len()
-            ))
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Provider store received out-of-range ModuleId {} for {} slots",
+                    module_id.index(),
+                    self.slots.len()
+                ),
+            )
         })
     }
 
@@ -201,24 +213,24 @@ impl ModuleArtifactStore {
     /// Require every dense slot to hold a successful artefact.
     ///
     /// This is the success-only gate used when assembling a linkable `ProjectCompilation`.
-    pub(crate) fn ensure_all_successful(&self) -> Result<(), CompilerError> {
+    pub(crate) fn ensure_all_successful(&self) {
         if let Some((index, slot)) = self
             .slots
             .iter()
             .enumerate()
             .find(|(_, slot)| !matches!(slot, ProviderSlot::Successful(_)))
         {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "ModuleId {index} is not successful ({slot:?}) but ProjectCompilation requires every module to succeed"
-            )));
+            );
         }
-        Ok(())
     }
 
     pub(crate) fn interface(
         &self,
         module_id: ModuleId,
-    ) -> Result<Option<&PublicSemanticInterface>, CompilerError> {
+    ) -> Result<Option<&PublicSemanticInterface>, InfrastructureFailure> {
         Ok(self
             .artifact(module_id)?
             .map(|artifact| &artifact.interface))
@@ -227,8 +239,8 @@ impl ModuleArtifactStore {
     ///
     /// WHAT: overwrites each executable's construction placeholder with the single final
     ///       `Arc<PathTable>` this boundary froze after all canonical publications.
-    /// WHY: per-module publication used to take one full table snapshot per successful module;
-    ///      the boundary install tail replaces that with one table built once and shared by
+    /// WHY: a full table snapshot per successful module would scale publication cost with the
+    ///      module count; the boundary install tail builds one table once and shares it with
     ///      every base artefact through the same `Arc`.
     pub(crate) fn install_path_table(&mut self, path_table: Arc<PathTable>) {
         for artifact in &mut self.artifacts {
@@ -276,18 +288,19 @@ impl ModuleArtifactStore {
     pub(crate) fn artifact(
         &self,
         module_id: ModuleId,
-    ) -> Result<Option<&CompiledModuleArtifact>, CompilerError> {
+    ) -> Result<Option<&CompiledModuleArtifact>, InfrastructureFailure> {
         let ProviderSlot::Successful(artifact_id) = self.slot(module_id)? else {
             return Ok(None);
         };
 
-        let artifact = self.artifacts.get(artifact_id.0).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+        let artifact = self.artifacts.get(artifact_id.0).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "ModuleId {} references missing artifact {}",
                 module_id.index(),
                 artifact_id.0
-            ))
-        })?;
+            )
+        });
         Ok(Some(artifact))
     }
 
@@ -304,25 +317,6 @@ impl ModuleArtifactStore {
         })
     }
 
-    /// Move successful-artefact warnings in deterministic `ModuleId` order.
-    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
-        let artifact_ids = self
-            .slots
-            .iter()
-            .filter_map(|slot| match slot {
-                ProviderSlot::Successful(artifact_id) => Some(*artifact_id),
-                ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
-            })
-            .collect::<Vec<_>>();
-        let mut warnings = Vec::new();
-        for artifact_id in artifact_ids {
-            if let Some(artifact) = self.artifacts.get_mut(artifact_id.0) {
-                warnings.append(&mut artifact.module.metadata.warnings);
-            }
-        }
-        warnings
-    }
-
     /// Resolve the exact published context for one indexed location.
     ///
     /// WHY: the boundary registry seeds itself from completed package boundaries through this
@@ -331,23 +325,28 @@ impl ModuleArtifactStore {
     pub(crate) fn materialisation_context_at(
         &self,
         location: MaterialisationContextLocation,
-    ) -> Result<&Arc<ModuleMaterialisationContext>, CompilerError> {
-        let artifact = self.artifacts.get(location.artifact_id.0).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+    ) -> &Arc<ModuleMaterialisationContext> {
+        let artifact = self
+            .artifacts
+            .get(location.artifact_id.0)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "Materialisation context index references missing artifact {}",
                 location.artifact_id.0
-            ))
-        })?;
+            )
+            });
         artifact
             .module
             .metadata
             .materialisation_context
             .as_ref()
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                     "Materialisation context index references artifact {} without a context",
                     location.artifact_id.0
-                ))
+                )
             })
     }
 
@@ -369,13 +368,14 @@ impl ModuleArtifactStore {
         &mut self,
         module_id: ModuleId,
         next: ProviderSlot,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let slot = self.slot_mut(module_id)?;
         if *slot != ProviderSlot::Unavailable {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "Provider slot for ModuleId {} was completed more than once",
                 module_id.index()
-            )));
+            );
         }
         *slot = next;
         Ok(())
@@ -386,7 +386,7 @@ impl ModuleArtifactStore {
         &mut self,
         module_id: ModuleId,
         artifact: CompiledModuleArtifact,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let expected_origin = artifact.interface.module_origin.clone();
         let publication = self.preflight_success(module_id, &artifact, &expected_origin)?;
         self.reserve_success_commit(&publication);
@@ -394,14 +394,20 @@ impl ModuleArtifactStore {
         Ok(())
     }
 
-    fn slot_mut(&mut self, module_id: ModuleId) -> Result<&mut ProviderSlot, CompilerError> {
+    fn slot_mut(
+        &mut self,
+        module_id: ModuleId,
+    ) -> Result<&mut ProviderSlot, InfrastructureFailure> {
         let slot_count = self.slots.len();
         self.slots.get_mut(module_id.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Provider store received out-of-range ModuleId {} for {} slots",
-                module_id.index(),
-                slot_count
-            ))
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Provider store received out-of-range ModuleId {} for {} slots",
+                    module_id.index(),
+                    slot_count
+                ),
+            )
         })
     }
 }

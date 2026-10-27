@@ -4,7 +4,6 @@
 //! runtime slots from the fragment list returned by entry start(), and runs the lifecycle.
 //! WHY: HTML assembly/orchestration remains builder policy while Wasm stays backend-generic.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::projects::html_project::js_path::append_startup_fault_report;
 
 /// Emits `page.js` for HTML Wasm mode.
@@ -16,7 +15,7 @@ pub(crate) fn generate_wasm_bootstrap_js(
     js_bundle: &str,
     slot_ids: &[String],
     start_invocation_js: &str,
-) -> Result<String, CompilerError> {
+) -> String {
     let mut out = String::new();
     out.push_str(js_bundle);
     out.push('\n');
@@ -161,8 +160,7 @@ pub(crate) fn generate_wasm_bootstrap_js(
     out.push_str("  console.error(\"Moth Wasm bootstrap failed\", error);\n");
     out.push_str("  throw error;\n");
     out.push_str("});\n");
-
-    Ok(out)
+    out
 }
 
 #[cfg(test)]

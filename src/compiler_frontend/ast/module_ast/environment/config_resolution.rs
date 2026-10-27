@@ -26,8 +26,12 @@ use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, ConfigResolutionServices, ContractValueError, PrimitiveBuildInputType,
     PrimitiveBuildValue, ResolvedBuildConfigValue, build_config_fingerprint,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -230,7 +234,8 @@ pub(super) fn resolve_config_declaration(
                         // without moving the initializer through a fabricated temporary expression.
                         let authored_expression =
                             declaration.value.initializer_mut().ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::AstConstruction,
                                     "a validated config value default has no initializer",
                                 )
                             })?;
@@ -266,7 +271,10 @@ pub(super) fn resolve_config_declaration(
             }
         }
         let expression_id = declaration.value.initializer().ok_or_else(|| {
-            CompilerError::compiler_error("a resolved config declaration has no initializer")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "a resolved config declaration has no initializer",
+            )
         })?;
         let expression = expression_builder.view(expression_id)?;
         declaration.type_id = expression.value_type_id()?;
@@ -456,7 +464,7 @@ fn config_expression_error(
     reason: InvalidConfigReason,
     span: Option<SourceSpan>,
 ) -> ExpressionParseError {
-    CompilerDiagnostic::invalid_config_reason(key, reason, span).into()
+    project_config::invalid_config_reason(key, reason, span).into()
 }
 
 fn config_input_type_mismatch(
@@ -513,7 +521,7 @@ fn configured_value_error(
                     },
                     span,
                 ),
-                None => CompilerDiagnostic::invalid_number_literal(literal, reason, span).into(),
+                None => token_lexical::invalid_number_literal(literal, reason, span).into(),
             }
         }
     }
@@ -692,7 +700,10 @@ fn primitive_value_from_payload(
 ) -> Result<Option<PrimitiveBuildValue>, ExpressionParseError> {
     Ok(
         match const_values.payload(id).ok_or_else(|| {
-            CompilerError::compiler_error("config constant ID is outside its owner")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "config constant ID is outside its owner",
+            )
         })? {
             ConstValuePayload::String(ConstStringValue::Text(value)) => Some(
                 PrimitiveBuildValue::String(string_table.resolve(*value).to_owned()),

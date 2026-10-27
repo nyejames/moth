@@ -11,44 +11,42 @@ use super::environment::TraitRequirementEvidence;
 use super::target_resolution::ConformanceTarget;
 use crate::compiler_frontend::ast::statements::functions::ReturnSlot;
 use crate::compiler_frontend::ast::{ReceiverMethodCatalog, ReceiverMethodEntry};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTraitConformanceReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTraitConformanceReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
 };
 
 /// Result for the connected trait-requirement matching family.
 ///
-/// Requirement lookup and signature validation keep diagnosed failures as plain
-/// `CompilerDiagnostic` values through the evidence-validation boundary.
-type RequirementValidationResult<T = ()> = Result<T, CompilerDiagnostic>;
+/// Requirement lookup and signature validation keep diagnosed failures as drafts
+/// through the evidence-validation boundary.
+type RequirementValidationResult<T = ()> = Result<T, DiagnosticDraft>;
 
 pub(super) struct ImplementationMethod<'a> {
     pub(super) entry: &'a ReceiverMethodEntry,
     pub(super) receiver_type_id: TypeId,
 }
 
-pub(super) struct RequirementValidationContext<'a, 'strings> {
+pub(super) struct RequirementValidationContext<'a> {
     pub(super) receiver_methods: &'a ReceiverMethodCatalog,
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) target_name: StringId,
     pub(super) trait_name: StringId,
     pub(super) conformance_span: Option<SourceSpan>,
-    pub(super) string_table: &'strings mut StringTable,
 }
 
 pub(super) fn validate_requirements(
     trait_definition: &ResolvedTraitDefinition,
     target: &ConformanceTarget,
     conformance_source_file: &PathId,
-    context: &mut RequirementValidationContext<'_, '_>,
+    context: &mut RequirementValidationContext<'_>,
 ) -> RequirementValidationResult<Vec<TraitRequirementEvidence>> {
     let mut requirement_methods = Vec::with_capacity(trait_definition.requirements.len());
 
@@ -68,7 +66,7 @@ pub(super) fn validate_requirements(
                     requirement_name: requirement.name,
                 },
                 context.conformance_span,
-                requirement_label(requirement, context.string_table),
+                requirement_label(requirement),
             )
         })?;
 
@@ -140,7 +138,7 @@ fn validate_requirement_signature(
     requirement: &ResolvedTraitRequirement,
     trait_this_type: TypeId,
     method: &ImplementationMethod<'_>,
-    context: &mut RequirementValidationContext<'_, '_>,
+    context: &mut RequirementValidationContext<'_>,
 ) -> RequirementValidationResult {
     let required_receiver_mutable = match requirement.receiver {
         TraitReceiverRequirement::Immutable { .. } => false,
@@ -155,7 +153,7 @@ fn validate_requirement_signature(
                 requirement_name: requirement.name,
             },
             context.conformance_span,
-            requirement_and_method_labels(requirement, method.entry, context.string_table),
+            requirement_and_method_labels(requirement, method.entry),
         ));
     }
 
@@ -168,7 +166,7 @@ fn validate_parameters(
     requirement: &ResolvedTraitRequirement,
     trait_this_type: TypeId,
     method: &ImplementationMethod<'_>,
-    context: &mut RequirementValidationContext<'_, '_>,
+    context: &mut RequirementValidationContext<'_>,
 ) -> RequirementValidationResult {
     let method_parameters = method
         .entry
@@ -187,7 +185,7 @@ fn validate_parameters(
                 found: method_parameters.len(),
             },
             context.conformance_span,
-            requirement_and_method_labels(requirement, method.entry, context.string_table),
+            requirement_and_method_labels(requirement, method.entry),
         ));
     }
 
@@ -206,7 +204,7 @@ fn validate_parameters(
                     parameter_index: index + 1,
                 },
                 context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry, context.string_table),
+                requirement_and_method_labels(requirement, method.entry),
             ));
         }
 
@@ -222,7 +220,7 @@ fn validate_parameters(
                     parameter_index: index + 1,
                 },
                 context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry, context.string_table),
+                requirement_and_method_labels(requirement, method.entry),
             ));
         }
 
@@ -239,7 +237,7 @@ fn validate_parameters(
                     found_type: actual.type_id,
                 },
                 context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry, context.string_table),
+                requirement_and_method_labels(requirement, method.entry),
             ));
         }
     }
@@ -251,7 +249,7 @@ fn validate_returns(
     requirement: &ResolvedTraitRequirement,
     trait_this_type: TypeId,
     method: &ImplementationMethod<'_>,
-    context: &mut RequirementValidationContext<'_, '_>,
+    context: &mut RequirementValidationContext<'_>,
 ) -> RequirementValidationResult {
     let method_returns = &method.entry.signature.returns;
     if requirement.returns.len() != method_returns.len() {
@@ -264,7 +262,7 @@ fn validate_returns(
                 found: method_returns.len(),
             },
             context.conformance_span,
-            requirement_and_method_labels(requirement, method.entry, context.string_table),
+            requirement_and_method_labels(requirement, method.entry),
         ));
     }
 
@@ -278,7 +276,7 @@ fn validate_returns(
                     return_index: index + 1,
                 },
                 context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry, context.string_table),
+                requirement_and_method_labels(requirement, method.entry),
             ));
         }
 
@@ -297,7 +295,7 @@ fn validate_returns(
                     found_type: method.receiver_type_id,
                 },
                 context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry, context.string_table),
+                requirement_and_method_labels(requirement, method.entry),
             ));
         };
 
@@ -314,7 +312,7 @@ fn validate_returns(
                     found_type: actual_type,
                 },
                 context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry, context.string_table),
+                requirement_and_method_labels(requirement, method.entry),
             ));
         }
     }

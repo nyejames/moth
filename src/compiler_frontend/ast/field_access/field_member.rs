@@ -3,6 +3,8 @@
 //! WHAT: owns member token parsing and field access node construction.
 //! WHY: field reads and inlined const-field reads should not be mixed with builtin or method policy.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -21,8 +23,8 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordSta
 use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidFieldAccessReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidFieldAccessReason;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -146,7 +148,10 @@ impl ProjectedField {
             }
             Self::Constant(id) => {
                 let metadata = const_values.metadata(id).ok_or_else(|| {
-                    CompilerError::compiler_error("projected field constant outside owner")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "projected field constant outside owner",
+                    )
                 })?;
                 let mut input = expression_builder.completed_input(
                     ExpressionOp::Constant(id),
@@ -224,7 +229,7 @@ fn project_const_record_fields(
     scope_context: Option<&ScopeContext>,
     path_fork: &PathInternerFork,
     const_values: &ConstValueStore,
-) -> Result<Option<ProjectedField>, CompilerError> {
+) -> Result<Option<ProjectedField>, InfrastructureFailure> {
     if fields.is_empty() {
         return Ok(Some(ProjectedField::Expression(current.id())));
     }
@@ -291,7 +296,7 @@ fn projected_field_from_receiver(
     scope_context: Option<&ScopeContext>,
     path_fork: &PathInternerFork,
     const_values: &ConstValueStore,
-) -> Result<Option<ProjectedField>, CompilerError> {
+) -> Result<Option<ProjectedField>, InfrastructureFailure> {
     let (root, fields) = const_record_root_and_field_path(receiver, field_name);
     project_const_record_fields(root, &fields, scope_context, path_fork, const_values)
 }
@@ -313,7 +318,12 @@ fn inline_projected_field(
         )?,
         ProjectedField::Constant(id) => const_values
             .metadata(id)
-            .ok_or_else(|| CompilerError::compiler_error("projected field constant outside owner"))?
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "projected field constant outside owner",
+                )
+            })?
             .value_kind
             .is_compile_time_value(),
     };
@@ -355,7 +365,10 @@ fn projected_field_facts(
         }
         ProjectedField::Constant(id) => {
             let metadata = const_values.metadata(id).ok_or_else(|| {
-                CompilerError::compiler_error("projected field constant outside owner")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "projected field constant outside owner",
+                )
             })?;
             Ok(ConstRecordFieldFacts {
                 type_id: metadata.type_id,
@@ -633,18 +646,24 @@ pub(super) fn parse_member_name_typed(
         TokenTag::SYMBOL => Ok(token_stream
             .current_string_id_in(string_table)?
             .ok_or_else(|| {
-                CompilerError::compiler_error("member symbol token had no string payload")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "member symbol token had no string payload",
+                )
             })?),
         TokenTag::NUMERIC_LITERAL => {
             let token = token_stream
                 .current_numeric_literal_in(string_table)?
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("member numeric token had no payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "member numeric token had no payload",
+                    )
                 })?;
             if token.kind == NumericLiteralKind::WholeNumber {
                 Ok(token.normalized_text)
             } else {
-                Err(CompilerDiagnostic::invalid_field_access(
+                Err(calls_data::invalid_field_access(
                     InvalidFieldAccessReason::ExpectedNameAfterDot,
                     None,
                     None,
@@ -657,15 +676,14 @@ pub(super) fn parse_member_name_typed(
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                 token_stream.current_tag(),
-                Some(token_stream.current_span()),
-                "AST Construction",
+                CompilerStage::AstConstruction,
                 "postfix/member parsing",
             )?;
 
             Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
-        _ => Err(CompilerDiagnostic::invalid_field_access(
+        _ => Err(calls_data::invalid_field_access(
             InvalidFieldAccessReason::ExpectedNameAfterDot,
             None,
             None,
@@ -727,7 +745,7 @@ pub(super) fn parse_field_member_access_typed(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-        return Err(CompilerDiagnostic::invalid_field_access(
+        return Err(calls_data::invalid_field_access(
             InvalidFieldAccessReason::FieldNotMethod,
             Some(member_name),
             Some(receiver_type_id),
@@ -744,9 +762,12 @@ pub(super) fn parse_field_member_access_typed(
         input.span = member_span;
         expression_builder.commit_replacement(input)?
     } else {
-        let base_expression = receiver_value_expression(receiver_node).ok_or_else(|| {
-            CompilerError::compiler_error("field receiver had no expression initializer")
-        })?;
+        let Some(base_expression) = receiver_value_expression(receiver_node) else {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "field receiver had no expression initializer",
+            );
+        };
         expression_builder.field_access(
             expression_builder.own(base_expression),
             field.field_name,

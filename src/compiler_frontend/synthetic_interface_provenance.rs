@@ -27,10 +27,7 @@ pub(crate) enum SyntheticInterfaceClass {
     /// Project-global membership. Non-portable: the dependency set depends on project context.
     ProjectContext,
     /// Builder-owned synthetic interface. Reserved for future builder-owned producers.
-    #[allow(
-        dead_code,
-        reason = "The builder-owned producer lands in a later builder interface slice."
-    )]
+    #[allow(dead_code, reason = "The builder-owned producer is not implemented.")]
     Builder,
 }
 

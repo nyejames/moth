@@ -5,11 +5,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStor
 use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleExpressionHandling, FallibleHandling,
 };
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 mod catch;
 mod continuation;
@@ -37,10 +37,10 @@ impl<'a> HirBuilder<'a> {
         } else if matches!(handling, FallibleExpressionHandling::Propagate) {
             self.lower_fallible_results_to_success_values(results, span)?
         } else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Recovering producer outside a catch",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
         Ok(LoweredResults {
             prelude: vec![],

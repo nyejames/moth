@@ -1145,13 +1145,16 @@ fn helper_artifact_rejected_after_final_view_traversal() {
             "helper artifact rejection should produce a diagnostic, not an infrastructure error"
         );
     };
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidTemplateStructure {
-                reason: InvalidTemplateStructureReason::HelperOutsideWrapperSlot
-            }
-        ),
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("the helper artifact diagnostic should compact");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("the diagnostic should use the template-structure family");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::HelperOutsideWrapperSlot,
         "diagnostic must be HelperOutsideWrapperSlot"
     );
 }

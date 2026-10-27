@@ -28,15 +28,16 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirSlotResolutionKind,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -114,7 +115,7 @@ struct PreparationWalk<'scope> {
     visiting_slot_plans: FxHashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
     mode: TemplatePreparationMode,
-    const_diagnostic: Option<CompilerDiagnostic>,
+    const_diagnostic: Option<DiagnosticDraft>,
     source_scope: Option<&'scope ScopeContext>,
     external_package_registry: Option<&'scope ExternalPackageRegistry>,
     expressions: &'scope AstExpressionBuilder,
@@ -221,7 +222,7 @@ impl<'scope> PreparationWalk<'scope> {
         }
     }
 
-    fn record_const_diagnostic(&mut self, diagnostic: CompilerDiagnostic) {
+    fn record_const_diagnostic(&mut self, diagnostic: DiagnosticDraft) {
         if self.const_diagnostic.is_none() {
             self.const_diagnostic = Some(diagnostic);
         }
@@ -276,11 +277,14 @@ fn prepare_tir_view_in_scope(
     external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplatePreparation, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
-        return Err(CompilerError::compiler_error(format!(
-            "TIR preparation requires Composed-or-later TIR, but root {} is at phase {}.",
-            view.root_ref(),
-            view.phase()
-        ))
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "TIR preparation requires Composed-or-later TIR, but root {} is at phase {}.",
+                view.root_ref(),
+                view.phase()
+            ),
+        )
         .into());
     }
 
@@ -366,9 +370,12 @@ impl PreparationWalk<'_> {
     ) -> Result<PreparationFacts, TemplateError> {
         let traversal_key = view.identity();
         if !self.visiting_templates.insert(traversal_key) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: exact view {traversal_key:?} re-entered while still active."
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: exact view {traversal_key:?} re-entered while still active."
+                ),
+            )
             .into());
         }
         let result = (|| {
@@ -447,21 +454,27 @@ impl PreparationWalk<'_> {
         template_id: TemplateIrId,
         root_node_id: TemplateIrNodeId,
         view: &TirView<'_>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if view.root_ref() != template_id {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: view root {} does not match walked template {}.",
-                view.root_ref(),
-                template_id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: view root {} does not match walked template {}.",
+                    view.root_ref(),
+                    template_id
+                ),
+            ));
         }
         let view_template = view.root_template()?;
         if view_template.root != root_node_id {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: view root {} does not match supplied template root node {}.",
-                view.root_ref(),
-                root_node_id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: view root {} does not match supplied template root node {}.",
+                    view.root_ref(),
+                    root_node_id
+                ),
+            ));
         }
         validate_view_context_dimensions(view)?;
         Ok(())
@@ -477,10 +490,13 @@ impl PreparationWalk<'_> {
         increment_ast_counter(AstCounter::TirPreparationNodesVisited);
         let traversal_key = (node_id, view.identity());
         if !self.visiting_nodes.insert(traversal_key) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: node {} is recursively referenced directly.",
-                node_id
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: node {} is recursively referenced directly.",
+                    node_id
+                ),
+            )
             .into());
         }
         let result = (|| {
@@ -649,12 +665,10 @@ impl PreparationWalk<'_> {
                             RuntimeTemplateReason::RuntimeExpression,
                         );
                         if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
-                            self.record_const_diagnostic(
-                                CompilerDiagnostic::invalid_template_structure(
-                                    InvalidTemplateStructureReason::TemplateIfBranchNotConst,
-                                    node.span,
-                                ),
-                            );
+                            self.record_const_diagnostic(templates::invalid_template_structure(
+                                InvalidTemplateStructureReason::TemplateIfBranchNotConst,
+                                node.span,
+                            ));
                         }
                     }
                     facts.merge(body_facts);
@@ -687,12 +701,10 @@ impl PreparationWalk<'_> {
                     if !body_facts.const_evaluable
                         && matches!(self.mode, TemplatePreparationMode::ConstRequired)
                     {
-                        self.record_const_diagnostic(
-                            CompilerDiagnostic::invalid_template_structure(
-                                InvalidTemplateStructureReason::TemplateLoopBodyNotConst,
-                                node.span,
-                            ),
-                        );
+                        self.record_const_diagnostic(templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopBodyNotConst,
+                            node.span,
+                        ));
                     }
                     facts.merge(body_facts);
                     if let Some(aggregate_wrapper) = aggregate_wrapper {
@@ -791,9 +803,9 @@ impl PreparationWalk<'_> {
                                 ..
                             } => InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
                         };
-                        self.record_const_diagnostic(
-                            CompilerDiagnostic::invalid_template_structure(reason, node.span),
-                        );
+                        self.record_const_diagnostic(templates::invalid_template_structure(
+                            reason, node.span,
+                        ));
                     }
                     Ok(facts)
                 }
@@ -822,7 +834,7 @@ impl PreparationWalk<'_> {
 
             for (index, source) in slot_plan.contribution_sources.iter().enumerate() {
                 if source.source.0 != index {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "TIR preparation: contribution source {} in plan {} does not match its index {}.",
                         source.source.0, slot_plan_id, index
                     ))
@@ -831,10 +843,13 @@ impl PreparationWalk<'_> {
             }
             for (index, site) in slot_plan.slot_sites.iter().enumerate() {
                 if site.site.0 != index {
-                    return Err(CompilerError::compiler_error(format!(
-                        "TIR preparation: slot site {} in plan {} does not match its index {}.",
-                        site.site.0, slot_plan_id, index
-                    ))
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "TIR preparation: slot site {} in plan {} does not match its index {}.",
+                            site.site.0, slot_plan_id, index
+                        ),
+                    )
                     .into());
                 }
             }
@@ -861,33 +876,43 @@ impl PreparationWalk<'_> {
         source: crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId,
         view: &TirView<'_>,
         role: &PreparationTraversalRole,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(active_plan) = role.active_slot_plan else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR preparation: runtime slot contribution marker appeared outside its owning plan.",
             ));
         };
         if plan != active_plan {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: runtime slot contribution marker plan {} differs from the active plan {}.",
-                plan, active_plan
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: runtime slot contribution marker plan {} differs from the active plan {}.",
+                    plan, active_plan
+                ),
+            ));
         }
         let slot_plan = view
             .store()
             .get_slot_plan(active_plan)
             .ok_or_else(|| missing_slot_plan_error(active_plan))?;
         let Some(stored) = slot_plan.contribution_sources.get(source.0) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: runtime slot contribution source {} is outside plan {}.",
-                source.0, active_plan
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: runtime slot contribution source {} is outside plan {}.",
+                    source.0, active_plan
+                ),
+            ));
         };
         if stored.source != source {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: contribution source {} in plan {} does not match its stored identity {}.",
-                source.0, active_plan, stored.source.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: contribution source {} in plan {} does not match its stored identity {}.",
+                    source.0, active_plan, stored.source.0
+                ),
+            ));
         }
         Ok(())
     }
@@ -898,17 +923,21 @@ impl PreparationWalk<'_> {
         site: crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId,
         view: &TirView<'_>,
         role: &PreparationTraversalRole,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(active_plan) = role.active_slot_plan else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR preparation: runtime slot site appeared outside its owning plan.",
             ));
         };
         if plan != active_plan {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: runtime slot site plan {} differs from the active plan {}.",
-                plan, active_plan
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: runtime slot site plan {} differs from the active plan {}.",
+                    plan, active_plan
+                ),
+            ));
         }
 
         let slot_plan = view
@@ -916,16 +945,22 @@ impl PreparationWalk<'_> {
             .get_slot_plan(active_plan)
             .ok_or_else(|| missing_slot_plan_error(active_plan))?;
         let Some(stored) = slot_plan.slot_sites.get(site.0) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: runtime slot site {} is outside plan {}.",
-                site.0, active_plan
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: runtime slot site {} is outside plan {}.",
+                    site.0, active_plan
+                ),
+            ));
         };
         if stored.site != site {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR preparation: slot site {} in plan {} does not match its stored identity {}.",
-                site.0, active_plan, stored.site.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR preparation: slot site {} in plan {} does not match its stored identity {}.",
+                    site.0, active_plan, stored.site.0
+                ),
+            ));
         }
 
         Ok(())
@@ -1046,7 +1081,7 @@ impl PreparationWalk<'_> {
                 if is_const {
                     Ok(())
                 } else {
-                    Err(CompilerDiagnostic::invalid_template_structure(
+                    Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
                         self.expressions.view(*condition)?.span().or(node_span),
                     ))
@@ -1082,7 +1117,7 @@ impl PreparationWalk<'_> {
                     collect_option_capture_binding_path(pattern, &mut branch_binding_paths);
                     Ok(())
                 } else {
-                    Err(CompilerDiagnostic::invalid_template_structure(
+                    Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
                         scrutinee_view.span().or(node_span),
                     ))
@@ -1133,11 +1168,11 @@ impl PreparationWalk<'_> {
                 );
                 let diagnostic = match condition_value {
                     Some(false) => None,
-                    Some(true) => Some(CompilerDiagnostic::invalid_template_structure(
+                    Some(true) => Some(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
                         condition_span_or_loop_span(diagnostic_condition, loop_span),
                     )),
-                    None => Some(CompilerDiagnostic::invalid_template_structure(
+                    None => Some(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
                         condition_span_or_loop_span(diagnostic_condition, loop_span),
                     )),
@@ -1214,7 +1249,7 @@ impl PreparationWalk<'_> {
                     facts.merge(step_facts);
                 }
                 (!header_const).then(|| {
-                    CompilerDiagnostic::invalid_template_structure(
+                    templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
                         loop_span,
                     )
@@ -1227,7 +1262,7 @@ impl PreparationWalk<'_> {
                 facts.merge(iterable_facts);
                 let iterable_span = self.expressions.view(*iterable)?.span().or(loop_span);
                 (!header_const).then(|| {
-                    CompilerDiagnostic::invalid_template_structure(
+                    templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
                         iterable_span,
                     )
@@ -1279,7 +1314,7 @@ fn slot_placeholder_has_wrapper_context(placeholder: &TirSlotPlaceholder) -> boo
         || placeholder.skip_parent_child_wrappers
 }
 
-fn validate_view_context_dimensions(view: &TirView<'_>) -> Result<(), CompilerError> {
+fn validate_view_context_dimensions(view: &TirView<'_>) -> Result<(), InfrastructureFailure> {
     let store = view.store();
     let context = view.context();
     if let Some(overlay_id) = context.expression_overlay
@@ -1315,43 +1350,58 @@ fn validate_view_context_dimensions(view: &TirView<'_>) -> Result<(), CompilerEr
     Ok(())
 }
 
-fn missing_template_error(template_id: TemplateIrId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR preparation: template {} is not present in the module store.",
-        template_id
-    ))
+fn missing_template_error(template_id: TemplateIrId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR preparation: template {} is not present in the module store.",
+            template_id
+        ),
+    )
 }
 
-fn missing_node_error(node_id: TemplateIrNodeId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR preparation: node {} does not exist in the module store.",
-        node_id
-    ))
+fn missing_node_error(node_id: TemplateIrNodeId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR preparation: node {} does not exist in the module store.",
+            node_id
+        ),
+    )
 }
 
-fn missing_wrapper_set_error(wrapper_set_id: TemplateWrapperSetId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR preparation: wrapper set {} is not present in the module store.",
-        wrapper_set_id
-    ))
+fn missing_wrapper_set_error(wrapper_set_id: TemplateWrapperSetId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR preparation: wrapper set {} is not present in the module store.",
+            wrapper_set_id
+        ),
+    )
 }
 
-fn missing_slot_plan_error(slot_plan_id: TemplateSlotPlanId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR preparation: slot plan {} is not present in the module store.",
-        slot_plan_id
-    ))
+fn missing_slot_plan_error(slot_plan_id: TemplateSlotPlanId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR preparation: slot plan {} is not present in the module store.",
+            slot_plan_id
+        ),
+    )
 }
 
 fn missing_overlay_dimension_error(
     context: TemplateViewContext,
     dimension: &str,
     overlay_id: impl std::fmt::Display,
-) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR preparation: context {:?} references missing {} overlay {}.",
-        context, dimension, overlay_id
-    ))
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR preparation: context {:?} references missing {} overlay {}.",
+            context, dimension, overlay_id
+        ),
+    )
 }
 
 fn condition_span_or_loop_span(

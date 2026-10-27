@@ -1,5 +1,6 @@
 //! Stable token taxonomy and compact payload shapes.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::numeric_text::store::NumericLiteralId;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
@@ -272,8 +273,8 @@ macro_rules! token_schema {
             /// Whether this tag counts toward the stats literal bucket.
             ///
             /// WHAT: the schema-owned fact behind `TokenStats::literals`. It covers the string,
-            ///      raw-string, numeric, char, bool, and `none` value spellings that the legacy
-            ///      classifier counted.
+            ///      raw-string, numeric, char, bool, and `none` value spellings in the literal
+            ///      count.
             /// WHY: capacity seeds must read one taxonomy authority instead of a second
             ///      hand-maintained literal table.
             pub(crate) fn is_stats_literal(self) -> bool {
@@ -291,7 +292,7 @@ macro_rules! token_schema {
             /// Whether this tag counts toward the stats operator bucket.
             ///
             /// WHAT: the schema-owned fact behind `TokenStats::operators`. It preserves the exact
-            ///      legacy operator set, including expression-continuing punctuation (`->`),
+            ///      established operator set, including expression-continuing punctuation (`->`),
             ///      word operators, postfix markers (`!`, `?`), `copy`, channels, `&`, and `=>`.
             /// WHY: capacity seeds must read one taxonomy authority instead of a second
             ///      hand-maintained operator table.
@@ -1123,7 +1124,10 @@ impl TokenShape {
             0 => NumericLiteralKind::WholeNumber,
             1 => NumericLiteralKind::DecimalPoint,
             2 => NumericLiteralKind::Exponent,
-            _ => unreachable!("numeric flags were checked above"),
+            _ => crate::compiler_bug!(
+                CompilerStage::Tokenization,
+                "numeric_kind already returned None when flags > 2; remaining flags are 0, 1, or 2"
+            ),
         })
     }
 

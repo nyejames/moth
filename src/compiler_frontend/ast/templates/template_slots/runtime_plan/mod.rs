@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::{
     convert_tir_tree_to_active_slot_plan, copy_tir_subtree_with_active_slot_plan,
     record_tir_copy_counters,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 
 use super::RuntimeSlotPlanningServices;
@@ -49,7 +50,8 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     let wrapper_root = store
         .get_template(wrapper_template_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR-native runtime slot plan: wrapper template ID was not present in the store.",
             )
         })?

@@ -40,8 +40,10 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -314,7 +316,7 @@ fn create_expression_until_with_seeded_items_inner(
             .collect::<Vec<_>>()
             .join(", ");
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
+        return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
         )
@@ -327,14 +329,14 @@ fn create_expression_until_with_seeded_items_inner(
             .collect::<Vec<_>>()
             .join(", ");
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
+        return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
         )
         .into());
     };
     if !stop_tokens.contains(&end_tag) {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(end_tag),
             end_span,
         )
@@ -553,7 +555,8 @@ fn retain_pending_fragment_catch(
         input.path_fork,
     )?;
     let Some(suffix) = suffix else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained fragment's authored `catch` suffix was classified as absent",
         )
         .into());
@@ -573,7 +576,8 @@ fn retain_pending_fragment_catch(
         DeferredExpressionSuffix::None,
     );
     let Some(payload) = retain_pending_catch_handler(handled, protected_shape, suffix) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a parsed `catch` suffix was classified as postfix propagation",
         )
         .into());
@@ -653,7 +657,7 @@ fn fragment_fallible_site(
     expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
     scope_context: &ScopeContext,
-) -> Result<(FragmentSuccess, Option<GenericErrorReturn>), CompilerError> {
+) -> Result<(FragmentSuccess, Option<GenericErrorReturn>), InfrastructureFailure> {
     let success = match single_operand(items) {
         Some(item) => match retained_terminal_call(item) {
             Some(terminal) => terminal_call_success(terminal, scope_context),
@@ -702,7 +706,7 @@ fn terminal_call_success(
 fn fragment_error_site(
     expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
-) -> Result<Option<GenericErrorReturn>, CompilerError> {
+) -> Result<Option<GenericErrorReturn>, InfrastructureFailure> {
     Ok(fragment_typed_error_summary(expression_builder, items)?
         .0
         .map(|fact| match fact {
@@ -724,7 +728,7 @@ fn fragment_error_site(
 pub(crate) fn fragment_typed_error_summary(
     expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
-) -> Result<(Option<TypedErrorFact>, Option<TypedErrorFact>), CompilerError> {
+) -> Result<(Option<TypedErrorFact>, Option<TypedErrorFact>), InfrastructureFailure> {
     /// Two producers share one error only when both are concrete and equal, or both retain the
     /// same shape. Any other pair stays a disagreement: a pending producer's type is not known
     /// until its shape completes, and the completion owner decides whether it really conflicts.
@@ -782,7 +786,7 @@ pub(crate) fn fragment_typed_error_summary(
         expression: ExprId,
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let Some(facts) = expression_builder.view(expression)?.failure_facts() {
             collect_facts(facts, first, conflicting);
         }
@@ -794,7 +798,7 @@ pub(crate) fn fragment_typed_error_summary(
         items: &[ExpressionRpnItem],
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for item in items {
             match item {
                 ExpressionRpnItem::PendingNumericCall { call, .. } => {
@@ -842,7 +846,7 @@ pub(crate) fn fragment_typed_error_summary(
         continuation: &RetainedOperandContinuation,
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         collect(
             expression_builder,
             &continuation.operand,
@@ -942,7 +946,7 @@ pub(crate) fn fragment_typed_error_summary(
         arguments: &[DeferredCallArgument],
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for argument in arguments {
             match argument {
                 DeferredCallArgument::Ready(ready) => {
@@ -968,7 +972,7 @@ pub(crate) fn fragment_typed_error_summary(
         call: &DeferredCall,
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         collect_error_return(call.error_return(), call.call_span(), first, conflicting);
         collect_deferred_arguments(
             expression_builder,
@@ -1019,7 +1023,8 @@ fn consume_deferred_expression_suffix(
             Ok(DeferredExpressionSuffix::Propagate { span })
         }
         TokenTag::CATCH | TokenTag::QUESTION_MARK => Err(ExpressionParseError::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "numeric-dependent expression followed by catch/option propagation cannot be \
                  retained yet; the suffix needs the resolved result shape",
             )
@@ -1206,7 +1211,7 @@ fn collect_expression_fragment_into(
 
     if !group_frames.is_empty() {
         // The stream ended before a group's `)`, so that group has no closing delimiter.
-        return Err(CompilerDiagnostic::missing_closing_delimiter(
+        return Err(token_lexical::missing_closing_delimiter(
             input.string_table.intern(")"),
             Some(input.token_stream.current_span()),
         )
@@ -1288,7 +1293,7 @@ fn create_expression_until_with_policy(
         let expected_tokens = formatted_stop_tokens.join(", ");
 
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
+        return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
         )
@@ -1303,7 +1308,7 @@ fn create_expression_until_with_policy(
         let expected_tokens = formatted_stop_tokens.join(", ");
 
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
+        return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
         )
@@ -1311,7 +1316,7 @@ fn create_expression_until_with_policy(
     };
 
     if end_index == start_index {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(end_tag),
             end_span,
         )
@@ -1319,7 +1324,7 @@ fn create_expression_until_with_policy(
     }
 
     if !stop_tokens.contains(&end_tag) {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(end_tag),
             end_span,
         )

@@ -15,10 +15,13 @@
 //! have no dependents and cannot be imported. They are appended after the sorted top-level
 //! headers so AST emission sees all top-level declarations before processing the start body.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{ModuleSymbols, PublicExportEntry};
 use crate::compiler_frontend::headers::parse_file_headers::LocalDeclarationOrderingHintOrigin;
@@ -85,7 +88,7 @@ impl ContentSourceTargets {
         source_files: &SourceDatabase,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut targets = FxHashMap::default();
 
         for reference in resolved_references.iter() {
@@ -269,7 +272,7 @@ impl<'a> DependencyGraph<'a> {
         header: &Header,
         string_table: &StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Vec<ResolvedDependencyEdge>, CompilerError> {
+    ) -> Vec<ResolvedDependencyEdge> {
         let source = header.tokens.source();
 
         // Hints retain every authored occurrence for diagnostics and Stage 0 handoff, but graph
@@ -302,7 +305,7 @@ impl<'a> DependencyGraph<'a> {
             })
         });
 
-        Ok(edges)
+        edges
     }
     fn resolve_dependency_edge(
         &self,
@@ -476,18 +479,7 @@ enum DependencyEdgeKind {
     Missing,
 }
 
-/// Failure lanes shared by the DFS visit and edge-recursion boundaries.
-///
-/// WHAT: keeps authored dependency diagnostics distinct from impossible graph-state failures
-/// while the outer resolver accumulates the former into a move-only premerge batch.
-/// WHY: an internal compiler failure must remain a typed outer failure instead of being fabricated
-/// as a user-facing diagnostic.
-enum VisitFailure {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(CompilerError),
-}
-
-type VisitResult = Result<(), VisitFailure>;
+type VisitResult = Result<(), DiagnosticDraft>;
 
 /// Topologically sort headers and finalize the header-owned module symbol package.
 ///
@@ -503,7 +495,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     content_source_targets: &ContentSourceTargets,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<SortedHeaders, PremergeFailure> {
+) -> Result<SortedHeaders, PreparedFailure> {
     let BoundModuleHeaders {
         headers,
         source_token_owners,
@@ -567,30 +559,22 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                     diagnostic_span,
                 ) {
                     Ok(()) => {}
-                    Err(VisitFailure::Diagnostic(error)) => diagnostic_bag.push(error),
-                    Err(VisitFailure::Infrastructure(error)) => {
-                        let failure = if diagnostic_bag.has_errors() {
-                            drop(graph);
-                            let table = std::mem::take(string_table);
-                            let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
-                            PremergeFailure::Mixed {
-                                batch,
-                                error: error.into(),
-                            }
-                        } else {
-                            PremergeFailure::from(error)
-                        };
-                        return Err(failure);
-                    }
+                    Err(error) => diagnostic_bag.push(error),
                 }
             }
         }
 
         if diagnostic_bag.has_errors() {
             drop(graph);
-            let table = std::mem::take(string_table);
-            let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
-            return Err(PremergeFailure::Diagnosed(batch));
+            let table = string_table.take_for_handoff();
+            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                diagnostic_bag,
+                table,
+                None,
+                || Some(std::sync::Arc::new(path_fork.shared_table())),
+            )
+            .map_err(PreparedFailure::from)?;
+            return Err(PreparedFailure::Diagnosed(batch));
         }
 
         (sorted, tracker.visit_count)
@@ -603,7 +587,9 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     // Build the complete sorted declaration placeholder list from the topologically
     // ordered headers and append builtins.
     // WHY: declarations must be in sorted order so AST passes see dependencies before dependents.
-    module_symbols.build_sorted_declarations(&sorted, string_table, path_fork);
+    module_symbols
+        .build_sorted_declarations(&sorted, string_table, path_fork)
+        .map_err(PreparedFailure::from)?;
 
     add_frontend_counter(
         FrontendCounter::DependencyHeaderCount,
@@ -643,9 +629,7 @@ fn visit_node(
     let Some(resolved_graph_path) =
         graph.resolve_requested_path(node_path, string_table, path_fork)
     else {
-        return Err(VisitFailure::Diagnostic(
-            CompilerDiagnostic::missing_import_target(node_path, diagnostic_span),
-        ));
+        return Err(imports::missing_import_target(node_path, diagnostic_span));
     };
 
     let resolved_path = match resolved_graph_path {
@@ -658,30 +642,27 @@ fn visit_node(
     };
 
     if tracker.is_in_current_stack(&resolved_path) {
-        return Err(VisitFailure::Diagnostic(
-            CompilerDiagnostic::circular_dependency(resolved_path, diagnostic_span),
+        return Err(project_config::circular_dependency(
+            resolved_path,
+            diagnostic_span,
         ));
     }
 
     if !tracker.visited.contains(&resolved_path) {
         let Some(header) = graph.header_for_path(&resolved_path) else {
             let mut scratch = Vec::new();
-            return Err(VisitFailure::Infrastructure(CompilerError::new(
-                format!(
-                    "Dependency ordering resolved '{}' but it was missing from the graph.",
-                    path_fork.render_portable(resolved_path, string_table, &mut scratch)
-                ),
-                None,
-                crate::compiler_frontend::compiler_errors::ErrorType::Compiler,
-            )));
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
+                "Dependency ordering resolved '{}' but it was missing from the graph.",
+                path_fork.render_portable(resolved_path, string_table, &mut scratch)
+            );
         };
 
         // Recurse on the dependency edges resolved from this header's retained hints.
         // WHY: edges include type surfaces and constant initializer references.
         // Executable body references are excluded.
-        let dependency_edges = graph
-            .sorted_dependency_edges_for_header(header, string_table, path_fork)
-            .map_err(VisitFailure::Infrastructure)?;
+        let dependency_edges =
+            graph.sorted_dependency_edges_for_header(header, string_table, path_fork);
         tracker.enter(resolved_path);
         for edge in dependency_edges {
             if let Err(error) =
@@ -710,11 +691,10 @@ fn visit_dependency_edge(
     match edge.kind {
         DependencyEdgeKind::GraphHeader => {
             let Some(resolved_path) = edge.resolved_path else {
-                return Err(VisitFailure::Infrastructure(CompilerError::new(
-                    "Dependency edge was classified as a graph header without a resolved path.",
-                    None,
-                    crate::compiler_frontend::compiler_errors::ErrorType::Compiler,
-                )));
+                crate::compiler_bug!(
+                    CompilerStage::DependencyResolution,
+                    "Dependency edge was classified as a graph header without a resolved path."
+                );
             };
 
             visit_node(
@@ -750,8 +730,9 @@ fn visit_dependency_edge(
             Ok(())
         }
 
-        DependencyEdgeKind::Missing => Err(VisitFailure::Diagnostic(
-            CompilerDiagnostic::missing_import_target(edge.requested_path, edge.span),
+        DependencyEdgeKind::Missing => Err(imports::missing_import_target(
+            edge.requested_path,
+            edge.span,
         )),
     }
 }

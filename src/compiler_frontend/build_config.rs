@@ -29,7 +29,8 @@
 //!
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -447,7 +448,7 @@ impl PrimitiveBuildValue {
 ///       owner, and the compiler owns the inference semantics behind the message.
 #[derive(Debug)]
 pub enum BuildInputValueError {
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureFailure>),
     /// A single-quote-leading value is not one complete ordinary Moth Char literal.
     MalformedCharLiteral {
         text: String,
@@ -464,7 +465,7 @@ impl fmt::Display for BuildInputValueError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Infrastructure(error) => {
-                write!(formatter, "input tokenization failed: {}", error.msg)
+                write!(formatter, "input tokenization failed: {}", error.message)
             }
             Self::MalformedCharLiteral { text, reason } => write!(
                 formatter,
@@ -537,18 +538,18 @@ fn parse_ordinary_quoted_literal(
         .map_err(|error| {
             BuildInputValueError::Infrastructure(Box::new(match error {
                 crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly,
                         "path table exhausted while interning a command-input tokenizer path",
                     )
                 }
                 crate::compiler_frontend::symbols::path_interner::PathInternError::NonUtf8(_) => {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly,
                         "command-input tokenizer path should be valid UTF-8",
                     )
                 }
                 crate::compiler_frontend::symbols::path_interner::PathInternError::BaseMismatch {
                     ..
-                } => CompilerError::compiler_error(
+                } => InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly,
                     "logical path merge base is not a structural prefix of the destination table",
                 ),
             }))
@@ -566,7 +567,7 @@ fn parse_ordinary_quoted_literal(
     )
     .map_err(|failure| match failure {
         TokenizeFailure::Diagnosed(diagnostic) => {
-            malformed_quoted_literal_error(value, diagnostic.kind.descriptor().title)
+            malformed_quoted_literal_error(value, diagnostic.descriptor().title)
         }
         TokenizeFailure::Infrastructure(error) => {
             BuildInputValueError::Infrastructure(Box::new(error))
@@ -606,7 +607,8 @@ fn parse_ordinary_quoted_literal(
     match literal.tag() {
         TokenTag::STRING_SLICE_LITERAL => {
             let id = literal.string_id().ok_or_else(|| {
-                BuildInputValueError::Infrastructure(Box::new(CompilerError::compiler_error(
+                BuildInputValueError::Infrastructure(Box::new(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
                     "quoted command literal has a malformed string payload",
                 )))
             })?;
@@ -616,7 +618,8 @@ fn parse_ordinary_quoted_literal(
         }
         TokenTag::CHAR_LITERAL => {
             let character = literal.char_value().ok_or_else(|| {
-                BuildInputValueError::Infrastructure(Box::new(CompilerError::compiler_error(
+                BuildInputValueError::Infrastructure(Box::new(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
                     "quoted command literal has a malformed character payload",
                 )))
             })?;
@@ -695,8 +698,8 @@ impl PrimitiveBuildInputType {
     ///
     /// WHAT: every signed and unsigned integer width and every binary float width is admitted.
     ///       The `Byte` octet is not a numeric build-input type.
-    /// WHY:  build inputs accept the exact fixed-width numeric domain of the plan, and each
-    ///       admitted scalar keeps its own identity rather than widening to one shared carrier.
+    /// WHY: build inputs accept the exact fixed-width numeric domain, and each admitted scalar
+    ///      keeps its own identity rather than widening to one shared carrier.
     pub(crate) fn from_fixed_scalar(scalar: FixedScalar) -> Option<Self> {
         match scalar.class() {
             FixedScalarClass::SignedInteger

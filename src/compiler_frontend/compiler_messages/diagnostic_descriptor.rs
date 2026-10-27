@@ -1,8 +1,7 @@
-//! Stable diagnostic descriptors.
+//! Stable diagnostic family descriptors.
 //!
-//! WHAT: binds a diagnostic kind to its stable code, short title, and default severity.
-//! WHY: enum variants are internal implementation details, while diagnostic codes are the
-//! contract for users, tests, and future tooling.
+//! WHAT: binds a family row to its stable code, short title, and default severity.
+//! WHY: diagnostic codes and titles are user-visible contracts, independent of internal family layouts.
 
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 

@@ -20,7 +20,8 @@ use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use std::path::{Component, Path};
 
@@ -269,7 +270,7 @@ impl StableModuleOriginIdentity {
     /// platform-independent.
     ///
     /// Only normal relative components are accepted. `CurDir`, `ParentDir`, `RootDir`, `Prefix`
-    /// and non-UTF-8 components are rejected through an internal `CompilerError` so two invalid
+    /// and non-UTF-8 components are rejected through an internal `InfrastructureFailure` so two invalid
     /// inputs can never collapse to the same stable identity. Stage 0's earlier UTF-8 and
     /// base-relative validation makes these invariant failures, but the constructor remains
     /// total rather than panicking.
@@ -277,7 +278,7 @@ impl StableModuleOriginIdentity {
         package: StablePackageIdentity,
         relative_logical_path: &Path,
         role: ModuleRootRole,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         Ok(Self {
             package,
             logical_module_path: portable_relative_logical_path_from(relative_logical_path)?,
@@ -325,19 +326,19 @@ impl StableModuleOriginIdentity {
 /// The empty path yields the empty string (valid for the entry-root module origin); deeper
 /// normal components are joined with `/`. Only normal relative components are accepted.
 /// `CurDir`, `ParentDir`, `RootDir` and `Prefix` components are rejected through an internal
-/// `CompilerError` so two invalid inputs cannot collapse to the same stable identity. Stage 0
+/// `InfrastructureFailure` so two invalid inputs cannot collapse to the same stable identity. Stage 0
 /// traversal already rejects non-UTF-8 path components through structured diagnostics, so a
 /// non-UTF-8 normal component here is a proven internal invariant; it is still surfaced as an
-/// explicit `CompilerError` rather than a panic.
+/// explicit `InfrastructureFailure` rather than a panic.
 pub(crate) fn portable_relative_logical_path_from(
     relative: &Path,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let mut spelling = String::new();
     for component in relative.components() {
         match component {
             Component::Normal(name) => {
                 let name = name.to_str().ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "stable relative logical path component {name:?} in {relative:?} is not \
                         UTF-8; Stage 0 rejects non-UTF-8 path components before identity \
                         construction, so this is an internal invariant violation"
@@ -352,11 +353,14 @@ pub(crate) fn portable_relative_logical_path_from(
             | Component::ParentDir
             | Component::RootDir
             | Component::Prefix(_) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "stable logical path {relative:?} contains an invalid component \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "stable logical path {relative:?} contains an invalid component \
                      {component:?}; only normal relative components are permitted, so two invalid \
                      inputs cannot collapse to the same stable identity"
-                )));
+                    ),
+                ));
             }
         }
     }
@@ -391,18 +395,19 @@ impl StableOwnedSourceIdentity {
     /// directory, including the root filename. It is validated by the same portable-component
     /// rules as the module origin path: only normal relative UTF-8 components are accepted, so
     /// `CurDir`, `ParentDir`, `RootDir`, `Prefix` and non-UTF-8 components surface as an internal
-    /// `CompilerError` rather than panicking or collapsing two invalid inputs to one identity.
+    /// `InfrastructureFailure` rather than panicking or collapsing two invalid inputs to one identity.
     /// Stage 0 traversal already rejects non-UTF-8 source names through structured diagnostics,
     /// so a non-UTF-8 component here is an internal invariant violation surfaced explicitly.
     /// An owned source identity always includes a filename, so an empty relative source path is
-    /// rejected through an internal `CompilerError` rather than collapsing to the entry-root
+    /// rejected through an internal `InfrastructureFailure` rather than collapsing to the entry-root
     /// module's empty path spelling.
     pub(crate) fn from_relative_source_path(
         module_origin: StableModuleOriginIdentity,
         relative_source_path: &Path,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         if relative_source_path.as_os_str().is_empty() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "stable owned-source identity cannot be constructed from an empty relative source \
                  path; an owned source identity always includes a filename",
             ));
@@ -471,8 +476,8 @@ impl OriginTypeId {
     /// Construct the stable origin identity for one exported source type.
     ///
     /// Compiler-internal: only declarations admitted to a consumer-visible or exported surface
-    /// receive an origin ID. Private source types remain without origin IDs by policy; this
-    /// slice does not add identity fields to private headers.
+    /// receive an origin ID. Private source types remain without origin IDs by policy, so
+    /// private headers carry no identity fields.
     pub(crate) fn new(
         module_origin: StableModuleOriginIdentity,
         defining_name: String,
@@ -700,8 +705,8 @@ impl OriginDeclarationId {
 ///       exporting module is the stable [`StableModuleOriginIdentity`], never a build-local dense
 ///       `ModuleId`. The public name and the origin's defining name are self-contained owned
 ///       strings, never `StringId` or `PathId` values that would not survive the graph
-///       table. For a directly defined export the public name equals the defining name; re-export
-///       aliasing is a separate fact owned by the future completed provider interface.
+///       table. Direct exports use the defining name; re-exports retain the public alias
+///       alongside the original declaration identity.
 /// WHY: the compiler design overview's `ExportBinding` contract requires public-interface binding
 ///      to key over stable module origins and declaration identities. Recording these bindings at
 ///      the semantic compilation boundary lets later phases consume them without reparsing source

@@ -9,9 +9,10 @@
 
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -96,7 +97,7 @@ pub(crate) fn build_source_package_boundary_indexes(
     source_file_kinds: &SourceFileKindRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
     string_table: &mut StringTable,
-) -> Result<SourcePackageBoundaryIndexes, PremergeFailure> {
+) -> Result<SourcePackageBoundaryIndexes, PreparedFailure> {
     let mut indexes = Vec::new();
 
     for package in source_packages.iter() {
@@ -112,9 +113,14 @@ pub(crate) fn build_source_package_boundary_indexes(
         {
             let diagnostic =
                 project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
-            let table = std::mem::take(string_table);
-            return Err(PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            let table = string_table.take_for_handoff();
+            return Err(PreparedFailure::Diagnosed(
+                PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(diagnostic),
+                    table,
+                    None,
+                    None,
+                ),
             ));
         }
 
@@ -122,7 +128,8 @@ pub(crate) fn build_source_package_boundary_indexes(
         // never proceeds against a path whose canonicalization failed. This preserves the
         // existing file-error diagnostic for unresolvable package roots.
         let canonical_root = fs::canonicalize(path).map_err(|error| {
-            CompilerError::file_error(
+            InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 path,
                 format!("Failed to canonicalize source-backed package root: {error}"),
             )

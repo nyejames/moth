@@ -1,6 +1,10 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
@@ -22,9 +26,7 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -75,29 +77,29 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
     .expect_err("option-present capture should not escape its selected body");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::UnknownName {
-                name,
-                namespace: NameNamespace::Value,
-            } if name == capture_name
-        ),
-        "unexpected payload: {:?}",
-        diagnostic.payload
-    );
+    let diagnostic = diagnostic
+        .first()
+        .expect("unknown-name failure should compact to one record");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0034");
+    let facts = diagnostic
+        .family_view::<UnknownValueNameView>()
+        .expect("unknown-value-name failure should retain typed facts");
+    assert_eq!(facts.name, capture_name);
 }
 
 #[test]
 fn match_style_template_if_is_rejected() {
     let diagnostic = parse_template_error("[if true is: Visible]");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported
-        }
-    ));
+    let facts = diagnostic
+        .first()
+        .expect("invalid structure failure should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("invalid structure should retain typed facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::TemplateMatchStyleControlFlowUnsupported
+    );
 }
 
 #[test]

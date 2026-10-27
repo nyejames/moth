@@ -4,7 +4,8 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -78,21 +79,21 @@ pub(super) fn estimate_tir_node_output_bytes(
         | TemplateIrNodeKind::Loop { .. }
         | TemplateIrNodeKind::InsertContribution { .. } => match mode {
             FoldEstimateMode::Structural => Ok(0),
-            FoldEstimateMode::Aggregate { .. } => Err(CompilerError::compiler_error(
+            FoldEstimateMode::Aggregate { .. } => Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR fold: malformed aggregate wrapper subtree contains a node kind that cannot be estimated inside a wrapper.",
             )
             .into()),
         },
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Err(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR fold: runtime slot nodes cannot enter constant-fold output estimation.",
             )
             .into(),
         ),
         // A retained position is unfinished compiler scratch and must never be estimated: its
         // value is installed by body-root numeric completion before folding runs.
-        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR fold: a retained numeric intake position cannot enter constant-fold output estimation.",
         )
         .into()),

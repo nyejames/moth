@@ -27,9 +27,12 @@ use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, 
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason, ValueReceiverContext,
+    InvalidTemplateStructureReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -88,7 +91,7 @@ pub(crate) fn validate_template_head_value_type(
     let type_id = expression.require_single(ValueReceiverContext::TemplateInterpolation)?;
     if expression.error_type().is_some() {
         return Err(with_source_span(
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::FallibleValueInTemplateHead,
                 span,
             ),
@@ -108,7 +111,7 @@ pub(crate) fn validate_template_head_value_type(
     }
 
     Err(with_source_span(
-        CompilerDiagnostic::invalid_template_structure(
+        templates::invalid_template_structure(
             InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { type_id },
             span,
         ),
@@ -117,12 +120,9 @@ pub(crate) fn validate_template_head_value_type(
     .into())
 }
 
-fn with_source_span(
-    mut diagnostic: CompilerDiagnostic,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = span;
+fn with_source_span(mut diagnostic: DiagnosticDraft, span: Option<SourceSpan>) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(span);
     }
     diagnostic
 }
@@ -142,7 +142,8 @@ pub(super) fn handle_template_value_in_template_head(
             .map(|template_ir| template_ir.kind.clone())
             .ok_or_else(|| {
                 TemplateError::from(
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Template head value was missing from the module TIR store.",
                     ),
                 )
@@ -152,7 +153,7 @@ pub(super) fn handle_template_value_in_template_head(
     if context.kind.is_constant_context() && matches!(&template_kind, TemplateType::StringFunction)
     {
         return Err(with_source_span(
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::RuntimeTemplateInConst,
                 span,
             ),
@@ -167,10 +168,7 @@ pub(super) fn handle_template_value_in_template_head(
 
     if matches!(&template_kind, TemplateType::SlotDefinition(_)) {
         return Err(with_source_span(
-            CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::SlotInHead,
-                span,
-            ),
+            templates::invalid_template_structure(InvalidTemplateStructureReason::SlotInHead, span),
             span,
         )
         .into());
@@ -287,7 +285,7 @@ pub(super) fn push_template_head_expression(
         )
     {
         return Err(with_source_span(
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead,
                 span,
             ),
@@ -309,7 +307,8 @@ pub(super) fn push_template_head_expression(
                 .is_none_or(|facts| facts.provenance.is_empty()) =>
         {
             match target.const_values.payload(value).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "template expression references an absent constant value",
                 )
             })? {
@@ -354,7 +353,7 @@ pub(super) fn push_template_head_path_expression(
     path_fork: &mut PathInternerFork,
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
-    let source_span = path_source_span_for(token_stream);
+    let source_span = Some(token_stream.current_span());
     let expression = resolve_file_value(
         path_syntax,
         token_stream,
@@ -384,18 +383,10 @@ pub(super) fn push_template_head_path_expression(
     )
 }
 
-/// Read-only path-expression source span on the canonical cursor view.
-///
-/// WHAT: reports the current token span for head path diagnostics and insertion.
-/// WHY: the path span is a pure token-local read.
-fn path_source_span_for(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
-}
-
 fn with_source_span_error(source_span: Option<SourceSpan>, error: TemplateError) -> TemplateError {
     error.map_diagnostic(|mut diagnostic| {
-        if diagnostic.primary_span.is_none() {
-            diagnostic.primary_span = source_span;
+        if diagnostic.primary_span().is_none() {
+            diagnostic.set_primary_span(source_span);
         }
         diagnostic
     })

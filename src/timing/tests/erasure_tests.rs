@@ -3,8 +3,8 @@
 //! WHAT: proves that with `timers` disabled every facade macro discards its
 //!      instrumentation arguments and the wrapped production expression runs
 //!      exactly once.
-//! WHY:  the zero-cost rule is enforced at the macro call site; these tests
-//!       pin that contract before the Phase 2 binary audit exists.
+//! WHY: the zero-cost rule is enforced at the macro call site; these tests
+//!      pin that contract for builds without the `timers` feature.
 
 #![cfg(not(feature = "timers"))]
 

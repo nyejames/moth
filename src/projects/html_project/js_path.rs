@@ -17,7 +17,8 @@
 
 use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsLoweringConfig, lower_hir_to_js};
 use crate::build_system::build::{FileKind, OutputFile, ProjectLinkedModule};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_compilation::{
@@ -60,13 +61,12 @@ pub(crate) fn append_startup_fault_report(output: &mut String, indent: &str) {
 /// Inputs for rendering a JS-backed HTML document.
 ///
 /// WHAT: groups all data needed to produce the final HTML document from a lowered JS module.
-/// WHY: `render_html_document` previously took 9 separate parameters; this struct keeps the
-///      call sites readable and the parameter list stable as fields are added or renamed.
+/// WHY: a named input bundle keeps call sites readable and the parameter contract stable as
+/// fields evolve.
 pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub hir_module: &'a HirModule,
     pub page_metadata_plan: &'a HtmlPageMetadataPlan,
     pub const_fragments: &'a [ResolvedConstFragment],
-    pub string_table: &'a mut StringTable,
     pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub document_config: &'a HtmlDocumentConfig,
     pub route: &'a CanonicalPageRoute,
@@ -126,8 +126,8 @@ pub(crate) struct HtmlJsCompileInput<'a> {
 /// WHY: this preserves existing builder behavior when `--html-wasm` is not enabled.
 pub(crate) fn compile_html_module_js(
     input: HtmlJsCompileInput<'_>,
-    string_table: &mut StringTable,
-) -> Result<CompiledHtmlJsModule, CompilerMessages> {
+    string_table: &StringTable,
+) -> Result<CompiledHtmlJsModule, InfrastructureFailure> {
     let HtmlJsCompileInput {
         module,
         external_imports,
@@ -141,8 +141,7 @@ pub(crate) fn compile_html_module_js(
         route,
     } = input;
     let structural_string_urls = structural_url_renderer
-        .lowering_map(&module.executable.resource_table, input.reachability)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        .lowering_map(&module.executable.resource_table, input.reachability)?;
     let js_lowering_config = JsLoweringConfig::html_page_bundle(
         input.build_profile.is_release(),
         Arc::clone(&input.external_package_registry),
@@ -165,19 +164,16 @@ pub(crate) fn compile_html_module_js(
             js_lowering_config,
             input.type_environment,
             &module.executable.path_table,
-        )
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
+        )?
     };
 
     if !linked_modules.is_empty() {
         let mut isolated_modules = Vec::with_capacity(linked_modules.len() + 1);
         for linked in linked_modules {
-            let linked_structural_string_urls = structural_url_renderer
-                .lowering_map(
-                    &linked.module.executable.resource_table,
-                    linked.reachability,
-                )
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+            let linked_structural_string_urls = structural_url_renderer.lowering_map(
+                &linked.module.executable.resource_table,
+                linked.reachability,
+            )?;
             let linked_config = JsLoweringConfig::html_page_bundle(
                 input.build_profile.is_release(),
                 Arc::clone(&linked.module.link_facts.external_package_registry),
@@ -199,8 +195,7 @@ pub(crate) fn compile_html_module_js(
                     linked_config,
                     &linked.module.executable.type_environment,
                     &linked.module.executable.path_table,
-                )
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
+                )?
             };
             let exported_names = linked
                 .module
@@ -271,8 +266,7 @@ pub(crate) fn compile_html_module_js(
         input.external_package_registry.as_ref(),
         &route.logical_html_path,
         input.build_profile.is_release(),
-    )
-    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    )?;
 
     let use_module_script = glue_result.bundle_import_preamble.is_some();
     let bundle_with_imports = if let Some(ref preamble) = glue_result.bundle_import_preamble {
@@ -281,11 +275,10 @@ pub(crate) fn compile_html_module_js(
         js_module.source.clone()
     };
 
-    let html = render_html_document(&mut HtmlDocumentRenderInput {
+    let html = render_html_document(&HtmlDocumentRenderInput {
         hir_module: input.hir_module,
         page_metadata_plan: input.page_metadata_plan,
         const_fragments: input.const_fragments,
-        string_table,
         structural_url_renderer,
         document_config: input.document_config,
         route,
@@ -365,7 +358,7 @@ pub(crate) fn render_entry_fragments(
     const_fragments: &[ResolvedConstFragment],
     slot_count: usize,
     structural_url_renderer: &StructuralUrlRenderer<'_>,
-) -> Result<(String, Vec<String>), CompilerError> {
+) -> Result<(String, Vec<String>), InfrastructureFailure> {
     let mut html = String::new();
     let mut slot_ids: Vec<String> = Vec::new();
     let mut runtime_index = 0usize;
@@ -413,25 +406,23 @@ pub(crate) fn render_entry_fragments(
 }
 
 pub(crate) fn render_html_document(
-    input: &mut HtmlDocumentRenderInput<'_>,
-) -> Result<String, CompilerMessages> {
+    input: &HtmlDocumentRenderInput<'_>,
+) -> Result<String, InfrastructureFailure> {
     let (body_html, slot_ids) = render_entry_fragments(
         input.const_fragments,
         input.entry_runtime_fragment_count,
         input.structural_url_renderer,
-    )
-    .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
+    )?;
     let start_function = input
         .hir_module
-        .require_start_function("HTML document rendering")
-        .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))?;
+        .require_start_function("HTML document rendering")?;
     let Some(start_function_name) = input.function_names.get(&start_function) else {
-        return Err(CompilerMessages::from_error(
-            CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
                 "HTML builder could not resolve start function {:?}",
                 start_function
-            )),
-            input.string_table.clone(),
+            ),
         ));
     };
 
@@ -454,7 +445,6 @@ pub(crate) fn render_html_document(
         script_html,
         import_map_html: input.import_map_html.clone(),
     })
-    .map_err(|error| CompilerMessages::from_error(error, input.string_table.clone()))
 }
 fn render_runtime_bootstrap_script_html(
     start_function_name: &str,

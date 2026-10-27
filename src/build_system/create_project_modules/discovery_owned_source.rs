@@ -1,3 +1,9 @@
+//! Owned-source preparation for Stage 0 module discovery.
+//!
+//! WHAT: `prepare_owned_source_input` tokenizes each selected Moth source exactly once.
+//! WHY:  the caller's queued set is the ownership proof. `SourceTreeIndex` owns identity, and
+//!       `SourceDatabase` plus the selected-text map own the source snapshots.
+use super::super::source_loading::registered_source_read_error;
 use super::*;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -29,6 +35,7 @@ pub(crate) fn prepare_owned_source_input(
         source_tree_index,
         source_files,
         Some(selected_source_texts),
+        path_fork,
     )?;
     let mut builder = source_spans.take_span_builder(source_id);
     let result = prepare_owned_source_text(
@@ -50,10 +57,12 @@ fn owned_source_text<'a>(
     source_tree_index: &SourceTreeIndex,
     source_files: &'a SourceDatabase,
     selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
+    path_fork: &mut PathInternerFork,
 ) -> Result<(SourceId, SourceFileKind, &'a str), SourceDiscoveryError> {
     let record = source_tree_index.source(source_index);
     let SourceClassification::CompilerSemantic(source_kind) = record.classification() else {
-        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+        return Err(SourceDiscoveryError::from(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             format!(
                 "Project source row {} is not compiler semantic",
                 source_index.index()
@@ -64,10 +73,13 @@ fn owned_source_text<'a>(
         .get_by_canonical_path(record.canonical_path())
         .map(|identity| identity.id)
         .ok_or_else(|| {
-            SourceDiscoveryError::from(CompilerError::compiler_error(format!(
-                "Project source row {} has no registered source identity",
-                source_index.index(),
-            )))
+            SourceDiscoveryError::from(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Project source row {} has no registered source identity",
+                    source_index.index(),
+                ),
+            ))
         })?;
     if let Some(source_code) = source_files.retained_text(source_id) {
         return Ok((source_id, *source_kind, source_code));
@@ -76,7 +88,8 @@ fn owned_source_text<'a>(
         return Err(SourceDiscoveryError::from(error.clone()));
     }
     let Some(selected_source_texts) = selected_source_texts else {
-        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+        return Err(SourceDiscoveryError::from(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             format!(
                 "Registered source row {} has no retained source text",
                 source_index.index()
@@ -85,7 +98,7 @@ fn owned_source_text<'a>(
     };
     let source_code = selected_source_texts
         .load(record.canonical_path())
-        .map_err(SourceDiscoveryError::from)?;
+        .map_err(|error| registered_source_read_error(error, source_id, source_files, path_fork))?;
     Ok((source_id, *source_kind, source_code))
 }
 #[allow(
@@ -127,7 +140,8 @@ fn prepare_owned_source_text(
             })?;
             if tokenized.logical_path != identity.logical_path || tokenized.file_id != source_id {
                 return Err(SourceDiscoveryError::Infrastructure(
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::Tokenization,
                         "lexer source identity does not match its registered owned-source identity",
                     ),
                 ));

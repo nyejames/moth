@@ -103,7 +103,7 @@ pub enum RuleView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Disposition {
-    /// The uses that could hide a weak contract were rewritten; what remains cannot.
+    /// The uses that could hide a weak contract assert it exactly; what remains cannot hide one.
     Hardened,
     /// The API under test has exactly one way to fail, so the broad assertion is exact.
     NarrowApiWithOneValidOutcome,
@@ -616,7 +616,7 @@ pub struct LedgerFinding {
     pub owning_phase: String,
 }
 
-/// A measurement the plan recorded, with the command that produced it.
+/// A declared measurement and its producing command.
 ///
 /// These are declared, not measured by this audit: a suite count comes from running the suite.
 /// They are carried here so the inventory is one place to look, and named `declared` so nobody

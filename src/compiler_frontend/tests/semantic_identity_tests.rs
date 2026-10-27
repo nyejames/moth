@@ -7,7 +7,7 @@
 //! WHY: these are pure value invariants owned by `compiler_frontend::semantic_identity`, so they
 //!      own a focused test beside the module rather than an end-to-end case.
 
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
@@ -267,7 +267,7 @@ fn distinct_projects_do_not_share_type_identity() {
     );
 }
 
-// ---- Phase 3a: stable owned-source identity ----
+// ---- Stable owned-source identity ----
 
 fn owned_source_identity(
     logical_module_path: &str,
@@ -353,14 +353,14 @@ fn owned_source_identity_rejects_invalid_relative_path_components() {
     );
     let error = result.expect_err("an invalid relative source path component must be rejected");
     assert_eq!(
-        error.error_type,
-        ErrorType::Compiler,
+        error.kind,
+        InfrastructureFailureKind::Internal,
         "an invalid relative source path must use the internal compiler-error lane"
     );
     assert!(
-        error.msg.contains("invalid component"),
+        error.message.contains("invalid component"),
         "internal error should mention the invalid component: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -371,7 +371,7 @@ fn owned_source_identity_rejects_absolute_relative_path() {
         Path::new("/abs/@page.moth"),
     );
     assert!(
-        matches!(result, Err(ref e) if e.error_type == ErrorType::Compiler && e.msg.contains("invalid component")),
+        matches!(result, Err(ref e) if e.kind == InfrastructureFailureKind::Internal && e.message.contains("invalid component")),
         "an absolute relative source path must be rejected through the compiler-error lane"
     );
 }
@@ -384,13 +384,13 @@ fn owned_source_identity_rejects_empty_relative_source_path() {
     );
     let error = result.expect_err("an empty relative source path must be rejected");
     assert_eq!(
-        error.error_type,
-        ErrorType::Compiler,
+        error.kind,
+        InfrastructureFailureKind::Internal,
         "an empty relative source path must use the internal compiler-error lane"
     );
     assert!(
-        error.msg.contains("empty relative source path"),
+        error.message.contains("empty relative source path"),
         "internal error should mention the empty path: {}",
-        error.msg
+        error.message
     );
 }

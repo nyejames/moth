@@ -39,7 +39,6 @@ fn retained_handoff_edges_include_nested_values_selectors_headers_and_slot_roots
             source: RuntimeSlotContributionSourceId(0),
             render_root: dynamic(original),
             renders_wrapper_unconditionally: false,
-            span: None,
         }],
         slot_sites: vec![OwnedRuntimeSlotSite {
             site: RuntimeSlotSiteId(0),

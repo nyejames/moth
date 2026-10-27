@@ -5,9 +5,13 @@
 //! WHY: call parsing and instance emission should report structured generic facts without
 //! knowing diagnostic rendering details.
 
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    conflicting_generic_inference, invalid_generic_instantiation,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, GenericInferenceSubject,
-    GenericSubstitutionDiagnostic, InvalidGenericInstantiationReason,
+    GenericInferenceSubject, GenericSubstitutionDiagnostic, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -34,8 +38,8 @@ pub(crate) fn cannot_infer_generic_function_arguments(
     function_name: Option<StringId>,
     missing_parameters: Vec<StringId>,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_generic_instantiation(
+) -> DiagnosticDraft {
+    invalid_generic_instantiation(
         function_name,
         InvalidGenericInstantiationReason::CannotInferFunctionArguments { missing_parameters },
         span,
@@ -48,8 +52,8 @@ pub(crate) fn conflicting_generic_function_argument(
     parameter_name: StringId,
     current_evidence_span: Option<SourceSpan>,
     previous_evidence_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::conflicting_generic_inference(
+) -> DiagnosticDraft {
+    conflicting_generic_inference(
         function_name,
         GenericInferenceSubject::Function,
         conflict,
@@ -65,8 +69,8 @@ pub(crate) fn missing_generic_function_trait_evidence(
     trait_name: StringId,
     concrete_type_id: TypeId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_generic_instantiation(
+) -> DiagnosticDraft {
+    invalid_generic_instantiation(
         function_name,
         InvalidGenericInstantiationReason::MissingTraitEvidence {
             parameter_name,
@@ -80,22 +84,12 @@ pub(crate) fn missing_generic_function_trait_evidence(
 pub(crate) fn recursive_generic_function_instantiation(
     function_name: Option<StringId>,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_generic_instantiation(
+) -> DiagnosticDraft {
+    invalid_generic_instantiation(
         function_name,
         InvalidGenericInstantiationReason::RecursiveFunctionInstantiation,
         span,
     )
-}
-
-pub(crate) fn with_generic_primary_span(
-    mut diagnostic: CompilerDiagnostic,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    if let Some(span) = span {
-        diagnostic.primary_span = Some(span);
-    }
-    diagnostic
 }
 
 /// Rebuild a concrete-body diagnostic around optional generic instantiation provenance.
@@ -107,9 +101,9 @@ pub(crate) fn with_generic_primary_span(
 /// WHY: the call selected the concrete type arguments when authored call provenance is available,
 ///       while generated or synthetic requests still need the concrete body's source location.
 pub(crate) fn with_generic_instantiation_context(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     context: GenericInstantiationDiagnosticContext,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let GenericInstantiationDiagnosticContext {
         call_span,
         declaration_span,
@@ -118,104 +112,66 @@ pub(crate) fn with_generic_instantiation_context(
         substitutions,
     } = context;
 
-    if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
-        diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+    let body_span = diagnostic.primary_span();
+    if let Some(handle) = frozen_identity_handle.as_ref() {
+        diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
     }
-
-    let body_span = diagnostic.primary_span;
-    let body_frozen_identity_handle = diagnostic.primary_frozen_identity_handle.take();
+    let body_frozen_identity_handle = diagnostic.primary_frozen_identity_handle().cloned();
     let has_call_span = call_span.is_some();
     if let Some(call_span) = call_span {
-        diagnostic.primary_span = Some(call_span);
-        diagnostic.primary_frozen_identity_handle = call_site_frozen_identity_handle;
+        diagnostic.set_primary_span(Some(call_span));
+        diagnostic.replace_primary_frozen_identity_handle(call_site_frozen_identity_handle);
     } else {
-        diagnostic.primary_span = body_span;
-        diagnostic.primary_frozen_identity_handle = body_frozen_identity_handle.clone();
-    }
-    let mut new_labels = Vec::with_capacity(diagnostic.labels.len() + 3);
-
-    if has_call_span
-        && let Some(span) = body_span
-        && !diagnostic.labels.iter().any(|label| {
-            label.span == Some(span)
-                && label_owner_domain_matches(
-                    label.frozen_identity_handle.as_ref(),
-                    body_frozen_identity_handle
-                        .as_ref()
-                        .or(frozen_identity_handle.as_ref()),
-                )
-        })
-    {
-        let body_frozen_identity_handle =
-            body_frozen_identity_handle.or_else(|| frozen_identity_handle.clone());
-        let label = match body_frozen_identity_handle {
-            Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
-                Some(span),
-                Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-                frozen_identity_handle,
-            ),
-            None => DiagnosticLabel::secondary(
-                Some(span),
-                Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-            ),
-        };
-        new_labels.push(label);
+        diagnostic.set_primary_span(body_span);
+        diagnostic.replace_primary_frozen_identity_handle(body_frozen_identity_handle.clone());
     }
 
-    if let Some(span) = declaration_span
-        && !diagnostic.labels.iter().any(|label| {
-            label.span == Some(span)
-                && label_owner_domain_matches(
-                    label.frozen_identity_handle.as_ref(),
-                    frozen_identity_handle.as_ref(),
-                )
-        })
-    {
-        let label = match frozen_identity_handle.as_ref() {
-            Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
-                Some(span),
-                Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite),
-                frozen_identity_handle.clone(),
-            ),
-            None => DiagnosticLabel::secondary(
-                Some(span),
-                Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite),
-            ),
-        };
-        new_labels.push(label);
+    let mut insertion_index = 0;
+    let add_body_label = has_call_span
+        && body_span.is_some_and(|span| {
+            !diagnostic.has_label_at_with_owner(Some(span), body_frozen_identity_handle.as_ref())
+        });
+    let add_declaration_label = declaration_span.is_some_and(|span| {
+        !diagnostic.has_label_at_with_owner(Some(span), frozen_identity_handle.as_ref())
+    });
+
+    if add_body_label {
+        let span = body_span.expect("a body label requires the original primary span");
+        diagnostic = diagnostic.with_label_at(
+            insertion_index,
+            Some(span),
+            Some(LabelDraftMessage::GenericInstantiationBodySite),
+        );
+        if let Some(handle) = body_frozen_identity_handle {
+            diagnostic = diagnostic.with_label_frozen_identity_handle(insertion_index, handle);
+        }
+        insertion_index += 1;
+    }
+
+    if add_declaration_label {
+        let span = declaration_span.expect("a declaration label requires its span");
+        diagnostic = diagnostic.with_label_at(
+            insertion_index,
+            Some(span),
+            Some(LabelDraftMessage::GenericInstantiationDeclarationSite),
+        );
+        if let Some(handle) = frozen_identity_handle.as_ref() {
+            diagnostic =
+                diagnostic.with_label_frozen_identity_handle(insertion_index, handle.clone());
+        }
+        insertion_index += 1;
     }
 
     if !substitutions.is_empty() {
-        let label = match frozen_identity_handle.as_ref() {
-            Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
-                declaration_span,
-                Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }),
-                frozen_identity_handle.clone(),
-            ),
-            None => DiagnosticLabel::secondary(
-                declaration_span,
-                Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }),
-            ),
-        };
-        new_labels.push(label);
-    }
-    new_labels.extend(diagnostic.labels);
-    diagnostic.labels = new_labels;
-    diagnostic
-}
-
-fn label_owner_domain_matches(
-    label_owner: Option<&FrozenIdentityHandle>,
-    expected_owner: Option<&FrozenIdentityHandle>,
-) -> bool {
-    match (label_owner, expected_owner) {
-        (None, None) => true,
-        (None, Some(_)) | (Some(_), None) => false,
-        (Some(label_owner), Some(expected_owner)) => {
-            match (label_owner.domain(), expected_owner.domain()) {
-                (Some(label_domain), Some(expected_domain)) => label_domain == expected_domain,
-                _ => label_owner == expected_owner,
-            }
+        diagnostic = diagnostic.with_label_at(
+            insertion_index,
+            declaration_span,
+            Some(LabelDraftMessage::GenericInstantiationSubstitutions { substitutions }),
+        );
+        if let Some(handle) = frozen_identity_handle {
+            diagnostic = diagnostic.with_label_frozen_identity_handle(insertion_index, handle);
         }
     }
+
+    diagnostic
 }

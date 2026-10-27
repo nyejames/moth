@@ -33,10 +33,17 @@ use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidAssignmentTargetReason,
-    InvalidCallShapeReason, InvalidTemplateSlotReason, NameNamespace,
+    CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
+    InvalidTemplateSlotReason, NameNamespace,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -82,14 +89,17 @@ pub(super) fn parse_identifier_or_call(
     }
     let identifier = token_stream
         .current_string_id_in(string_table)?
-        .ok_or_else(|| CompilerError::compiler_error("symbol token had no string payload"))?;
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "symbol token had no string payload",
+            )
+        })?;
 
     if context.is_assignment_target_unavailable(identifier) {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        return Err(names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
             Some(identifier),
-            None,
-            None,
             None,
             None,
             Some(token_stream.current_span()),
@@ -109,7 +119,7 @@ pub(super) fn parse_identifier_or_call(
         // for the whole fragment instead of fabricating a value or reporting an absent name.
         if let Some(pending_binding) = binding.pending_binding() {
             if route_argument_context.is_some() {
-                return Err(CompilerDiagnostic::invalid_call_shape(
+                return Err(calls_data::invalid_call_shape(
                     InvalidCallShapeReason::RouteArgumentNotDirect,
                     None,
                     Some(token_stream.current_span()),
@@ -119,17 +129,18 @@ pub(super) fn parse_identifier_or_call(
             // A pending numeric binding is a runtime body-local value, and constants fold at
             // their declaration boundary, so a constant context can never consume it.
             if context.kind.is_constant_context() {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-                    Some(identifier),
-                    Some(token_stream.current_span()),
-                )
-                .into());
+                return Err(ExpressionParseError::NonConstantReferenceInConstant(
+                    choices_control_flow::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                        Some(identifier),
+                        Some(token_stream.current_span()),
+                    ),
+                ));
             }
 
             // Variant syntax names a choice type, and a pending numeric binding is a value.
             if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
-                return Err(CompilerDiagnostic::namespace_misuse(
+                return Err(names_declarations::namespace_misuse(
                     identifier,
                     NameNamespace::Type,
                     NameNamespace::Value,
@@ -153,7 +164,8 @@ pub(super) fn parse_identifier_or_call(
         // A ready local or shared declaration: the reference path needs its declaration, and the
         // pending case above is the only shape without one.
         let Some(declaration) = binding.ready_declaration() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a local binding reference carried neither a ready declaration nor a pending \
                  numeric binding",
             )
@@ -169,7 +181,7 @@ pub(super) fn parse_identifier_or_call(
                     const_values,
                 )?)
         {
-            return Err(CompilerDiagnostic::invalid_call_shape(
+            return Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::RouteArgumentNotDirect,
                 None,
                 Some(token_stream.current_span()),
@@ -189,7 +201,8 @@ pub(super) fn parse_identifier_or_call(
                 .get_template(template_value.tir_reference.root)
                 .map(|template_ir| matches!(template_ir.kind, TemplateType::SlotInsert(_)))
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Identifier template reference pointed at a missing same-store template.",
                     )
                 })?;
@@ -199,7 +212,7 @@ pub(super) fn parse_identifier_or_call(
                     ContextKind::Template | ContextKind::Constant | ContextKind::ConstantHeader
                 )
             {
-                return Err(CompilerDiagnostic::invalid_template_slot(
+                return Err(templates::invalid_template_slot(
                     InvalidTemplateSlotReason::InsertOutsideParentSlot,
                     None,
                     Some(token_stream.current_span()),
@@ -215,7 +228,7 @@ pub(super) fn parse_identifier_or_call(
             && token_stream.peek_next_tag() != Some(TokenTag::DOT)
             && !context.kind.is_constant_context()
         {
-            return Err(CompilerDiagnostic::const_record_used_as_value(
+            return Err(names_declarations::const_record_used_as_value(
                 identifier,
                 Some(token_stream.current_span()),
             )
@@ -274,48 +287,49 @@ pub(super) fn parse_identifier_or_call(
             return Ok(());
         }
 
-        // Choice constructors are routed through their own parser.
-        if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
-            if context.is_source_choice_declaration(
+        // Only an immediate `::` or following symbol begins a choice constructor. A newline or
+        // comment after the type name belongs to the existing separator diagnostic path.
+        if context.is_source_choice_declaration(declaration, expression_builder, const_values)?
+            && matches!(
+                token_stream.peek_next_tag(),
+                Some(TokenTag::DOUBLE_COLON | TokenTag::SYMBOL)
+            )
+        {
+            match parse_choice_construct(
+                token_stream,
                 declaration,
+                context,
+                type_interner,
                 expression_builder,
                 const_values,
+                path_fork,
+                string_table,
+                route_argument_context,
             )? {
-                match parse_choice_construct(
-                    token_stream,
-                    declaration,
-                    context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    path_fork,
-                    string_table,
-                    route_argument_context,
-                )? {
-                    ParsedConstructorExpression::Value(choice_value) => {
-                        push_expression_operand(
-                            token_stream,
-                            context,
-                            type_interner,
-                            expression_builder,
-                            const_values,
-                            string_table,
-                            expression,
-                            allow_boundary_catch,
-                            choice_value,
-                            path_fork,
-                        )?;
-                    }
-                    // A payload constructor whose numeric-dependent arguments were retained takes
-                    // its authored operand position as one pending item and resumes exactly once
-                    // at the body root, like the struct constructor lane above.
-                    ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
+                ParsedConstructorExpression::Value(choice_value) => {
+                    push_expression_operand(
+                        token_stream,
+                        context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        string_table,
+                        expression,
+                        allow_boundary_catch,
+                        choice_value,
+                        path_fork,
+                    )?;
                 }
-
-                return Ok(());
+                // A payload constructor whose numeric-dependent arguments were retained takes
+                // its authored operand position as one pending item and resumes once at the root.
+                ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
             }
 
-            return Err(CompilerDiagnostic::namespace_misuse(
+            return Ok(());
+        }
+
+        if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
+            return Err(names_declarations::namespace_misuse(
                 identifier,
                 NameNamespace::Type,
                 NameNamespace::Value,
@@ -332,7 +346,7 @@ pub(super) fn parse_identifier_or_call(
                 DeclarationShell::Struct | DeclarationShell::Choice | DeclarationShell::TypeAlias
             )
         ) {
-            return Err(CompilerDiagnostic::namespace_misuse(
+            return Err(names_declarations::namespace_misuse(
                 identifier,
                 NameNamespace::Value,
                 NameNamespace::Type,
@@ -367,12 +381,13 @@ pub(super) fn parse_identifier_or_call(
             };
 
             if !is_compile_time_constant {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-                    Some(identifier),
-                    Some(token_stream.current_span()),
-                )
-                .into());
+                return Err(ExpressionParseError::NonConstantReferenceInConstant(
+                    choices_control_flow::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                        Some(identifier),
+                        Some(token_stream.current_span()),
+                    ),
+                ));
             }
         }
 
@@ -462,7 +477,7 @@ pub(super) fn parse_identifier_or_call(
             });
         }
 
-        return Err(CompilerDiagnostic::dependency_namespace_used_as_value(
+        return Err(project_config::dependency_namespace_used_as_value(
             identifier,
             Some(token_stream.current_span()),
         )
@@ -477,7 +492,7 @@ pub(super) fn parse_identifier_or_call(
         token_stream.advance();
 
         if context.kind.is_constant_context() && !const_def.value.is_scalar() {
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
+            return Err(choices_control_flow::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
                 Some(identifier),
                 span,
@@ -586,7 +601,7 @@ pub(super) fn parse_identifier_or_call(
     if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
         && context.lookup_visible_external_type(identifier).is_some()
     {
-        return Err(CompilerDiagnostic::compile_time_evaluation_error(
+        return Err(choices_control_flow::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported,
             Some(identifier),
             Some(token_stream.current_span()),
@@ -596,7 +611,7 @@ pub(super) fn parse_identifier_or_call(
 
     // Type aliases are type-namespace only.
     if context.is_visible_type_alias_name(identifier) {
-        return Err(CompilerDiagnostic::namespace_misuse(
+        return Err(names_declarations::namespace_misuse(
             identifier,
             NameNamespace::Value,
             NameNamespace::Type,
@@ -608,7 +623,7 @@ pub(super) fn parse_identifier_or_call(
     // Core cast trait names are reserved static contracts. They are valid in trait
     // declarations, conformances, and generic bounds, but never as ordinary values.
     if is_core_cast_trait_name(string_table.resolve(identifier)) {
-        return Err(CompilerDiagnostic::trait_name_used_as_type(
+        return Err(generics_traits_api::trait_name_used_as_type(
             identifier,
             Some(token_stream.current_span()),
         )
@@ -616,7 +631,7 @@ pub(super) fn parse_identifier_or_call(
     }
 
     Err(
-        CompilerDiagnostic::unknown_value_name(identifier, Some(token_stream.current_span()))
+        names_declarations::unknown_value_name(identifier, Some(token_stream.current_span()))
             .into(),
     )
 }
@@ -648,7 +663,10 @@ fn parse_this_reference(
     // `this` names the reserved receiver parameter, which is never a pending numeric body local,
     // so a pending reference here is a broken invariant rather than an unresolved value.
     let receiver_declaration = receiver_declaration.ready_declaration().ok_or_else(|| {
-        CompilerError::compiler_error("`this` resolved to a pending numeric binding")
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "`this` resolved to a pending numeric binding",
+        )
     })?;
     let reference_span = Some(token_stream.current_span());
     let reference_expression = reference_expression_from_declaration(

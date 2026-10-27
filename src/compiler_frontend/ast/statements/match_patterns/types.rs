@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::DeclaredChoiceSubject;
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -96,7 +96,9 @@ pub struct PatternValue {
 }
 
 impl PatternValue {
-    pub(crate) fn from_expression(value: ExpressionView<'_>) -> Result<Self, CompilerError> {
+    pub(crate) fn from_expression(
+        value: ExpressionView<'_>,
+    ) -> Result<Self, InfrastructureFailure> {
         Ok(Self {
             kind: match value.operation() {
                 ExpressionOperationView::Constant(id) => PatternValueKind::Constant(id),

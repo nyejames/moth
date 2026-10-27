@@ -23,12 +23,20 @@ use crate::compiler_frontend::ast::type_resolution::{
     resolve_struct_field_types, validate_map_key_type,
 };
 use crate::compiler_frontend::ast::{Ast, TopLevelDeclarationTable};
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidCollectionTypeReason, InvalidDeclarationReason, InvalidMapTypeReason,
-    NameNamespace, NamespaceTypeValueMisuseKind,
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCollectionTypeCode, InvalidCollectionTypeView, InvalidMapTypeCode, InvalidMapTypeView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownTypeNameView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::NamespaceTypeValueMisuseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, NamespaceTypeValueMisuseKind};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
+use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
@@ -47,7 +55,8 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic, parse_single_file_ast_result,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -55,6 +64,19 @@ use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+fn compact_diagnostic(
+    diagnostic: impl Into<DiagnosticDraft>,
+    environment: Option<&TypeEnvironment>,
+) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(diagnostic.into()), environment)
+}
+
+fn site_span(site: SiteRef<'_>) -> Option<SourceSpan> {
+    match site {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
 fn folded_expression_root(
     outcome: ConstantFoldOutcome,
 ) -> crate::compiler_frontend::ast::expressions::expression_store::ExprId {
@@ -82,27 +104,57 @@ fn expected_source_span(source: &str, text: &str) -> SourceSpan {
 #[test]
 fn signature_member_ast_diagnostic_retains_exact_member_anchor() {
     let source = "bad |items {F64 = I32}|:\n;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0016-MAP",
+        Some("invalid_map_type.unsupported_key_type"),
+    );
     assert!(
-        diagnostic
-            .labels
-            .iter()
-            .any(|label| label.span == Some(expected_source_span(source, "items"))),
+        ast_error_label_spans(diagnostic).contains(&Some(expected_source_span(source, "items"))),
         "AST signature diagnostics should retain the authored member anchor"
     );
 }
 
 #[test]
+fn template_nonconstant_reference_in_struct_default_keeps_invalid_default_classification() {
+    let source = "runtime || -> String:\n\
+    return \"dynamic\"\n\
+;\n\
+Widget = |\n\
+    content String = [: [runtime()]],\n\
+|\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0030", None);
+
+    let reference_start = source
+        .rfind("runtime")
+        .expect("the template default should reference the runtime function");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let reference_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(
+            reference_start as u32,
+            "runtime".len() as u32,
+            &mut span_builder,
+        )
+        .expect("the template function reference should fit an inline span"),
+    );
+    assert_eq!(ast_error_primary_span(diagnostic), Some(reference_span));
+}
+
+#[test]
 fn choice_variant_ast_diagnostic_retains_exact_variant_anchor() {
     let source = "Status :: WithValue |value {F64 = I32}|;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0016-MAP",
+        Some("invalid_map_type.unsupported_key_type"),
+    );
     assert!(
-        diagnostic
-            .labels
-            .iter()
-            .any(|label| label.span == Some(expected_source_span(source, "WithValue"))),
+        ast_error_label_spans(diagnostic)
+            .contains(&Some(expected_source_span(source, "WithValue"))),
         "AST choice diagnostics should retain the authored variant anchor"
     );
 }
@@ -119,13 +171,11 @@ Box type Existing = |\n\
 |\n";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
-            ..
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0043",
+        Some("invalid_declaration.generic_parameter_name_collision"),
+    );
 
     let parameter_start = source
         .find("Box type ")
@@ -139,7 +189,7 @@ Box type Existing = |\n\
     )
     .expect("generic parameter span should fit the test span table");
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, parameter_span)),
         "AST scope diagnostics should retain the colliding parameter's exact byte span"
     );
@@ -209,16 +259,16 @@ fn callable_shell_type_lookup_rejects_bare_and_qualified_annotations() {
         )
         .expect_err("an explicit callable annotation must not become inferred");
 
-        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0067");
-        assert_eq!(diagnostic.primary_span, span);
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::NamespaceTypeValueMisuse {
-                name,
-                expected: NamespaceTypeValueMisuseKind::Type,
-                found: NamespaceTypeValueMisuseKind::Value,
-            } if name == callable_name
-        ));
+        let compact = compact_diagnostic(diagnostic, None);
+        let diagnostic = compact.first().expect("misuse emits one diagnostic");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0067");
+        assert_eq!(site_span(diagnostic.primary_site()), span);
+        let facts = diagnostic
+            .family_view::<NamespaceTypeValueMisuseView>()
+            .expect("callable annotation misuse should retain typed facts");
+        assert_eq!(facts.name, callable_name);
+        assert_eq!(facts.expected, NamespaceTypeValueMisuseKind::Type);
+        assert_eq!(facts.found, NamespaceTypeValueMisuseKind::Value);
     }
 }
 
@@ -248,13 +298,13 @@ fn parsed_annotation_resolution_preserves_unresolved_authored_name() {
         resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
             .expect_err("an unresolved authored name must remain a user-facing type error");
 
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Type,
-        } if *name == missing
-    ));
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact.first().expect("unknown type emits one diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unknown type should retain typed name facts");
+    assert_eq!(facts.name, missing);
 }
 
 #[test]
@@ -290,11 +340,19 @@ fn parsed_annotation_resolution_prefers_inner_spans_for_nested_unknown_types() {
     )
     .expect_err("unknown collection elements should report their authored name");
 
-    assert_eq!(collection_diagnostic.identity().code, "MOTH-RULE-0035");
+    let compact = compact_diagnostic(collection_diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("unknown collection item emits a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
     assert_eq!(
-        collection_diagnostic.primary_span,
+        site_span(diagnostic.primary_site()),
         Some(expected_source_span(source, "MissingCollection"))
     );
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unknown collection element should retain typed name facts");
+    assert_eq!(facts.name, collection_name);
 
     let map_value_name = string_table.intern("MissingMap");
     let map = ParsedTypeRef::Map {
@@ -314,11 +372,19 @@ fn parsed_annotation_resolution_prefers_inner_spans_for_nested_unknown_types() {
     )
     .expect_err("unknown map values should report their authored name");
 
-    assert_eq!(map_diagnostic.identity().code, "MOTH-RULE-0035");
+    let compact = compact_diagnostic(map_diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("unknown map value emits a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
     assert_eq!(
-        map_diagnostic.primary_span,
+        site_span(diagnostic.primary_site()),
         Some(expected_source_span(source, "MissingMap"))
     );
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unknown map value should retain typed name facts");
+    assert_eq!(facts.name, map_value_name);
 }
 
 #[test]
@@ -353,18 +419,19 @@ fn parsed_annotation_resolution_rejects_unknown_qualified_type_name() {
         resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
             .expect_err("an unknown qualified type name must be rejected");
 
-    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0035");
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("qualified unknown type emits a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
     assert_eq!(
-        diagnostic.primary_span,
+        site_span(diagnostic.primary_site()),
         Some(expected_source_span(source, "source.QualifiedMissing"))
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Type,
-        } if name == missing_name
-    ));
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("qualified unknown type should retain typed name facts");
+    assert_eq!(facts.name, missing_name);
 }
 
 // ---------------------------------------------------------------
@@ -984,20 +1051,16 @@ fn map_value_type(ast: &Ast, type_id: TypeId) -> TypeId {
 
 fn assert_source_invalid_map_type(
     source: &str,
-    expected_reason: impl FnOnce(&InvalidMapTypeReason) -> bool,
+    expected_reason_key: &str,
     expected_description: &str,
 ) {
-    let diagnostic = match parse_single_file_ast_result(source) {
-        Ok(_) => panic!("{expected_description}: source parsed successfully"),
-        Err(diagnostic) => diagnostic.to_owned(),
-    };
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidMapType { reason } if expected_reason(reason)
-        ),
-        "expected {expected_description}, got {:?}",
-        diagnostic.payload
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic =
+        assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0016-MAP", Some(expected_reason_key));
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some(expected_reason_key),
+        "{expected_description}",
     );
 }
 
@@ -1103,37 +1166,32 @@ use_maps |scores StringScores, direct {Bool = {String = I32}}| -> {Char = String
 fn map_type_syntax_rejects_invalid_source_key_types() {
     assert_source_invalid_map_type(
         "bad |items {F64 = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for F64 keys",
     );
     assert_source_invalid_map_type(
         "User = |\n    id I32,\n|\n\nbad |items {User = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for struct keys",
     );
     assert_source_invalid_map_type(
         "bad |items {{String} = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for collection keys",
     );
     assert_source_invalid_map_type(
         "bad |items {{String = I32} = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for map keys",
     );
     assert_source_invalid_map_type(
         "bad |items {String = {String = {String = I32}}}|:\n;\n",
-        |reason| {
-            matches!(
-                reason,
-                InvalidMapTypeReason::ExcessiveInlineNesting { depth: 3 }
-            )
-        },
+        "invalid_map_type.excessive_inline_nesting",
         "ExcessiveInlineNesting for depth-three inline maps",
     );
     assert_source_invalid_map_type(
         "Holder type Key = |\n    values {Key = I32},\n|\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for generic map keys",
     );
 }
@@ -1198,11 +1256,6 @@ fn map_type_rejects_unsupported_key() {
         Vec::new(),
         &PathInternerFork::empty(),
     ));
-    let mut resolution_context = TypeResolutionContext::from_declaration_table(
-        &declaration_table,
-        &mut type_environment,
-        &const_values,
-    );
 
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinFixedScalar {
@@ -1216,25 +1269,42 @@ fn map_type_rejects_unsupported_key() {
         span: None,
     };
 
-    let error = resolve_parsed_type_annotation(
-        &parsed,
-        None,
-        &mut resolution_context,
-        &mut string_table,
-        None,
-    )
-    .expect_err("F64 key should be rejected");
-
-    assert!(
-        matches!(
-            &error.payload,
-            DiagnosticPayload::InvalidMapType {
-                reason: crate::compiler_frontend::compiler_messages::InvalidMapTypeReason::UnsupportedKeyType { .. },
-                ..
-            }
-        ),
-        "expected UnsupportedKeyType error, got {:?}",
-        error.payload
+    let error = {
+        let mut resolution_context = TypeResolutionContext::from_declaration_table(
+            &declaration_table,
+            &mut type_environment,
+            &const_values,
+        );
+        resolve_parsed_type_annotation(
+            &parsed,
+            None,
+            &mut resolution_context,
+            &mut string_table,
+            None,
+        )
+        .expect_err("F64 key should be rejected")
+    };
+    let compact = compact_diagnostic(error, Some(&type_environment));
+    let diagnostic = compact
+        .first()
+        .expect("unsupported map key emits a diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidMapTypeView>()
+        .expect("unsupported map key should retain typed map facts");
+    assert_eq!(facts.reason, InvalidMapTypeCode::UnsupportedKeyType);
+    let key_type = facts
+        .key_type
+        .expect("unsupported map key should retain its semantic type");
+    let path_table = _path_fork.snapshot_table();
+    assert_eq!(
+        diagnostic.types().shape(key_type),
+        TypeDisplayShape::FixedScalar(FixedScalar::F64)
+    );
+    assert_eq!(
+        diagnostic
+            .types()
+            .display(key_type, &string_table, &path_table),
+        "F64"
     );
 }
 
@@ -1249,16 +1319,29 @@ fn map_key_capability_rejects_generic_key_as_unsupported() {
     let error = validate_map_key_type(key_type_id, &type_environment, None)
         .expect_err("generic map keys should be rejected by the scalar-key policy");
 
-    assert!(
-        matches!(
-            &error.payload,
-            DiagnosticPayload::InvalidMapType {
-                reason: InvalidMapTypeReason::UnsupportedKeyType { key_type },
-                ..
-            } if *key_type == key_type_id
-        ),
-        "expected UnsupportedKeyType error, got {:?}",
-        error.payload
+    let compact = compact_diagnostic(error, Some(&type_environment));
+    let diagnostic = compact
+        .first()
+        .expect("generic unsupported map key emits a diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidMapTypeView>()
+        .expect("generic map key should retain typed map facts");
+    assert_eq!(facts.reason, InvalidMapTypeCode::UnsupportedKeyType);
+    let key_type = facts
+        .key_type
+        .expect("generic map key should retain its semantic type");
+    let path_table = _path_fork.snapshot_table();
+    assert_eq!(
+        diagnostic.types().shape(key_type),
+        TypeDisplayShape::GenericParameter {
+            name: parameter_name,
+        }
+    );
+    assert_eq!(
+        diagnostic
+            .types()
+            .display(key_type, &string_table, &path_table),
+        "Key"
     );
 }
 
@@ -1272,11 +1355,6 @@ fn map_type_rejects_excessive_inline_nesting() {
         Vec::new(),
         &PathInternerFork::empty(),
     ));
-    let mut resolution_context = TypeResolutionContext::from_declaration_table(
-        &declaration_table,
-        &mut type_environment,
-        &const_values,
-    );
 
     // {String = {String = {String = I32}}} is depth 3 and should be rejected
     let parsed = ParsedTypeRef::Map {
@@ -1296,26 +1374,30 @@ fn map_type_rejects_excessive_inline_nesting() {
         span: None,
     };
 
-    let error = resolve_parsed_type_annotation(
-        &parsed,
-        None,
-        &mut resolution_context,
-        &mut string_table,
-        None,
-    )
-    .expect_err("depth-3 nesting should be rejected");
-
-    assert!(
-        matches!(
-            &error.payload,
-            DiagnosticPayload::InvalidMapType {
-                reason: crate::compiler_frontend::compiler_messages::InvalidMapTypeReason::ExcessiveInlineNesting { depth: 3 },
-                ..
-            }
-        ),
-        "expected ExcessiveInlineNesting error, got {:?}",
-        error.payload
-    );
+    let error = {
+        let mut resolution_context = TypeResolutionContext::from_declaration_table(
+            &declaration_table,
+            &mut type_environment,
+            &const_values,
+        );
+        resolve_parsed_type_annotation(
+            &parsed,
+            None,
+            &mut resolution_context,
+            &mut string_table,
+            None,
+        )
+        .expect_err("depth-3 nesting should be rejected")
+    };
+    let compact = compact_diagnostic(error, Some(&type_environment));
+    let diagnostic = compact
+        .first()
+        .expect("excessive map nesting emits a diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidMapTypeView>()
+        .expect("excessive map nesting should retain typed map facts");
+    assert_eq!(facts.reason, InvalidMapTypeCode::ExcessiveInlineNesting);
+    assert_eq!(facts.depth, Some(3));
 }
 
 #[test]
@@ -1492,7 +1574,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         StructFieldResolutionError::Infrastructure(error) => {
             panic!(
                 "an I64 field default above the i32 range should fold: {}",
-                error.msg
+                error.message
             )
         }
     });
@@ -1568,15 +1650,12 @@ fn capacity_i32_boundary_is_rejected_above_range() {
         None,
     )
     .expect_err("capacity above i32::MAX should be rejected");
-    assert!(
-        matches!(
-            error.payload,
-            DiagnosticPayload::InvalidCollectionType {
-                reason: InvalidCollectionTypeReason::CapacityOverflow,
-                ..
-            }
-        ),
-        "expected CapacityOverflow, got {:?}",
-        error.payload
-    );
+    let compact = compact_diagnostic(error, None);
+    let diagnostic = compact
+        .first()
+        .expect("capacity overflow emits a diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidCollectionTypeView>()
+        .expect("capacity overflow should retain typed collection facts");
+    assert_eq!(facts.reason, InvalidCollectionTypeCode::CapacityOverflow);
 }

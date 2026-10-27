@@ -8,7 +8,8 @@ use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
 use crate::backends::wasm::backend::lower_hir_to_wasm_module;
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::build_system::build::{FileKind, OutputFile};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
@@ -62,7 +63,6 @@ pub(crate) struct HtmlWasmArtifacts {
 /// WHY: emission is called from one orchestration site and should avoid a long argument list.
 pub(crate) struct HtmlWasmArtifactEmitInput<'a> {
     pub entry_fragment_html: &'a str,
-    pub string_table: &'a mut StringTable,
     pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub route: &'a CanonicalPageRoute,
     pub project_name: &'a str,
@@ -98,10 +98,10 @@ pub(crate) struct CompiledHtmlWasmModule {
 /// WHY: keeps the HTML builder in charge of artifact layout while delegating Wasm lowering.
 pub(crate) fn compile_html_module_wasm(
     input: &HtmlModuleCompileInput<'_>,
-    string_table: &mut StringTable,
+    string_table: &StringTable,
     route: &CanonicalPageRoute,
     structural_url_renderer: &StructuralUrlRenderer<'_>,
-) -> Result<CompiledHtmlWasmModule, CompilerMessages> {
+) -> Result<CompiledHtmlWasmModule, InfrastructureFailure> {
     // Record the full Wasm build duration on every exit path (success or error).
     timing_scope!(
         timing_guard_backend_wasm_total,
@@ -111,9 +111,8 @@ pub(crate) fn compile_html_module_wasm(
     // Place per-route artifacts from the already-derived route projections. This lane never
     // parses a logical path to recover route semantics.
     let output_plan = plan_wasm_output_from_route(route);
-    let structural_string_urls = structural_url_renderer
-        .lowering_map(input.resource_table, input.reachability)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let structural_string_urls =
+        structural_url_renderer.lowering_map(input.resource_table, input.reachability)?;
     let js_lowering_config = JsLoweringConfig::html_wasm_companion(
         input.build_profile.is_release(),
         Arc::clone(&input.external_package_registry),
@@ -127,17 +126,14 @@ pub(crate) fn compile_html_module_wasm(
         js_lowering_config,
         input.type_environment,
         input.path_table,
-    )
-    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    )?;
 
     let (entry_fragment_html, slot_ids) = render_entry_fragments(
         input.const_fragments,
         input.root_activity.runtime_fragment_count,
         structural_url_renderer,
-    )
-    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let mut build_plan = build_html_wasm_plan(input.hir_module, input.reachability, slot_ids)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    )?;
+    let mut build_plan = build_html_wasm_plan(input.hir_module, input.reachability, slot_ids)?;
     build_plan.wasm_request.external_package_registry =
         Arc::clone(&input.external_package_registry);
     build_plan.wasm_request.structural_string_urls = Some(structural_string_urls);
@@ -157,14 +153,12 @@ pub(crate) fn compile_html_module_wasm(
             input.path_table,
         )?
     };
-    let wasm_bytes = wasm_result.wasm_bytes.ok_or_else(|| {
-        CompilerMessages::from_error(
-            CompilerError::compiler_error(
-                "HTML Wasm mode expected emitted wasm bytes, but the backend returned none",
-            ),
-            string_table.clone(),
+    let wasm_bytes = wasm_result.wasm_bytes.unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
+            "HTML Wasm mode expected emitted wasm bytes, but the backend returned none"
         )
-    })?;
+    });
 
     let artifacts = {
         timing_scope!(
@@ -175,7 +169,6 @@ pub(crate) fn compile_html_module_wasm(
             &build_plan,
             HtmlWasmArtifactEmitInput {
                 entry_fragment_html: &entry_fragment_html,
-                string_table,
                 structural_url_renderer,
                 route,
                 project_name: input.project_name,
@@ -220,7 +213,7 @@ pub(crate) fn build_html_wasm_plan(
     hir_module: &HirModule,
     reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
     js_entry_slot_ids: Vec<String>,
-) -> Result<HtmlWasmBuildPlan, CompilerError> {
+) -> Result<HtmlWasmBuildPlan, InfrastructureFailure> {
     let export_plan = build_html_wasm_export_plan(hir_module)?;
     let wasm_request = build_wasm_backend_request(&export_plan, reachability);
     // WHY: entry start() is exported as "moth_start"; JS evaluates it directly and consumes the
@@ -241,11 +234,10 @@ pub(crate) fn build_html_wasm_plan(
 /// WHY: keeping one emission function avoids path/policy drift across call sites.
 pub(crate) fn emit_html_wasm_artifacts(
     plan: &HtmlWasmBuildPlan,
-    mut input: HtmlWasmArtifactEmitInput<'_>,
-) -> Result<HtmlWasmArtifacts, CompilerMessages> {
+    input: HtmlWasmArtifactEmitInput<'_>,
+) -> Result<HtmlWasmArtifacts, InfrastructureFailure> {
     let HtmlWasmArtifactEmitInput {
         entry_fragment_html,
-        string_table,
         structural_url_renderer,
         route,
         project_name,
@@ -253,14 +245,13 @@ pub(crate) fn emit_html_wasm_artifacts(
         page_metadata_plan,
         js_bundle,
         wasm_bytes,
-    } = &mut input;
+    } = input;
 
     let bootstrap_js = generate_wasm_bootstrap_js(
         js_bundle,
         &plan.js_entry_slot_ids,
         &plan.js_start_invocation,
-    )
-    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    );
     let html = render_wasm_html_document(
         document_config,
         page_metadata_plan,
@@ -268,11 +259,10 @@ pub(crate) fn emit_html_wasm_artifacts(
         route,
         project_name,
         entry_fragment_html,
-    )
-    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    )?;
 
     Ok(HtmlWasmArtifacts {
-        wasm_bytes: wasm_bytes.to_owned(),
+        wasm_bytes,
         bootstrap_js,
         html,
     })
@@ -284,7 +274,7 @@ fn render_wasm_html_document(
     route: &CanonicalPageRoute,
     project_name: &str,
     entry_fragment_html: &str,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     render_html_document_shell(HtmlDocumentShellInput {
         config: document_config,
         page_metadata: &page_metadata_plan.metadata,

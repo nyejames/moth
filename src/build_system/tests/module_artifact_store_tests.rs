@@ -11,6 +11,8 @@ use crate::build_system::create_project_modules::project_module_graph::ProjectMo
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -30,6 +32,14 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+fn assert_compiler_bug(payload: Box<dyn std::any::Any + Send>, expected_message: &str) {
+    let report = payload
+        .downcast::<CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
+    assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
+    assert_eq!(report.message.as_ref(), expected_message);
+}
 
 fn duplicate_materialisation_identity() -> GeneratedDeclarationIdentity {
     GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
@@ -68,7 +78,6 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
             },
             metadata: ModuleCompilerMetadata {
                 entry_point: PathBuf::new(),
-                warnings: Vec::new(),
                 const_top_level_fragments: Vec::new(),
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
@@ -112,36 +121,35 @@ fn boundary_validation_rejects_missing_successful_artefact_row() {
         blocked: Vec::new(),
     };
 
-    let error = boundary
-        .validate_invariants()
-        .expect_err("a successful slot must reference an existing artefact row");
-    assert!(
-        error.msg.contains("references missing artifact 0"),
-        "unexpected missing-artefact error: {error:?}"
-    );
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        boundary.validate_invariants()
+    }))
+    .expect_err("a successful slot must reference an existing artefact row");
+    assert_compiler_bug(payload, "ModuleId 0 references missing artifact 0");
 }
 
 #[test]
 fn module_success_preflight_rejects_duplicate_rows_without_mutation() {
     let identity = duplicate_materialisation_identity();
+    let expected_message = format!(
+        "Generated declaration identity {:?} is duplicated inside one materialisation context",
+        identity
+    );
     let artifact = artifact_with_context(ModuleMaterialisationContext::from_identities_for_test(
         vec![identity.clone(), identity],
     ));
     let store = ModuleArtifactStore::new(1);
 
-    let error = store
-        .preflight_success(
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.preflight_success(
             ModuleId::from_index(0),
             &artifact,
             &artifact.interface.module_origin,
         )
-        .expect_err("duplicate materialisation rows must fail during preflight");
+    }))
+    .expect_err("duplicate materialisation rows must raise a compiler bug");
+    assert_compiler_bug(payload, &expected_message);
 
-    assert!(
-        error
-            .msg
-            .contains("duplicated inside one materialisation context")
-    );
     assert_eq!(store.artifact_count(), 0);
     assert_eq!(
         store.slot(ModuleId::from_index(0)).unwrap(),

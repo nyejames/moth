@@ -22,7 +22,7 @@ Before reading implementation: valid inputs and required outputs, invalid inputs
 
 ## Failure paths
 
-- Malformed user input cannot panic. User-authored failures become `CompilerDiagnostic`; impossible internal states use `CompilerError`.
+- Malformed user input cannot panic. User-authored failures become `DiagnosticDraft`; operational failures use `InfrastructureFailure`; only proven-impossible internal states use `compiler_bug!`.
 - Failure leaves no partially published mutable state.
 - A blocked consumer is not semantically compiled; a failed generated request blocks only its real consumers.
 - Recovery does not fabricate placeholder facts that later look valid.

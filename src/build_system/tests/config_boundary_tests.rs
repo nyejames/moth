@@ -12,13 +12,20 @@ use crate::compiler_frontend::build_config::{
     BuildInputType, BuilderConfigGlobalSet, PrimitiveBuildInputType, PrimitiveBuildValue,
     resolve_build_config_values,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticPayload, InvalidConfigReason, PremergeFailure,
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    boundary_accumulator::BoundaryAccumulator,
+    families::project_config::{InvalidConfigCode, InvalidConfigView},
+    foreign::SiteRef,
+    freeze::InstallMode,
+    labels::DurableLabelMessage,
+    report::DiagnosticReport,
+    view::DiagnosticView,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 fn exact_span(source_index: usize, start: u32, length: u32) -> SourceSpan {
     let mut builder = ExtendedSpanBuilder::new();
@@ -47,21 +54,46 @@ fn i32_value(value: i64) -> PrimitiveBuildValue {
     PrimitiveBuildValue::Fixed(fixed.expect("test integer should fit I32"))
 }
 
+fn diagnosed_reports(
+    failure: PreparedFailure,
+) -> crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    let PreparedFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("mapped config diagnostics should freeze")
+}
+
 fn assert_config_identity_and_span<'a>(
-    messages: &'a crate::compiler_frontend::compiler_errors::CompilerMessages,
+    reports: &'a crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet,
     expected_span: Option<SourceSpan>,
     expected_reason_key: &str,
-) -> &'a crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
-    assert_eq!(messages.error_count(), 1);
-    let diagnostic = messages
-        .first_error()
-        .expect("mapped config failure should contain one error");
-    let identity = diagnostic.identity();
-    assert_eq!(identity.code, "MOTH-CONFIG-0001");
-    assert_eq!(identity.reason_key, Some(expected_reason_key));
-    assert_eq!(diagnostic.primary_span, expected_span);
-    assert!(diagnostic.labels.is_empty());
+) -> (&'a DiagnosticReport, DiagnosticView<'a>) {
+    assert_eq!(reports.counts().errors, 1);
+    let (report, diagnostic) = reports
+        .iter()
+        .next()
+        .expect("mapped config failure should contain one diagnostic");
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    assert_eq!(diagnostic.reason_key(), Some(expected_reason_key));
+    match (diagnostic.primary_site(), expected_span) {
+        (SiteRef::Absent, None) => {}
+        (SiteRef::Local(actual), Some(expected)) => assert_eq!(actual, expected),
+        (actual, expected) => panic!("unexpected primary site {actual:?} for {expected:?}"),
+    }
+    (report, diagnostic)
+}
+
+fn diagnostic_strings(report: &DiagnosticReport, diagnostic: &DiagnosticView<'_>) -> Vec<String> {
     diagnostic
+        .string_ids()
+        .iter()
+        .map(|id| report.context().strings().resolve(*id).to_owned())
+        .collect()
 }
 
 #[test]
@@ -102,43 +134,38 @@ fn mapped_config_contract_conflict_preserves_payload_spans_and_labels() {
         BuildConfigResolutionError::SourceContractConflict { .. }
     ));
 
-    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
-    let PremergeFailure::Diagnosed(batch) = failure else {
-        panic!("mapped config failure should be diagnosed, not infrastructure");
-    };
-    let messages = batch.into_messages();
-    let diagnostic = messages
-        .first_error()
-        .expect("mapped conflict should contain one error");
-    let identity = diagnostic.identity();
-    assert_eq!(identity.code, "MOTH-CONFIG-0001");
-    assert_eq!(
-        identity.reason_key,
-        Some("invalid_config.config_contract_conflict")
+    let failure = diagnosed_reports(build_config_resolution_failure(
+        error,
+        None,
+        &mut boundary_table,
+    ));
+    let (report, diagnostic) = assert_config_identity_and_span(
+        &failure,
+        Some(conflicting_span),
+        "invalid_config.config_contract_conflict",
     );
-    assert_eq!(diagnostic.primary_span, Some(conflicting_span));
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].span, Some(first_span));
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    assert!(labels[0].spanned);
+    assert!(matches!(
+        labels[0].site,
+        SiteRef::Local(span) if span == first_span
+    ));
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::PreviousDeclaration
+    ));
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the config failure should retain typed conflict facts");
+    assert_eq!(facts.reason, InvalidConfigCode::ConfigContractConflict);
     assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::PreviousDeclaration)
-    );
-
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(key),
-        reason: InvalidConfigReason::ConfigContractConflict { first, conflicting },
-    } = &diagnostic.payload
-    else {
-        panic!("expected a structured config contract conflict payload");
-    };
-    assert_eq!(messages.string_table.resolve(*key), "setting");
-    assert_eq!(
-        messages.string_table.resolve(*first),
-        "I32; required; no default"
-    );
-    assert_eq!(
-        messages.string_table.resolve(*conflicting),
-        "String; required; no default"
+        diagnostic_strings(report, &diagnostic),
+        [
+            "I32; required; no default",
+            "String; required; no default",
+            "setting"
+        ]
     );
 }
 
@@ -164,35 +191,22 @@ fn mapped_unknown_build_config_input_preserves_spanlessness_and_argument_index()
         BuildConfigResolutionError::UnknownExplicitInput { .. }
     ));
 
-    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
-    let PremergeFailure::Diagnosed(batch) = failure else {
-        panic!("mapped config failure should be diagnosed, not infrastructure");
-    };
-    let messages = batch.into_messages();
-    let diagnostic = assert_config_identity_and_span(
-        &messages,
+    let failure = diagnosed_reports(build_config_resolution_failure(
+        error,
+        None,
+        &mut boundary_table,
+    ));
+    let (report, diagnostic) = assert_config_identity_and_span(
+        &failure,
         None,
         "invalid_config.unknown_build_config_input",
     );
-
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(diagnostic_key),
-        reason:
-            InvalidConfigReason::UnknownBuildConfigInput {
-                key: reason_key,
-                provided_argument_index,
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("expected a structured unknown build-config input payload");
-    };
-    assert_eq!(
-        messages.string_table.resolve(*diagnostic_key),
-        "mystery_input"
-    );
-    assert_eq!(messages.string_table.resolve(*reason_key), "mystery_input");
-    assert_eq!(diagnostic_key, reason_key);
-    assert_eq!(*provided_argument_index, Some(17));
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the config failure should retain typed unknown-input facts");
+    assert_eq!(facts.reason, InvalidConfigCode::UnknownBuildConfigInput);
+    assert_eq!(facts.provided_argument_index, Some(17));
+    assert_eq!(diagnostic_strings(report, &diagnostic), ["mystery_input"]);
 }
 
 #[test]
@@ -230,33 +244,25 @@ fn mapped_config_input_type_mismatch_preserves_contract_span_and_argument_index(
         BuildConfigResolutionError::ValueTypeMismatch { .. }
     ));
 
-    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
-    let PremergeFailure::Diagnosed(batch) = failure else {
-        panic!("mapped config failure should be diagnosed, not infrastructure");
-    };
-    let messages = batch.into_messages();
-    let diagnostic = assert_config_identity_and_span(
-        &messages,
+    let failure = diagnosed_reports(build_config_resolution_failure(
+        error,
+        None,
+        &mut boundary_table,
+    ));
+    let (report, diagnostic) = assert_config_identity_and_span(
+        &failure,
         Some(contract_span),
         "invalid_config.config_input_type_mismatch",
     );
-
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(key),
-        reason:
-            InvalidConfigReason::ConfigInputTypeMismatch {
-                provided,
-                expected,
-                provided_argument_index,
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("expected a structured config input type mismatch payload");
-    };
-    assert_eq!(messages.string_table.resolve(*key), "count");
-    assert_eq!(messages.string_table.resolve(*provided), "String");
-    assert_eq!(messages.string_table.resolve(*expected), "I32");
-    assert_eq!(*provided_argument_index, Some(23));
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the config failure should retain typed mismatch facts");
+    assert_eq!(facts.reason, InvalidConfigCode::ConfigInputTypeMismatch);
+    assert_eq!(facts.provided_argument_index, Some(23));
+    assert_eq!(
+        diagnostic_strings(report, &diagnostic),
+        ["String", "I32", "count"]
+    );
 }
 
 #[test]
@@ -291,36 +297,29 @@ fn mapped_command_literal_outside_its_contract_scalar_keeps_the_argument_index()
     )
     .expect_err("a value above the I32 maximum should not satisfy an I32 contract");
 
-    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
-    let PremergeFailure::Diagnosed(batch) = failure else {
-        panic!("mapped config failure should be diagnosed, not infrastructure");
-    };
-    let messages = batch.into_messages();
-    let diagnostic = assert_config_identity_and_span(
-        &messages,
+    let failure = diagnosed_reports(build_config_resolution_failure(
+        error,
+        None,
+        &mut boundary_table,
+    ));
+    let (report, diagnostic) = assert_config_identity_and_span(
+        &failure,
         Some(contract_span),
         "invalid_config.config_input_out_of_range",
     );
-
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(key),
-        reason:
-            InvalidConfigReason::ConfigInputOutOfRange {
-                literal,
-                reason,
-                provided_argument_index,
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("expected a structured config input range payload");
-    };
-    assert_eq!(messages.string_table.resolve(*key), "count");
-    assert_eq!(messages.string_table.resolve(*literal), "4_294_967_296");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the config failure should retain typed out-of-range facts");
     assert_eq!(
-        *reason,
-        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
+        facts.reason,
+        InvalidConfigCode::ConfigInputOutOfRangeOutsideFixedScalarRange
     );
-    assert_eq!(*provided_argument_index, Some(5));
+    assert_eq!(facts.provided_argument_index, Some(5));
+    assert_eq!(facts.fixed_scalar, Some(FixedScalar::I32));
+    assert_eq!(
+        diagnostic_strings(report, &diagnostic),
+        ["4_294_967_296", "count"]
+    );
 }
 
 #[test]
@@ -349,20 +348,18 @@ fn mapped_missing_source_contract_publishes_exact_primary_span() {
         BuildConfigResolutionError::MissingRequiredValue { .. }
     ));
 
-    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
-    let PremergeFailure::Diagnosed(batch) = failure else {
-        panic!("mapped config failure should be diagnosed, not infrastructure");
-    };
-    let messages = batch.into_messages();
-    let diagnostic = messages
-        .first_error()
-        .expect("mapped missing config input should contain one error");
-    assert_eq!(diagnostic.primary_span, Some(source_span));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::MissingConfigInput,
-            ..
-        }
+    let failure = diagnosed_reports(build_config_resolution_failure(
+        error,
+        None,
+        &mut boundary_table,
     ));
+    let (_, diagnostic) = assert_config_identity_and_span(
+        &failure,
+        Some(source_span),
+        "invalid_config.missing_config_input",
+    );
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the config failure should retain typed missing-value facts");
+    assert_eq!(facts.reason, InvalidConfigCode::MissingConfigInput);
 }

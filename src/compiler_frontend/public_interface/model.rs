@@ -6,11 +6,9 @@
 //! donor-local `TypeId`, `NominalTypeId`, `GenericParameterId`, `TraitId`, `PathId` or
 //! `StringId` crosses this boundary.
 //!
-//! WHY: the compiler design overview and the recovery plan require one declaration-centric
-//! model with distinct phase types instead of one object with mutable pending states. The
-//! draft is the sole pre-HIR public-semantic handoff; the completed phase is produced exactly
-//! once by local finalization. Keeping the value and phase types in one model module gives
-//! every projection and finalization step a single vocabulary owner.
+//! WHY: distinct draft and completed types separate pre-HIR declaration facts from concrete
+//!      summaries produced after borrow validation. Local finalization creates the completed
+//!      type once, and this module gives projection and finalization one vocabulary owner.
 
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -242,7 +240,7 @@ pub(crate) struct PublicTraitRequirementSurface {
 ///
 /// WHAT: a distinct variant per directly-defined public declaration category. Struct and choice
 /// are separate variants so nominal meaning is never implicit in empty field/variant vectors.
-/// Each variant carries only the semantic facts already produced at R1; folded constant
+/// Each variant carries only the semantic facts available for that declaration; folded constant
 /// values are owned by the constant variant. The free-function variant carries an explicit
 /// callable category that distinguishes directly-defined concrete-local functions from
 /// generic-template declarations.
@@ -270,10 +268,9 @@ pub(crate) enum PublicDeclarationSemantics {
 /// `GenericParameterListId`, `GenericParameterId`, `TypeId`, `TraitId` or other local registry
 /// handle enters this descriptor.
 ///
-/// WHY: locked decision 10 separates consumer-visible generic semantic identity from the
-/// declaring module's retained template body and compilation context. This descriptor is the
-/// consumer-visible generic contract; the validated body artefact and materialisation context
-/// remain a later compiler-metadata fact.
+/// WHY: consumer-visible generic identity is separate from the declaring module's retained
+///      template body and compilation context. This descriptor carries the consumer-visible
+///      contract; compiler metadata retains the body artefact and materialisation context.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicGenericTemplateDescriptor {
     pub(crate) generic_parameters: Vec<PublicGenericParameterSurface>,
@@ -484,10 +481,9 @@ pub(crate) struct PublicEvidenceRecord {
 /// only owned stable values: no donor-local `TypeId`, `NominalTypeId`, `GenericParameterId`,
 /// `TraitId`, `PathId` or `StringId` crosses this boundary.
 ///
-/// It is deliberately not the final `PublicSemanticInterface`. Generic template bodies and
-/// cross-module call lowering remain for later phases. Exported-name diagnostic spans are retained
-/// unchanged here, and re-export bindings retain donor-owned origins before the completed interface
-/// is published.
+/// The draft is not the final `PublicSemanticInterface`. Generic template bodies live in compiler
+/// metadata, and cross-module call lowering belongs to executable compilation. Exported-name
+/// diagnostic spans and donor-owned re-export origins are retained here.
 /// Folded constant values are owned by each constant declaration record. Reusable evidence is a
 /// separate collection, not a declaration variant. Concrete callable borrow summaries never enter
 /// the pre-HIR draft: [`finalize_after_borrow_validation`](Self::finalize_after_borrow_validation)

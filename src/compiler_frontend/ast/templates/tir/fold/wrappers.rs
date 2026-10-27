@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirWrapperApplicationMode, TirWrapperContext,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -70,7 +71,8 @@ pub(super) fn apply_wrapper_context_overlay_to_child_emission(
     } = result;
 
     let wrapper_set = store.get_wrapper_set(wrapper_set_ref).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR fold: inherited wrapper set referenced by overlay is missing.",
         )
     })?;
@@ -240,10 +242,13 @@ fn fold_tir_wrapper_around_child_output(
     let wrapper_template = wrapper_store
         .get_template(wrapper_reference.root)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR wrapper fold: wrapper template {} not found in the module store.",
-                wrapper_reference.root
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR wrapper fold: wrapper template {} not found in the module store.",
+                    wrapper_reference.root
+                ),
+            )
         })?;
 
     let parent_view = fold_input.view;
@@ -279,7 +284,7 @@ fn fold_tir_wrapper_with_input(
     reject_slot_insert_template(&wrapper_template.kind)?;
 
     if wrapper_template.runtime_slot_plan.is_some() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR wrapper fold: a runtime slot plan reached the fold reducer without a foldable preparation proof.",
         )
         .into());

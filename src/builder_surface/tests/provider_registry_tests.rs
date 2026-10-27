@@ -15,7 +15,7 @@ use crate::builder_surface::external_import_providers::provider::{
 };
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
@@ -48,7 +48,7 @@ impl ExternalImportProvider for DummyProvider {
         &self,
         _request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         let package_id = context
             .package_registry
             .register_package(
@@ -65,7 +65,6 @@ impl ExternalImportProvider for DummyProvider {
                 PathBuf::from("/test/asset.js"),
                 "registry",
             )),
-            diagnostics: vec![],
             required_runtime_imports: vec![RequiredRuntimeImport {
                 module_name: "@moth/runtime".to_owned(),
                 imported_names: vec!["mothOk".to_owned(), "mothErr".to_owned()],
@@ -255,7 +254,6 @@ fn resolution_table_import(package_id: u32) -> ResolvedExternalImport {
         exported_types: vec![ExternalTypeId(package_id)],
         exported_free_functions: vec![ExternalFunctionId::Synthetic(package_id)],
         runtime_asset: None,
-        diagnostics: vec![],
         required_runtime_imports: vec![],
     }
 }
@@ -328,7 +326,6 @@ fn cache_stores_and_retrieves_resolved_import() {
         exported_types: vec![],
         exported_free_functions: vec![],
         runtime_asset: None,
-        diagnostics: vec![],
         required_runtime_imports: vec![],
     };
 

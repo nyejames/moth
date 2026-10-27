@@ -1,6 +1,6 @@
-//! D15 exact-width numeric operator domain, failure-discharge and failure-code policy tests.
+//! Exact-width numeric operator domain, failure-discharge and failure-code policy tests.
 //!
-//! The scalar rows below are the D15 regression oracle: equal fixed types keep their own type,
+//! The scalar rows below are the regression oracle: equal fixed types keep their own type,
 //! mixed fixed types use the smallest supported domain covering both complete operand ranges,
 //! and failure discharge is judged against the selected result domain. `Dec`, `Byte` and
 //! mixed-family rejection keep their explicit negative rows.
@@ -153,7 +153,7 @@ fn fixed_integer_operators_compute_in_the_common_type_and_divide_in_f64() {
 
 #[test]
 fn fixed_float_operators_preserve_the_wider_precision_without_an_f32_floor() {
-    // D15: equal precisions keep their own type and `F16` has no minimum `F32` semantic domain.
+    // Equal precisions keep their own type and `F16` has no minimum `F32` semantic domain.
     let cases = [
         (F16, F16, F16),
         (F16, F32, F32),
@@ -236,7 +236,7 @@ fn number_arithmetic_keeps_its_scale_and_rejects_invalid_scale_operators() {
 fn number_power_accepts_only_an_exact_i32_exponent() {
     let number_scale = number(2);
 
-    // D15/D05: the exponent is the exact I32 identity.
+    // The exponent is the exact I32 identity.
     assert_eq!(
         binary_operation_domain(NumericOperator::Power, number_scale, fixed(I32)),
         Some(number_scale)
@@ -317,7 +317,7 @@ fn negate_is_never_a_binary_operation() {
 
 #[test]
 fn negation_preserves_signed_and_float_width_and_rejects_unsigned_and_byte() {
-    // D15: a fixed signed integer or binary float keeps its own type under unary minus, so
+    // A fixed signed integer or binary float keeps its own type under unary minus, so
     // negating a signed minimum fails in that narrow type. Unsigned types and `Byte` stay
     // invalid.
     let cases = [
@@ -366,7 +366,7 @@ fn every_fixed_integer_pair_compares_including_i64_with_u64() {
 #[test]
 fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
     use NumericOperator as Op;
-    // (operator, left, right, domain, expected): domains are the D15 domains the policy must
+    // (operator, left, right, domain, expected): domains are the result domains the policy must
     // select, so the table pins the predicate's contract inputs.
     let cases = [
         // True table: the selected result domain contains the complete mathematical result
@@ -376,7 +376,7 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
         (Op::Multiply, fixed(U8), Some(fixed(I8)), fixed(I16), true),
         (Op::Add, fixed(I8), Some(fixed(U8)), fixed(I16), true),
         // False table: equal narrow operands keep their own result domain, so the complete
-        // result range exceeds it. `U8` plus `U8` can overflow `U8` and is no longer proven safe.
+        // result range exceeds it. `U8` plus `U8` can overflow `U8` and is not proven safe.
         (Op::Add, fixed(U8), Some(fixed(U8)), fixed(U8), false),
         (Op::Multiply, fixed(U8), Some(fixed(U8)), fixed(U8), false),
         (
@@ -431,7 +431,7 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
         );
     }
 
-    // The rows above pin the D15 domains the policy must select for those operations: equal
+    // The rows above pin the domains the policy must select for those operations: equal
     // narrow operands keep their own narrow domain, mixed signedness uses the smallest signed
     // type containing both complete ranges, and negation preserves the signed width.
     assert_eq!(
@@ -513,7 +513,7 @@ fn range_iteration_uses_the_fixed_pairwise_table_and_rejects_dec() {
         range_iteration_domain(fixed(I8), fixed(U16), Some(fixed(U16))),
         Some(fixed(I32))
     );
-    // D15: an equal narrow fixed type keeps its own counter domain instead of a wider floor.
+    // An equal narrow fixed type keeps its own counter domain instead of a wider floor.
     assert_eq!(
         range_iteration_domain(fixed(U8), fixed(U8), Some(fixed(U8))),
         Some(fixed(U8))

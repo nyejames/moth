@@ -1,0 +1,5 @@
+project #= (
+    name = "adversarial_moth_non_utf8_source_rejected",
+    entry_root = "src",
+)
+html #= ()

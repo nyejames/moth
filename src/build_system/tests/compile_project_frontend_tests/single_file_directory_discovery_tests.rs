@@ -1,4 +1,6 @@
+use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn single_file_remaps_module_type_environment_nominal_fields() {
@@ -15,29 +17,28 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
 
     let mut config = Config::new(moth_path.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut path_fork = PathInternerFork::empty();
-    string_table.intern("preexisting");
+    warning_owner.string_table_mut().intern("preexisting");
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("expected Ok for nominal type module");
+        &mut warning_owner,
+    ));
 
     let module = modules
         .successful_module_views()
         .next()
         .expect("expected compiled module");
     let test_path = path_fork
-        .try_intern_portable_path("test.moth", &mut string_table)
+        .try_intern_portable_path("test.moth", warning_owner.string_table_mut())
         .expect("test path fits");
     let point_path = path_fork
-        .try_intern_child(test_path, string_table.intern("Point"))
+        .try_intern_child(test_path, warning_owner.string_table_mut().intern("Point"))
         .expect("test path fits");
     let nominal_id = module
         .executable
@@ -54,7 +55,7 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
         display_type(
             point_type_id,
             &module.executable.type_environment,
-            &string_table,
+            warning_owner.string_table(),
             &module.executable.path_table,
         ),
         "Point"
@@ -70,14 +71,14 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
             .executable
             .path_table
             .component(fields[0].name)
-            .map(|id| string_table.resolve(id)),
+            .map(|id| warning_owner.string_table().resolve(id)),
         Some("value")
     );
     assert_eq!(
         display_type(
             fields[0].type_id,
             &module.executable.type_environment,
-            &string_table,
+            warning_owner.string_table(),
             &module.executable.path_table,
         ),
         "I32"
@@ -95,7 +96,7 @@ fn single_file_rejects_wrong_extension() {
 
     let mut config = Config::new(txt_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
@@ -104,23 +105,17 @@ fn single_file_rejects_wrong_extension() {
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
 
-    let Err(messages) = result else {
-        panic!("expected Err for wrong extension");
-    };
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("expected at least one error");
-    let error_text = terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        messages.diagnostic_render_context(0),
-    );
+    let reports = diagnosed_reports(&result);
+    assert_eq!(reports.counts().errors, 1);
+    assert_eq!(reports.counts().warnings, 0);
     assert!(
-        error_text.contains(".moth"),
-        "expected error to mention .moth, got: {error_text}"
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.descriptor().code == "MOTH-IMPORT-0026"),
+        "unsupported source files should use the authored entry diagnostic"
     );
 }
 
@@ -134,7 +129,7 @@ fn single_file_rejects_missing_file() {
 
     let mut config = Config::new(missing_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
@@ -143,13 +138,15 @@ fn single_file_rejects_missing_file() {
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
 
-    let Err(messages) = result else {
-        panic!("missing entry file should produce an error, not success");
+    let Err(errors) = result else {
+        panic!("missing entry file should produce an infrastructure error, not success");
     };
-    assert_exact_infrastructure_error(&messages, &ErrorType::File);
+    assert_eq!(errors.iter().count(), 1);
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert!(errors.additional.is_empty());
 }
 
 #[test]
@@ -164,7 +161,7 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
 
     let mut config = Config::new(moth_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
@@ -173,20 +170,21 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
 
-    let Err(messages) = result else {
-        panic!("optional core package should require builder opt-in");
-    };
-    let diagnostic = messages
-        .error_diagnostics()
+    let reports = diagnosed_reports(&result);
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("expected one diagnostic");
-    let DiagnosticPayload::UnsupportedBuilderPackage { package_path } = diagnostic.payload else {
-        panic!("unexpected diagnostic payload: {:?}", diagnostic.payload);
-    };
-    assert_eq!(messages.string_table.resolve(package_path), "@core/text");
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0060");
+    let rendered =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
+    assert!(
+        rendered.contains("Core package '@core/text' is not supported by this builder."),
+        "unsupported builder package should render the exact selected package-path fact: {rendered}"
+    );
 }
 
 #[test]
@@ -207,7 +205,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
 
     let mut config = Config::new(moth_path);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface.source_packages.register_filesystem_root(
         "unused",
@@ -215,15 +213,14 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
         PackageOrigin::Builder,
     );
 
-    let frontend = compile_project_frontend(
+    let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("a single-file consumer without package dependencies should compile cleanly");
+        &mut warning_owner,
+    ));
 
     assert!(
         !frontend.has_diagnosed_or_blocked(),
@@ -255,7 +252,7 @@ fn directory_project_discovers_multiple_entry_modules() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
 
     let result = compile_project_frontend(
@@ -264,10 +261,10 @@ fn directory_project_discovers_multiple_entry_modules() {
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     );
 
-    let modules = result.expect("expected Ok for multi-module directory project");
+    let modules = successful_compilation_value(result);
     let views = modules.successful_module_views().collect::<Vec<_>>();
     assert_eq!(
         views.len(),
@@ -307,18 +304,17 @@ fn directory_project_remaps_delta_collisions_across_modules() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
 
-    let modules = compile_project_frontend(
+    let modules = successful_compilation_value(compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("expected Ok for multi-module directory project");
+        &mut warning_owner,
+    ));
 
     let second_module = modules
         .successful_module_views()
@@ -336,7 +332,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
         .find(|path| {
             second_module.executable.path_table.render_portable(
                 *path,
-                &string_table,
+                warning_owner.string_table(),
                 &mut Vec::new(),
             ) == "second/@b.moth/Item"
         })
@@ -363,7 +359,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 .executable
                 .path_table
                 .component(field.name)
-                .map(|id| string_table.resolve(id))
+                .map(|id| warning_owner.string_table().resolve(id))
         })
         .collect::<Vec<_>>();
 
@@ -371,7 +367,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
         display_type(
             item_type_id,
             &second_module.executable.type_environment,
-            &string_table,
+            warning_owner.string_table(),
             &second_module.executable.path_table,
         ),
         "Item"
@@ -398,7 +394,7 @@ fn single_file_rejects_source_package_moth_folder_collision() {
 
     let mut config = Config::new(main_path.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
@@ -414,23 +410,16 @@ fn single_file_rejects_source_package_moth_folder_collision() {
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
+        &mut warning_owner,
     );
-
-    let Err(messages) = result else {
-        panic!("single-file build should reject source-backed package .moth/folder collision");
-    };
-
+    let reports = diagnosed_reports(&result);
     assert!(
-        messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::SourceFileFolderCollision { .. },
-                    ..
-                }
-            )
-        }),
-        "expected SourceFileFolderCollision diagnostic, got {messages:?}"
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-CONFIG-0001"
+                    && view.reason_key() == Some("invalid_config.source_file_folder_collision")
+            }),
+        "expected SourceFileFolderCollision diagnostic"
     );
 }

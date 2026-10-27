@@ -12,23 +12,30 @@ use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
 };
-use crate::compiler_frontend::display_messages::print_compiler_messages;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::display_messages::print_diagnostic_reports;
 use crate::projects::dev_server::error_page::{
-    format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
+    format_compiler_messages, render_compiler_bug_page, render_compiler_error_page,
 };
 use crate::projects::dev_server::sse;
-use crate::projects::dev_server::state::DevServerState;
+use crate::projects::dev_server::state::{DevServerState, ServedArtifactSnapshot};
 use crate::projects::dev_server::watch;
 use crate::projects::routing::{HtmlSiteConfig, parse_html_site_config};
 #[cfg(feature = "detailed_timers")]
 use crate::timing_scope;
 use saying::say;
-use std::io;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct BuildCycleReport {
     pub version: u64,
@@ -36,7 +43,8 @@ pub struct BuildCycleReport {
     pub build_duration: Duration,
     pub clients_notified: usize,
     pub watch_scope: Option<watch::WatchScope>,
-    pub success_messages: Option<CompilerMessages>,
+    pub success_messages: Option<DiagnosticReportSet>,
+    pub output_warnings: Vec<String>,
     /// Drained timing observations for this cycle, rendered by the caller
     /// after its own status line.
     #[cfg(feature = "timers")]
@@ -48,110 +56,273 @@ pub struct RebuildRunReport {
     pub watch_scope: Option<watch::WatchScope>,
 }
 
-struct BuildOutcome {
-    build_succeeded: bool,
-    build_duration: Duration,
-    entry_page_rel: Option<PathBuf>,
-    html_site_config: Option<HtmlSiteConfig>,
-    diagnostics_summary: String,
-    /// Full structured warnings for successful dev builds.
-    ///
-    /// WHAT: carries the same `CompilerDiagnostic` payloads that would be printed on a CLI build
-    /// so the dev-server terminal can show complete warnings after a successful rebuild.
-    /// WHY: `diagnostics_summary` is intentionally brief for SSE/state consumers; terminal output
-    /// needs the full diagnostic cards without rebuilding them from summary titles.
-    success_messages: Option<CompilerMessages>,
-    failed_build: Option<BuildFailure>,
-    watch_scope: Option<watch::WatchScope>,
-    output_dir: Option<PathBuf>,
+/// The host hands each cycle a fully owned request; the factory uses it to create one fresh worker.
+pub(crate) struct DevBuildRequest {
+    entry_file: PathBuf,
+    flags: Vec<Flag>,
+    build_config_inputs: BuildConfigInputSet,
+    output_root: PathBuf,
+    write_mode: WriteMode,
 }
 
-enum BuildFailure {
-    CompilerMessages(CompilerMessages),
+pub(crate) trait DevBuildExecutor: Clone + Send + Sync + 'static {
+    fn build_config_inputs(&self) -> &BuildConfigInputSet;
+    fn create_worker(&self, request: DevBuildRequest) -> Box<dyn DevBuildWorker>;
 }
 
-/// Adapter for build execution used by the dev loop.
-///
-/// Keeping this contract small makes the watch/build coordination testable while still delegating
-/// real work to the core build APIs.
-pub trait DevBuildExecutor: Send {
-    fn build(&mut self, entry_file: &Path, flags: &[Flag])
-    -> Result<BuildResult, CompilerMessages>;
-
+pub(crate) trait DevBuildWorker {
+    fn request(&self) -> &DevBuildRequest;
+    fn build(&mut self) -> CompilationResult<BuildResult>;
     fn write_outputs(
         &mut self,
         build_result: &mut BuildResult,
-        entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages>;
-}
-pub struct ProjectBuildExecutor {
-    builder: ProjectBuilder,
-    /// The typed explicit build inputs every dev build starts from.
-    build_config_inputs: BuildConfigInputSet,
+    ) -> Result<OutputWriteSummary, PreparedFailure>;
 }
 
-impl ProjectBuildExecutor {
-    pub fn new(builder: ProjectBuilder, build_config_inputs: BuildConfigInputSet) -> Self {
+/// Immutable builder factory and common build inputs shared across dev cycles.
+pub(crate) struct ProjectBuildExecutor {
+    builder_factory: Arc<dyn Fn() -> ProjectBuilder + Send + Sync>,
+    build_config_inputs: Arc<BuildConfigInputSet>,
+}
+
+impl Clone for ProjectBuildExecutor {
+    fn clone(&self) -> Self {
         Self {
-            builder,
-            build_config_inputs,
+            builder_factory: Arc::clone(&self.builder_factory),
+            build_config_inputs: Arc::clone(&self.build_config_inputs),
         }
     }
 }
+
+impl ProjectBuildExecutor {
+    pub(crate) fn new(
+        builder_factory: impl Fn() -> ProjectBuilder + Send + Sync + 'static,
+        build_config_inputs: BuildConfigInputSet,
+    ) -> Self {
+        Self {
+            builder_factory: Arc::new(builder_factory),
+            build_config_inputs: Arc::new(build_config_inputs),
+        }
+    }
+}
+
 impl DevBuildExecutor for ProjectBuildExecutor {
-    fn build(
-        &mut self,
-        entry_file: &Path,
-        flags: &[Flag],
-    ) -> Result<BuildResult, CompilerMessages> {
-        let entry_path = entry_file.to_str().ok_or_else(|| {
-            let error = CompilerError::file_error(
-                entry_file,
+    fn build_config_inputs(&self) -> &BuildConfigInputSet {
+        &self.build_config_inputs
+    }
+
+    fn create_worker(&self, request: DevBuildRequest) -> Box<dyn DevBuildWorker> {
+        Box::new(ProjectBuildWorker {
+            builder: (self.builder_factory)(),
+            request,
+        })
+    }
+}
+
+struct ProjectBuildWorker {
+    builder: ProjectBuilder,
+    request: DevBuildRequest,
+}
+
+impl DevBuildWorker for ProjectBuildWorker {
+    fn request(&self) -> &DevBuildRequest {
+        &self.request
+    }
+
+    fn build(&mut self) -> CompilationResult<BuildResult> {
+        let entry_path = self.request.entry_file.to_str().ok_or_else(|| {
+            InfrastructureErrors::from(InfrastructureFailure::filesystem(
+                CompilerStage::DevelopmentServer,
+                &self.request.entry_file,
                 "Dev server entry path contains invalid UTF-8 and cannot be compiled.",
-            );
-            CompilerMessages::from_error(error, Default::default())
+            ))
         })?;
 
-        build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)
+        build::build_project(
+            &self.builder,
+            entry_path,
+            &self.request.flags,
+            &self.request.build_config_inputs,
+        )
     }
 
     fn write_outputs(
         &mut self,
         build_result: &mut BuildResult,
-        entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages> {
-        let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
+    ) -> Result<OutputWriteSummary, PreparedFailure> {
+        crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
             } else {
-                let project_root = entry_file
+                let project_root = self
+                    .request
+                    .entry_file
                     .parent()
-                    .filter(|parent| parent.is_dir())
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| entry_file.to_path_buf());
+                    .expect("absolute dev entry path must have a parent")
+                    .to_path_buf();
                 OutputPlan::SingleFile(SingleFileOutputPlan {
-                    output_root: project_root.join("dev"),
+                    output_root: self.request.output_root.clone(),
                     project_root: Some(project_root),
                     owner: build_result.output_owner,
-                    setting_span: None,
                 })
             };
+            let mut diagnostic_strings =
+                DiagnosticStringBuilder::new(build_result.warning_accumulator.string_table_mut());
             write_project_outputs(
                 &mut build_result.project,
                 &WriteOptions {
                     output_plan,
-                    write_mode: WriteMode::SkipUnchanged,
+                    write_mode: self.request.write_mode,
                 },
-                &mut build_result.string_table,
+                &mut diagnostic_strings,
             )
-        });
-        output_result.map_err(|messages| build_result.take_output_failure_messages(messages))
+        })
     }
 }
 
-pub fn run_single_build_cycle(
+enum BuildOutcomeKind {
+    Success {
+        entry_page_rel: PathBuf,
+        html_site_config: HtmlSiteConfig,
+        success_messages: Option<DiagnosticReportSet>,
+        output_warnings: Vec<String>,
+    },
+    Failure(CompilationResult<()>),
+    CompilerBug(Option<String>),
+}
+
+struct BuildOutcome {
+    kind: BuildOutcomeKind,
+    watch_scope: Option<watch::WatchScope>,
+    output_dir: Option<PathBuf>,
+}
+
+fn finish_build_failure(
+    build_result: BuildResult,
+    failure: PreparedFailure,
+) -> CompilationResult<()> {
+    match build_result.finish_output(Err(failure))? {
+        CompilationOutcome::Diagnosed(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+        CompilationOutcome::Success { value, .. } => {
+            drop(value);
+            crate::compiler_bug!(
+                CompilerStage::DevelopmentServer,
+                "a failed dev-server output step unexpectedly finalized a successful build"
+            )
+        }
+    }
+}
+
+fn run_dev_build_worker(mut worker: Box<dyn DevBuildWorker>) -> BuildOutcome {
+    let compiled = worker.build();
+    let outcome = build_once(worker.as_mut(), compiled);
+    drop(worker);
+    outcome
+}
+
+fn build_once(
+    worker: &mut dyn DevBuildWorker,
+    compiled: CompilationResult<BuildResult>,
+) -> BuildOutcome {
+    let fallback_output_root = worker.request().output_root.clone();
+    let build_result = match compiled {
+        Err(errors) => {
+            return failed_build_outcome(Err(errors), None, None);
+        }
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            return failed_build_outcome(Ok(CompilationOutcome::Diagnosed(reports)), None, None);
+        }
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+    };
+
+    let mut build_result = build_result;
+    let output_summary = match worker.write_outputs(&mut build_result) {
+        Ok(summary) => summary,
+        Err(failure) => {
+            return failed_build_outcome(finish_build_failure(build_result, failure), None, None);
+        }
+    };
+    let output_warnings = output_summary.into_warning_messages();
+    let output_dir = build_result
+        .directory_output_plan
+        .as_ref()
+        .map(|plan| canonical_output_dir(&plan.output_root))
+        .unwrap_or_else(|| canonical_output_dir(&fallback_output_root));
+    let watch_scope = watch::WatchScope::derive(
+        &build_result.config.entry_dir,
+        Some(&build_result.config),
+        &output_dir,
+    );
+
+    let html_site_config_result = {
+        let mut diagnostic_strings =
+            DiagnosticStringBuilder::new(build_result.warning_accumulator.string_table_mut());
+        parse_html_site_config(&build_result.config, &mut diagnostic_strings)
+            .map_err(|error| error.into_prepared_failure(diagnostic_strings.strings()))
+    };
+    let html_site_config = match html_site_config_result {
+        Ok(config) => config,
+        Err(failure) => {
+            return failed_build_outcome(
+                finish_build_failure(build_result, failure),
+                Some(watch_scope),
+                Some(output_dir),
+            );
+        }
+    };
+
+    let Some(entry_page_rel) = build_result.project.entry_page_rel.clone() else {
+        let error = InfrastructureFailure::internal(
+            CompilerStage::DevelopmentServer,
+            "Build completed, but the project builder did not declare a dev entry page.",
+        );
+        return failed_build_outcome(
+            finish_build_failure(build_result, PreparedFailure::Infrastructure(error.into())),
+            Some(watch_scope),
+            Some(output_dir),
+        );
+    };
+
+    let warnings = match build_result.finish_output(Ok(())) {
+        Ok(CompilationOutcome::Success { value, warnings }) => {
+            drop(value);
+            warnings
+        }
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            return failed_build_outcome(
+                Ok(CompilationOutcome::Diagnosed(reports)),
+                Some(watch_scope),
+                Some(output_dir),
+            );
+        }
+        Err(errors) => {
+            return failed_build_outcome(Err(errors), Some(watch_scope), Some(output_dir));
+        }
+    };
+
+    BuildOutcome {
+        kind: BuildOutcomeKind::Success {
+            entry_page_rel,
+            html_site_config,
+            success_messages: warnings,
+            output_warnings,
+        },
+        watch_scope: Some(watch_scope),
+        output_dir: Some(output_dir),
+    }
+}
+
+fn format_warning_titles(reports: &DiagnosticReportSet) -> String {
+    reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().title.to_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn run_single_build_cycle<E: DevBuildExecutor>(
     state: &Arc<DevServerState>,
-    executor: &mut dyn DevBuildExecutor,
+    executor: &E,
     entry_file: &Path,
     flags: &[Flag],
 ) -> BuildCycleReport {
@@ -161,91 +332,225 @@ pub fn run_single_build_cycle(
         timing_guard_command_dev_cycle,
         crate::timing::TimingMetric::CommandDevCycle
     );
-    let start = std::time::Instant::now();
-    let compiled = executor.build(entry_file, flags);
-    let project_root = dev_server_project_root(entry_file);
+    let start = Instant::now();
 
-    // WHAT: output mutation and metadata publication share the HTTP read-capture boundary.
-    // WHY: compilation is independent, but no request may label new bytes with the old version.
-    let mut recovered_poison = false;
-    let mut build_state = match state.build_state.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            say!(
-                Yellow "Dev server state warning: recovering from a poisoned build-state lock after a previous panic."
-            );
-            recovered_poison = true;
-            poisoned.into_inner()
+    let (outcome, report_entry_file) = match resolve_absolute_path(entry_file) {
+        Ok(absolute_entry_file) => {
+            let report_entry_file = absolute_entry_file.clone();
+            let output_root = {
+                let build_state = state
+                    .build_state
+                    .lock()
+                    .expect("dev-server host bug: build-state lock poisoned before build request");
+                build_state.output_dir.clone()
+            };
+            let outcome = match resolve_absolute_path(&output_root) {
+                Ok(output_root) => {
+                    let factory = executor.clone();
+                    let request = DevBuildRequest {
+                        entry_file: absolute_entry_file,
+                        flags: flags.to_vec(),
+                        build_config_inputs: executor.build_config_inputs().clone(),
+                        output_root,
+                        write_mode: WriteMode::SkipUnchanged,
+                    };
+                    // The wrapper is safe because it captures only owned request/factory values;
+                    // the fresh worker and all its mutable build state are dropped on unwind
+                    // before host state is published.
+                    match catch_unwind(AssertUnwindSafe(move || {
+                        let worker = factory.create_worker(request);
+                        run_dev_build_worker(worker)
+                    })) {
+                        Ok(outcome) => outcome,
+                        Err(payload) => {
+                            let report = crate::render_compiler_bug_payload(payload.as_ref());
+                            if let Some(report) = &report {
+                                say!(Bold Yellow report);
+                            }
+                            BuildOutcome {
+                                kind: BuildOutcomeKind::CompilerBug(report),
+                                watch_scope: None,
+                                output_dir: None,
+                            }
+                        }
+                    }
+                }
+                Err(errors) => failed_build_outcome(Err(errors), None, None),
+            };
+            (outcome, Some(report_entry_file))
         }
+        Err(errors) => (failed_build_outcome(Err(errors), None, None), None),
     };
-    let build_outcome = build_once(executor, entry_file, compiled, start);
-    let BuildOutcome {
-        build_succeeded,
-        build_duration,
-        entry_page_rel,
-        html_site_config,
+    let report_entry_file = report_entry_file.as_deref().unwrap_or(entry_file);
+    let report = publish_build_outcome(state, outcome, start, report_entry_file);
+    #[cfg(feature = "detailed_timers")]
+    drop(timing_guard_command_dev_cycle);
+    #[cfg(feature = "timers")]
+    let report = {
+        let mut report = report;
+        report.timing_snapshot = Some(timing_session.finish());
+        report
+    };
+    report
+}
+
+fn publish_build_outcome(
+    state: &Arc<DevServerState>,
+    mut outcome: BuildOutcome,
+    start: Instant,
+    entry_file: &Path,
+) -> BuildCycleReport {
+    let served_artifacts = if matches!(&outcome.kind, BuildOutcomeKind::Success { .. }) {
+        match outcome.output_dir.as_deref() {
+            Some(output_dir) => match capture_served_artifacts(output_dir) {
+                Ok(artifacts) => Some(artifacts),
+                Err(failure) => {
+                    outcome.kind = BuildOutcomeKind::Failure(Err(failure.into()));
+                    outcome.output_dir = None;
+                    None
+                }
+            },
+            None => {
+                outcome.kind = BuildOutcomeKind::Failure(Err(InfrastructureFailure::internal(
+                    CompilerStage::DevelopmentServer,
+                    "Successful dev build did not provide an output root to capture.",
+                )
+                .into()));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let served_html_entries = served_artifacts.as_ref().map(|artifacts| {
+        let output_root = outcome
+            .output_dir
+            .as_deref()
+            .expect("successful artifact snapshot has an output root");
+        crate::projects::dev_server::static_files::validated_html_entries(output_root, artifacts)
+    });
+
+    let build_duration =
+        crate::capture_command_duration!(crate::timing::TimingMetric::CommandDevBuildWrite, start,);
+    let project_root = dev_server_project_root(entry_file);
+    let (version, origin) = {
+        let build_state = state
+            .build_state
+            .lock()
+            .expect("dev-server host bug: build-state lock poisoned");
+        (
+            build_state.last_build_version.saturating_add(1),
+            build_state.html_site_config.origin.clone(),
+        )
+    };
+
+    let (
+        build_ok,
         diagnostics_summary,
         success_messages,
-        failed_build,
-        watch_scope,
-        output_dir,
-    } = build_outcome;
+        output_warnings,
+        success_metadata,
+        error_html,
+    ) = match outcome.kind {
+        BuildOutcomeKind::Success {
+            entry_page_rel,
+            html_site_config,
+            success_messages,
+            output_warnings,
+        } => {
+            let warnings_summary = success_messages
+                .as_ref()
+                .map(format_warning_titles)
+                .unwrap_or_default();
+            let output_warnings_summary = output_warnings.join("\n");
+            let diagnostics_summary = match (
+                warnings_summary.is_empty(),
+                output_warnings_summary.is_empty(),
+            ) {
+                (true, true) => String::from("Build succeeded."),
+                (false, true) => format!("Build succeeded with warnings:\n{warnings_summary}"),
+                (true, false) => {
+                    format!("Build succeeded with warnings:\n{output_warnings_summary}")
+                }
+                (false, false) => format!(
+                    "Build succeeded with warnings:\n{warnings_summary}\n{output_warnings_summary}"
+                ),
+            };
+            (
+                true,
+                diagnostics_summary,
+                success_messages,
+                output_warnings,
+                Some((entry_page_rel, html_site_config)),
+                None,
+            )
+        }
+        BuildOutcomeKind::Failure(failure) => {
+            let diagnostics_summary = format_compiler_messages(&failure);
+            let error_html = render_compiler_error_page(&failure, &project_root, &origin, version);
+            (
+                false,
+                diagnostics_summary,
+                None,
+                Vec::new(),
+                None,
+                Some(error_html),
+            )
+        }
+        BuildOutcomeKind::CompilerBug(report) => {
+            let details = report.map_or_else(
+                || {
+                    String::from(
+                        "Compiler bug in the dev build worker. The worker was discarded; watching remains active.",
+                    )
+                },
+                |report| format!("Compiler bug:\n{report}"),
+            );
+            let error_html = render_compiler_bug_page(&details, &origin, version);
+            (false, details, None, Vec::new(), None, Some(error_html))
+        }
+    };
 
-    build_state.last_build_version = build_state.last_build_version.saturating_add(1);
-    build_state.last_build_ok = build_succeeded;
+    let watch_scope = outcome.watch_scope;
+    let output_dir = outcome.output_dir;
+    let mut build_state = state
+        .build_state
+        .lock()
+        .expect("dev-server host bug: build-state lock poisoned");
+    build_state.last_build_version = version;
+    build_state.last_build_ok = build_ok;
     build_state.last_build_messages_summary = diagnostics_summary;
-
-    if build_succeeded {
+    if build_ok {
         build_state.last_error_html = None;
-        build_state.entry_page_rel = entry_page_rel;
+        if let Some((entry_page_rel, html_site_config)) = success_metadata {
+            build_state.entry_page_rel = Some(entry_page_rel);
+            build_state.html_site_config = html_site_config;
+        }
         if let Some(output_dir) = output_dir {
             build_state.output_dir = output_dir;
         }
-        if let Some(html_site_config) = html_site_config {
-            build_state.html_site_config = html_site_config;
-        }
+        build_state.served_artifacts =
+            served_artifacts.expect("successful dev build must have a captured artifact snapshot");
+        build_state.served_html_entries = served_html_entries
+            .expect("successful dev build must have validated HTML entries for its snapshot");
+        build_state.served_artifacts_version = version;
     } else {
-        // Failed publication may leave partially emitted assets, never a successful page generation.
-        // Keep assets reachable, but replace page HTML with diagnostics for this failed attempt.
-        build_state.last_error_html = Some(match failed_build {
-            Some(BuildFailure::CompilerMessages(messages)) => render_compiler_error_page(
-                &messages,
-                &project_root,
-                &build_state.html_site_config.origin,
-                build_state.last_build_version,
-            ),
-            None => render_runtime_error_page(
-                "Build Failed",
-                "The latest build failed, but no diagnostics were stored.",
-                &build_state.html_site_config.origin,
-                build_state.last_build_version,
-            ),
-        });
-    }
-
-    let version = build_state.last_build_version;
-    // WHAT: clear the poison flag while still holding the guard that published coherent state.
-    // WHY: HTTP readers reject a poisoned lock, so recovery must end the poisoned era before any
-    // reader can acquire it; a panic during a later cycle re-poisons normally.
-    if recovered_poison {
-        state.build_state.clear_poison();
+        // Failure publication keeps the last successful output root, metadata, and artifact snapshot.
+        build_state.last_error_html = error_html;
     }
     drop(build_state);
 
     let clients_notified = sse::broadcast_generation(state);
-    #[cfg(feature = "detailed_timers")]
-    drop(timing_guard_command_dev_cycle);
-    #[cfg(feature = "timers")]
-    let timing_snapshot = timing_session.finish();
     BuildCycleReport {
         version,
-        build_ok: build_succeeded,
+        build_ok,
         build_duration,
         clients_notified,
         watch_scope,
         success_messages,
+        output_warnings,
         #[cfg(feature = "timers")]
-        timing_snapshot: Some(timing_snapshot),
+        timing_snapshot: None,
     }
 }
 
@@ -254,13 +559,13 @@ pub fn run_single_build_cycle(
 /// the fingerprint check would trigger indefinitely without this limit.
 const MAX_CONSECUTIVE_REBUILDS: usize = 5;
 
-pub fn run_builds_until_stable(
+pub fn run_builds_until_stable<E: DevBuildExecutor>(
     state: &Arc<DevServerState>,
-    executor: &mut dyn DevBuildExecutor,
+    executor: &E,
     entry_file: &Path,
     flags: &[Flag],
     watch_session: &watch::WatchSession,
-) -> io::Result<RebuildRunReport> {
+) -> RebuildRunReport {
     let mut build_count = 0usize;
     let latest_watch_scope = loop {
         let build_start_revision = watch_session.current_revision();
@@ -280,9 +585,11 @@ pub fn run_builds_until_stable(
                 Blue report.clients_notified,
                 Reset " clients."
             );
-
             if let Some(messages) = report.success_messages {
-                print_compiler_messages(messages);
+                print_diagnostic_reports(&messages);
+            }
+            for warning in report.output_warnings {
+                say!(Yellow warning);
             }
         } else {
             say!(
@@ -318,14 +625,14 @@ pub fn run_builds_until_stable(
         }
     };
 
-    Ok(RebuildRunReport {
+    RebuildRunReport {
         watch_scope: latest_watch_scope,
-    })
+    }
 }
 
-pub fn run_watch_build_loop(
+pub fn run_watch_build_loop<E: DevBuildExecutor>(
     state: Arc<DevServerState>,
-    mut executor: Box<dyn DevBuildExecutor>,
+    executor: E,
     entry_file: PathBuf,
     flags: Vec<Flag>,
     initial_watch_scope: watch::WatchScope,
@@ -346,23 +653,8 @@ pub fn run_watch_build_loop(
             }
         };
 
-        let rebuild_report = match run_builds_until_stable(
-            &state,
-            executor.as_mut(),
-            &entry_file,
-            &flags,
-            &watch_session,
-        ) {
-            Ok(report) => report,
-            Err(error) => {
-                say!(
-                    Yellow "Dev server watch warning: rebuild cycle failed: ",
-                    Yellow error.to_string()
-                );
-                last_seen_revision = watch_session.current_revision().max(seen_revision);
-                continue;
-            }
-        };
+        let rebuild_report =
+            run_builds_until_stable(&state, &executor, &entry_file, &flags, &watch_session);
 
         last_seen_revision = watch_session.current_revision().max(seen_revision);
 
@@ -375,155 +667,33 @@ pub fn run_watch_build_loop(
     }
 }
 
-fn build_once(
-    executor: &mut dyn DevBuildExecutor,
-    entry_file: &Path,
-    compiled: Result<BuildResult, CompilerMessages>,
-    start: std::time::Instant,
+fn failed_build_outcome(
+    failure: CompilationResult<()>,
+    watch_scope: Option<watch::WatchScope>,
+    output_dir: Option<PathBuf>,
 ) -> BuildOutcome {
-    let build_result_outcome = compiled.and_then(|mut build_result| {
-        executor.write_outputs(&mut build_result, entry_file)?;
-        Ok(build_result)
-    });
-    let build_duration =
-        crate::capture_command_duration!(crate::timing::TimingMetric::CommandDevBuildWrite, start,);
-
-    let mut build_result = match build_result_outcome {
-        Ok(build_result) => build_result,
-        Err(messages) => {
-            return BuildOutcome {
-                build_succeeded: false,
-                build_duration,
-                entry_page_rel: None,
-                html_site_config: None,
-                diagnostics_summary: format_compiler_messages(&messages),
-                success_messages: None,
-                failed_build: Some(BuildFailure::CompilerMessages(messages)),
-                watch_scope: None,
-                output_dir: None,
-            };
-        }
-    };
-    let output_dir = build_result
-        .directory_output_plan
-        .as_ref()
-        .map(|plan| canonical_output_dir(&plan.output_root))
-        .unwrap_or_else(|| {
-            canonical_output_dir(
-                &entry_file
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("dev"),
-            )
-        });
-    let watch_scope = watch::WatchScope::derive(
-        &build_result.config.entry_dir,
-        Some(&build_result.config),
-        &output_dir,
-    );
-
-    let html_site_config =
-        match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
-            Ok(config) => config,
-            Err(error) => {
-                let config_string_table = build_result.string_table.clone();
-                let config_source_database = build_result.source_database.as_ref().map(Arc::clone);
-                let mut messages = error.into_messages(config_string_table);
-                if let Some(source_database) = config_source_database {
-                    messages.set_source_database(source_database);
-                }
-                if let Some(warnings) = build_result.take_warning_messages_before_freeze() {
-                    messages.append_messages_preserving_context(warnings);
-                }
-                if let Err(error) = messages.freeze_source_contexts() {
-                    messages.set_infrastructure_error(error);
-                }
-                return BuildOutcome {
-                    build_succeeded: false,
-                    build_duration,
-                    entry_page_rel: None,
-                    html_site_config: None,
-                    diagnostics_summary: format_compiler_messages(&messages),
-                    success_messages: None,
-                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
-                    watch_scope: Some(watch_scope),
-                    output_dir: Some(output_dir),
-                };
-            }
-        };
-
-    let warnings_summary = build_result
-        .warnings
-        .iter()
-        .map(|warning| warning.kind.descriptor().title.to_string())
-        .collect::<Vec<String>>()
-        .join("\n");
-
-    if let Some(entry_page_rel) = build_result.project.entry_page_rel.clone() {
-        let diagnostics_summary = if warnings_summary.is_empty() {
-            String::from("Build succeeded.")
-        } else {
-            format!("Build succeeded with warnings:\n{warnings_summary}")
-        };
-
-        let success_messages = match build_result.take_warning_messages() {
-            Some(messages) if messages.has_errors() => {
-                return BuildOutcome {
-                    build_succeeded: false,
-                    build_duration,
-                    entry_page_rel: None,
-                    html_site_config: None,
-                    diagnostics_summary: format_compiler_messages(&messages),
-                    success_messages: None,
-                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
-                    watch_scope: Some(watch_scope),
-                    output_dir: Some(output_dir),
-                };
-            }
-            messages => messages,
-        };
-        BuildOutcome {
-            build_succeeded: true,
-            build_duration,
-            entry_page_rel: Some(entry_page_rel),
-            html_site_config: Some(html_site_config),
-            diagnostics_summary,
-            success_messages,
-            failed_build: None,
-            watch_scope: Some(watch_scope),
-            output_dir: Some(output_dir),
-        }
-    } else {
-        // A successful dev build promises a page for the host to serve, including custom builders.
-        let mut error = CompilerError::compiler_error(
-            "Build completed, but the project builder did not declare a dev entry page.",
-        );
-        error.new_metadata_entry(
-            CompilerErrorMetadataKey::CompilationStage,
-            "Dev entry publication".to_string(),
-        );
-        let mut messages = CompilerMessages::from_error(error, Default::default());
-        if let Some(mut warnings) = build_result.take_warning_messages_before_freeze() {
-            warnings.append_messages_preserving_context(messages);
-            messages = warnings;
-        }
-        if let Err(error) = messages.freeze_source_contexts() {
-            messages.set_infrastructure_error(error);
-        }
-        let diagnostics_summary = format_compiler_messages(&messages);
-        BuildOutcome {
-            build_succeeded: false,
-            build_duration,
-            entry_page_rel: None,
-            html_site_config: None,
-            diagnostics_summary,
-            success_messages: None,
-            failed_build: Some(BuildFailure::CompilerMessages(messages)),
-            watch_scope: Some(watch_scope),
-            output_dir: Some(output_dir),
-        }
+    BuildOutcome {
+        kind: BuildOutcomeKind::Failure(failure),
+        watch_scope,
+        output_dir,
     }
+}
+
+fn resolve_absolute_path(path: &Path) -> Result<PathBuf, InfrastructureErrors> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+
+    std::env::current_dir()
+        .map(|current_directory| current_directory.join(path))
+        .map_err(|error| {
+            InfrastructureFailure::filesystem(
+                CompilerStage::DevelopmentServer,
+                path,
+                format!("Failed to resolve an absolute dev-server path: {error}"),
+            )
+            .into()
+        })
 }
 
 fn canonical_output_dir(output_dir: &Path) -> PathBuf {
@@ -543,10 +713,79 @@ fn dev_server_project_root(entry_file: &Path) -> PathBuf {
     }
 }
 
-/// Constructs a host-operation failure. Typed compiler and filesystem failures bypass this helper.
-pub fn dev_server_error_messages(path: &Path, msg: impl Into<String>) -> CompilerMessages {
-    let error = CompilerError::file_error(path, msg.into()).with_error_type(ErrorType::DevServer);
-    CompilerMessages::from_error(error, Default::default())
+pub(crate) fn capture_served_artifacts(
+    output_root: &Path,
+) -> Result<ServedArtifactSnapshot, InfrastructureFailure> {
+    let root = output_root
+        .canonicalize()
+        .map_err(|error| artifact_snapshot_failure(output_root, error.to_string()))?;
+    let mut directories = vec![(root.clone(), PathBuf::new(), HashSet::new())];
+    let mut artifacts = HashMap::new();
+
+    while let Some((directory, relative_directory, mut ancestors)) = directories.pop() {
+        let canonical_directory = directory
+            .canonicalize()
+            .map_err(|error| artifact_snapshot_failure(&directory, error.to_string()))?;
+        if !ancestors.insert(canonical_directory) {
+            continue;
+        }
+
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| artifact_snapshot_failure(&directory, error.to_string()))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| artifact_snapshot_failure(&directory, error.to_string()))?;
+            let path = entry.path();
+            let relative_path = relative_directory.join(entry.file_name());
+            let file_type = entry
+                .file_type()
+                .map_err(|error| artifact_snapshot_failure(&path, error.to_string()))?;
+            let target_metadata = if file_type.is_symlink() {
+                match fs::metadata(&path) {
+                    Ok(metadata) => Some(metadata),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => {
+                        return Err(artifact_snapshot_failure(&path, error.to_string()));
+                    }
+                }
+            } else {
+                None
+            };
+            if file_type.is_dir()
+                || target_metadata
+                    .as_ref()
+                    .is_some_and(std::fs::Metadata::is_dir)
+            {
+                directories.push((path, relative_path, ancestors.clone()));
+                continue;
+            }
+            if !file_type.is_file()
+                && !target_metadata
+                    .as_ref()
+                    .is_some_and(std::fs::Metadata::is_file)
+            {
+                continue;
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| artifact_snapshot_failure(&path, error.to_string()))?;
+            artifacts.insert(relative_path, Arc::new(bytes));
+        }
+    }
+
+    Ok(Arc::new(artifacts))
+}
+
+fn artifact_snapshot_failure(path: &Path, detail: String) -> InfrastructureFailure {
+    InfrastructureFailure::filesystem(
+        CompilerStage::DevelopmentServer,
+        path,
+        format!("Failed to capture dev-server artifact snapshot: {detail}"),
+    )
+}
+
+/// Constructs a host-operation failure.
+pub fn dev_server_error(path: &Path, msg: impl Into<String>) -> InfrastructureFailure {
+    InfrastructureFailure::development_server(path, msg.into())
 }
 
 #[cfg(test)]

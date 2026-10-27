@@ -1,4 +1,4 @@
--- Phase 8 acceptance: Error.code is a genuine U32 at runtime.
+-- Error.code is a genuine U32 at runtime.
 --
 -- Dynamic code parameters 0, 2147483648 and 4294967295 are produced through
 -- mutable carriers and function boundaries, recovered through ordinary Error!

@@ -1,0 +1,14 @@
+AlertLevel ::
+    Ok,
+    Watch,
+;
+
+format_level |level AlertLevel| -> String:
+    if level is:
+        Ok => return "ok"
+        Watch => return "watch"
+    ;
+;
+
+message = format_level(AlertLevel::Watch)
+[:match_message=[message]]

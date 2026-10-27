@@ -28,6 +28,11 @@ use super::parse_expression_places::{
 };
 use super::parse_expression_templates::parse_template_expression;
 use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::ast_log;
@@ -53,14 +58,15 @@ use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
 use crate::compiler_frontend::builtins::expression_parsing::parse_curly_literal_expression;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken,
-    InvalidBuiltinCallReason, InvalidCastReason, InvalidControlFlowStatementReason,
-    InvalidExpressionReason, InvalidFallibleHandlingReason,
+    AstCapacityResource, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
+    InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
@@ -168,7 +174,7 @@ fn reject_adjacent_operand(
         .is_some_and(ExpressionRpnItem::is_operand_shape);
 
     if previous_is_operand {
-        return Err(CompilerDiagnostic::invalid_expression(
+        return Err(token_lexical::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
             second_expression_span,
         )
@@ -182,30 +188,25 @@ fn unexpected_token_at_current(
     token_stream: &AstCursor,
     fallback: TokenTag,
     string_table: &mut StringTable,
-) -> Result<CompilerDiagnostic, ExpressionParseError> {
+) -> Result<DiagnosticDraft, ExpressionParseError> {
     let span = Some(token_stream.current_span());
     let found = token_stream
         .current_diagnostic_token(string_table)
         .map_err(|error| {
-            CompilerDiagnostic::token_view_invariant_error(
-                error,
+            InfrastructureFailure::malformed_token_projection(
                 "expression unexpected-token diagnostic",
+                error,
             )
         })?;
     Ok(match found {
-        Some(found) => CompilerDiagnostic::unexpected_token_from_tag(found, span),
-        None => CompilerDiagnostic::unexpected_token_from_tag(
+        Some(found) => token_lexical::unexpected_token_from_tag(found, span),
+        None => token_lexical::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(fallback),
             span,
         ),
     })
 }
 
-fn is_value_operand_start_token(tag: TokenTag) -> bool {
-    // The schema class is the canonical operand-start authority; `RAW_STRING_LITERAL` keeps its
-    // legacy exclusion because raw strings never appear in value-operand position here.
-    tag.is_operand_start() && tag != TokenTag::RAW_STRING_LITERAL
-}
 /// Skips value-less comment templates before checking what follows a value template.
 fn reject_second_operand_after_value_template(
     token_stream: &mut AstCursor,
@@ -230,7 +231,7 @@ fn reject_second_operand_after_value_template(
         )?;
 
         if next_template.is_some() {
-            return Err(CompilerDiagnostic::invalid_expression(
+            return Err(token_lexical::invalid_expression(
                 InvalidExpressionReason::ExpectedOperatorBeforeExpression,
                 next_template_start,
             )
@@ -238,8 +239,8 @@ fn reject_second_operand_after_value_template(
         }
     }
 
-    if is_value_operand_start_token(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_expression(
+    if token_stream.current_tag().is_operand_start() {
+        return Err(token_lexical::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
             Some(token_stream.current_span()),
         )
@@ -278,10 +279,10 @@ fn push_expression_after_suffixes(
         }
         // Invariant: the condition above guarantees Bang+Assign, which
         // check_expression_common_mistake always matches. Reaching here is a compiler bug.
-        return Err(CompilerError::compiler_error(
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "Bang+Assign pattern did not produce expected error",
-        )
-        .into());
+        );
     }
 
     // ----------------------------
@@ -348,7 +349,7 @@ fn push_expression_after_suffixes(
             string_table,
             path_fork,
         );
-        return Err(CompilerDiagnostic::const_record_used_as_value(
+        return Err(names_declarations::const_record_used_as_value(
             record_name,
             expression_builder
                 .view_owned(expression_after_option_propagation)?
@@ -499,8 +500,7 @@ fn parse_unary_operator(
             if token_stream.peek_next_tag() == Some(TokenTag::NUMERIC_LITERAL) {
                 *next_number_negative = true;
             } else {
-                // Token-local postfix span comes from the AstCursor view.
-                let span = Some(token_stream.current_postfix_operator_span());
+                let span = Some(token_stream.current_span());
                 expression.push(ExpressionRpnItem::Operator {
                     operator: Operator::Negate,
                     span,
@@ -509,7 +509,7 @@ fn parse_unary_operator(
             true
         }
         TokenTag::NOT => {
-            let span = Some(token_stream.current_postfix_operator_span());
+            let span = Some(token_stream.current_span());
             expression.push(ExpressionRpnItem::Operator {
                 operator: Operator::Not,
                 span,
@@ -535,10 +535,10 @@ fn advance_with_operator(
     context: &ScopeContext,
     token_stream: &AstCursor,
     operator: Operator,
-) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    let span = Some(token_stream.current_postfix_operator_span());
+) -> ExpressionTokenStep {
+    let span = Some(token_stream.current_span());
     push_operator_item(expression, context, span, operator);
-    Ok(ExpressionTokenStep::Advance)
+    ExpressionTokenStep::Advance
 }
 
 pub(super) fn dispatch_expression_token(
@@ -551,7 +551,7 @@ pub(super) fn dispatch_expression_token(
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     // Reject definite adjacency before semantic name, call or constructor parsing.
-    if is_value_operand_start_token(token) {
+    if token.is_operand_start() {
         reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
     }
 
@@ -578,6 +578,26 @@ pub(super) fn dispatch_expression_token(
     )
 }
 
+fn binary_operator_for_tag(tag: TokenTag) -> Option<Operator> {
+    match tag {
+        TokenTag::ADD => Some(Operator::Add),
+        TokenTag::SUBTRACT => Some(Operator::Subtract),
+        TokenTag::MULTIPLY => Some(Operator::Multiply),
+        TokenTag::DIVIDE => Some(Operator::Divide),
+        TokenTag::INT_DIVIDE => Some(Operator::IntDivide),
+        TokenTag::EXPONENT => Some(Operator::Exponent),
+        TokenTag::MODULUS => Some(Operator::Modulus),
+        TokenTag::LESS_THAN => Some(Operator::LessThan),
+        TokenTag::LESS_THAN_OR_EQUAL => Some(Operator::LessThanOrEqual),
+        TokenTag::GREATER_THAN => Some(Operator::GreaterThan),
+        TokenTag::GREATER_THAN_OR_EQUAL => Some(Operator::GreaterThanOrEqual),
+        TokenTag::AND => Some(Operator::And),
+        TokenTag::OR => Some(Operator::Or),
+        TokenTag::EXCLUSIVE_RANGE => Some(Operator::Range),
+        _ => None,
+    }
+}
+
 #[inline(never)]
 fn dispatch_non_group_expression_token(
     token: TokenTag,
@@ -592,11 +612,20 @@ fn dispatch_non_group_expression_token(
     let const_values = &mut *state.const_values;
     // This state machine is intentionally flat: each token either appends one AST node, advances
     // past a nested parse, or signals the caller that the surrounding grammar owns the delimiter.
+    if let Some(operator) = binary_operator_for_tag(token) {
+        return Ok(advance_with_operator(
+            state.expression,
+            context,
+            token_stream,
+            operator,
+        ));
+    }
+
     match token {
         // Recovery selects the completed ordinary expression, never the last primary.
         TokenTag::CATCH => {
             if !state.allow_boundary_catch || !fallible_catch_allowed_in_context(context) {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
+                return Err(choices_control_flow::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::CatchOutsideBoundary,
                     Some(token_stream.current_span()),
                 )
@@ -623,7 +652,7 @@ fn dispatch_non_group_expression_token(
             if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
                 let cast_name = builtin_scalar_type_name_for_tag(token)
                     .map(|spelling| string_table.intern(spelling));
-                return Err(CompilerDiagnostic::invalid_builtin_call(
+                return Err(calls_data::invalid_builtin_call(
                     InvalidBuiltinCallReason::ScalarConstructorRemoved,
                     cast_name,
                     Some(token_stream.current_span()),
@@ -658,7 +687,7 @@ fn dispatch_non_group_expression_token(
             Ok(ExpressionTokenStep::Advance)
         }
 
-        TokenTag::NEWLINE => dispatch_newline(token_stream, context, state),
+        TokenTag::NEWLINE => Ok(dispatch_newline(token_stream, context, state)),
 
         TokenTag::SYMBOL | TokenTag::THIS => {
             parse_identifier_or_call(
@@ -718,13 +747,21 @@ fn dispatch_non_group_expression_token(
         }
 
         TokenTag::PATH => {
-            let path_span = Some(token_stream.current_postfix_operator_span());
+            let path_span = Some(token_stream.current_span());
             let path_syntax = token_stream
                 .current()
                 .and_then(|token| token.path_syntax_id())
-                .ok_or_else(|| CompilerError::compiler_error("path token had no payload"))?;
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "path token had no payload",
+                    )
+                })?;
             token_stream.current_path_syntax()?.ok_or_else(|| {
-                CompilerError::compiler_error("path token had no validated syntax row")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "path token had no validated syntax row",
+                )
             })?;
             let operand = resolve_file_value(
                 path_syntax,
@@ -822,13 +859,13 @@ fn dispatch_non_group_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenTag::IF => Err(CompilerDiagnostic::invalid_control_flow_statement(
+        TokenTag::IF => Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
             Some(token_stream.current_span()),
         )
         .into()),
 
-        TokenTag::ASSERT => Err(CompilerDiagnostic::invalid_builtin_call(
+        TokenTag::ASSERT => Err(calls_data::invalid_builtin_call(
             InvalidBuiltinCallReason::ExpressionPositionNotAllowed,
             Some(string_table.intern("assert")),
             Some(token_stream.current_span()),
@@ -838,8 +875,7 @@ fn dispatch_non_group_expression_token(
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                 token_stream.current_tag(),
-                Some(token_stream.current_span()),
-                "Expression Parsing",
+                CompilerStage::AstConstruction,
                 "expression parsing",
             )?;
 
@@ -873,28 +909,6 @@ fn dispatch_non_group_expression_token(
             Ok(ExpressionTokenStep::Advance)
         }
 
-        TokenTag::ADD => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Add)
-        }
-        TokenTag::SUBTRACT => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Subtract)
-        }
-        TokenTag::MULTIPLY => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Multiply)
-        }
-        TokenTag::DIVIDE => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Divide)
-        }
-        TokenTag::INT_DIVIDE => {
-            advance_with_operator(state.expression, context, token_stream, Operator::IntDivide)
-        }
-        TokenTag::EXPONENT => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Exponent)
-        }
-        TokenTag::MODULUS => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Modulus)
-        }
-
         TokenTag::IS => dispatch_is_token(
             token,
             token_stream,
@@ -904,38 +918,6 @@ fn dispatch_non_group_expression_token(
             string_table,
             path_fork,
         ),
-
-        TokenTag::LESS_THAN => {
-            advance_with_operator(state.expression, context, token_stream, Operator::LessThan)
-        }
-        TokenTag::LESS_THAN_OR_EQUAL => advance_with_operator(
-            state.expression,
-            context,
-            token_stream,
-            Operator::LessThanOrEqual,
-        ),
-        TokenTag::GREATER_THAN => advance_with_operator(
-            state.expression,
-            context,
-            token_stream,
-            Operator::GreaterThan,
-        ),
-        TokenTag::GREATER_THAN_OR_EQUAL => advance_with_operator(
-            state.expression,
-            context,
-            token_stream,
-            Operator::GreaterThanOrEqual,
-        ),
-        TokenTag::AND => {
-            advance_with_operator(state.expression, context, token_stream, Operator::And)
-        }
-        TokenTag::OR => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Or)
-        }
-
-        TokenTag::EXCLUSIVE_RANGE => {
-            advance_with_operator(state.expression, context, token_stream, Operator::Range)
-        }
 
         TokenTag::WILDCARD => {
             Err(unexpected_token_at_current(token_stream, token, string_table)?.into())
@@ -1009,7 +991,7 @@ fn dispatch_non_group_expression_token(
                         )? {
                             return Ok(ExpressionTokenStep::Continue);
                         }
-                        let span = Some(token_stream.current_postfix_operator_span());
+                        let span = Some(token_stream.current_span());
                         token_stream.advance();
                         retain_operand_handling_suffix(
                             state.expression,
@@ -1032,13 +1014,13 @@ fn dispatch_non_group_expression_token(
                         if token_stream.peek_next_tag() == Some(TokenTag::CATCH) {
                             let conflict_span =
                                 token_stream.span_at(token_stream.position().saturating_add(1));
-                            return Err(CompilerDiagnostic::invalid_fallible_handling(
+                            return Err(choices_control_flow::invalid_fallible_handling(
                                 InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
                                 conflict_span,
                             )
                             .into());
                         }
-                        let span = Some(token_stream.current_postfix_operator_span());
+                        let span = Some(token_stream.current_span());
                         token_stream.advance();
                         retain_operand_handling_suffix(
                             state.expression,
@@ -1119,7 +1101,7 @@ fn dispatch_parenthesized_expression(
     // numeric literal widened to `Infer`, and the parent's state returns when the frame closes.
     state.group_frames.push(GroupFrame {
         open_index: state.expression.len(),
-        opening_span: token_stream.current_postfix_operator_span(),
+        opening_span: token_stream.current_span(),
         parent_expected_type: *state.expected_type,
         parent_cast_target_context: std::mem::replace(
             state.cast_target_context,
@@ -1147,17 +1129,17 @@ fn dispatch_parenthesized_record(
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     let expression_builder = &mut *state.expression_builder;
     let const_values = &mut *state.const_values;
-    let group_span = Some(token_stream.current_postfix_operator_span());
+    let group_span = Some(token_stream.current_span());
     if !context.kind.is_constant_context() {
         if matches!(parenthesized_kind, ParenthesizedExpressionKind::Empty) {
-            return Err(CompilerDiagnostic::invalid_expression(
+            return Err(token_lexical::invalid_expression(
                 InvalidExpressionReason::EmptyRuntimeAnonymousRecord,
                 Some(token_stream.current_span()),
             )
             .into());
         }
 
-        return Err(CompilerDiagnostic::deferred_feature_reason(
+        return Err(names_declarations::deferred_feature_reason(
             DeferredFeatureReason::RuntimeAnonymousRecord,
             Some(token_stream.current_span()),
         )
@@ -1216,7 +1198,8 @@ pub(super) fn close_innermost_group(
     root_allow_boundary_catch: bool,
 ) -> Result<(), ExpressionParseError> {
     let Some(frame) = state.group_frames.pop() else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "grouped expression closed without an open group frame",
         )
         .into());
@@ -1272,7 +1255,8 @@ pub(super) fn close_innermost_group(
         let anchor_span = match state.expression.get(anchor_index) {
             Some(item) => item.source_span(&*state.expression_builder)?,
             None => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "No nodes found in expression. This should never happen.",
                 )
                 .into());
@@ -1329,13 +1313,13 @@ fn group_open_distance(
         .checked_sub(open_index)
         .filter(|distance| *distance > 0)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "grouped expression close does not follow its open marker",
             )
         })?;
     u32::try_from(distance).map_err(|_| {
-        CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::GroupDistances, span)
-            .into()
+        token_lexical::compiler_capacity_exceeded(AstCapacityResource::GroupDistances, span).into()
     })
 }
 
@@ -1348,7 +1332,7 @@ fn group_open_distance(
 ///      that does not exist yet. Literal-only operands keep their existing diagnostics.
 fn last_item_is_retained_numeric_operand(
     items: &[ExpressionRpnItem],
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     Ok(match items.last() {
         Some(ExpressionRpnItem::PendingNumericBinding { .. })
         | Some(ExpressionRpnItem::PendingNumericCast { .. })
@@ -1381,7 +1365,8 @@ pub(super) fn push_pending_numeric_binding(
     is_copy: bool,
 ) -> Result<(), ExpressionParseError> {
     let value_mode = context.pending_numeric_value_mode(binding).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a pending numeric binding reference had no live row in its own construction domain",
         )
     })?;
@@ -1415,7 +1400,7 @@ fn dispatch_delimiter_token(
     }
 
     if state.consume_closing_parenthesis {
-        return Err(CompilerDiagnostic::missing_closing_delimiter(
+        return Err(token_lexical::missing_closing_delimiter(
             string_table.intern(")"),
             Some(token_stream.current_span()),
         )
@@ -1511,7 +1496,7 @@ fn dispatch_newline(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     state: &mut ExpressionDispatchState<'_>,
-) -> Result<ExpressionTokenStep, ExpressionParseError> {
+) -> ExpressionTokenStep {
     let previous_tag = token_stream
         .previous()
         .map(|token| token.tag())
@@ -1523,11 +1508,11 @@ fn dispatch_newline(
         context.match_arm_boundary,
     ) {
         token_stream.skip_newlines();
-        return Ok(ExpressionTokenStep::Continue);
+        return ExpressionTokenStep::Continue;
     }
 
     ast_log!("Breaking out of expression with newline");
-    Ok(ExpressionTokenStep::Break)
+    ExpressionTokenStep::Break
 }
 
 fn dispatch_is_token(
@@ -1539,11 +1524,11 @@ fn dispatch_is_token(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    match token_stream.peek_next_tag() {
+    let operator = match token_stream.peek_next_tag() {
         // `is not` → inequality operator.
         Some(TokenTag::NOT) => {
             token_stream.advance();
-            advance_with_operator(state.expression, context, token_stream, Operator::NotEqual)
+            Operator::NotEqual
         }
 
         // `is:` → type guard in a match arm. The left side must be one operand: the whole fragment
@@ -1576,12 +1561,18 @@ fn dispatch_is_token(
                 string_table,
                 path_fork,
             )?;
-            Ok(ExpressionTokenStep::Return(value))
+            return Ok(ExpressionTokenStep::Return(value));
         }
 
         // Bare `is` → equality operator.
-        _ => advance_with_operator(state.expression, context, token_stream, Operator::Equality),
-    }
+        _ => Operator::Equality,
+    };
+    Ok(advance_with_operator(
+        state.expression,
+        context,
+        token_stream,
+        operator,
+    ))
 }
 
 /// Parses an explicit `cast` or `cast ... catch:` expression at a typed boundary.
@@ -1616,7 +1607,7 @@ fn parse_cast_expression(
         } => (target_type_id, target, requires_optional_wrap_after_cast),
 
         CastTargetContext::TargetIsGenericParameter { target_type_id } => {
-            return Err(CompilerDiagnostic::invalid_cast(
+            return Err(calls_data::invalid_cast(
                 InvalidCastReason::TargetIsGenericParameter,
                 None,
                 Some(target_type_id),
@@ -1626,7 +1617,7 @@ fn parse_cast_expression(
         }
 
         CastTargetContext::TargetNotBuiltin { target_type_id } => {
-            return Err(CompilerDiagnostic::invalid_cast(
+            return Err(calls_data::invalid_cast(
                 InvalidCastReason::TargetNotBuiltin,
                 None,
                 Some(target_type_id),
@@ -1636,7 +1627,7 @@ fn parse_cast_expression(
         }
 
         CastTargetContext::None => {
-            return Err(CompilerDiagnostic::invalid_cast(
+            return Err(calls_data::invalid_cast(
                 InvalidCastReason::MissingExplicitTarget,
                 None,
                 None,
@@ -1649,10 +1640,10 @@ fn parse_cast_expression(
     let cast_span = Some(token_stream.current_span());
     token_stream.advance();
 
-    // `cast!` was removed. Its separate bang remains an ordinary token so the
+    // A bang immediately after the cast keyword is rejected. It remains an ordinary token so the
     // diagnostic can point to the exact byte instead of silently changing meaning.
     if token_stream.current_tag() == TokenTag::BANG {
-        return Err(CompilerDiagnostic::invalid_cast(
+        return Err(calls_data::invalid_cast(
             InvalidCastReason::CastPropagationRemoved,
             None,
             None,
@@ -1913,7 +1904,7 @@ impl GroupContentFacts {
 fn group_content_facts(
     expression: &[ExpressionRpnItem],
     item_start: usize,
-) -> Result<GroupContentFacts, CompilerError> {
+) -> Result<GroupContentFacts, InfrastructureFailure> {
     let mut facts = GroupContentFacts {
         operands: 0,
         binary_operators: 0,
@@ -1936,7 +1927,8 @@ fn group_content_facts(
                             && matches!(expression[*open], ExpressionRpnItem::GroupOpen { .. })
                     })
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "grouped expression close does not match its open marker",
                         )
                     })?;
@@ -1945,7 +1937,8 @@ fn group_content_facts(
                 index = open_index;
             }
             ExpressionRpnItem::GroupOpen { .. } => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "grouped expression open marker has no matching close",
                 ));
             }

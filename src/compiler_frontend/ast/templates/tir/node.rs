@@ -86,8 +86,8 @@ pub(crate) struct TemplateIr {
     /// WHAT: references a `TemplateSlotPlan` side-table entry. Runtime slot site
     /// nodes inside this template also carry the same plan ID so each site ID is
     /// anchored to the plan that owns it.
-    /// WHY: runtime slot routing remains AST-owned, but TIR needs a stable
-    /// handoff before HIR/runtime metadata can migrate away from `Template`.
+    /// WHY: routing remains AST-owned. AST handoff materialization turns this TIR-local plan into
+    ///      owned runtime metadata for HIR without exposing TIR IDs.
     pub(crate) runtime_slot_plan: Option<TemplateSlotPlanId>,
 }
 
@@ -233,10 +233,8 @@ pub(crate) enum TemplateIrNodeKind {
     /// and dynamic expressions that surround the loop aggregate output. The
     /// `AggregateOutput` marker node inside that subtree is replaced at fold
     /// time with the already-folded aggregate string.
-    /// WHY: representing wrapper contents directly in TIR removes the old
-    /// AST aggregate-plan detour. Keeping the wrapper as a normal subtree lets
-    /// folding reuse the existing node walker instead of a parallel render-piece
-    /// fold path.
+    /// WHY: representing wrapper contents directly in TIR lets folding reuse the existing
+    ///      node walker rather than a separate fold path.
     Loop {
         header: TemplateLoopHeader,
 
@@ -267,8 +265,7 @@ pub(crate) enum TemplateIrNodeKind {
     ///
     /// WHAT: a leaf that the TIR fold path replaces with the per-loop aggregate
     /// string after the body has been folded.
-    /// WHY: this replaces the AST aggregate-plan placeholder and makes the
-    /// aggregate wrapper a first-class TIR subtree.
+    /// WHY: the aggregate wrapper is a first-class TIR subtree.
     AggregateOutput,
 
     /// Runtime slot site placeholder resolved by AST planning.

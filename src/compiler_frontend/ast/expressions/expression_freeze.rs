@@ -22,7 +22,7 @@ impl EntryRemap {
         }
     }
 
-    fn select(&mut self, index: usize) -> Result<(), CompilerError> {
+    fn select(&mut self, index: usize) -> Result<(), InfrastructureFailure> {
         let entry = self
             .indices
             .get_mut(index)
@@ -31,7 +31,7 @@ impl EntryRemap {
         Ok(())
     }
 
-    fn select_range(&mut self, start: u32, len: u32) -> Result<(), CompilerError> {
+    fn select_range(&mut self, start: u32, len: u32) -> Result<(), InfrastructureFailure> {
         let end = start
             .checked_add(len)
             .ok_or_else(|| invariant("freeze range overflow"))?;
@@ -53,7 +53,7 @@ impl EntryRemap {
         }
     }
 
-    fn index(&self, index: usize) -> Result<u32, CompilerError> {
+    fn index(&self, index: usize) -> Result<u32, InfrastructureFailure> {
         self.indices
             .get(index)
             .copied()
@@ -61,7 +61,7 @@ impl EntryRemap {
             .ok_or_else(|| invariant("freeze reference to omitted entry"))
     }
 
-    fn range_start(&self, start: u32, len: u32) -> Result<u32, CompilerError> {
+    fn range_start(&self, start: u32, len: u32) -> Result<u32, InfrastructureFailure> {
         if len == 0 {
             return Ok(0);
         }
@@ -127,11 +127,11 @@ side_remaps!(
 );
 
 impl FreezeRemap {
-    fn expression(&self, id: ExprId) -> Result<ExprId, CompilerError> {
+    fn expression(&self, id: ExprId) -> Result<ExprId, InfrastructureFailure> {
         Ok(ExprId::at(self.rows.index(id.index())? as usize))
     }
 
-    fn place(&self, id: PlaceId) -> Result<PlaceId, CompilerError> {
+    fn place(&self, id: PlaceId) -> Result<PlaceId, InfrastructureFailure> {
         Ok(PlaceId::at(self.places.index(id.index())? as usize))
     }
 
@@ -139,7 +139,7 @@ impl FreezeRemap {
         &mut self,
         storage: &ExpressionStore,
         id: PlaceId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.places.select(id.index())?;
         let place = storage
             .places
@@ -149,7 +149,11 @@ impl FreezeRemap {
             .select_range(place.projections.start, place.projections.len)
     }
 
-    fn select_call(&mut self, storage: &ExpressionStore, id: CallId) -> Result<(), CompilerError> {
+    fn select_call(
+        &mut self,
+        storage: &ExpressionStore,
+        id: CallId,
+    ) -> Result<(), InfrastructureFailure> {
         self.calls.select(id.index())?;
         let call = storage
             .calls
@@ -167,7 +171,7 @@ impl FreezeRemap {
         &mut self,
         storage: &ExpressionStore,
         row: &ExpressionRow,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let SuccessShape::Multiple(range) = row.success {
             self.result_types.select_range(range.start, range.len)?;
         }
@@ -246,7 +250,7 @@ impl FreezeRemap {
         }
         Ok(())
     }
-    fn rewrite_row(&self, row: &mut ExpressionRow) -> Result<(), CompilerError> {
+    fn rewrite_row(&self, row: &mut ExpressionRow) -> Result<(), InfrastructureFailure> {
         macro_rules! side {
             ($field:ident, $id:expr, $ty:ident) => {
                 *$id = $ty::at(self.$field.index($id.index())? as usize)
@@ -337,7 +341,7 @@ impl FreezeRemap {
         Ok(())
     }
 
-    fn rewrite_sides(&self, storage: &mut ExpressionStore) -> Result<(), CompilerError> {
+    fn rewrite_sides(&self, storage: &mut ExpressionStore) -> Result<(), InfrastructureFailure> {
         macro_rules! selected { ($field:ident, $value:ident, $body:block) => {
             for (index, $value) in storage.$field.iter_mut().enumerate() {
                 if self.$field.indices[index].is_some() $body
@@ -401,7 +405,7 @@ impl FreezeRemap {
 fn rewrite_expression_leaves(
     remap: &FreezeRemap,
     visit: impl FnOnce(&mut dyn FnMut(&mut ExprId)),
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut result = Ok(());
     visit(&mut |id| {
         if result.is_ok() {
@@ -417,7 +421,7 @@ fn rewrite_expression_leaves(
 fn rewrite_place_leaves(
     remap: &FreezeRemap,
     visit: impl FnOnce(&mut dyn FnMut(&mut PlaceId)),
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut result = Ok(());
     visit(&mut |id| {
         if result.is_ok() {
@@ -438,7 +442,7 @@ impl AstExpressionBuilder {
     pub(crate) fn freeze(
         self,
         roots: &mut impl ExpressionFreezeRoots,
-    ) -> Result<ExpressionStore, CompilerError> {
+    ) -> Result<ExpressionStore, InfrastructureFailure> {
         let mut storage = self.storage;
         let mut remap = FreezeRemap::new(&storage);
         let mut pending = Vec::new();
@@ -526,7 +530,7 @@ impl FreezeParity {
         storage: &ExpressionStore,
         remap: &FreezeRemap,
         roots: &impl ExpressionFreezeRoots,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut snapshot = Self {
             roots: Vec::new(),
             places: Vec::new(),
@@ -566,7 +570,7 @@ impl FreezeParity {
         self,
         store: &ExpressionStore,
         roots: &impl ExpressionFreezeRoots,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut expressions = Vec::new();
         let mut places = Vec::new();
         roots.visit_expression_ids(&mut |id| expressions.push(id));

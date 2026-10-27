@@ -1,4 +1,10 @@
+use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    CrossModuleImportNotExportedView, UnsupportedExternalExtensionView,
+};
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 #[test]
 fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -27,8 +33,11 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
     super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 1);
@@ -99,8 +108,11 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         &canonical_root,
     );
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("unreachable malformed sources must not enter the module diagnostics");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1);
     let module = modules[0];
@@ -248,8 +260,11 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
     source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("asset source discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(
         module_prepared_source_names(modules[0]),
@@ -316,24 +331,18 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
     let root = _temp.path().to_path_buf();
 
     let missing_source = root.join("missing.md");
-    let mut string_table = StringTable::new();
-
-    let messages = load_missing_source_path_for_test(
+    let error = load_missing_source_path_for_test(
         missing_source.clone(),
         crate::builder_surface::SourceFileKind::PlainMarkdown,
-        &mut string_table,
     )
     .expect_err("missing source read should fail");
 
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("expected infrastructure file error");
     assert!(
         error
-            .msg
+            .message
             .contains("Error reading file when adding new moth files to parse"),
         "unexpected infrastructure message: {}",
-        error.msg,
+        error.message,
     );
     let host_path = error
         .host_path
@@ -355,24 +364,23 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     fs::write(&loaded, "# Loaded sibling\n").expect("should write loaded source");
 
     let mut string_table = StringTable::new();
-    let messages = match load_missing_source_paths_with_registered_paths_for_test(
-        vec![
-            first_missing.clone(),
-            loaded.clone(),
-            second_missing.clone(),
-        ],
-        SourceFileKind::PlainMarkdown,
-        &mut string_table,
-    ) {
-        Ok(_) => panic!("a serial missing-source failure should be reported"),
-        Err(messages) => messages,
-    };
+    let (prepared_failure, source_files) =
+        match load_missing_source_paths_with_registered_paths_for_test(
+            vec![
+                first_missing.clone(),
+                loaded.clone(),
+                second_missing.clone(),
+            ],
+            SourceFileKind::PlainMarkdown,
+            &mut string_table,
+        ) {
+            Ok(_) => panic!("a serial missing-source failure should be reported"),
+            Err((failure, Some(source_files))) => (failure, *source_files),
+            Err((failure, None)) => {
+                panic!("source loading should retain its finalized source owner: {failure:?}")
+            }
+        };
 
-    let source_files = messages
-        .infrastructure_errors()
-        .expect("source loading should retain its infrastructure causes")
-        .source_database_for_cause(0)
-        .expect("mixed source loading should publish its finalized source context");
     let first_missing_id = source_files
         .get_by_canonical_path(&first_missing)
         .expect("first missing source should retain its registration slot")
@@ -396,8 +404,17 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     assert!(source_files.source_load_error(first_missing_id).is_some());
     assert!(source_files.source_load_error(second_missing_id).is_some());
 
-    let error = messages
-        .primary_infrastructure_error()
+    let boundary = prepared_failure_result::<()>(
+        prepared_failure,
+        Some(Arc::new(source_files)),
+        &string_table,
+    );
+    let Err(errors) = boundary else {
+        panic!("source loading should retain its infrastructure causes");
+    };
+    let error = errors
+        .iter()
+        .next()
         .expect("the first read failure should retain the infrastructure error lane");
     let host_path = error
         .host_path
@@ -426,25 +443,25 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
         .collect::<Vec<_>>();
     let mut string_table = StringTable::new();
 
-    let messages = match load_missing_source_paths_with_registered_paths_for_test(
-        source_paths.clone(),
-        SourceFileKind::PlainMarkdown,
-        &mut string_table,
-    ) {
-        Ok(_) => panic!("parallel missing-source failures should be reported"),
-        Err(messages) => messages,
-    };
-
-    let source_files = messages
-        .infrastructure_errors()
-        .expect("parallel source loading should retain its infrastructure causes")
-        .source_database_for_cause(0)
-        .expect("parallel source loading should publish its finalized source context");
+    let (prepared_failure, source_files) =
+        match load_missing_source_paths_with_registered_paths_for_test(
+            source_paths.clone(),
+            SourceFileKind::PlainMarkdown,
+            &mut string_table,
+        ) {
+            Ok(_) => panic!("parallel missing-source failures should be reported"),
+            Err((failure, Some(source_files))) => (failure, *source_files),
+            Err((failure, None)) => {
+                panic!("parallel loading should retain its finalized source owner: {failure:?}")
+            }
+        };
+    let mut source_ids = Vec::with_capacity(source_paths.len());
     for (index, path) in source_paths.iter().enumerate() {
         let source_id = source_files
             .get_by_canonical_path(path)
             .expect("every parallel source should retain its registration slot")
             .id;
+        source_ids.push(source_id);
         if index == 1 || index == source_count - 1 {
             assert!(
                 source_files.retained_text(source_id).is_none(),
@@ -464,8 +481,17 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
         }
     }
 
-    let error = messages
-        .primary_infrastructure_error()
+    let boundary = prepared_failure_result::<()>(
+        prepared_failure,
+        Some(Arc::new(source_files)),
+        &string_table,
+    );
+    let Err(errors) = boundary else {
+        panic!("parallel source loading should retain its infrastructure causes");
+    };
+    let error = errors
+        .iter()
+        .next()
         .expect("the parallel read failure should retain the infrastructure error lane");
     let host_path = error
         .host_path
@@ -512,9 +538,12 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
         &calls,
     ))));
 
-    let modules =
-        discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-            .expect("provider-backed import should resolve during discovery");
+    let modules = successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -725,8 +754,11 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
     super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("canonical multi-entry discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     for source in [
@@ -815,9 +847,12 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
         &calls,
     ))));
 
-    let modules =
-        discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-            .expect("provider-backed multi-entry discovery should succeed");
+    let modules = successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(
@@ -882,9 +917,12 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
     super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
 
-    let modules =
-        discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-            .expect("canonical provider discovery should succeed");
+    let modules = successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     // Three unique Moth sources: @pageA.moth, page_a/helper.moth, and @pageB.moth.
@@ -952,33 +990,33 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-        Ok(_) => panic!("unsupported .js import should fail discovery"),
-        Err(messages) => messages,
-    };
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
 
-    let diagnostic = first_error_diagnostic(&messages);
+    let diagnostic = first_error_diagnostic(&failure);
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-IMPORT-0021",
-        "expected unsupported external extension diagnostic, got {:?}",
-        diagnostic
+        "expected unsupported external extension diagnostic, got {}",
+        diagnostic.descriptor().code
     );
-    if let DiagnosticPayload::UnsupportedExternalExtension { path, extension } = &diagnostic.payload
-    {
-        let path_text = messages.diagnostic_render_context(0).render_path(*path);
-        assert_eq!(path_text, "drawing.js", "unexpected path in diagnostic");
-        assert_eq!(
-            messages.string_table.resolve(*extension),
-            "js",
-            "unexpected extension in diagnostic"
-        );
-    } else {
-        panic!(
-            "expected UnsupportedExternalExtension payload, got {:?}",
-            diagnostic.payload
-        );
-    }
+    let facts = diagnostic
+        .family_view::<UnsupportedExternalExtensionView>()
+        .expect("unsupported external extension should retain typed path facts");
+    let (report, _) = diagnosed_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("unsupported external extension should retain its error report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.render_path(facts.path),
+        "drawing.js",
+        "unexpected path in diagnostic"
+    );
+    assert_eq!(
+        context.string_table.resolve(facts.extension),
+        "js",
+        "unexpected extension in diagnostic"
+    );
 }
 
 #[test]
@@ -1016,8 +1054,12 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
     let mut providers = ExternalImportProviderRegistry::empty();
     providers.register(Arc::new(ResolvingCountingProvider::new(Arc::clone(&calls))));
 
-    discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
-        .expect("repeated provider import should resolve");
+    successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
 
     // The provider runs exactly once for one physical provider source, even though two consumers
     // reach it during the traversal. The cache key is the indexed canonical path, so the second
@@ -1067,15 +1109,8 @@ fn directory_provider_dependency_rejects_cross_module_target() {
         &calls,
     ))));
 
-    let messages = match discover_modules_for_test_with_providers(
-        &config,
-        &resolver,
-        &style_directives,
-        &providers,
-    ) {
-        Ok(_) => panic!("cross-module provider import should be rejected"),
-        Err(messages) => messages,
-    };
+    let failure =
+        discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers);
 
     // The provider must never be invoked for a cross-module target.
     assert_eq!(
@@ -1084,21 +1119,16 @@ fn directory_provider_dependency_rejects_cross_module_target() {
         "provider must not run for a cross-module target"
     );
 
-    let diagnostic = first_error_diagnostic(&messages);
+    let diagnostic = first_error_diagnostic(&failure);
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-IMPORT-0015",
-        "expected cross-module import diagnostic, got {:?}",
-        diagnostic
+        "expected cross-module import diagnostic, got {}",
+        diagnostic.descriptor().code
     );
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::CrossModuleImportNotExported { .. }
-        ),
-        "expected CrossModuleImportNotExported payload, got {:?}",
-        diagnostic.payload
-    );
+    diagnostic
+        .family_view::<CrossModuleImportNotExportedView>()
+        .expect("cross-module import should retain typed symbol-path facts");
 }
 
 #[test]
@@ -1136,15 +1166,8 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         &calls,
     ))));
 
-    let messages = match discover_modules_for_test_with_providers(
-        &config,
-        &resolver,
-        &style_directives,
-        &providers,
-    ) {
-        Ok(_) => panic!("missing provider target should fail discovery"),
-        Err(messages) => messages,
-    };
+    let failure =
+        discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers);
 
     // The provider must never be invoked for a target the index could not resolve.
     assert_eq!(
@@ -1154,26 +1177,28 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
     );
 
     // The diagnostic must be a structured import diagnostic, not a filesystem infrastructure
-    // error. The old filesystem-backed path canonicalized the candidate and produced a File
-    // infrastructure error; the index-based path reports a missing import target through the
-    // existing import diagnostic lane, proving no directory-time path probe runs after the
+    // error. The index-based lookup reports a missing import target through the existing
+    // import diagnostic lane, which proves no directory-time path probe runs after the
     // index is built.
     assert!(
-        messages.error_diagnostics().next().is_some(),
+        diagnosed_reports(&failure)
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .is_some(),
         "missing provider target should surface a structured import diagnostic"
     );
     assert!(
-        messages.infrastructure_errors().is_none(),
-        "missing provider target must not surface a filesystem infrastructure error"
+        matches!(&failure, Ok(CompilationOutcome::Diagnosed(_))),
+        "missing provider target must remain a diagnosed result"
     );
-    let diagnostic = first_error_diagnostic(&messages);
+    let diagnostic = first_error_diagnostic(&failure);
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-IMPORT-0005",
-        "expected missing import target diagnostic, got {:?}",
-        diagnostic
+        "expected missing import target diagnostic, got {}",
+        diagnostic.descriptor().code
     );
-    assert_primary_span_text(&messages, &src.join("@page.moth"), "@missing.js");
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@missing.js");
 }
 
 #[test]
@@ -1209,8 +1234,11 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("cross-module root discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 2);
@@ -1286,8 +1314,11 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("the owner and sibling descendant should resolve the scoped package by name");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     assert_eq!(
         modules.waves().iter().map(Vec::len).sum::<usize>(),
         3,
@@ -1323,17 +1354,12 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
     source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-        Ok(_) => panic!(
-            "case-colliding recognized sources must not resolve by extension or spelling precedence"
-        ),
-        Err(messages) => messages,
-    };
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0006"
     );
-    assert_primary_span_text(&messages, &src.join("@page.moth"), "@HELPER");
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@HELPER");
 }
 
 #[test]
@@ -1363,12 +1389,9 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-        Ok(_) => panic!("a registered package must not take precedence over a local module prefix"),
-        Err(messages) => messages,
-    };
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0006"
     );
 }
@@ -1398,12 +1421,9 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-        Ok(_) => panic!("directory source dependencies must reject @./"),
-        Err(messages) => messages,
-    };
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0016"
     );
 }
@@ -1438,12 +1458,9 @@ fn direct_child_private_path_bypass_is_rejected() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
-        Ok(_) => panic!("a consumer must not address a child module's private file path"),
-        Err(messages) => messages,
-    };
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0015"
     );
 }
@@ -1479,9 +1496,9 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let (modules, source_files) =
-        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives)
-            .expect("header discovery should pass");
+    let (modules, source_files) = successful_compilation_value(
+        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives),
+    );
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules[0].prepared.semantic.source_file_count, 3);
     assert_eq!(
@@ -1552,8 +1569,11 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("canonical discovery should pass");
+    let modules = successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 2);

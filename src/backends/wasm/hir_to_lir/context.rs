@@ -11,6 +11,7 @@ use crate::backends::wasm::request::WasmBackendRequest;
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -193,9 +194,9 @@ pub(crate) fn lower_type_to_abi(
     context: &WasmLirLoweringContext<'_>,
     type_id: TypeId,
 ) -> WasmAbiType {
-    match classify_hir_type(type_id, context.type_environment)
-        .unwrap_or_else(|error| panic!("{}", error.msg))
-    {
+    match classify_hir_type(type_id, context.type_environment).unwrap_or_else(|error| {
+        crate::compiler_bug!(CompilerStage::BackendLowering, "{}", error.message)
+    }) {
         HirTypeClass::Unit => WasmAbiType::Void,
         HirTypeClass::Bool | HirTypeClass::Char => WasmAbiType::I32,
         HirTypeClass::FixedScalar(scalar) => match scalar {
@@ -211,7 +212,10 @@ pub(crate) fn lower_type_to_abi(
             FixedScalar::F64 => WasmAbiType::F64,
         },
         HirTypeClass::Number(_) => {
-            unreachable!("reachable Number values must be rejected by Wasm feature validation")
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "reachable Number values must be rejected by Wasm feature validation"
+            )
         }
         HirTypeClass::Function | HirTypeClass::HeapAllocated => WasmAbiType::Handle,
     }

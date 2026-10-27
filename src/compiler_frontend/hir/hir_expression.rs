@@ -13,7 +13,7 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
+//! `InfrastructureFailure::hir_transformation` in this module means an internal
 //! HIR transformation or lowering invariant failure only. The construction failure lane also
 //! carries source diagnostics when authored input exceeds a compact HIR store capacity; other
 //! source failures are emitted by AST or earlier stages.
@@ -34,7 +34,8 @@ use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_tar
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -57,7 +58,6 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::hir_log;
-use crate::return_hir_transformation_error;
 
 mod calls;
 mod expression_walk;
@@ -100,7 +100,7 @@ impl<'a> HirBuilder<'a> {
         expr: ExpressionView<'_>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered = self.lower_expression_results(expr)?;
-        let value = self.single_result_value(lowered.values, &expr.span())?;
+        let value = self.single_result_value(lowered.values)?;
         Ok(LoweredExpression {
             prelude: lowered.prelude,
             value,
@@ -113,7 +113,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<Vec<HirValueId>, HirConstructionFailure> {
         let lowered = self.lower_expression_results(expr)?;
         for statement in lowered.prelude {
-            self.emit_statement_to_current_block(statement, &expr.span())?;
+            self.emit_statement_to_current_block(statement)?;
         }
         Ok(lowered.values)
     }
@@ -281,16 +281,17 @@ impl<'a> HirBuilder<'a> {
         let span = &expression.span();
         let types = expression.success_types();
         let target = match metadata.target {
-            ResolvedCallableTarget::Function(path) => {
-                self.resolve_call_target_or_error(&path, span)?
-            }
+            ResolvedCallableTarget::Function(path) => self.resolve_call_target_or_error(&path)?,
             ResolvedCallableTarget::Host(id) => CallTarget::External(id),
         };
         if let Some(handling) = call.handling() {
             let results = match metadata.target {
                 ResolvedCallableTarget::Host(id) => {
                     let error = metadata.error_type.or(handling.error_type).ok_or_else(|| {
-                        CompilerError::compiler_error("Handled host call has no error contract")
+                        InfrastructureFailure::internal(
+                            CompilerStage::HirConstruction,
+                            "Handled host call has no error contract",
+                        )
                     })?;
                     self.emit_external_result_call_to_current_block(
                         id,
@@ -403,10 +404,10 @@ impl<'a> HirBuilder<'a> {
             | ExpressionOperationView::LogicalBinary { .. }
             | ExpressionOperationView::Compare { .. }
             | ExpressionOperationView::Range { .. } => {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Operator expression reached the generic HIR dispatcher",
-                    self.hir_error_location(&expr.span())
-                );
+                )
+                .into());
             }
 
             ExpressionOperationView::FieldAccess { base, field } => {
@@ -437,10 +438,10 @@ impl<'a> HirBuilder<'a> {
 
             ExpressionOperationView::Template(_) => {
                 // Finalization must eliminate construction-only template operations.
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Raw template reached HIR runtime-template lowering after AST finalization.",
-                    self.hir_error_location(&expr.span())
                 )
+                .into());
             }
 
             ExpressionOperationView::RuntimeTemplate(handoff) => self
@@ -460,7 +461,7 @@ impl<'a> HirBuilder<'a> {
                 let mut prelude = Vec::new();
                 let mut lowered_value =
                     self.lower_child_expression_for_parent(&mut prelude, value)?;
-                let coerced_ty = self.lower_type_id(expr.value_type_id()?, &expr.span())?;
+                let coerced_ty = self.lower_type_id(expr.value_type_id()?)?;
                 let lowered_type = self.module.expressions.expression(lowered_value).ty;
                 if self
                     .type_environment
@@ -501,11 +502,8 @@ impl<'a> HirBuilder<'a> {
                 if let (Some(source), Some(target)) = (source_scalar, target_scalar)
                     && source != target
                 {
-                    let converted = self.convert_numeric_operand_to_domain(
-                        lowered_value,
-                        target,
-                        &expr.span(),
-                    )?;
+                    let converted =
+                        self.convert_numeric_operand_to_domain(lowered_value, target)?;
                     return Ok(LoweredExpression {
                         prelude,
                         value: converted,
@@ -545,9 +543,9 @@ impl<'a> HirBuilder<'a> {
         expr: ExpressionView<'_>,
         place: PlaceView<'_>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let region = self.current_region_or_error(&expr.span())?;
+        let region = self.current_region_or_error()?;
         let (prelude, place) = self.lower_place_expression_to_hir_place(place)?;
-        let ty = self.lower_type_id(expr.value_type_id()?, &expr.span())?;
+        let ty = self.lower_type_id(expr.value_type_id()?)?;
 
         Ok(LoweredExpression {
             prelude,
@@ -567,7 +565,7 @@ impl<'a> HirBuilder<'a> {
         expr: ExpressionView<'_>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let results = self.lower_expression_results(expr)?;
-        let value = self.single_result_value(results.values, &expr.span())?;
+        let value = self.single_result_value(results.values)?;
         Ok(LoweredExpression {
             prelude: results.prelude,
             value,
@@ -582,7 +580,7 @@ impl<'a> HirBuilder<'a> {
         block: &ValueBlock,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered = self.lower_value_block(block, expr, &expr.span(), expr.success_types())?;
-        let value = self.single_result_value(lowered.values, &expr.span())?;
+        let value = self.single_result_value(lowered.values)?;
         Ok(LoweredExpression {
             prelude: lowered.prelude,
             value,
@@ -601,7 +599,12 @@ impl<'a> HirBuilder<'a> {
         let nominal_path = self
             .type_environment
             .nominal_path(type_id)
-            .ok_or_else(|| CompilerError::compiler_error("Choice has no nominal identity"))?
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    "Choice has no nominal identity",
+                )
+            })?
             .to_owned();
         let choice_id = if let Some(TypeIdentityKey::GenericInstance(key)) = self
             .type_environment
@@ -614,10 +617,10 @@ impl<'a> HirBuilder<'a> {
                 &expr.span(),
             )?
         } else {
-            self.resolve_choice_id(&nominal_path, &expr.span())?
+            self.resolve_choice_id(&nominal_path)?
         };
-        let region = self.current_region_or_error(&expr.span())?;
-        let ty = self.lower_type_id(expr.value_type_id()?, &expr.span())?;
+        let region = self.current_region_or_error()?;
+        let ty = self.lower_type_id(expr.value_type_id()?)?;
 
         let mut prelude = Vec::new();
         let mut hir_fields = Vec::with_capacity(fields.len());
@@ -685,8 +688,8 @@ impl<'a> HirBuilder<'a> {
             lowered_items.push(lowered_item);
         }
 
-        let region = self.current_region_or_error(&expr.span())?;
-        let ty = self.lower_type_id(expr.value_type_id()?, &expr.span())?;
+        let region = self.current_region_or_error()?;
+        let ty = self.lower_type_id(expr.value_type_id()?)?;
         let item_range = self
             .module
             .expressions
@@ -717,8 +720,8 @@ impl<'a> HirBuilder<'a> {
             let value = self.lower_child_expression_for_parent(&mut prelude, entry.value())?;
             hir_entries.push(HirMapEntry { key, value });
         }
-        let region = self.current_region_or_error(&expr.span())?;
-        let ty = self.lower_type_id(expr.value_type_id()?, &expr.span())?;
+        let region = self.current_region_or_error()?;
+        let ty = self.lower_type_id(expr.value_type_id()?)?;
         let entry_range = self
             .module
             .expressions
@@ -745,44 +748,36 @@ impl<'a> HirBuilder<'a> {
         // If a const record reaches HIR struct lowering, push validation earlier
         // instead of converting this into a user diagnostic here.
         if expr.is_const_record_value() {
-            return_hir_transformation_error!(
-                "HIR invariant: Const record reached runtime HIR struct lowering; field access should select a member before HIR generation",
-                self.hir_error_location(&expr.span())
-            );
+            return Err(InfrastructureFailure::hir_transformation("HIR invariant: Const record reached runtime HIR struct lowering; field access should select a member before HIR generation").into());
         }
 
         let Some(nominal_path) = self.type_environment.nominal_path(expr.value_type_id()?) else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Struct instance reached HIR lowering without a nominal struct identity",
-                self.hir_error_location(&expr.span())
-            );
+            )
+            .into());
         };
         let nominal_path = nominal_path.to_owned();
         let struct_id = if let Some(TypeIdentityKey::GenericInstance(key)) = self
             .type_environment
             .type_id_to_type_identity_key(expr.value_type_id()?)
         {
-            self.resolve_or_register_generic_struct(
-                &key,
-                &nominal_path,
-                expr.value_type_id()?,
-                &expr.span(),
-            )?
+            self.resolve_or_register_generic_struct(&key, &nominal_path, expr.value_type_id()?)?
         } else {
-            self.resolve_struct_id_from_nominal_path(&nominal_path, &expr.span())?
+            self.resolve_struct_id_from_nominal_path(&nominal_path)?
         };
         let mut prelude = Vec::new();
         let mut fields = Vec::with_capacity(args.len());
 
         for arg in args.iter() {
-            let field_id = self.resolve_field_id_or_error(struct_id, &arg.name(), &expr.span())?;
+            let field_id = self.resolve_field_id_or_error(struct_id, &arg.name())?;
             let lowered_value =
                 self.lower_child_expression_for_parent(&mut prelude, arg.value())?;
             fields.push((field_id, lowered_value));
         }
 
-        let region = self.current_region_or_error(&expr.span())?;
-        let ty = self.lower_type_id(expr.value_type_id()?, &expr.span())?;
+        let region = self.current_region_or_error()?;
+        let ty = self.lower_type_id(expr.value_type_id()?)?;
         let field_range = self
             .module
             .expressions
@@ -817,7 +812,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirValueId, HirConstructionFailure> {
         let lowered = self.lower_expression(expr)?;
         for prelude in lowered.prelude {
-            self.emit_statement_to_current_block(prelude, &expr.span())?;
+            self.emit_statement_to_current_block(prelude)?;
         }
 
         Ok(lowered.value)
@@ -837,7 +832,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirValueId, HirConstructionFailure> {
         if self.expression_needs_current_block_lowering(expr) {
             for prelude in pending_prelude.drain(..) {
-                self.emit_statement_to_current_block(prelude, &expr.span())?;
+                self.emit_statement_to_current_block(prelude)?;
             }
 
             return self.lower_expression_value_to_current_block(expr);
@@ -943,7 +938,10 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredResults, HirConstructionFailure> {
         let protected = owner.bind(value_catch.handled_value)?;
         let facts = protected.failure_facts().ok_or_else(|| {
-            CompilerError::compiler_error("Catch protected expression has no failure facts")
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "Catch protected expression has no failure facts",
+            )
         })?;
         if facts.is_statically_infallible_catch() {
             // AST validated the authored handler. Converged facts show no error edge can run,
@@ -953,12 +951,12 @@ impl<'a> HirBuilder<'a> {
         // The parser owns catch compatibility; its validated disposition, not the protected
         // root shape, decides which payload arrives in the handler.
         let FailureDisposition::HandledByCatch { error_type_id } = facts.disposition else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Value catch block did not contain a recoverable expression",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
-        let err_type = self.lower_type_id(error_type_id, span)?;
+        let err_type = self.lower_type_id(error_type_id)?;
 
         // The direct catch root joins cast target values before applying an optional receiving
         // wrap. Nested casts keep their receiving type because a parent expression may need it.
@@ -1065,10 +1063,8 @@ impl<'a> HirBuilder<'a> {
             },
             ResolvedCastEvidence::UserDefined { method_path, .. } => self
                 .lower_user_defined_cast_expression(source, cast, method_path, expr_type_id, span),
-            ResolvedCastEvidence::GenericBound => Err(CompilerError::new(
+            ResolvedCastEvidence::GenericBound => Err(InfrastructureFailure::hir_transformation(
                 "Generic-bound cast evidence reached HIR lowering",
-                self.hir_error_location(span),
-                crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             )
             .into()),
         }
@@ -1086,11 +1082,11 @@ impl<'a> HirBuilder<'a> {
         let mut prelude = Vec::new();
         let source = self.lower_child_expression_for_parent(&mut prelude, source)?;
 
-        // Every numeric domain now takes the ordinary cast path: fixed binary floats lower
+        // Every numeric domain takes the ordinary cast path: fixed binary floats lower
         // through their numeric text policy so casts and templates share the same formatter
         // selection.
-        let target_type = self.lower_type_id(cast.target_type_id, span)?;
-        let region = self.current_region_or_error(span)?;
+        let target_type = self.lower_type_id(cast.target_type_id)?;
+        let region = self.current_region_or_error()?;
         let value = self.make_expression(
             span,
             HirExpressionKind::Cast { source, policy },
@@ -1113,11 +1109,11 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
         let lowered_source = self.lower_expression(source)?;
         for prelude_statement in lowered_source.prelude {
-            self.emit_statement_to_current_block(prelude_statement, span)?;
+            self.emit_statement_to_current_block(prelude_statement)?;
         }
 
-        let ok_type = self.lower_type_id(cast.target_type_id, span)?;
-        let err_type = self.builtin_error_type_id(span)?;
+        let ok_type = self.lower_type_id(cast.target_type_id)?;
+        let err_type = self.builtin_error_type_id()?;
         self.emit_fallible_operation(
             crate::compiler_frontend::hir::terminators::HirFallibleOperation::CastOp {
                 policy,
@@ -1170,17 +1166,19 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => {
                 if self.active_catch_handler.is_none() {
-                    return_hir_transformation_error!(
+                    return Err(InfrastructureFailure::hir_transformation(
                         "Recovering builtin cast reached HIR outside a value catch block",
-                        self.hir_error_location(span)
-                    );
+                    )
+                    .into());
                 }
                 self.lower_results_to_active_catch_success_value(results, span)?
             }
-            CastHandling::StoreConversion => return_hir_transformation_error!(
-                "Store conversion cast bypassed compound-assignment lowering",
-                self.hir_error_location(span)
-            ),
+            CastHandling::StoreConversion => {
+                return Err(InfrastructureFailure::hir_transformation(
+                    "Store conversion cast bypassed compound-assignment lowering",
+                )
+                .into());
+            }
         };
         let value = self.wrap_value_to_optional_type(success_value, expr_type_id, span)?;
         Ok(LoweredExpression {
@@ -1206,7 +1204,7 @@ impl<'a> HirBuilder<'a> {
         store: bool,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        if self.numeric_failure_is_recoverable(span)? {
+        if self.numeric_failure_is_recoverable()? {
             return self.lower_fallible_results_to_success_value(results, span);
         }
         use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
@@ -1234,7 +1232,7 @@ impl<'a> HirBuilder<'a> {
             *span,
         )?;
         let values = self.fallible_success_values(&results, span)?;
-        self.single_result_value(values, span)
+        self.single_result_value(values)
     }
     /// Lowers a user-defined cast by calling the selected evidence method.
     fn lower_user_defined_cast_expression(
@@ -1245,7 +1243,7 @@ impl<'a> HirBuilder<'a> {
         expr_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let call_target = self.resolve_call_target_or_error(method_path, span)?;
+        let call_target = self.resolve_call_target_or_error(method_path)?;
 
         match (cast.fallibility, cast.handling) {
             (
@@ -1261,7 +1259,7 @@ impl<'a> HirBuilder<'a> {
                     &[cast.target_type_id],
                     span,
                 )?;
-                let value = self.single_result_value(lowered.values, span)?;
+                let value = self.single_result_value(lowered.values)?;
                 let value = self.wrap_value_to_optional_type(value, expr_type_id, span)?;
                 Ok(LoweredExpression {
                     prelude: lowered.prelude,
@@ -1281,10 +1279,10 @@ impl<'a> HirBuilder<'a> {
             }
             (BuiltinCastFallibility::Fallible, CastHandling::Recover) => {
                 if self.active_catch_handler.is_none() {
-                    return_hir_transformation_error!(
+                    return Err(InfrastructureFailure::hir_transformation(
                         "Recovering user-defined cast reached HIR outside a value catch block",
-                        self.hir_error_location(span)
-                    );
+                    )
+                    .into());
                 }
                 let carrier =
                     self.emit_user_defined_cast_call_results(call_target, source, span)?;
@@ -1296,10 +1294,10 @@ impl<'a> HirBuilder<'a> {
                     value,
                 })
             }
-            (_, CastHandling::StoreConversion) => return_hir_transformation_error!(
+            (_, CastHandling::StoreConversion) => Err(InfrastructureFailure::hir_transformation(
                 "Store conversion cast reached HIR with non-builtin evidence",
-                self.hir_error_location(span)
-            ),
+            )
+            .into()),
         }
     }
 
@@ -1310,11 +1308,11 @@ impl<'a> HirBuilder<'a> {
         source: ExpressionView<'_>,
         span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
-        let (types, error_type) = self.result_call_slots(&target, span)?;
+        let (types, error_type) = self.result_call_slots(&target)?;
         let source = self.lower_expression_value_to_current_block(source)?;
         let args = self.module.expressions.append_values(&[source], *span)?;
-        let types = self.lower_call_result_types(&types, span)?;
-        let error_type = self.lower_type_id(error_type, span)?;
+        let types = self.lower_call_result_types(&types)?;
+        let error_type = self.lower_type_id(error_type)?;
         self.emit_fallible_operation(
             crate::compiler_frontend::hir::terminators::HirFallibleOperation::Call { target, args },
             &types,
@@ -1330,7 +1328,7 @@ impl<'a> HirBuilder<'a> {
         expr_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let expected_type = self.lower_type_id(expr_type_id, span)?;
+        let expected_type = self.lower_type_id(expr_type_id)?;
         let (source_type, region) = {
             let source = self.module.expressions.expression(value);
             (source.ty, source.region)
@@ -1340,14 +1338,10 @@ impl<'a> HirBuilder<'a> {
         }
 
         if self.type_environment.option_inner_type(expected_type) != Some(source_type) {
-            return Err(CompilerError::new(
-                format!(
-                    "Value type {:?} cannot be wrapped to expected optional type {:?}",
-                    source_type, expected_type
-                ),
-                self.hir_error_location(span),
-                crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
-            )
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Value type {:?} cannot be wrapped to expected optional type {:?}",
+                source_type, expected_type
+            ))
             .into());
         }
 
@@ -1374,10 +1368,7 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Resolves the builtin `Error` type id for recoverable failure edges and error returns.
-    fn builtin_error_type_id(
-        &mut self,
-        span: &Option<SourceSpan>,
-    ) -> Result<TypeId, HirConstructionFailure> {
+    fn builtin_error_type_id(&mut self) -> Result<TypeId, HirConstructionFailure> {
         Ok(type_id_for_builtin_target(
             BuiltinCastTarget::Error,
             &self.type_environment,
@@ -1385,10 +1376,8 @@ impl<'a> HirBuilder<'a> {
             self.path_fork,
         )
         .ok_or_else(|| {
-            CompilerError::new(
+            InfrastructureFailure::hir_transformation(
                 "Builtin Error type is not registered in the type environment",
-                self.hir_error_location(span),
-                crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             )
         })?)
     }
@@ -1403,9 +1392,8 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn emit_statement_to_current_block(
         &mut self,
         statement: HirStatement,
-        span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let block = self.current_block_mut_or_error(span)?;
+        let block = self.current_block_mut_or_error()?;
         block.statements.push(statement);
         Ok(())
     }
@@ -1417,7 +1405,6 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         target: HirWriteTarget,
         value: HirValueId,
-        span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let write_statement = HirStatement {
             id: self.allocate_node_id(),
@@ -1426,7 +1413,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.side_table.map_statement(None, &write_statement);
-        self.emit_statement_to_current_block(write_statement, span)
+        self.emit_statement_to_current_block(write_statement)
     }
 
     // -------------------------
@@ -1474,9 +1461,8 @@ impl<'a> HirBuilder<'a> {
         call_span: Option<SourceSpan>,
         argument_index: Option<usize>,
     ) -> Result<LocalId, HirConstructionFailure> {
-        let span = source_info;
-        let region = self.current_region_or_error(&span)?;
-        let block_id = self.current_block_id_or_error(&span)?;
+        let region = self.current_region_or_error()?;
+        let block_id = self.current_block_id_or_error()?;
         let local_id = self.allocate_local_id();
 
         let local = HirLocal {
@@ -1488,7 +1474,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.side_table.map_local_source(&local);
-        self.register_local_in_block(block_id, local, &span)?;
+        self.register_local_in_block(block_id, local)?;
 
         let temp_name = format!("__hir_tmp_{}", self.temp_local_counter);
         self.temp_local_counter += 1;
@@ -1497,7 +1483,8 @@ impl<'a> HirBuilder<'a> {
             .path_fork
             .try_intern_child(PathId::ROOT, temp_component)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "path table exhausted while naming a compiler-generated HIR local",
                 )
             })?;
@@ -1520,10 +1507,9 @@ impl<'a> HirBuilder<'a> {
     //      produces clearer diagnostics than assuming block state exists.
     pub(crate) fn current_block_mut_or_error(
         &mut self,
-        span: &Option<SourceSpan>,
     ) -> Result<&mut HirBlock, HirConstructionFailure> {
-        let block_id = self.current_block_id_or_error(span)?;
-        Ok(self.block_mut_by_id_or_error(block_id, span)?)
+        let block_id = self.current_block_id_or_error()?;
+        Ok(self.block_mut_by_id_or_error(block_id)?)
     }
 
     // WHAT: allocates one HIR expression node with its identity and typing metadata attached.
@@ -1560,10 +1546,10 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirValueId, HirConstructionFailure> {
         let (ty, region, previous_span) = {
             let expression = self.module.expressions.get_expression(id).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "HIR expression ID {:?} is outside its dense row store",
-                    id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!("HIR expression ID {:?} is outside its dense row store", id),
+                )
             })?;
             (
                 ty.unwrap_or(expression.ty),
@@ -1618,7 +1604,6 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn register_choice_id(
         &mut self,
         nominal_path: &PathId,
-        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, HirConstructionFailure> {
         if let Some(&choice_id) = self.choices_by_name.get(nominal_path) {
             return Ok(choice_id);
@@ -1629,10 +1614,13 @@ impl<'a> HirBuilder<'a> {
             .nominal_id_for_path(nominal_path)
             .and_then(|nominal_id| self.type_environment.type_id_for_nominal_id(nominal_id))
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                    "Choice '{}' is not registered in TypeEnvironment during HIR lowering",
-                    self.symbol_name_for_diagnostics(nominal_path)
-                ))
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
+                        "Choice '{}' is not registered in TypeEnvironment during HIR lowering",
+                        self.symbol_name_for_diagnostics(nominal_path)
+                    ),
+                )
             })?;
 
         let choice_id = self.allocate_choice_id();
@@ -1651,7 +1639,7 @@ impl<'a> HirBuilder<'a> {
             variants: vec![],
         });
 
-        let hir_variants = self.lower_choice_variants_for_type_id(frontend_type_id, span)?;
+        let hir_variants = self.lower_choice_variants_for_type_id(frontend_type_id)?;
         self.module.choices[index].variants = hir_variants;
 
         Ok(choice_id)
@@ -1665,16 +1653,13 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_choice_id(
         &self,
         nominal_path: &PathId,
-        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, HirConstructionFailure> {
         let Some(choice_id) = self.choices_by_name.get(nominal_path).copied() else {
-            return_hir_transformation_error!(
-                format!(
-                    "Choice '{}' was not pre-registered during HIR declaration preparation",
-                    self.symbol_name_for_diagnostics(nominal_path)
-                ),
-                self.hir_error_location(span)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Choice '{}' was not pre-registered during HIR declaration preparation",
+                self.symbol_name_for_diagnostics(nominal_path)
+            ))
+            .into());
         };
         Ok(choice_id)
     }
@@ -1682,12 +1667,6 @@ impl<'a> HirBuilder<'a> {
     // -------------------------
     //  Diagnostics & Logging
     // -------------------------
-
-    // WHAT: preserves exact source-span provenance for HIR transformation errors.
-    // WHY: HIR lowering uses one helper so all transformation errors preserve consistent source metadata.
-    pub(crate) fn hir_error_location(&self, span: &Option<SourceSpan>) -> Option<SourceSpan> {
-        *span
-    }
 
     fn log_expression_input(&self, _expression: ExpressionView<'_>) {
         hir_log!(format!(

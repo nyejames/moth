@@ -36,12 +36,14 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, render_payload,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_guidance_view;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -76,7 +78,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -120,15 +122,18 @@ fn sample_tokens(
         NumericExponentSign::None,
     );
     let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
-    let path_id = path_syntax.push(
-        path_fork
-            .try_intern_components(&[
-                string_table.intern("provider"),
-                string_table.intern("CONST"),
-            ])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, token_span()),
-    );
+    let path_id = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_components(&[
+                    string_table.intern("provider"),
+                    string_table.intern("CONST"),
+                ])
+                .expect("test path fits"),
+            SourceId::COMPILATION_ROOT,
+            token_span(),
+        )
+        .expect("test path syntax row should fit");
     let mut builder =
         TestSourceTokensBuilder::with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax);
     builder
@@ -226,8 +231,9 @@ fn capture_test_body(
     }
     let facts =
         Stage0ResolutionFacts::ordinary(resolved_references, SourceDatabase::empty().into());
-    let no_content_value = |_path: &PathId| -> Result<PublicFoldedValue, CompilerError> {
-        Err(CompilerError::compiler_error(
+    let no_content_value = |_path: &PathId| -> Result<PublicFoldedValue, InfrastructureFailure> {
+        Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "test body has no content value resolver",
         ))
     };
@@ -298,12 +304,15 @@ fn direct_content_body_fixture() -> (
         .id;
     let path_span = LocalSpan::source_start();
     let mut path_syntax = PathSyntaxTable::with_source(body_file_id);
-    let path_id = path_syntax.push(
-        path_fork
-            .try_intern_portable_path("@private.mtf", &mut string_table)
-            .expect("test path fits"),
-        SourceSpan::new(body_file_id, path_span),
-    );
+    let path_id = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_portable_path("@private.mtf", &mut string_table)
+                .expect("test path fits"),
+            body_file_id,
+            path_span,
+        )
+        .expect("test path syntax row should fit");
     let mut builder = TestSourceTokensBuilder::with_path_syntax(body_file_id, path_syntax);
     builder
         .push_path(TokenTag::PATH, path_id, path_span)
@@ -454,7 +463,8 @@ fn missing_content_fold_fails_loudly_during_capture() {
         Some(&facts),
         FrozenIdentityHandle::new(),
         &|_| {
-            Err(CompilerError::compiler_error(
+            Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "synthetic content constant was not folded before capture",
             ))
         },
@@ -464,7 +474,7 @@ fn missing_content_fold_fails_loudly_during_capture() {
     };
     assert!(
         error
-            .msg
+            .message
             .contains("synthetic content constant was not folded before capture"),
         "unexpected content capture error: {error:?}"
     );
@@ -493,7 +503,7 @@ fn non_string_content_fold_fails_loudly_during_capture() {
     };
     assert!(
         error
-            .msg
+            .message
             .contains("synthetic content constant did not fold to a String value"),
         "unexpected content capture error: {error:?}"
     );
@@ -536,9 +546,7 @@ fn frozen_body_preserves_donor_range_and_path_spelling() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked range");
-    let parse_owner = materialised_body
-        .parse_owner()
-        .expect("materialised body should retain a borrowed canonical parse owner");
+    let parse_owner = materialised_body.parse_owner();
     let owner = parse_owner.owner.as_ref();
     assert!(
         materialised_body
@@ -622,9 +630,7 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked range");
-    let parse_owner = materialised_body
-        .parse_owner()
-        .expect("materialised body should retain a borrowed canonical parse owner");
+    let parse_owner = materialised_body.parse_owner();
     let owner = parse_owner.owner.as_ref();
     owner
         .path_syntax_table()
@@ -643,30 +649,39 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     // The body references donor row 2 before donor row 0. Donor row 1 is deliberately
     // unreferenced, so retained facts must preserve the original donor handles and omit the
     // unreferenced row rather than inventing a second body-local handle domain.
-    let first_donor_path = path_syntax.push(
-        path_fork
-            .try_intern_components(&[
-                source_table.intern("provider"),
-                source_table.intern("first"),
-            ])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, base_span),
-    );
-    let _unreferenced_donor_path = path_syntax.push(
-        path_fork
-            .try_intern_portable_path("provider/unused", &mut source_table)
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, base_span),
-    );
-    let second_donor_path = path_syntax.push(
-        path_fork
-            .try_intern_components(&[
-                source_table.intern("provider"),
-                source_table.intern("second"),
-            ])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, base_span),
-    );
+    let first_donor_path = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_components(&[
+                    source_table.intern("provider"),
+                    source_table.intern("first"),
+                ])
+                .expect("test path fits"),
+            SourceId::COMPILATION_ROOT,
+            base_span,
+        )
+        .expect("test path syntax row should fit");
+    let _unreferenced_donor_path = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_portable_path("provider/unused", &mut source_table)
+                .expect("test path fits"),
+            SourceId::COMPILATION_ROOT,
+            base_span,
+        )
+        .expect("test path syntax row should fit");
+    let second_donor_path = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_components(&[
+                    source_table.intern("provider"),
+                    source_table.intern("second"),
+                ])
+                .expect("test path fits"),
+            SourceId::COMPILATION_ROOT,
+            base_span,
+        )
+        .expect("test path syntax row should fit");
     let source_file = path_fork
         .try_intern_portable_path("src/@mod.moth", &mut source_table)
         .expect("test path fits");
@@ -717,7 +732,8 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         Some(&facts),
         FrozenIdentityHandle::new(),
         &|_| {
-            Err::<PublicFoldedValue, CompilerError>(CompilerError::compiler_error(
+            Err::<PublicFoldedValue, InfrastructureFailure>(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "remapping fixture has no content values",
             ))
         },
@@ -757,9 +773,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked source range");
-    let parse_owner = materialised_body
-        .parse_owner()
-        .expect("same-boundary materialised body should retain its donor owner");
+    let parse_owner = materialised_body.parse_owner();
     let owner = parse_owner.owner.as_ref();
     let parser_token_ids = owner
         .shapes()
@@ -825,12 +839,15 @@ fn repeated_spellings_share_one_frozen_string_entry() {
     let symbol_id = source_table.intern("hello");
     let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
     let path_span = token_span();
-    let path_id = path_syntax.push(
-        path_fork
-            .try_intern_components(&[symbol_id])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
-    );
+    let path_id = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_components(&[symbol_id])
+                .expect("test path fits"),
+            SourceId::COMPILATION_ROOT,
+            path_span,
+        )
+        .expect("test path syntax row should fit");
     let original =
         canonical_tokens_with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax, |builder| {
             builder
@@ -870,7 +887,7 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
         direct_content_body_fixture();
     let body = body_view(&body_file, source_file);
     let donor_identity = SharedDonorIdentity::freeze(&source_table);
-    let content_value = |_path: &PathId| -> Result<PublicFoldedValue, CompilerError> {
+    let content_value = |_path: &PathId| -> Result<PublicFoldedValue, InfrastructureFailure> {
         Ok(PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text("retained".to_owned()),
         ])))
@@ -923,9 +940,7 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
     let materialised_body = materialised
         .into_generic_body()
         .expect("materialised body should retain its checked source owner");
-    let parse_owner = materialised_body
-        .parse_owner()
-        .expect("materialised body should retain its donor owner");
+    let parse_owner = materialised_body.parse_owner();
     let owner = parse_owner.owner.as_ref();
     assert_eq!(
         owner.len(),
@@ -987,7 +1002,9 @@ fn a_materialised_body_with_only_a_path_identity_is_rejected() {
         Err(error) => error,
     };
     assert!(
-        error.msg.contains("incomplete source identity table pair"),
+        error
+            .message
+            .contains("incomplete source identity table pair"),
         "unexpected incomplete donor error: {error:?}",
     );
 }
@@ -1039,7 +1056,12 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         Some(&donor_identity),
         body.resolution_facts().map(Arc::as_ref),
         FrozenIdentityHandle::new(),
-        &|_| Err(CompilerError::compiler_error("no content rows")),
+        &|_| {
+            Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "no content rows",
+            ))
+        },
     )
     .expect("a string-only canonical donor should capture");
     let mut materialised_path_fork = PathInternerFork::empty();
@@ -1060,9 +1082,7 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
     let materialised_body = materialised
         .into_generic_body()
         .expect("canonical string-only body should retain its checked range");
-    let parse_owner = materialised_body
-        .parse_owner()
-        .expect("a canonical string-only donor should retain a borrowed parse owner");
+    let parse_owner = materialised_body.parse_owner();
     let (cursor, source_id) = parse_owner
         .cursor()
         .expect("a borrowed parse owner should borrow its canonical cursor");
@@ -1080,12 +1100,17 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         .current_diagnostic_token(&mut materialised_strings)
         .expect("materialised body diagnostic projection should succeed")
         .expect("materialised body should expose its current token");
-    let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
-    let rendered = render_payload(
-        &diagnostic.payload,
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(unexpected_token_from_tag(projected, None)),
+        None,
+    );
+    let rendered = format_guidance_view(
+        compact
+            .first()
+            .expect("projected token diagnostic compacts"),
         DiagnosticRenderContext::new(&materialised_strings),
     )
-    .message;
+    .join("\n");
     assert!(
         rendered.contains("donor"),
         "materialised-body diagnostics must render donor spelling, got {rendered:?}",
@@ -1130,9 +1155,7 @@ fn malformed_materialised_donor_text_handle_is_infrastructure_failure() {
         },
     )
     .expect("malformed donor body should retain its checked owner");
-    let parse_owner = body
-        .parse_owner()
-        .expect("materialised donor body should expose a parse owner");
+    let parse_owner = body.parse_owner();
     let (cursor, _) = parse_owner
         .cursor()
         .expect("materialised donor body should construct its cursor");
@@ -1140,11 +1163,11 @@ fn malformed_materialised_donor_text_handle_is_infrastructure_failure() {
         .current_diagnostic_token(&mut StringTable::new())
         .expect_err("malformed donor text must fail diagnostic projection");
     assert_eq!(error, TokenViewError::MalformedStringHandle);
-    let infrastructure = CompilerDiagnostic::token_view_invariant_error(
-        error,
-        "materialised body diagnostic projection",
+    let infrastructure = InfrastructureFailure::internal(
+        CompilerStage::GenericMaterialisation,
+        format!("materialised body diagnostic projection token payload was malformed: {error:?}"),
     );
-    assert_eq!(infrastructure.error_type, ErrorType::Compiler);
+    assert_eq!(infrastructure.kind, InfrastructureFailureKind::Internal);
 }
 
 #[test]
@@ -1205,7 +1228,12 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         Some(&donor_identity),
         body.resolution_facts().map(Arc::as_ref),
         FrozenIdentityHandle::new(),
-        &|_| Err(CompilerError::compiler_error("no content rows")),
+        &|_| {
+            Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "no content rows",
+            ))
+        },
     )
     .expect("a numeric donor body should capture");
     let mut materialised_path_fork = PathInternerFork::empty();
@@ -1231,9 +1259,7 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         .expect("a numeric donor body should materialise")
         .into_generic_body()
         .expect("a numeric donor body should retain its checked range");
-    let parse_owner = materialised_body
-        .parse_owner()
-        .expect("the donor body should retain its parse owner");
+    let parse_owner = materialised_body.parse_owner();
     let (cursor, source_id) = parse_owner
         .cursor()
         .expect("the donor body should borrow its canonical cursor");
@@ -1265,12 +1291,17 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         .current_diagnostic_token(&mut materialised_strings)
         .expect("donor numeric diagnostic projection should succeed")
         .expect("the current numeric token should project into a diagnostic token");
-    let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
-    let rendered = render_payload(
-        &diagnostic.payload,
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(unexpected_token_from_tag(projected, None)),
+        None,
+    );
+    let rendered = format_guidance_view(
+        compact
+            .first()
+            .expect("projected numeric token diagnostic compacts"),
         DiagnosticRenderContext::new(&materialised_strings),
     )
-    .message;
+    .join("\n");
     assert!(
         rendered.contains("-12.5"),
         "numeric donor diagnostics must render donor-authored text, got {rendered:?}",
@@ -1374,9 +1405,7 @@ fn a_segmented_donor_body_borrows_its_source_sequence() {
     let _requester_fork = PathInternerFork::empty();
     requester_strings.intern("requester alpha");
     requester_strings.intern("requester beta");
-    let parse_owner = body
-        .parse_owner()
-        .expect("a segmented donor body should retain its source owner");
+    let parse_owner = body.parse_owner();
     let owner = parse_owner.owner.as_ref();
 
     let donor_indices = [0usize, 2, 3, 4];
@@ -1457,7 +1486,9 @@ fn donor_path_handles_render_through_borrowed_origin() {
         .expect("donor paths fit the checked table");
     let donor_path_table = Arc::new(donor_builder.freeze());
     let mut path_syntax = PathSyntaxTable::with_source(source);
-    let path_handle = path_syntax.push(donor_root, SourceSpan::new(source, token_span()));
+    let path_handle = path_syntax
+        .try_push_for_source(donor_root, source, token_span())
+        .expect("test path syntax row should fit");
     let owner = canonical_tokens_with_path_syntax(source, path_syntax, |builder| {
         builder
             .push_path(TokenTag::PATH, path_handle, token_span())
@@ -1499,9 +1530,7 @@ fn donor_path_handles_render_through_borrowed_origin() {
         "the fixture must exercise a colliding PathId",
     );
 
-    let parse_owner = body
-        .parse_owner()
-        .expect("the donor body should retain its source owner");
+    let parse_owner = body.parse_owner();
     let (cursor, source_id) = parse_owner
         .cursor()
         .expect("the donor body should borrow its source cursor");
@@ -1585,10 +1614,10 @@ fn generated_materialisation_rejects_an_incompatible_string_prefix() {
             .expect_err(case);
         assert!(
             error
-                .msg
+                .message
                 .contains("not an exact prefix of the live boundary string table"),
             "{case}: the failure should identify the incompatible string domain: {}",
-            error.msg
+            error.message
         );
     };
 
@@ -2199,12 +2228,15 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             })
             .expect("the placeholder body literal should be present");
         let mut path_syntax = PathSyntaxTable::with_source(body_file_id);
-        let path_id = path_syntax.push(
-            path_fork
-                .try_intern_components(&[assets_component, logo_component])
-                .expect("test path fits"),
-            SourceSpan::new(body_file_id, placeholder_span),
-        );
+        let path_id = path_syntax
+            .try_push_for_source(
+                path_fork
+                    .try_intern_components(&[assets_component, logo_component])
+                    .expect("test path fits"),
+                body_file_id,
+                placeholder_span,
+            )
+            .expect("test path syntax row should fit");
         let mut builder = TestSourceTokensBuilder::with_path_syntax(body_file_id, path_syntax);
         for index in body_range.start().index()..body_range.end().index() {
             let token_index =
@@ -2667,12 +2699,15 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             .expect("test path fits");
         let path_span = token_span();
         let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
-        let path_id = path_syntax.push(
-            path_fork
-                .try_intern_portable_path("@resource.bin", &mut source_table)
-                .expect("test path fits"),
-            SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
-        );
+        let path_id = path_syntax
+            .try_push_for_source(
+                path_fork
+                    .try_intern_portable_path("@resource.bin", &mut source_table)
+                    .expect("test path fits"),
+                SourceId::COMPILATION_ROOT,
+                path_span,
+            )
+            .expect("test path syntax row should fit");
         let mut body_builder =
             TestSourceTokensBuilder::with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax);
         body_builder
@@ -2710,7 +2745,8 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             Some(&facts),
             FrozenIdentityHandle::new(),
             &|_| {
-                Err::<PublicFoldedValue, CompilerError>(CompilerError::compiler_error(
+                Err::<PublicFoldedValue, InfrastructureFailure>(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "collision fixture has no content values",
                 ))
             },
@@ -3234,7 +3270,7 @@ fn frozen_generic_rejects_absent_path_handle() {
         Err(error) => error,
     };
     assert_eq!(
-        error.msg,
+        &*error.message,
         "frozen generic resolved-reference row has an absent PathSyntaxId marker"
     );
 }
@@ -3277,10 +3313,13 @@ fn frozen_generic_lookup_requires_retained_owner() {
 #[test]
 fn frozen_generic_rejects_duplicate_path_handle() {
     let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(
-        PathId::ROOT,
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let path_id = path_syntax
+        .try_push_for_source(
+            PathId::ROOT,
+            SourceId::COMPILATION_ROOT,
+            LocalSpan::source_start(),
+        )
+        .expect("test path syntax row should fit");
     let error = match Stage0ResolutionFacts::frozen_generic(
         SourceId::COMPILATION_ROOT,
         vec![
@@ -3292,7 +3331,7 @@ fn frozen_generic_rejects_duplicate_path_handle() {
         Err(error) => error,
     };
     assert_eq!(
-        error.msg,
+        &*error.message,
         "frozen generic resolved-reference table contains duplicate path handles"
     );
 }
@@ -3307,7 +3346,7 @@ fn generic_body_rejects_foreign_source_range() {
     let error = GenericFunctionBody::source(owner, foreign_range, None, PathId::ROOT)
         .expect_err("a generic body must reject a range owned by another source");
     assert!(
-        error.msg.contains("foreign source identity"),
+        error.message.contains("foreign source identity"),
         "unexpected foreign-range error: {error:?}",
     );
 }
@@ -3325,7 +3364,7 @@ fn stale_in_range_template_row_fails_declaration_identity_validation() {
     let error = check_materialisation_row_identity(artefact, &stale)
         .expect_err("a stale but in-range row must never materialise");
     assert!(
-        error.msg.contains("declaration identity"),
+        error.message.contains("declaration identity"),
         "unexpected declaration identity error: {error:?}"
     );
 }
@@ -3443,7 +3482,7 @@ fn incomplete_or_missing_retained_identity_pair_rejects_rebase() {
         .err()
         .expect("an incomplete retained identity pair must reject rebasing");
     assert!(
-        error.msg.contains("incomplete identity table pair"),
+        error.message.contains("incomplete identity table pair"),
         "unexpected incomplete-pair error: {error:?}"
     );
 
@@ -3456,7 +3495,7 @@ fn incomplete_or_missing_retained_identity_pair_rejects_rebase() {
         .expect("a rebase without an issuing identity pair must reject");
     assert!(
         error
-            .msg
+            .message
             .contains("cannot rebase without an issuing identity table pair"),
         "unexpected missing-pair error: {error:?}"
     );
@@ -3515,16 +3554,12 @@ fn materialised_body_declaration_cursor_translates_colliding_symbol_payloads() {
         "the fixture must collide on the token-at symbol handle",
     );
 
-    let parse_owner = body
-        .parse_owner()
-        .expect("the materialised body should retain a borrowed parse owner");
+    let parse_owner = body.parse_owner();
     let (cursor, source_id) = parse_owner
         .cursor()
         .expect("the materialised body should borrow its canonical cursor");
     assert_eq!(source_id, source);
-    let declaration = cursor
-        .declaration_cursor()
-        .expect("the borrowed cursor should build a declaration cursor");
+    let declaration = cursor.declaration_cursor();
     let current = declaration
         .current_string_id_in(&mut requester_strings)
         .expect("the declaration cursor should translate its current donor symbol")
@@ -3956,8 +3991,7 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
         PreparedSourcePackageRoots::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
-    )
-    .expect("the fixture resolver should build");
+    );
     let entry = &canonical_files[0];
     let mut strings = StringTable::new();
     let sources = Arc::new(
@@ -4017,7 +4051,11 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
     let syntax = prepare_header_syntax(
         &mut outputs,
         &mut frontend.string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut frontend.path_fork,
     )
     .expect("the module declarations should prepare");
@@ -4350,9 +4388,9 @@ fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
     let Err(collision) = collision else {
         panic!("different canonical instances cannot share one local target path");
     };
-    assert_eq!(collision.error_type, ErrorType::Compiler);
+    assert_eq!(collision.kind, InfrastructureFailureKind::Internal);
     assert_eq!(
-        collision.msg,
+        &*collision.message,
         "Generated request path collides with another imported or generated callable",
     );
     let contract = &build_result.ast.imported_functions_by_local_path[&outer_request.instance_path];

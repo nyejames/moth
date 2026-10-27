@@ -6,6 +6,7 @@
 //! validation and backend lowering from treating it as a panic unwrap.
 
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
@@ -15,7 +16,6 @@ use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
 
@@ -28,28 +28,24 @@ impl<'a> HirBuilder<'a> {
         let lowered = self.lower_expression(value)?;
         let option_type = self.module.expressions.expression(lowered.value).ty;
         let Some(inner_type) = self.type_environment.option_inner_type(option_type) else {
-            return_hir_transformation_error!(
+            crate::compiler_bug!(
+                CompilerStage::HirConstruction,
                 "Option propagation reached HIR with a non-option value",
-                self.hir_error_location(span)
             );
         };
 
         for prelude in lowered.prelude {
-            self.emit_statement_to_current_block(prelude, span)?;
+            self.emit_statement_to_current_block(prelude)?;
         }
 
         let option_local = self.allocate_temp_local(option_type, None)?;
-        self.emit_write_statement(
-            HirWriteTarget::DefineLocal(option_local),
-            lowered.value,
-            span,
-        )?;
+        self.emit_write_statement(HirWriteTarget::DefineLocal(option_local), lowered.value)?;
 
-        let branch_region = self.current_region_or_error(span)?;
-        let branch_block = self.current_block_id_or_error(span)?;
+        let branch_region = self.current_region_or_error()?;
+        let branch_block = self.current_block_id_or_error()?;
         let no_span = None;
-        let present_block = self.create_block(branch_region, &no_span, "propagate-option-some")?;
-        let none_block = self.create_block(branch_region, &no_span, "propagate-option-none")?;
+        let present_block = self.create_block(branch_region, &no_span, "propagate-option-some");
+        let none_block = self.create_block(branch_region, &no_span, "propagate-option-none");
         let option_for_branch =
             self.make_local_load_expression(option_local, option_type, &no_span, branch_region)?;
 
@@ -75,8 +71,8 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         self.emit_option_none_return(none_block, option_type, span)?;
-        self.set_current_block(present_block, span)?;
-        let present_region = self.current_region_or_error(span)?;
+        self.set_current_block(present_block)?;
+        let present_region = self.current_region_or_error()?;
         let option_for_payload =
             self.make_local_load_expression(option_local, option_type, &no_span, present_region)?;
         let present_value = self.make_expression(
@@ -104,16 +100,14 @@ impl<'a> HirBuilder<'a> {
         propagated_option_type: crate::compiler_frontend::datatypes::ids::TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        self.set_current_block(none_block, span)?;
-        let none_region = self.current_region_or_error(span)?;
-        let current_function_id = self.current_function_id_or_error(span)?;
-        let returns = &self
-            .function_by_id_or_error(current_function_id, span)?
-            .returns;
+        self.set_current_block(none_block)?;
+        let none_region = self.current_region_or_error()?;
+        let current_function_id = self.current_function_id_or_error()?;
+        let returns = &self.function_by_id_or_error(current_function_id)?.returns;
         let [function_return_type] = returns.as_ref() else {
-            return_hir_transformation_error!(
+            crate::compiler_bug!(
+                CompilerStage::HirConstruction,
                 "Option propagation requires one success return slot",
-                self.hir_error_location(span)
             );
         };
         let function_return_type = *function_return_type;
@@ -123,12 +117,11 @@ impl<'a> HirBuilder<'a> {
         if self.module.expressions.expression(none).ty != propagated_option_type {
             // AST compatibility checks should have guaranteed that the early
             // return uses the current function's option type.
-            return_hir_transformation_error!(
+            crate::compiler_bug!(
+                CompilerStage::HirConstruction,
                 "Option propagation reached HIR with a mismatched function return type",
-                self.hir_error_location(span)
             );
         }
-
         let values = self.module.expressions.append_values(&[none], *span)?;
         self.emit_terminator_with_span(none_block, HirTerminator::Return(values), span, *span)
     }
@@ -140,9 +133,9 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::HirValueId, HirConstructionFailure> {
         if !self.type_environment.is_option(option_type) {
-            return_hir_transformation_error!(
+            crate::compiler_bug!(
+                CompilerStage::HirConstruction,
                 "Option propagation none return targeted a non-option type",
-                self.hir_error_location(span)
             );
         }
 

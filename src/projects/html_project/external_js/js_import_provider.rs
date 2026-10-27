@@ -11,18 +11,21 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, InvalidExternalModuleReason, SourceSpanCapacityResource,
+    CompilerStage, DiagnosticSeverity, InvalidExternalModuleReason, PreparedFailure,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::package_registration::{
-    register_parsed_js_module, required_runtime_imports_from_parsed,
+    JsModuleRegistrationError, register_parsed_js_module, required_runtime_imports_from_parsed,
 };
 use crate::projects::html_project::external_js::parser::parse_js_module;
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
@@ -64,24 +67,21 @@ impl ExternalImportProvider for JsExternalImportProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
-        let source = match std::fs::read_to_string(&request.canonical_source_path) {
-            Ok(content) => content,
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
+        let bytes = match std::fs::read(&request.canonical_source_path) {
+            Ok(bytes) => bytes,
             Err(error) => {
-                return Err(CompilerMessages::from_error(
-                    CompilerError::file_error(
-                        &request.canonical_source_path,
-                        format!(
-                            "Failed to read JS import '{}': {error}",
-                            request.canonical_source_path.display()
-                        ),
+                return Err(InfrastructureFailure::filesystem(
+                    CompilerStage::SourceLoading,
+                    &request.canonical_source_path,
+                    format!(
+                        "Failed to read JS import '{}': {error}",
+                        request.canonical_source_path.display()
                     ),
-                    context.string_table.clone(),
-                ));
+                )
+                .into());
             }
         };
-
-        let parsed = parse_js_module(&source, &RuntimeModuleRegistry::v1());
 
         let js_source_path = match context
             .path_fork
@@ -89,60 +89,83 @@ impl ExternalImportProvider for JsExternalImportProvider {
         {
             Ok(path) => path,
             Err(PathInternError::NonUtf8(non_utf8)) => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::file_error(
-                        &non_utf8.path,
-                        format!(
-                            "JS import source path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
-                            non_utf8.path
-                        ),
+                return Err(InfrastructureFailure::filesystem(
+                    CompilerStage::ProjectBuildAssembly,
+                    &non_utf8.path,
+                    format!(
+                        "JS import source path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
+                        non_utf8.path
                     ),
-                    context.string_table,
-                ));
+                )
+                .into());
             }
             Err(PathInternError::TableFull) => {
-                return Err(CompilerMessages::from_diagnostic_ref(
-                    CompilerDiagnostic::source_table_capacity(
+                return Err(context.capture_diagnostic_failure(DiagnosticBag::from(
+                    token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
                         SourceSpanCapacityResource::LogicalPath,
+                        None,
                     ),
-                    context.string_table,
-                ));
+                )));
             }
             Err(PathInternError::BaseMismatch { .. }) => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "logical path merge base is not a structural prefix of the destination table",
-                    ),
-                    context.string_table,
-                ));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "logical path merge base is not a structural prefix of the destination table",
+                )
+                .into());
             }
         };
 
-        let mut diagnostics = convert_js_parser_diagnostics(
-            &parsed.diagnostics,
-            js_source_path,
-            request.source_span,
-            context.string_table,
-        );
+        let source = match String::from_utf8(bytes) {
+            Ok(source) => source,
+            Err(error) => {
+                let utf8_detail = {
+                    let mut diagnostic_strings = DiagnosticStringBuilder::new(context.string_table);
+                    diagnostic_strings.intern(&error.utf8_error().to_string())
+                };
+                return Err(context.capture_diagnostic_failure(DiagnosticBag::from(
+                    imports::invalid_external_module(
+                        js_source_path,
+                        InvalidExternalModuleReason::NonUtf8Source { utf8_detail },
+                        request.source_span,
+                    ),
+                )));
+            }
+        };
 
-        // Reject project-local JS imports that declare receiver-style signatures.
-        // WHY: callable `@moth.sig` signatures must expose free functions rather than `this`
-        //      receiver parameters. The parser classifies receiver-shaped signatures so every
-        //      registration boundary can reject them.
-        diagnostics.extend(reject_receiver_methods_in_project_local_js(
-            &parsed,
-            js_source_path,
-            context.string_table,
-        ));
+        let parsed = parse_js_module(&source, &RuntimeModuleRegistry::v1());
 
+        let diagnostics = {
+            let mut diagnostic_strings = DiagnosticStringBuilder::new(context.string_table);
+            let mut diagnostics = convert_js_parser_diagnostics(
+                &parsed.diagnostics,
+                js_source_path,
+                request.source_span,
+                &mut diagnostic_strings,
+            );
+
+            // Reject project-local JS imports that declare receiver-style signatures.
+            // WHY: callable `@moth.sig` signatures must expose free functions rather than `this`
+            //      receiver parameters. The parser classifies receiver-shaped signatures so every
+            //      registration boundary can reject them.
+            diagnostics.extend(reject_receiver_methods_in_project_local_js(
+                &parsed,
+                js_source_path,
+                &mut diagnostic_strings,
+            ));
+            diagnostics
+        };
+
+        // All diagnostics here are error severity, so a successful import carries none.
         if diagnostics
             .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error)
+            .any(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
         {
-            return Err(CompilerMessages::from_diagnostics(
-                diagnostics,
-                context.string_table.clone(),
-            ));
+            return Err(
+                context.capture_diagnostic_failure(DiagnosticBag::from_diagnostics(diagnostics))
+            );
         }
 
         let package_path = js_provider_package_path(&request.logical_source_path);
@@ -152,12 +175,25 @@ impl ExternalImportProvider for JsExternalImportProvider {
                 &package_path,
                 crate::builder_surface::PackageOrigin::ProjectLocal,
             )
-            .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
+            .map_err(PreparedFailure::from)?;
 
-        let registered = register_parsed_js_module(package_id, &parsed, context.package_registry)
-            .map_err(|error| {
-            CompilerMessages::from_error(error, context.string_table.clone())
-        })?;
+        let registered =
+            match register_parsed_js_module(package_id, &parsed, context.package_registry) {
+                Ok(registered) => registered,
+                Err(JsModuleRegistrationError::Infrastructure(error)) => {
+                    return Err(error.into());
+                }
+                Err(JsModuleRegistrationError::ParserDiagnostic { parser_detail }) => {
+                    let parser_detail =
+                        DiagnosticStringBuilder::new(context.string_table).intern(&parser_detail);
+                    let diagnostic = imports::invalid_external_module(
+                        js_source_path,
+                        InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
+                        request.source_span,
+                    );
+                    return Err(context.capture_diagnostic_failure(DiagnosticBag::from(diagnostic)));
+                }
+            };
 
         let required_runtime_imports = required_runtime_imports_from_parsed(&parsed);
 
@@ -167,14 +203,13 @@ impl ExternalImportProvider for JsExternalImportProvider {
             request.canonical_source_path,
             request.source_span,
         )
-        .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
+        .map_err(PreparedFailure::from)?;
 
         Ok(Some(ResolvedExternalImport {
             package_id,
             exported_types: registered.exported_types,
             exported_free_functions: registered.exported_free_functions,
             runtime_asset: Some(runtime_asset),
-            diagnostics,
             required_runtime_imports,
         }))
     }
@@ -200,13 +235,13 @@ pub(crate) fn js_provider_package_path(logical_source_path: &PortableResourcePat
 fn reject_receiver_methods_in_project_local_js(
     parsed: &ParsedJsModule,
     js_source_path: PathId,
-    string_table: &mut StringTable,
-) -> Vec<CompilerDiagnostic> {
+    string_table: &mut DiagnosticStringBuilder,
+) -> Vec<DiagnosticDraft> {
     let mut diagnostics = Vec::new();
 
     for receiver_method in &parsed.receiver_methods {
         let moth_name = string_table.intern(&receiver_method.moth_name);
-        diagnostics.push(CompilerDiagnostic::invalid_external_module(
+        diagnostics.push(imports::invalid_external_module(
             js_source_path,
             InvalidExternalModuleReason::ReceiverMethod { moth_name },
             None,
@@ -224,13 +259,13 @@ fn convert_js_parser_diagnostics(
     parser_diagnostics: &[JsParserDiagnostic],
     js_source_path: PathId,
     import_span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> Vec<CompilerDiagnostic> {
+    string_table: &mut DiagnosticStringBuilder,
+) -> Vec<DiagnosticDraft> {
     let mut diagnostics = Vec::with_capacity(parser_diagnostics.len());
 
     for parser_diagnostic in parser_diagnostics {
         let parser_detail = string_table.intern(&parser_diagnostic.message);
-        diagnostics.push(CompilerDiagnostic::invalid_external_module(
+        diagnostics.push(imports::invalid_external_module(
             js_source_path,
             InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
             import_span,

@@ -88,21 +88,21 @@ impl<'a> HirBuilder<'a> {
         result_type: TypeId,
         source_span: &Option<SourceSpan>,
     ) -> Result<ShortCircuitPlan, HirConstructionFailure> {
-        let condition_block = self.current_block_id_or_error(source_span)?;
-        let parent_region = self.current_region_or_error(source_span)?;
-        let bool_type_id = self.lower_type_id(result_type, source_span)?;
+        let condition_block = self.current_block_id_or_error()?;
+        let parent_region = self.current_region_or_error()?;
+        let bool_type_id = self.lower_type_id(result_type)?;
         let spec = short_circuit_cfg_spec(operation);
 
         let rhs_region = self.create_child_region(parent_region);
         let short_region = self.create_child_region(parent_region);
-        let rhs_block = self.create_block(rhs_region, source_span, spec.rhs_block_label)?;
-        let short_block = self.create_block(short_region, source_span, spec.short_block_label)?;
-        let merge_block = self.create_block(parent_region, source_span, spec.merge_block_label)?;
+        let rhs_block = self.create_block(rhs_region, source_span, spec.rhs_block_label);
+        let short_block = self.create_block(short_region, source_span, spec.short_block_label);
+        let merge_block = self.create_block(parent_region, source_span, spec.merge_block_label);
 
-        self.set_current_block(merge_block, source_span)?;
+        self.set_current_block(merge_block)?;
         let result_local = self.allocate_temp_local(bool_type_id, None)?;
 
-        self.set_current_block(condition_block, source_span)?;
+        self.set_current_block(condition_block)?;
         let (then_block, else_block) = spec.branch_targets(rhs_block, short_block);
         self.emit_terminator_with_span(
             condition_block,
@@ -115,7 +115,7 @@ impl<'a> HirBuilder<'a> {
             *source_span,
         )?;
 
-        self.set_current_block(rhs_block, source_span)?;
+        self.set_current_block(rhs_block)?;
         Ok(ShortCircuitPlan {
             spec,
             short_block,
@@ -142,10 +142,9 @@ impl<'a> HirBuilder<'a> {
             bool_type_id,
         } = plan;
 
-        let rhs_merge_argument =
-            self.materialize_short_circuit_jump_argument_local(lowered_rhs, source_span)?;
-        let rhs_tail = self.current_block_id_or_error(source_span)?;
-        if !self.block_has_explicit_terminator(rhs_tail, source_span)? {
+        let rhs_merge_argument = self.materialize_short_circuit_jump_argument_local(lowered_rhs)?;
+        let rhs_tail = self.current_block_id_or_error()?;
+        if !self.block_has_explicit_terminator(rhs_tail)? {
             self.emit_jump_with_args(
                 rhs_tail,
                 merge_block,
@@ -158,8 +157,8 @@ impl<'a> HirBuilder<'a> {
             )?;
         }
 
-        self.set_current_block(short_block, source_span)?;
-        let short_region = self.current_region_or_error(source_span)?;
+        self.set_current_block(short_block)?;
+        let short_region = self.current_region_or_error()?;
         let short_value = self.make_expression(
             &None,
             HirExpressionKind::Bool(spec.short_value),
@@ -168,7 +167,7 @@ impl<'a> HirBuilder<'a> {
             short_region,
         )?;
         let short_merge_argument =
-            self.materialize_short_circuit_jump_argument_local(short_value, source_span)?;
+            self.materialize_short_circuit_jump_argument_local(short_value)?;
         self.emit_jump_with_args(
             short_block,
             merge_block,
@@ -180,8 +179,8 @@ impl<'a> HirBuilder<'a> {
             spec.short_edge_label,
         )?;
 
-        self.set_current_block(merge_block, source_span)?;
-        let merge_region = self.current_region_or_error(source_span)?;
+        self.set_current_block(merge_block)?;
+        let merge_region = self.current_region_or_error()?;
         self.make_local_load_expression(result_local, bool_type_id, &None, merge_region)
     }
 }

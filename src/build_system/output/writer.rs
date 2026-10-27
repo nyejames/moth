@@ -13,8 +13,7 @@ use super::output_path::{
 use crate::build_system::build::{FileKind, Project};
 use crate::build_system::output::{OutputPlan, WriteMode};
 use crate::build_system::utils::{file_error_with_rejection_reason, should_skip_unchanged_write};
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -25,19 +24,17 @@ use std::path::{Path, PathBuf};
 ///
 /// WHAT: distinguishes the specific safety contract violated when the writer
 /// rejects an output batch, so tests can assert the exact rejection reason
-/// rather than accepting any `ErrorType::File` infrastructure error.
-/// WHY: all writer rejections share `ErrorType::File`, but they enforce
+/// rather than accepting any `InfrastructureFailureKind::Filesystem` infrastructure error.
+/// WHY: all writer rejections share `InfrastructureFailureKind::Filesystem`, but they enforce
 /// distinct safety contracts (path validity, destination uniqueness, symlink
 /// containment, hard-link safety, etc.). Without a typed reason, a test for
 /// one contract could pass when a different contract is violated.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum OutputRejectionReason {
     DanglingSymlinkInOutputRoot,
     NonPortablePathComponents,
     ReservedManifestDestination,
     DuplicateDestination,
-    CaseOnlyCollision,
     DanglingSymlinkInDestination,
     EscapesOutputRoot,
     DestinationIsOutputRoot,
@@ -71,7 +68,6 @@ impl OutputRejectionReason {
             Self::NonPortablePathComponents => "non-portable-path-components",
             Self::ReservedManifestDestination => "reserved-manifest-destination",
             Self::DuplicateDestination => "duplicate-destination",
-            Self::CaseOnlyCollision => "case-only-collision",
             Self::DanglingSymlinkInDestination => "dangling-symlink-in-destination",
             Self::EscapesOutputRoot => "escapes-output-root",
             Self::DestinationIsOutputRoot => "destination-is-output-root",
@@ -132,7 +128,6 @@ struct DestinationPreparation<'a> {
     managed_artifact_paths: &'a mut HashSet<PathBuf>,
     explicit_directory_paths: &'a mut HashSet<PathBuf>,
     identities: &'a mut HashMap<OutputPathIdentity, PathBuf>,
-    string_table: &'a StringTable,
 }
 
 struct DestinationRequest<'a> {
@@ -145,15 +140,13 @@ struct DestinationRequest<'a> {
 pub(crate) fn prepare_output_write(
     project: &Project,
     output_plan: &OutputPlan,
-    string_table: &StringTable,
-) -> Result<PreparedOutputWrite, CompilerMessages> {
+) -> Result<PreparedOutputWrite, InfrastructureFailure> {
     let output_root = output_plan.output_root();
     let canonical_output_root = canonicalize_output_path(output_root).map_err(|_| {
         file_error_with_rejection_reason(
             output_root,
             "Output root contains a dangling symlink component and cannot be prepared safely.",
             OutputRejectionReason::DanglingSymlinkInOutputRoot,
-            string_table,
         )
     })?;
     let mut destinations = Vec::new();
@@ -167,7 +160,6 @@ pub(crate) fn prepare_output_write(
         managed_artifact_paths: &mut managed_artifact_paths,
         explicit_directory_paths: &mut explicit_directory_paths,
         identities: &mut identities,
-        string_table,
     };
 
     for (output_file_index, output_file) in project.output_files.iter().enumerate() {
@@ -205,9 +197,8 @@ pub(crate) fn prepare_output_write(
         )?;
     }
 
-    reject_canonical_destination_conflicts(&destinations, string_table)?;
-    let manifest_destination =
-        prepare_manifest_destination(output_root, &canonical_output_root, string_table)?;
+    reject_canonical_destination_conflicts(&destinations)?;
+    let manifest_destination = prepare_manifest_destination(output_root, &canonical_output_root)?;
 
     Ok(PreparedOutputWrite {
         destinations,
@@ -220,20 +211,19 @@ pub(crate) fn prepare_output_write(
 fn prepare_one_destination(
     preparation: &mut DestinationPreparation<'_>,
     request: DestinationRequest<'_>,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), InfrastructureFailure> {
     let DestinationRequest {
         authored_path,
         is_directory,
         is_managed,
         kind,
     } = request;
-    let relative_path = validate_relative_output_path(authored_path, preparation.string_table)?;
+    let relative_path = validate_relative_output_path(authored_path)?;
     let identity = output_path_identity(&relative_path).map_err(|_| {
         file_error_with_rejection_reason(
             &relative_path,
             "Output path must use normal portable path components.",
             OutputRejectionReason::NonPortablePathComponents,
-            preparation.string_table,
         )
     })?;
     if path_starts_with_component_identity(&relative_path, Path::new(BUILD_MANIFEST_FILENAME)) {
@@ -244,7 +234,6 @@ fn prepare_one_destination(
                 relative_path.display()
             ),
             OutputRejectionReason::ReservedManifestDestination,
-            preparation.string_table,
         ));
     }
     if let Some(existing_path) = preparation.identities.get(&identity) {
@@ -264,7 +253,6 @@ fn prepare_one_destination(
             &relative_path,
             message,
             OutputRejectionReason::DuplicateDestination,
-            preparation.string_table,
         ));
     }
     preparation
@@ -277,7 +265,6 @@ fn prepare_one_destination(
             &relative_path,
             "Output destination contains a dangling symlink component and cannot be prepared safely.",
             OutputRejectionReason::DanglingSymlinkInDestination,
-            preparation.string_table,
         )
     })?;
     if !canonical_destination.starts_with(preparation.canonical_output_root) {
@@ -289,7 +276,6 @@ fn prepare_one_destination(
                 preparation.output_root.display()
             ),
             OutputRejectionReason::EscapesOutputRoot,
-            preparation.string_table,
         ));
     }
     if canonical_destination == preparation.canonical_output_root {
@@ -300,7 +286,6 @@ fn prepare_one_destination(
                 relative_path.display()
             ),
             OutputRejectionReason::DestinationIsOutputRoot,
-            preparation.string_table,
         ));
     }
     let canonical_relative_path = canonical_destination
@@ -315,7 +300,6 @@ fn prepare_one_destination(
                 relative_path.display()
             ),
             OutputRejectionReason::NonLosslessCanonicalPath,
-            preparation.string_table,
         ));
     }
     if path_starts_with_component_identity(
@@ -329,16 +313,10 @@ fn prepare_one_destination(
                 relative_path.display()
             ),
             OutputRejectionReason::ReservedManifestDestinationCanonical,
-            preparation.string_table,
         ));
     }
 
-    validate_existing_destination(
-        &canonical_destination,
-        &relative_path,
-        is_directory,
-        preparation.string_table,
-    )?;
+    validate_existing_destination(&canonical_destination, &relative_path, is_directory)?;
     if is_directory {
         preparation
             .explicit_directory_paths
@@ -362,31 +340,25 @@ fn prepare_one_destination(
 fn prepare_manifest_destination(
     output_root: &Path,
     canonical_output_root: &Path,
-    string_table: &StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+) -> Result<PathBuf, InfrastructureFailure> {
     let authored_manifest_path = output_root.join(BUILD_MANIFEST_FILENAME);
     match fs::symlink_metadata(&authored_manifest_path) {
         Ok(metadata) if metadata.file_type().is_file() => {
-            let has_multiple_hard_links = inspect_hard_link_count(
-                &authored_manifest_path,
-                &metadata,
-            )
-            .map_err(|error| {
-                file_error_with_rejection_reason(
-                    &authored_manifest_path,
-                    format!(
-                        "The existing build manifest cannot be inspected safely for hard-link aliases: {error}"
-                    ),
-                    OutputRejectionReason::ManifestHardLinkInspectionFailed,
-                    string_table,
-                )
-            })?;
+            let has_multiple_hard_links =
+                inspect_hard_link_count(&authored_manifest_path, &metadata).map_err(|error| {
+                    file_error_with_rejection_reason(
+                        &authored_manifest_path,
+                        format!(
+                            "The existing build manifest cannot be inspected safely for hard-link aliases: {error}"
+                        ),
+                        OutputRejectionReason::ManifestHardLinkInspectionFailed,
+                    )
+                })?;
             if has_multiple_hard_links {
                 return Err(file_error_with_rejection_reason(
                     &authored_manifest_path,
                     "The existing build manifest is hard-linked to another filesystem path and cannot be overwritten safely.",
                     OutputRejectionReason::ManifestHardLinked,
-                    string_table,
                 ));
             }
         }
@@ -395,7 +367,6 @@ fn prepare_manifest_destination(
                 &authored_manifest_path,
                 "The existing build manifest destination must be a regular file; symlinks, directories, and special files are not allowed.",
                 OutputRejectionReason::ManifestNotRegularFile,
-                string_table,
             ));
         }
         Err(error) if error.kind() == ErrorKind::NotFound => {}
@@ -404,7 +375,6 @@ fn prepare_manifest_destination(
                 &authored_manifest_path,
                 format!("The build manifest destination cannot be inspected safely: {error}"),
                 OutputRejectionReason::ManifestInspectionFailed,
-                string_table,
             ));
         }
     }
@@ -414,8 +384,7 @@ fn prepare_manifest_destination(
 
 fn reject_canonical_destination_conflicts(
     destinations: &[PreparedDestination],
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), InfrastructureFailure> {
     let mut destinations_by_identity: HashMap<Vec<String>, usize> = HashMap::new();
     for (destination_index, destination) in destinations.iter().enumerate() {
         let identity = output_path_component_identities(&destination.canonical_relative_path)
@@ -430,7 +399,6 @@ fn reject_canonical_destination_conflicts(
                     destination.relative_path.display()
                 ),
                 OutputRejectionReason::CanonicalDestinationCollision,
-                string_table,
             ));
         }
         destinations_by_identity.insert(identity, destination_index);
@@ -455,7 +423,6 @@ fn reject_canonical_destination_conflicts(
                         ancestor.relative_path.display()
                     ),
                     OutputRejectionReason::FileAncestorConflict,
-                    string_table,
                 ));
             }
         }
@@ -468,8 +435,7 @@ fn validate_existing_destination(
     destination: &Path,
     relative_path: &Path,
     expects_directory: bool,
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), InfrastructureFailure> {
     let metadata = match fs::metadata(destination) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -481,7 +447,6 @@ fn validate_existing_destination(
                     relative_path.display()
                 ),
                 OutputRejectionReason::DestinationInspectionFailed,
-                string_table,
             ));
         }
     };
@@ -494,7 +459,6 @@ fn validate_existing_destination(
                 relative_path.display()
             ),
             OutputRejectionReason::DirectoryDestinationExistsAsNonDirectory,
-            string_table,
         ));
     }
     if !expects_directory && !metadata.is_file() {
@@ -505,7 +469,6 @@ fn validate_existing_destination(
                 relative_path.display()
             ),
             OutputRejectionReason::FileDestinationExistsAsNonFile,
-            string_table,
         ));
     }
     if metadata.is_file() {
@@ -518,7 +481,6 @@ fn validate_existing_destination(
                         relative_path.display()
                     ),
                     OutputRejectionReason::DestinationInspectionFailed,
-                    string_table,
                 )
             },
         )?;
@@ -530,7 +492,6 @@ fn validate_existing_destination(
                     relative_path.display()
                 ),
                 OutputRejectionReason::HardLinkedDestination,
-                string_table,
             ));
         }
     }
@@ -538,22 +499,24 @@ fn validate_existing_destination(
     Ok(())
 }
 
+// Windows inspection can fail, and unsupported targets report inability, so retain `Result`.
 fn inspect_hard_link_count(path: &Path, metadata: &fs::Metadata) -> std::io::Result<bool> {
     #[cfg(unix)]
     {
-        let _ = path;
         use std::os::unix::fs::MetadataExt;
 
+        let _ = path;
         Ok(metadata.nlink() > 1)
     }
+
     #[cfg(windows)]
     {
-        let _ = metadata;
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Storage::FileSystem::{
             BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
         };
 
+        let _ = metadata;
         let file = fs::File::open(path)?;
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
         let succeeded =
@@ -563,6 +526,7 @@ fn inspect_hard_link_count(path: &Path, metadata: &fs::Metadata) -> std::io::Res
         }
         Ok(information.nNumberOfLinks > 1)
     }
+
     #[cfg(not(any(unix, windows)))]
     {
         let _ = path;
@@ -603,9 +567,12 @@ pub(crate) struct OutputDestinationOutcome {
 /// Destinations are named by their authored relative path rather than the canonical filesystem
 /// destination, because the relative path is the identity the caller chose and the canonical one
 /// resolves symlinks the caller never wrote.
+///
+/// Recoverable cleanup warnings remain plain data for the successful host-side presentation path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OutputWriteSummary {
     destinations: Vec<OutputDestinationOutcome>,
+    warning_messages: Vec<String>,
 }
 
 impl OutputWriteSummary {
@@ -641,6 +608,15 @@ impl OutputWriteSummary {
             .count()
     }
 
+    /// Append non-fatal output cleanup messages produced after artifact emission.
+    pub(crate) fn append_warning_messages(&mut self, warning_messages: Vec<String>) {
+        self.warning_messages.extend(warning_messages);
+    }
+
+    pub(crate) fn into_warning_messages(self) -> Vec<String> {
+        self.warning_messages
+    }
+
     /// Every destination this write considered, in preparation order.
     #[cfg(test)]
     pub(crate) fn destinations(&self) -> &[OutputDestinationOutcome] {
@@ -653,8 +629,7 @@ pub(crate) fn emit_prepared_output_files(
     project: &mut Project,
     prepared_write: &PreparedOutputWrite,
     write_mode: WriteMode,
-    string_table: &mut StringTable,
-) -> Result<OutputWriteSummary, CompilerMessages> {
+) -> Result<OutputWriteSummary, InfrastructureFailure> {
     let mut destinations = Vec::with_capacity(prepared_write.destinations.len());
 
     for prepared_destination in &prepared_write.destinations {
@@ -662,11 +637,8 @@ pub(crate) fn emit_prepared_output_files(
         let outcome = match &prepared_destination.kind {
             PreparedDestinationKind::DeferredResource(deferred_resource_index) => {
                 let source_id = project.deferred_resources[*deferred_resource_index].source_id;
-                let bytes = project
-                    .resource_inputs
-                    .read_source(source_id)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                write_bytes_output(destination, bytes, write_mode, string_table)?
+                let bytes = project.resource_inputs.read_source(source_id)?;
+                write_bytes_output(destination, bytes, write_mode)?
             }
             PreparedDestinationKind::OutputFile(output_file_index) => {
                 let output_file = &project.output_files[*output_file_index];
@@ -683,16 +655,15 @@ pub(crate) fn emit_prepared_output_files(
                                     destination.display()
                                 ),
                                 OutputRejectionReason::DirectoryCreationFailed,
-                                string_table,
                             )
                         })?;
                         OutputWriteOutcome::DirectoryCreated
                     }
                     FileKind::Js(content) | FileKind::Html(content) => {
-                        write_string_output(destination, content, write_mode, string_table)?
+                        write_string_output(destination, content, write_mode)?
                     }
                     FileKind::Wasm(bytes) | FileKind::Bytes(bytes) => {
-                        write_bytes_output(destination, bytes, write_mode, string_table)?
+                        write_bytes_output(destination, bytes, write_mode)?
                     }
                 }
             }
@@ -704,13 +675,13 @@ pub(crate) fn emit_prepared_output_files(
         });
     }
 
-    Ok(OutputWriteSummary { destinations })
+    Ok(OutputWriteSummary {
+        destinations,
+        warning_messages: Vec::new(),
+    })
 }
 
-fn create_parent_dir_if_needed(
-    path: &Path,
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+fn create_parent_dir_if_needed(path: &Path) -> Result<(), InfrastructureFailure> {
     let Some(parent) = path.parent() else {
         return Ok(());
     };
@@ -723,7 +694,6 @@ fn create_parent_dir_if_needed(
                 parent.display()
             ),
             OutputRejectionReason::ParentDirCreationFailed,
-            string_table,
         )
     })
 }
@@ -732,18 +702,16 @@ fn write_string_output(
     destination: &Path,
     content: &str,
     write_mode: WriteMode,
-    string_table: &StringTable,
-) -> Result<OutputWriteOutcome, CompilerMessages> {
-    write_bytes_output(destination, content.as_bytes(), write_mode, string_table)
+) -> Result<OutputWriteOutcome, InfrastructureFailure> {
+    write_bytes_output(destination, content.as_bytes(), write_mode)
 }
 
 fn write_bytes_output(
     destination: &Path,
     content: &[u8],
     write_mode: WriteMode,
-    string_table: &StringTable,
-) -> Result<OutputWriteOutcome, CompilerMessages> {
-    create_parent_dir_if_needed(destination, string_table)?;
+) -> Result<OutputWriteOutcome, InfrastructureFailure> {
+    create_parent_dir_if_needed(destination)?;
 
     if should_skip_unchanged_write(destination, content, write_mode) {
         return Ok(OutputWriteOutcome::SkippedUnchanged);
@@ -757,7 +725,6 @@ fn write_bytes_output(
                 destination.display()
             ),
             OutputRejectionReason::FileWriteFailed,
-            string_table,
         )
     })?;
 

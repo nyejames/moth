@@ -23,8 +23,7 @@ const OVER_ALLOCATION_DENOMINATOR: usize = 2;
 /// Conservative capacity estimates for frontend arenas.
 ///
 /// WHAT: a policy-only bundle of initial `Vec` capacities. Fields are public so later phases can
-///       read the subset they need, but only the fields required by the current phase are wired
-///       into counters today.
+///       read the subset they need.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FrontendArenaCapacityEstimate {
     pub scope_frames: usize,

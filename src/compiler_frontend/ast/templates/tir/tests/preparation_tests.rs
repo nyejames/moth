@@ -34,12 +34,28 @@ use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIr
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+
+fn assert_structure_reason(draft: DiagnosticDraft, expected: InvalidTemplateStructureCode) {
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let facts = diagnostic
+        .first()
+        .expect("invalid structure error should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("invalid structure error should retain typed facts");
+    assert_eq!(facts.reason, expected);
+}
 
 fn runtime_expression(
     expressions: &mut AstExpressionBuilder,
@@ -269,12 +285,10 @@ fn preparation_mode_controls_const_required_conditional_validation() {
     let TemplateError::Diagnostic(diagnostic) = const_required else {
         panic!("ConstRequired conditional rejection should remain a source diagnostic");
     };
-    assert!(matches!(
-        diagnostic.payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidTemplateStructure {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-        }
-    ));
+    assert_structure_reason(
+        diagnostic,
+        InvalidTemplateStructureCode::TemplateIfConditionNotConst,
+    );
 }
 
 #[test]
@@ -313,12 +327,10 @@ fn preparation_const_required_recurses_through_coerced_loop_condition() {
     else {
         panic!("const-true loop rejection should remain a source diagnostic");
     };
-    assert!(matches!(
-        diagnostic.payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidTemplateStructure {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
-        }
-    ));
+    assert_structure_reason(
+        diagnostic,
+        InvalidTemplateStructureCode::TemplateConditionalLoopConstTrue,
+    );
 }
 
 #[test]
@@ -340,7 +352,7 @@ fn preparation_continues_after_runtime_dependence_to_malformed_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing TIR authority should remain an infrastructure error");
     };
-    assert!(error.primary.msg.contains("TIR preparation: node"));
+    assert!(error.primary.message.contains("TIR preparation: node"));
 }
 
 #[test]
@@ -397,7 +409,7 @@ fn preparation_reenters_nested_template_payload_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("nested authority failure must remain infrastructure");
     };
-    assert!(error.primary.msg.contains("TIR preparation: node"));
+    assert!(error.primary.message.contains("TIR preparation: node"));
 }
 
 #[test]
@@ -465,12 +477,14 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
         None,
     ) {
         Err(error) => error,
-        Ok(prepared) => panic!("nested value cycles must be CompilerError, got {prepared:?}"),
+        Ok(prepared) => {
+            panic!("nested value cycles must be InfrastructureFailure, got {prepared:?}")
+        }
     };
     let TemplateError::Infrastructure(error) = error else {
         panic!("nested value cycles must stay on the infrastructure lane, got {error:?}");
     };
-    assert_eq!(error.primary.error_type, ErrorType::Compiler);
+    assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
 }
 
 /// Exact-view child cycles are internal authority failures, not runtime values.
@@ -512,12 +526,14 @@ fn preparation_rejects_exact_child_cycle_as_internal_error() {
         None,
     ) {
         Err(error) => error,
-        Ok(prepared) => panic!("exact-view child cycles must be CompilerError, got {prepared:?}"),
+        Ok(prepared) => {
+            panic!("exact-view child cycles must be InfrastructureFailure, got {prepared:?}")
+        }
     };
     let TemplateError::Infrastructure(error) = error else {
         panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
     };
-    assert_eq!(error.primary.error_type, ErrorType::Compiler);
+    assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
 }
 
 #[test]
@@ -560,7 +576,7 @@ fn preparation_validates_runtime_slot_plan_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing slot plan must remain infrastructure");
     };
-    assert!(error.primary.msg.contains("TIR preparation: slot plan"));
+    assert!(error.primary.message.contains("TIR preparation: slot plan"));
 }
 
 #[test]
@@ -794,9 +810,9 @@ fn preparation_reports_missing_wrapper_root_without_a_separate_slot_layout_walk(
         panic!("missing wrapper root should remain an infrastructure error");
     };
     assert!(
-        error.primary.msg.contains("TIR preparation: node"),
+        error.primary.message.contains("TIR preparation: node"),
         "preparation should own missing wrapper-root validation, got: {}",
-        error.primary.msg
+        error.primary.message
     );
 }
 
@@ -907,7 +923,12 @@ fn preparation_validates_wrapper_set_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing wrapper set must remain infrastructure");
     };
-    assert!(error.primary.msg.contains("TIR preparation: wrapper set"));
+    assert!(
+        error
+            .primary
+            .message
+            .contains("TIR preparation: wrapper set")
+    );
 }
 
 fn prepare_slot_plan_view(
@@ -940,9 +961,9 @@ fn assert_preparation_authority_error(
         panic!("contribution-source authority must stay infrastructure, got {error:?}");
     };
     assert!(
-        error.primary.msg.contains(marker),
+        error.primary.message.contains(marker),
         "expected {marker:?} in {}",
-        error.primary.msg
+        error.primary.message
     );
 }
 

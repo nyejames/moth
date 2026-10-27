@@ -22,9 +22,14 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Template, TemplateConstValueKind};
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-    InvalidBuiltinCallReason, InvalidFallibleHandlingReason,
+    AstCapacityResource, CompileTimeEvaluationErrorReason, InvalidBuiltinCallReason,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -250,7 +255,7 @@ impl AstExpressionBuilder {
         let materialised =
             FixedScalarValue::binary_float(FixedScalar::F64, value).ok_or_else(|| {
                 ExpressionConstructionFailure::Diagnostic(
-                    CompilerDiagnostic::compile_time_evaluation_error(
+                    choices_control_flow::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::FloatOverflow,
                         Some(name),
                         span,
@@ -384,7 +389,7 @@ impl AstExpressionBuilder {
         if let Some(slot) = argument.parameter_slot {
             u32::try_from(slot.index()).map_err(|_| {
                 ExpressionConstructionFailure::Diagnostic(
-                    CompilerDiagnostic::compiler_capacity_exceeded(
+                    token_lexical::compiler_capacity_exceeded(
                         AstCapacityResource::ExpressionSideEntries,
                         argument.span,
                     ),
@@ -788,12 +793,10 @@ impl AstExpressionBuilder {
         >,
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         let tag = u32::try_from(input.tag).map_err(|_| {
-            ExpressionConstructionFailure::Diagnostic(
-                CompilerDiagnostic::compiler_capacity_exceeded(
-                    AstCapacityResource::ChoiceTags,
-                    input.span,
-                ),
-            )
+            ExpressionConstructionFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                AstCapacityResource::ChoiceTags,
+                input.span,
+            ))
         })?;
         let fields = self.append_constructor_fields(input.fields, input.span)?;
         self.append_expression(
@@ -811,12 +814,10 @@ impl AstExpressionBuilder {
         >,
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         let tag = u32::try_from(input.tag).map_err(|_| {
-            ExpressionConstructionFailure::Diagnostic(
-                CompilerDiagnostic::compiler_capacity_exceeded(
-                    AstCapacityResource::ChoiceTags,
-                    input.span,
-                ),
-            )
+            ExpressionConstructionFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                AstCapacityResource::ChoiceTags,
+                input.span,
+            ))
         })?;
         let fields = self.append_constructor_fields(input.fields, input.span)?;
         self.append_expression(
@@ -1129,7 +1130,7 @@ impl AstExpressionBuilder {
                 let (ExpressionOperationView::Call(call)
                 | ExpressionOperationView::MethodCall { call, .. }) = view.operation()
                 else {
-                    unreachable!("operation matched above");
+                    crate::compiler_bug!(CompilerStage::AstConstruction, "operation matched above");
                 };
                 let metadata = call.metadata();
                 let record = ResolvedCall {
@@ -1148,7 +1149,7 @@ impl AstExpressionBuilder {
                     _ => ExpressionOp::Call(call),
                 }
             }
-            _ => unreachable!("operation matched above"),
+            _ => crate::compiler_bug!(CompilerStage::AstConstruction, "operation matched above"),
         };
         let facts = input
             .failure
@@ -1174,7 +1175,7 @@ impl ExpressionView<'_> {
         }
     }
 
-    pub(crate) fn unhandled_typed_error_diagnostic(self) -> Option<CompilerDiagnostic> {
+    pub(crate) fn unhandled_typed_error_diagnostic(self) -> Option<DiagnosticDraft> {
         let facts = self.failure_facts()?;
         if facts.disposition != super::failure_facts::FailureDisposition::Pending {
             return None;
@@ -1182,12 +1183,12 @@ impl ExpressionView<'_> {
         facts.summary.first_typed.map(|producer| {
             let span = producer.span.or(self.span());
             match producer.builtin_name {
-                Some(name) => CompilerDiagnostic::invalid_builtin_call(
+                Some(name) => calls_data::invalid_builtin_call(
                     InvalidBuiltinCallReason::UnhandledFallibleCall,
                     Some(name),
                     span,
                 ),
-                None => CompilerDiagnostic::invalid_fallible_handling(
+                None => choices_control_flow::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::UnhandledErrorReturn,
                     span,
                 ),

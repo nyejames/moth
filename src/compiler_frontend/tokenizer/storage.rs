@@ -1,7 +1,8 @@
 //! Canonical source-token storage and bounded sequence ownership.
 
 use crate::compiler_frontend::arena::TokenStats;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::numeric_text::store::{
     NumericLiteralId, NumericLiteralStore, NumericLiteralStoreError,
 };
@@ -31,8 +32,8 @@ impl TokenIndex {
     ///
     /// Every `u32` value is representable. Whether it addresses a token is checked by
     /// [`SourceTokens::token`] or [`TokenCursor::new`].
-    pub const fn try_from_raw(raw: u32) -> Option<Self> {
-        Some(Self(raw))
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw)
     }
 
     /// Construct an index from a host index without truncation.
@@ -515,7 +516,7 @@ pub(crate) struct TokenPayloadOrigin<'a> {
 #[derive(Clone, Debug)]
 pub(crate) enum SourceTokenBuildError {
     Capacity,
-    Invariant(CompilerError),
+    Invariant(InfrastructureFailure),
 }
 
 /// Failures while emitting one canonical source token.
@@ -580,9 +581,10 @@ impl SourceTokensBuilder {
     ) -> Result<(), SourceTokenBuildError> {
         let next_index = self.shapes.len();
         let shape = TokenShape::from_raw_parts(tag.raw(), flags, data).ok_or_else(|| {
-            SourceTokenBuildError::Invariant(CompilerError::compiler_error(format!(
-                "trusted token at index {next_index} has a malformed compact shape"
-            )))
+            SourceTokenBuildError::Invariant(InfrastructureFailure::internal(
+                CompilerStage::Tokenization,
+                format!("trusted token at index {next_index} has a malformed compact shape"),
+            ))
         })?;
         self.push_packed(shape, span)
     }
@@ -597,11 +599,10 @@ impl SourceTokensBuilder {
     ) -> Result<(), SourceTokenBuildError> {
         let expected = self.preflight_numeric()?;
         if expected != numeric_id {
-            return Err(SourceTokenBuildError::Invariant(
-                CompilerError::compiler_error(
-                    "numeric literal handle did not match the staged canonical position",
-                ),
-            ));
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
+                "numeric literal handle did not match the staged canonical position",
+            );
         }
         self.push_payload(tag, flags, numeric_id.raw(), span)?;
         self.staged_numeric += 1;
@@ -622,10 +623,7 @@ impl SourceTokensBuilder {
         Ok(())
     }
 
-    pub(crate) fn finish(
-        self,
-        numeric_literals: NumericLiteralStore,
-    ) -> Result<SourceTokens, CompilerError> {
+    pub(crate) fn finish(self, numeric_literals: NumericLiteralStore) -> SourceTokens {
         #[cfg(feature = "data_layout_memory_probe")]
         crate::compiler_frontend::instrumentation::record_transient_construction_buffer_bytes(
             self.shapes
@@ -638,23 +636,26 @@ impl SourceTokensBuilder {
                 ),
         );
         if numeric_literals.owner_source().is_none() && !numeric_literals.is_empty() {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
                 "source token numeric store has records but no source identity",
-            ));
+            );
         }
         if let Some(owner) = numeric_literals.owner_source()
             && owner != self.source
         {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
                 "source token numeric store does not match its source identity",
-            ));
+            );
         }
         if self.staged_numeric != numeric_literals.len() {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
                 "source token numeric handles (staged {}) do not match numeric store rows ({})",
                 self.staged_numeric,
-                numeric_literals.len()
-            )));
+                numeric_literals.len(),
+            );
         }
         let len = self.shapes.len();
         let owner = SourceTokens {
@@ -666,15 +667,15 @@ impl SourceTokensBuilder {
             sequence_store: TokenSequenceStore::new(self.source, len),
             token_stats: self.token_stats,
         };
-        owner.validate_structure()?;
-        Ok(owner)
+        owner.validate_structure();
+        owner
     }
 }
 
 /// Canonical source-token fixture builder for tests that need hand-authored syntax.
 ///
 /// This helper writes the same compact shape/span arrays and source-owned cold stores as the
-/// lexer. It deliberately exposes typed payload methods instead of a compatibility token enum.
+/// lexer. It deliberately exposes typed payload methods instead of accepting token values.
 #[cfg(test)]
 pub(crate) struct TestSourceTokensBuilder {
     source: SourceId,
@@ -707,7 +708,7 @@ impl TestSourceTokensBuilder {
         &mut self,
         tag: TokenTag,
         span: LocalSpan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.builder
             .push_payload(tag, 0, 0, span)
             .map_err(test_shape_error)
@@ -718,7 +719,7 @@ impl TestSourceTokensBuilder {
         tag: TokenTag,
         value: StringId,
         span: LocalSpan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.builder
             .push_payload(tag, 0, value.index(), span)
             .map_err(test_shape_error)
@@ -729,7 +730,7 @@ impl TestSourceTokensBuilder {
         tag: TokenTag,
         value: PathSyntaxId,
         span: LocalSpan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.builder
             .push_payload(tag, 0, value.raw(), span)
             .map_err(test_shape_error)
@@ -740,7 +741,7 @@ impl TestSourceTokensBuilder {
         tag: TokenTag,
         value: char,
         span: LocalSpan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.builder
             .push_payload(tag, 0, value as u32, span)
             .map_err(test_shape_error)
@@ -751,7 +752,7 @@ impl TestSourceTokensBuilder {
         tag: TokenTag,
         value: bool,
         span: LocalSpan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.builder
             .push_payload(tag, 0, u32::from(value), span)
             .map_err(test_shape_error)
@@ -761,13 +762,14 @@ impl TestSourceTokensBuilder {
         &mut self,
         literal: NumericLiteralToken,
         span: LocalSpan,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let numeric_id = self.builder.preflight_numeric().map_err(test_shape_error)?;
         let kind = literal.kind;
         self.numeric_literals.try_push(literal).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "test numeric literal insertion failed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::Tokenization,
+                format!("test numeric literal insertion failed: {error:?}"),
+            )
         })?;
         self.builder
             .push_numeric(
@@ -779,7 +781,7 @@ impl TestSourceTokensBuilder {
             .map_err(test_shape_error)
     }
 
-    pub(crate) fn finish(self) -> Result<Arc<SourceTokens>, CompilerError> {
+    pub(crate) fn finish(self) -> Result<Arc<SourceTokens>, InfrastructureFailure> {
         let mut source_tokens = self.finish_unfrozen()?;
         Arc::get_mut(&mut source_tokens)
             .expect("test source token owner should be unique before freeze")
@@ -791,10 +793,10 @@ impl TestSourceTokensBuilder {
     ///
     /// Segmented fixtures register their checked ranges before publishing the final frozen
     /// owner. Callers must freeze numeric and sequence storage after registration.
-    pub(crate) fn finish_unfrozen(self) -> Result<Arc<SourceTokens>, CompilerError> {
+    pub(crate) fn finish_unfrozen(self) -> Result<Arc<SourceTokens>, InfrastructureFailure> {
         self.path_syntax
             .validate_file_owned_locations(self.source)?;
-        let mut source_tokens = self.builder.finish(self.numeric_literals)?;
+        let mut source_tokens = self.builder.finish(self.numeric_literals);
         let mut path_syntax = self.path_syntax;
         path_syntax.freeze();
         source_tokens.attach_shared_path_syntax(Arc::new(path_syntax));
@@ -806,11 +808,12 @@ impl TestSourceTokensBuilder {
 }
 
 #[cfg(test)]
-fn test_shape_error(error: SourceTokenBuildError) -> CompilerError {
+fn test_shape_error(error: SourceTokenBuildError) -> InfrastructureFailure {
     match error {
-        SourceTokenBuildError::Capacity => {
-            CompilerError::compiler_error("test source token fixture exceeded its capacity")
-        }
+        SourceTokenBuildError::Capacity => InfrastructureFailure::internal(
+            CompilerStage::Tokenization,
+            "test source token fixture exceeded its capacity",
+        ),
         SourceTokenBuildError::Invariant(error) => error,
     }
 }
@@ -928,35 +931,38 @@ impl SourceTokens {
         self.token_stats
     }
 
-    pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, CompilerError> {
+    pub(crate) fn path_syntax_table(&self) -> Result<&PathSyntaxTable, InfrastructureFailure> {
         self.path_syntax.as_deref().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::Tokenization,
                 "source token path table is not attached at its immutable publication boundary",
             )
         })
     }
 
     #[cfg(test)]
-    pub(crate) fn path_syntax_arc(&self) -> Result<Arc<PathSyntaxTable>, CompilerError> {
+    pub(crate) fn path_syntax_arc(&self) -> Result<Arc<PathSyntaxTable>, InfrastructureFailure> {
         self.path_syntax.clone().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::Tokenization,
                 "source token path table is not attached at its immutable publication boundary",
             )
         })
     }
 
-    fn validate_structure(&self) -> Result<(), CompilerError> {
+    fn validate_structure(&self) {
         if self.shapes.len() != self.spans.len() {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
                 "source token shape/span arrays have different lengths",
-            ));
+            );
         }
         if !token_store_length_fits(self.shapes.len()) {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
                 "source token arrays exceed their checked u32 index domain",
-            ));
+            );
         }
-        Ok(())
     }
 
     pub(crate) fn validate_range(&self, range: TokenRange) -> Result<(), TokenRangeError> {
@@ -1052,7 +1058,10 @@ impl SourceTokens {
     }
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         if self.numeric_literals.is_frozen() {
-            panic!("numeric literal remapping was requested after the source publication freeze");
+            crate::compiler_bug!(
+                CompilerStage::Tokenization,
+                "numeric literal remapping was requested after the source publication freeze"
+            );
         }
         self.numeric_literals.remap_string_ids(remap);
         for shape in &mut self.shapes {

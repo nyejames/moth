@@ -1,4 +1,5 @@
-# Authored for Phase 5B.2 and unobserved until the parent harness run. Parent bg925 observed the grouped known-none predicate as MOTH-RULE-0042 at 2:19; this fixture pins that line. No html_wasm block is declared.
+# The grouped known-none predicate reports MOTH-RULE-0042 at 2:19; this fixture pins that line.
+# No html_wasm block is declared.
 
 [backends.html]
 mode = "failure"

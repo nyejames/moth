@@ -20,9 +20,12 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, DiagnosticPayload, InvalidFallibleHandlingReason,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{BuiltinFailureOriginKind, DiagnosticBag};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -375,7 +378,6 @@ fn inactive_assertion_keeps_private_call_facts_after_ast_release() {
     let witness = summaries.witness(contributor);
     assert_eq!(witness.call_spans, vec![contributor.span]);
     assert!(witness.origin_span.is_none());
-    assert!(witness.codes.is_empty());
 }
 
 #[test]
@@ -452,7 +454,6 @@ fn deferred_custom_catch_keeps_typed_locations_and_candidates_after_ast_release(
     let witness = summaries.witness(candidate);
     assert_eq!(witness.call_spans, vec![candidate.span]);
     assert!(witness.origin_span.is_none());
-    assert!(witness.codes.is_empty());
 }
 
 #[test]
@@ -601,24 +602,36 @@ fn first_numeric_and_typed_diagnostics_keep_descendant_producer_spans() {
     let typed_diagnostic = pending
         .unhandled_typed_error_diagnostic()
         .expect("the pending expression has an unhandled typed producer");
-    assert_eq!(typed_diagnostic.primary_span, first_typed.span);
+    let typed_compact = compact_bag_for_test(DiagnosticBag::from(typed_diagnostic), None);
+    let typed_diagnostic = typed_compact.first().expect("the diagnostic is retained");
     assert!(matches!(
-        typed_diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::UnhandledErrorReturn,
-        }
+        typed_diagnostic.primary_site(),
+        SiteRef::Local(span) if Some(span) == first_typed.span
     ));
+    let typed_facts = typed_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the diagnostic is invalid fallible handling");
+    assert_eq!(
+        typed_facts.reason,
+        InvalidFallibleHandlingCode::UnhandledErrorReturn
+    );
     let numeric_diagnostic =
         assert_message_escape_diagnostic(pending, &TemplateIrStore::new(), &builder)
             .expect("valid AST")
             .expect("checked numeric work can escape message evaluation");
-    assert_eq!(numeric_diagnostic.primary_span, first_numeric.span);
+    let numeric_compact = compact_bag_for_test(DiagnosticBag::from(numeric_diagnostic), None);
+    let numeric_diagnostic = numeric_compact.first().expect("the diagnostic is retained");
     assert!(matches!(
-        numeric_diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-        }
+        numeric_diagnostic.primary_site(),
+        SiteRef::Local(span) if Some(span) == first_numeric.span
     ));
+    let numeric_facts = numeric_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the diagnostic is invalid fallible handling");
+    assert_eq!(
+        numeric_facts.reason,
+        InvalidFallibleHandlingCode::AssertionMessageCannotEscape
+    );
 }
 
 #[test]
@@ -675,7 +688,7 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
     // WHAT: the recursive call precedes the overflow producer in source order in both the
     //       self-recursive and the mutually recursive fixtures.
     // WHY: the witness must skip only the back-edge and retain the available origin instead
-    //      of stopping with call-only hops and empty cause codes.
+    //      of stopping with call-only hops and no origin.
     for source in [
         "helper |value I32, ready Bool| -> I32:\n\
              if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n\
@@ -748,7 +761,6 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
             .first_active(&facts.body.implicit)
             .expect("the boundary escapes through its helper");
         let witness = summaries.witness(entry);
-        assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
         assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
 
         // The origin is the actual multiplication in the helper, never the skipped call.
@@ -815,7 +827,6 @@ fn unavailable_call_before_numeric_origin_stops_at_the_visible_leaf() {
         .expect("the unavailable call precedes the producer")
         .span;
     assert_eq!(witness.call_spans, vec![unavailable_span]);
-    assert_eq!(witness.codes, Vec::<BuiltinErrorCode>::new());
     assert!(witness.origin_span.is_none());
 }
 
@@ -922,16 +933,15 @@ fn mutually_recursive_component_with_late_origin_expands_each_body_once() {
         .span;
     assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
     assert_eq!(witness.origin_span, numeric_span);
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
     assert_eq!(witness.call_spans, vec![entry.span]);
     assert_eq!(witness.elided_call_hops, 0);
     assert_eq!(summaries.witness(entry), witness);
 }
 
-fn cursor_span(index: u32) -> Option<SourceSpan> {
+fn cursor_span(index: u32) -> SourceSpan {
     let mut builder = ExtendedSpanBuilder::new();
     let local = LocalSpan::exact(index * 10, 3, &mut builder).unwrap();
-    Some(SourceSpan::new(SourceId::from_index(1), local))
+    SourceSpan::new(SourceId::from_index(1), local)
 }
 
 #[test]
@@ -958,8 +968,8 @@ fn witness_candidates_yield_calls_then_one_terminal_origin_on_demand() {
     assert_eq!((activity_checks.get(), site_reads.get()), (1, 1));
 
     // Arithmetic scans its remainder once, linearly, and yields its write-back first.
-    sites[0] = FailureWitnessSite::Arithmetic(cursor_span(0));
-    sites[CALL_COUNT - 1] = FailureWitnessSite::WriteBack(cursor_span(0));
+    sites[0] = FailureWitnessSite::Arithmetic(Some(cursor_span(0)));
+    sites[CALL_COUNT - 1] = FailureWitnessSite::WriteBack(Some(cursor_span(0)));
     activity_checks.set(0);
     site_reads.set(0);
     let mut candidates = WitnessCandidates::new(&sites);
@@ -976,7 +986,7 @@ fn witness_candidates_yield_calls_then_one_terminal_origin_on_demand() {
     );
 
     // Calls are skippable and stay in order until the first terminal origin ends the body.
-    sites[2] = FailureWitnessSite::Arithmetic(cursor_span(2));
+    sites[2] = FailureWitnessSite::Arithmetic(Some(cursor_span(2)));
     sites[0] = FailureWitnessSite::Call;
     activity_checks.set(0);
     let mut candidates = WitnessCandidates::new(&sites);

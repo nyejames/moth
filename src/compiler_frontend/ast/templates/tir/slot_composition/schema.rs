@@ -24,7 +24,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use super::child_wrappers::wrap_tir_node_in_wrappers_into;
 use super::contributions::TirSlotContributions;
-use super::helpers::internal_compiler_error;
+use super::helpers::internal_infrastructure_failure;
 
 type SlotSchemaResult<T> = Result<T, TemplateError>;
 
@@ -37,7 +37,7 @@ pub(crate) fn expand_tir_slot_placeholders_into(
     string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let Some(template) = store.get_template(wrapper_template_id) else {
-        return Err(internal_compiler_error(
+        return Err(internal_infrastructure_failure(
             "TIR slot expansion: wrapper template ID was not present in the store.",
         ));
     };
@@ -70,7 +70,7 @@ fn expand_tir_slot_placeholders_from_node(
     string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let Some(node) = store.get_node(node_id).cloned() else {
-        return Err(internal_compiler_error(
+        return Err(internal_infrastructure_failure(
             "TIR slot expansion: node ID was not present in the store.",
         ));
     };
@@ -176,7 +176,7 @@ fn expand_tir_slot_placeholders_from_node(
                 .get_template(child_template_id)
                 .map(|template| template.root)
             else {
-                return Err(internal_compiler_error(
+                return Err(internal_infrastructure_failure(
                     "TIR slot expansion: child template ID was not present in the store.",
                 ));
             };
@@ -325,7 +325,9 @@ fn apply_tir_wrapper_set_to_node(
     string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-        internal_compiler_error("TIR slot expansion: placeholder referenced a missing wrapper set.")
+        internal_infrastructure_failure(
+            "TIR slot expansion: placeholder referenced a missing wrapper set.",
+        )
     })?;
 
     let wrapper_references = wrapper_set.wrappers.to_vec();
@@ -409,7 +411,7 @@ pub(crate) fn attach_conditional_wrapper_set(
     wrapper_set_id: TemplateWrapperSetId,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let node = store.get_node(node_id).cloned().ok_or_else(|| {
-        internal_compiler_error(
+        internal_infrastructure_failure(
             "TIR slot expansion: control-flow node ID was not present in the store.",
         )
     })?;
@@ -418,7 +420,7 @@ pub(crate) fn attach_conditional_wrapper_set(
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template_id = reference.root;
             let Some(template) = store.get_template(template_id).cloned() else {
-                return Err(internal_compiler_error(
+                return Err(internal_infrastructure_failure(
                     "TIR slot expansion: control-flow child template was not present in the store.",
                 ));
             };
@@ -487,13 +489,13 @@ fn required_wrapper_set_count(
     wrapper_set_id: TemplateWrapperSetId,
 ) -> SlotSchemaResult<u32> {
     let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-        internal_compiler_error(
+        internal_infrastructure_failure(
             "TIR slot expansion: required wrapper set ID was not present in the store.",
         )
     })?;
 
     u32::try_from(wrapper_set.wrappers.len()).map_err(|_| {
-        internal_compiler_error(
+        internal_infrastructure_failure(
             "TIR slot expansion: wrapper-set count exceeded the supported summary range.",
         )
     })

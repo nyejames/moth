@@ -91,7 +91,7 @@ Outcomes stay strict:
 - **Success** yields a full artefact with no errors inside
 - **Diagnosed** yields diagnostics and **no partial public interface**
 - blocked consumers waiting on a required diagnosed provider do not pretend to link
-- **CompilerError** aborts the owning compilation boundary
+- **InfrastructureFailure** aborts the owning compilation boundary
 
 A diagnosed provider cannot expose "half of `greet`" for experimental linking. Partial linkable data only breeds bugs.
 

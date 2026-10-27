@@ -29,13 +29,11 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged exact numeric and MON capabilities, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Next; the compact diagnostic layout it waited for is delivered. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.
 
-- [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compact diagnostic layout: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
+- [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compiler diagnostics improvements: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
 
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout and bounded diagnostic recovery complete. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work are delivered with the compact typed-expression foundation. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
-
-- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
+- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked only on five-run benchmark evidence (Slice 0); investigation before narrow success-path fix
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
 
@@ -88,6 +86,29 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
+
+## Compiler data-layout follow-ups
+
+Revisit these compiler representation and tooling capabilities only when their stated evidence or design prerequisite is met. Source-facing diagnostic wording and coverage remain owned by the sequenced diagnostics-improvement plan, which resumes immediately after data-layout work completes. The compiler-identity serialisation capability is distinct from persistent build artefact formats and precompiled package caches listed under genuinely deferred items below.
+
+| Capability | Re-entry criteria |
+|---|---|
+| Process-isolated compiler workers | A separate tooling or reliability plan is justified by evidence that thread isolation is insufficient. |
+| Persistent serialisation of `SourceId`, `PathId`, token or diagnostic IDs | A persistent artefact format defines canonical identities and remapping. Never serialise process-local IDs directly. |
+| Persistent or incremental source database and token reuse | Source-hash ownership and incremental invalidation are defined. |
+| Source snapshot compression or memory mapping | Retained source bytes are a measured top memory owner, a separate design is approved, and platform and lifetime policies are specified. |
+| Terminator-based span encoding | A new exact constant-time design passes every architecture gate and materially beats exact overflow storage. |
+| Token records below 8 bytes | Token shape becomes a measured common-memory hotspot. |
+| Procedural or build-script diagnostic schema generation | The current `macro_rules!` schema becomes demonstrably unmanageable. |
+| Broader compiler-wide ID bit packing | Each domain has a formal bound and measured retained-memory pressure. |
+| Cross-build or context diagnostic deduplication or caching | Repeated frozen reports are a material report-storage cost, with stable identity and invalidation specified. |
+| Full LSP protocol, incremental documents and cancellation | A separate tooling plan consumes the source, report and worker architecture. |
+| Further path cold-store packing | A later retained-memory profile identifies cold path-node storage as a material owner; traversal layout remains a separate AoS/SoA question. |
+| Token cold-store packing | Formal token-record bounds and aggregate retained-memory evidence show that cold token data are material; keep the 8-byte token shape until both conditions hold. |
+| Extended-span deduplication | The verified `LocalSpan` split (`L=10`) remains the baseline (661,044 spans, 355 extended rows / 2,840 B); revisit only if a retained-memory profile shows repeated extended-span rows are still material. |
+| Compiler source `SourceRecord` hot/cold split | A profile shows cold fields measurably pollute common source-record access. |
+| Path-node AoS/SoA | A traversal profile shows path lookup is a hotspot; merge/remap timings alone are insufficient. |
+| Diagnostic extra/list packing | Cold diagnostic side data become material in retained reports. |
 
 ## Optional catch tooling advisory
 
@@ -143,7 +164,7 @@ performs semantic symbol resolution or syntax diagnostics.
 
 - final builder selection syntax and a possible Moth-native build script system
 - package acquisition, admission and registry work is tracked only in the [Lappet roadmap](../../crates/lappet/roadmap.md)
-- persistent artefact serialisation and precompiled package caches
+- persistent build artefact formats and precompiled package caches, separate from process-local compiler identity
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
 - direct normal-sibling dependencies if real project evidence justifies them

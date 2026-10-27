@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
-    PublishedBoundary, facts, generated_identity, summary, test_sidecar,
+    PublishedBoundary, assert_compiler_bug, facts, generated_identity, summary, test_sidecar,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use rustc_hash::FxHashSet;
@@ -31,7 +31,7 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
     ]);
 
     assert_eq!(ids, vec![GeneratedRequestId(0), GeneratedRequestId(1)]);
-    assert_eq!(transaction.identity(ids[0]).unwrap(), &alpha);
+    assert_eq!(transaction.identity(ids[0]), &alpha);
     assert_eq!(transaction.records.len(), 2);
 }
 
@@ -61,7 +61,9 @@ fn completed_boundary_summary_suppresses_rematerialisation() {
 
     assert!(ids.is_empty());
     assert_eq!(transaction.summary(&identity), Some(&expected));
-    assert!(transaction.finish().is_ok());
+    let (delta, warnings) = transaction.finish();
+    assert!(delta.records().is_empty());
+    assert!(warnings.is_empty());
 }
 
 #[test]
@@ -72,19 +74,26 @@ fn completed_sidecars_publish_only_after_structural_freeze() {
         let identity = generated_identity("ready");
         let request_id = transaction.register_requests([facts("ready")])[0];
         assert_eq!(
-            transaction.enter(request_id).unwrap(),
+            transaction.enter(request_id),
             GeneratedRequestEntry::Materialise
         );
         let mut sidecar = test_sidecar(identity, summary());
         if frozen {
             sidecar.module.executable.hir.expressions.freeze();
         }
-        transaction
-            .complete(request_id, summary(), sidecar)
-            .unwrap();
+        transaction.complete(request_id, summary(), sidecar, Default::default());
 
         // A complete semantic record is still unpublished while its graph can grow.
-        assert_eq!(transaction.finish().is_ok(), frozen);
+        if frozen {
+            let (delta, _warnings) = transaction.finish();
+            assert_eq!(delta.records().len(), 1);
+        } else {
+            assert_compiler_bug(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                "Generated transaction cannot publish a growing HIR expression store",
+                || transaction.finish(),
+            );
+        }
     }
 }
 
@@ -124,7 +133,7 @@ fn request_records_own_diagnostic_facts() {
         call_span,
     }]);
 
-    let (display_name, actual_call_span) = transaction.request_facts(ids[0]).unwrap();
+    let (display_name, actual_call_span) = transaction.request_facts(ids[0]);
     assert_eq!(display_name, "make");
     assert_eq!(actual_call_span, call_span);
 }
@@ -197,41 +206,45 @@ fn failed_completion_discards_earlier_unpublished_work_and_preserves_published_w
     let first_identity = generated_identity("first");
     let first_request = transaction.register_requests([facts("first")])[0];
     assert_eq!(
-        transaction
-            .enter(first_request)
-            .expect("first request enters"),
+        transaction.enter(first_request),
         GeneratedRequestEntry::Materialise,
     );
     let first_sidecar = test_sidecar(first_identity.clone(), summary());
     let unpublished_registry =
         Arc::downgrade(&first_sidecar.module.link_facts.external_package_registry);
-    transaction
-        .complete(first_request, summary(), first_sidecar)
-        .expect("the first sidecar completes");
+    transaction.complete(first_request, summary(), first_sidecar, Default::default());
     assert_eq!(
-        transaction
-            .enter(first_request)
-            .expect("first request is complete"),
+        transaction.enter(first_request),
         GeneratedRequestEntry::Complete,
     );
 
     let later_request = transaction.register_requests([facts("later")])[0];
     assert_eq!(
-        transaction
-            .enter(later_request)
-            .expect("later request enters"),
+        transaction.enter(later_request),
         GeneratedRequestEntry::Materialise,
     );
-    assert!(
-        transaction
-            .complete(
+    let foreign_identity = generated_identity("foreign");
+    assert_compiler_bug(
+        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+        "Generated sidecar identity disagrees with its request",
+        || {
+            transaction.complete(
                 later_request,
                 summary(),
-                test_sidecar(generated_identity("foreign"), summary()),
+                test_sidecar(foreign_identity, summary()),
+                Default::default(),
             )
-            .is_err()
+        },
     );
-    assert!(transaction.finish().is_err());
+    let later_identity = transaction.identity(later_request).clone();
+    assert_compiler_bug(
+        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+        &format!(
+            "Generated transaction stopped before request {:?} completed",
+            later_identity
+        ),
+        || transaction.finish(),
+    );
 
     assert!(unpublished_registry.upgrade().is_none());
     assert!(published_registry.upgrade().is_some());
@@ -251,20 +264,18 @@ fn pruning_sidecars_rebuilds_request_and_completion_ids() {
     let request_ids = transaction.register_requests([facts("discarded"), facts("retained")]);
 
     for request_id in request_ids {
-        let identity = transaction.identity(request_id).unwrap().clone();
+        let identity = transaction.identity(request_id).clone();
         assert_eq!(
-            transaction.enter(request_id).unwrap(),
+            transaction.enter(request_id),
             GeneratedRequestEntry::Materialise
         );
         let mut sidecar = test_sidecar(identity.clone(), summary());
         sidecar.module.executable.hir.expressions.freeze();
-        transaction
-            .complete(request_id, summary(), sidecar)
-            .unwrap();
+        transaction.complete(request_id, summary(), sidecar, Default::default());
     }
 
     let reachable = FxHashSet::from_iter([retained.clone()]);
-    transaction.retain_reachable_sidecars(&reachable).unwrap();
+    transaction.retain_reachable_sidecars(&reachable);
 
     assert_eq!(transaction.records.len(), 1);
     assert_eq!(transaction.completed_records.len(), 1);
@@ -282,14 +293,15 @@ fn pruning_sidecars_rebuilds_request_and_completion_ids() {
         Some(0)
     );
     assert_eq!(
-        transaction.request_facts(GeneratedRequestId(0)).unwrap().0,
+        transaction.request_facts(GeneratedRequestId(0)).0,
         "retained"
     );
     assert!(transaction.summary(&discarded).is_none());
     let retained_summary = summary();
     assert_eq!(transaction.summary(&retained), Some(&retained_summary));
 
-    let delta = transaction.finish().unwrap();
+    let (delta, warnings) = transaction.finish();
     assert_eq!(delta.records().len(), 1);
+    assert_eq!(warnings.len(), 1);
     assert_eq!(delta.records()[0].identity, retained);
 }

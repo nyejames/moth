@@ -9,13 +9,14 @@
 //! Path syntax rows retain their exact source-qualified span. This table does not store resource
 //! identity, output placement, hashes or byte contents.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Shallow classification of one non-dependency path row.
@@ -54,11 +55,6 @@ impl PreparedFileReferenceTable {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &PreparedFileReference> {
         self.references.iter()
-    }
-
-    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {
-        // Prepared references carry only source-qualified spans and dense IDs; neither contains
-        // interned strings.
     }
 
     pub(crate) fn rebind_source_identity(&mut self, file_id: SourceId, _logical_path: PathId) {
@@ -170,6 +166,36 @@ pub(crate) enum ResolvedFileReferenceTarget {
     IdentifiedSourceKind,
 }
 
+/// A user-authored failure retained for one file-reference occurrence.
+///
+/// Stores semantic facts, not a built diagnostic. A row can be read more than once, and each
+/// emission site builds its diagnostic from these facts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ResolvedFileReferenceFailure {
+    InvalidCompileTimePath {
+        path: PathId,
+        reason: InvalidCompileTimePathReason,
+        span: SourceSpan,
+    },
+    /// An absolute path component, which a compile-time path cannot contain.
+    InvalidComponent { span: SourceSpan },
+    UnsupportedSourceFileKind {
+        path: PathId,
+        extension: StringId,
+        span: SourceSpan,
+    },
+}
+
+impl ResolvedFileReferenceFailure {
+    pub(crate) fn span_mut(&mut self) -> &mut SourceSpan {
+        match self {
+            Self::InvalidCompileTimePath { span, .. }
+            | Self::InvalidComponent { span }
+            | Self::UnsupportedSourceFileKind { span, .. } => span,
+        }
+    }
+}
+
 /// The settled Stage 0 outcome for one authored file-reference occurrence.
 ///
 /// User-authored target failures are retained beside the path identity so a surrounding AST
@@ -181,7 +207,7 @@ pub(crate) enum ResolvedFileReferenceOutcome {
     /// extensionless path retained for AST's typed diagnostic).
     NoPhysicalTarget,
     Target(ResolvedFileReferenceTarget),
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(ResolvedFileReferenceFailure),
 }
 
 /// Module-compilation table pairing prepared path rows with Stage 0 resolved targets.
@@ -243,13 +269,16 @@ impl ResolvedFileReferenceTable {
     pub(crate) fn push(
         &mut self,
         reference: ResolvedFileReference,
-    ) -> Result<ResolvedFileReferenceId, CompilerError> {
+    ) -> Result<ResolvedFileReferenceId, InfrastructureFailure> {
         let key = (reference.source_file, reference.path_syntax);
         if self.by_key.contains_key(&key) {
-            return Err(CompilerError::compiler_error(format!(
-                "duplicate resolved source reference for {:?} and PathSyntaxId {:?}",
-                reference.source_file, reference.path_syntax
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "duplicate resolved source reference for {:?} and PathSyntaxId {:?}",
+                    reference.source_file, reference.path_syntax
+                ),
+            ));
         }
 
         let reference_id = ResolvedFileReferenceId(self.targets.len() as u32);
@@ -271,25 +300,29 @@ impl ResolvedFileReferenceTable {
         self.targets.iter()
     }
 
-    pub(crate) fn validate(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate(&self) -> Result<(), InfrastructureFailure> {
         if self.targets.len() != self.by_key.len() {
-            return Err(CompilerError::compiler_error(
-                "resolved file-reference table has an inconsistent key index",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
+                "resolved file-reference table key index length disagrees with rows; only push inserts both together"
+            );
         }
         for reference in self.iter() {
             let Some(indexed) = self.get(reference.source_file, reference.path_syntax) else {
-                return Err(CompilerError::compiler_error(
-                    "resolved file-reference table lost a composite-key row",
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::DependencyResolution,
+                    "resolved file-reference table lost a composite-key row; only push inserts both maps"
+                );
             };
             if !std::ptr::eq(indexed, reference) {
-                return Err(CompilerError::compiler_error(
-                    "resolved file-reference table composite key points at the wrong row",
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::DependencyResolution,
+                    "resolved file-reference table composite key points at the wrong row; only push inserts both maps"
+                );
             }
             if !class_accepts_outcome(reference.class, &reference.outcome) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::DependencyResolution,
                     "resolved file-reference class does not match its settled outcome",
                 ));
             }
@@ -297,14 +330,16 @@ impl ResolvedFileReferenceTable {
 
         for (key, reference_id) in &self.by_key {
             let Some(reference) = self.targets.get(reference_id.0 as usize) else {
-                return Err(CompilerError::compiler_error(
-                    "resolved file-reference table key points outside its rows",
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::DependencyResolution,
+                    "resolved file-reference table key points outside its rows; only push inserts both maps"
+                );
             };
             if (reference.source_file, reference.path_syntax) != *key {
-                return Err(CompilerError::compiler_error(
-                    "resolved file-reference table key disagrees with its row",
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::DependencyResolution,
+                    "resolved file-reference table key disagrees with its row; only push inserts both maps"
+                );
             }
         }
         Ok(())

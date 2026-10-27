@@ -25,10 +25,11 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -62,7 +63,7 @@ pub(crate) fn parse_if_suffix(
         return Err(with_token_span(
             token_stream,
             marker_span,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateIfCondition,
                 Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
@@ -85,7 +86,7 @@ pub(crate) fn parse_if_suffix(
     let (mut condition, then_context) = match parsed_header {
         ParsedIfHeader::BoolCondition { condition } => {
             let then_context =
-                context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+                context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
             (
                 match condition {
                     StatementExpression::Built(condition) => TemplateBranchSelectorDraft::Concrete(
@@ -107,8 +108,11 @@ pub(crate) fn parse_if_suffix(
             pattern,
             then_context,
         } => {
-            let then_context =
-                then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+            let then_context = then_context.new_child_control_flow(
+                ContextKind::Branch,
+                string_table,
+                path_fork,
+            )?;
             let selector = match (scrutinee, pattern) {
                 (StatementExpression::Built(scrutinee), DeferredArmPattern::Ready(pattern)) => {
                     TemplateBranchSelectorDraft::Concrete(
@@ -126,7 +130,8 @@ pub(crate) fn parse_if_suffix(
                     }
                 }
                 (StatementExpression::Built(_), _) => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a built template option capture reached a deferred pattern shape",
                     )
                     .into());
@@ -148,7 +153,7 @@ pub(crate) fn parse_if_suffix(
             return Err(with_token_span(
                 token_stream,
                 marker_span,
-                CompilerDiagnostic::invalid_template_structure(
+                templates::invalid_template_structure(
                     InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
                     scrutinee_span,
                 ),
@@ -207,7 +212,7 @@ pub(crate) fn parse_loop_suffix(
         return Err(with_token_span(
             token_stream,
             marker_span,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateLoopHeader,
                 Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
@@ -225,7 +230,7 @@ pub(crate) fn parse_loop_suffix(
         return Err(with_token_span(
             token_stream,
             marker_span,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
                 Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
@@ -238,7 +243,7 @@ pub(crate) fn parse_loop_suffix(
     let mut window = window.with_synthetic_eof_span(eof_span);
     let (parsed_header, body_context) = parse_loop_header_cursor(
         &mut window,
-        context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
+        context.new_child_control_flow(ContextKind::Loop, string_table, path_fork)?,
         type_interner,
         expression_builder,
         const_values,
@@ -317,7 +322,8 @@ pub(crate) fn parse_loop_suffix(
             }
 
             (StatementExpression::Built(_), Some(_)) => {
-                return Err(TemplateError::from(CompilerError::compiler_error(
+                return Err(TemplateError::from(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a collection loop source was built after its loop declared a pending item.",
                 )));
             }
@@ -370,7 +376,7 @@ fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuff
         TokenTag::START_TEMPLATE_BODY => Ok(()),
         TokenTag::COMMA => Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
                 None,
             ),
@@ -378,7 +384,7 @@ fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuff
         .into()),
         _ => Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                 None,
             ),
@@ -408,7 +414,7 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
             outcome = Some(Err(with_token_span(
                 token_stream,
                 span.local(),
-                CompilerDiagnostic::invalid_template_structure(
+                templates::invalid_template_structure(
                     InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                     Some(span),
                 ),
@@ -429,7 +435,7 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
     outcome.unwrap_or_else(|| {
         Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                 None,
             ),
@@ -441,23 +447,20 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
 /// Attach the exact source span for a direct suffix diagnostic.
 fn with_current_token_span(
     token_stream: &AstCursor,
-    diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        let mut diagnostic = diagnostic;
-        diagnostic.primary_span = Some(token_stream.current_span());
-        return diagnostic;
+    mut diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(Some(token_stream.current_span()));
     }
     diagnostic
 }
-
 fn with_token_span(
     token_stream: &AstCursor,
     span: LocalSpan,
-    mut diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(token_stream.source_id(), span));
+    mut diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(Some(SourceSpan::new(token_stream.source_id(), span)));
     }
     diagnostic
 }

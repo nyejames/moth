@@ -1,0 +1,3 @@
+@broken.js consume_void
+
+io.line(consume_void(1))

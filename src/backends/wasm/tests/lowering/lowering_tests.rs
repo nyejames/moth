@@ -1,4 +1,3 @@
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
@@ -19,7 +18,9 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -227,18 +228,27 @@ fn wasm_assertion_lowering_calls_host_before_trap_and_rejects_runtime_messages()
         &mut type_environment,
         HirAssertionMessageEvaluation::Runtime,
     );
-    let error = lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &default_numeric_proofs(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &WasmBackendRequest::default(),
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("runtime assertion messages must raise a compiler bug");
+    }))
     .expect_err("runtime assertion messages must be rejected before Wasm lowering");
+    let report = payload
+        .downcast::<CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("runtime assertion messages must carry a CompilerBugReport"));
+    assert_eq!(report.stage, CompilerStage::BackendLowering);
     assert!(
-        format!("{error:?}").contains("runtime assertion message after target validation"),
+        report
+            .message
+            .contains("runtime assertion message after target validation"),
         "the lowerer must report the backend invariant violation instead of discarding the message"
     );
 }
@@ -1870,12 +1880,9 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         &path_fork.snapshot_table(),
     )
     .expect_err("invalid request should produce a lowering diagnostic");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm lowering failure should be wrapped for rendering");
     assert!(
         error
-            .msg
+            .message
             .contains("missing stable export name for FunctionId(0)")
     );
 }
@@ -2147,11 +2154,13 @@ fn lowers_validated_fixed_float_guard_with_the_exact_source_precision() {
     }
 }
 
-/// Verifies that the Wasm binary-float guard rejects unsupported source types as lowering failures.
+/// Verifies that the Wasm binary-float guard keeps unsupported source handling
+/// classified correctly.
 ///
-/// WHAT: an F16 source (which shares the F32 carrier but keeps binary16 precision) and a fixed
-///       integer source both fail as lowering transformation errors, while the paired F64 and F32
-///       sources in the identical fixture shape lower a guard with their own precision.
+/// WHAT: an F16 source (which shares the F32 carrier but keeps binary16 precision) remains an
+///       infrastructure failure, while a fixed integer source raises a compiler bug because it
+///       is not a binary float. The paired F64 and F32 sources in the identical fixture shape
+///       lower a guard with their own precision.
 /// WHY: the guard supports exactly the F32 and F64 carriers at their exact precision, so a
 ///      permissive carrier check would silently validate F16 at the wrong precision. The paired
 ///      controls keep the rejection tied to the source type rather than to the fixture shape.
@@ -2179,24 +2188,36 @@ fn rejects_validated_float_guards_with_unsupported_source_types() {
             &mut string_table,
             builtin_type_ids::fixed_scalar(unsupported),
         );
-        let error = lower_hir_to_wasm_lir(
-            &unsupported_module,
-            &default_borrow_facts(),
-            &default_numeric_proofs(),
-            &request,
-            &string_table,
-            &type_environment,
-            &path_fork.snapshot_table(),
-        )
-        .expect_err("unsupported binary-float validation sources must fail lowering");
-        let error = error
-            .primary_infrastructure_error()
-            .expect("Wasm lowering failure should be wrapped for rendering");
-        assert_eq!(
-            error.error_type,
-            ErrorType::Backend(BackendErrorType::LirTransformation),
-            "{unsupported:?} must be rejected as a lowering transformation failure"
-        );
+        let lowering = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            lower_hir_to_wasm_lir(
+                &unsupported_module,
+                &default_borrow_facts(),
+                &default_numeric_proofs(),
+                &request,
+                &string_table,
+                &type_environment,
+                &path_fork.snapshot_table(),
+            )
+        }));
+        if unsupported == FixedScalar::F16 {
+            let error = lowering
+                .expect("F16 validation remains an infrastructure failure")
+                .expect_err("F16 validation must remain unsupported in Wasm lowering");
+            assert_eq!(error.kind, InfrastructureFailureKind::LirTransformation);
+            assert!(
+                error
+                    .message
+                    .contains("Wasm binary-float validation requires an F32 or F64 source")
+            );
+        } else {
+            let payload =
+                lowering.expect_err("non-float validation sources must raise a compiler bug");
+            let report = payload.downcast::<CompilerBugReport>().unwrap_or_else(|_| {
+                panic!("non-float validation sources must carry a CompilerBugReport")
+            });
+            assert_eq!(report.stage, CompilerStage::BackendLowering);
+            assert!(report.message.contains("which is not a binary float"));
+        }
 
         let control_module = validate_float_test_module(
             &mut path_fork,
@@ -2728,10 +2749,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         &path_fork.snapshot_table(),
     )
     .expect_err("unsupported host call should produce diagnostic");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm lowering failure should be wrapped for rendering");
-    assert!(error.msg.contains("<synthetic>"));
+    assert!(error.message.contains("<synthetic>"));
 }
 
 #[test]
@@ -2875,10 +2893,11 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         &path_fork.snapshot_table(),
     )
     .expect_err("an unselected function must not become a Wasm export");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm request validation should fail before lowering");
-    assert!(error.msg.contains("absent from the selected function plan"));
+    assert!(
+        error
+            .message
+            .contains("absent from the selected function plan")
+    );
 }
 
 #[test]
@@ -3175,8 +3194,8 @@ fn debug_name_uses_source_name_when_available() {
 // ---------------------------------------------------------------------------
 
 /// Verifies that V1 console functions are not silently mapped to a Wasm host import.
-/// WHAT: the old callable IO path used to hardcode a Wasm host import.
-/// WHY: new console functions have no Wasm lowering and must fail through the normal
+/// WHAT: the callable IO path does not hardcode a Wasm host import.
+/// WHY: console functions have no Wasm lowering and must fail through the normal
 /// unsupported-external-function validation path.
 #[test]
 fn io_console_functions_are_unsupported_in_wasm() {

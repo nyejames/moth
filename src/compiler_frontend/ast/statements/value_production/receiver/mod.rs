@@ -31,8 +31,10 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ParsedReceiverValue, ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -61,11 +63,11 @@ use single_predicate::SinglePredicateParseOutcome;
 
 /// Forwards accumulated parser warnings into the outer scope.
 ///
-/// WHAT: drains a local warning vec and emits each warning through the scope context.
+/// WHAT: drains a local draft bag and emits each warning through the scope context.
 /// WHY: branch-local parsing (e.g. `function_body_to_ast`) may produce warnings
 /// that belong to the enclosing receiver site.
-pub(super) fn emit_collected_warnings(context: &ScopeContext, warnings: Vec<CompilerDiagnostic>) {
-    for warning in warnings {
+pub(super) fn emit_collected_warnings(context: &ScopeContext, warnings: DiagnosticBag) {
+    for warning in warnings.into_diagnostics() {
         context.emit_warning(warning);
     }
 }
@@ -120,7 +122,8 @@ pub fn try_parse_value_block_at_receiver(
     .map(|parsed| {
         parsed.map(|value| match value {
             ParsedReceiverValue::NeedsSlotInference { .. } => {
-                unreachable!(
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
                     "known receivers must wrap a finished expression; mixed-slot parse results belong to multi-bind"
                 )
             }
@@ -164,7 +167,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
         classification,
     ) {
         Ok(Some(reason)) => {
-            return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
+            return Some(Err(choices_control_flow::invalid_control_flow_statement(
                 reason,
                 Some(token_stream.current_span()),
             )
@@ -207,7 +210,6 @@ pub fn try_parse_value_block_at_receiver_with_target(
             ) {
                 SinglePredicateParseOutcome::Decided(result) => return Some(result),
                 SinglePredicateParseOutcome::OrdinarySubject(seed) => Some(seed),
-                SinglePredicateParseOutcome::Absent => None,
             };
 
             Some(parse_bool_value_if_after_condition(
@@ -242,7 +244,6 @@ pub fn try_parse_value_block_at_receiver_with_target(
             ) {
                 SinglePredicateParseOutcome::Decided(result) => return Some(result),
                 SinglePredicateParseOutcome::OrdinarySubject(seed) => Some(seed),
-                SinglePredicateParseOutcome::Absent => None,
             };
 
             Some(parse_bool_value_if_after_condition(
@@ -298,7 +299,7 @@ fn parse_bool_value_if_after_condition(
     path_fork: &mut PathInternerFork,
 ) -> ReceiverResult<ParsedReceiverValue> {
     if seed.is_none() && if_condition_is_missing(token_stream) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
             Some(token_stream.current_span()),
         )
@@ -307,7 +308,7 @@ fn parse_bool_value_if_after_condition(
 
     let mut condition_type = ExpectedType::Infer;
     let condition_context =
-        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
+        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)?;
     let mut cast_target_context = CastTargetContext::None;
     // An ordinary single-predicate subject already parsed exactly once; resume the central parser
     // from its seed instead of relexing it, so forward producers and generic requests stay issued
@@ -363,7 +364,7 @@ fn parse_bool_value_if_after_condition(
 
     if token_stream.current_tag() == TokenTag::THEN {
         if !same_logical_line(token_stream, header_index, token_stream.position()) {
-            return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            return Err(choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::InlineValueIfMultiline,
                 Some(token_stream.current_span()),
             )
@@ -399,7 +400,7 @@ fn parse_bool_value_if_after_condition(
         });
     }
 
-    Err(CompilerDiagnostic::invalid_control_flow_statement(
+    Err(choices_control_flow::invalid_control_flow_statement(
         InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
         Some(token_stream.current_span()),
     )

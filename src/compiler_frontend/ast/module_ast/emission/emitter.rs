@@ -44,11 +44,14 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    templates, token_lexical,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
+    DiagnosticBag, DiagnosticDraft, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
+    PreparedFailure,
 };
 use std::sync::Arc;
 
@@ -94,18 +97,11 @@ fn enclosing_callable_contract(
     })
 }
 
-fn attach_frozen_identity_handle_to_diagnostic(
-    diagnostic: &mut CompilerDiagnostic,
-    frozen_identity_handle: &FrozenIdentityHandle,
-) {
-    diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-}
-
 pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Typed AST nodes emitted for this module (functions, structs, generic instances).
     pub(in crate::compiler_frontend::ast) ast: Vec<AstNode>,
     /// Warnings accumulated during emission (unused variables, deprecated uses, etc.).
-    pub(in crate::compiler_frontend::ast) warnings: Vec<CompilerDiagnostic>,
+    pub(in crate::compiler_frontend::ast) warnings: Vec<DiagnosticDraft>,
     /// Folded top-level const template result records keyed by source file.
     pub(in crate::compiler_frontend::ast) const_templates_by_path:
         FxHashMap<PathId, FoldedConstTemplateResult>,
@@ -178,7 +174,7 @@ fn rebase_signature_parameters(
     signature: &mut FunctionSignature,
     function_path: PathId,
     path_fork: &mut PathInternerFork,
-) {
+) -> Result<(), DiagnosticDraft> {
     for parameter in &mut signature.parameters {
         let Some(parameter_name) = path_fork.component(parameter.id) else {
             continue;
@@ -186,8 +182,9 @@ fn rebase_signature_parameters(
 
         parameter.id = path_fork
             .try_intern_child(function_path, parameter_name)
-            .expect("path table exhausted while rebasing generic signature parameter");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
     }
+    Ok(())
 }
 
 /// Count sorted-header roots that create independent root `ScopeArena`s during emission.
@@ -213,7 +210,7 @@ fn count_root_scope_arena_consumers(headers: &[Header]) -> usize {
 }
 pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'environment> {
     ast: Vec<AstNode>,
-    warnings: Vec<CompilerDiagnostic>,
+    warnings: DiagnosticBag,
     context: &'context mut AstPhaseContext<'services>,
     path_fork: &'context mut PathInternerFork,
     environment: &'environment mut AstModuleEnvironment,
@@ -235,7 +232,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         path_fork: &'context mut PathInternerFork,
         source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     ) -> Self {
-        let warnings = environment.lookups.warnings.clone();
+        let lookups = std::rc::Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before emission");
+        let warnings = DiagnosticBag::from_diagnostics(std::mem::take(&mut lookups.warnings));
         Self {
             context,
             path_fork,
@@ -274,13 +273,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         mut self,
         request: GenericFunctionInstantiationRequest,
         string_table: &mut StringTable,
-    ) -> Result<AstEmission, CompilerMessages> {
+    ) -> Result<AstEmission, PreparedFailure> {
         self.emit_generic_function_instance(request, &[], string_table)?;
         let deferred_generic_requests = self.take_generic_request_ledger();
 
         Ok(AstEmission {
             ast: self.ast,
-            warnings: self.warnings,
+            warnings: self.warnings.into_diagnostics(),
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests,
@@ -342,7 +341,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context
     }
 
-    fn source_path_for_header(&self, header: &Header) -> Result<PathId, CompilerError> {
+    fn source_path_for_header(&self, header: &Header) -> Result<PathId, InfrastructureFailure> {
         let ownerless_synthetic_constant = matches!(
             header.synthetic_content_payload,
             Some(SyntheticContentPayload::RenderedHtml(_))
@@ -355,7 +354,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .contains_key(&header.tokens.source())
             && !ownerless_synthetic_constant
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "header source path has no canonical prepared source token owner",
             ));
         }
@@ -364,7 +364,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .module_symbols
             .source_path_for_header(header)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "header source path was not retained by the prepared source identity",
                 )
             })
@@ -373,12 +374,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     fn canonical_owner_for_header(
         &self,
         header: &Header,
-    ) -> Result<Arc<SourceTokens>, CompilerError> {
+    ) -> Result<Arc<SourceTokens>, InfrastructureFailure> {
         let owner = self
             .source_token_owners
             .get(&header.tokens.source())
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "header body range has no canonical prepared source stream",
                 )
             })?;
@@ -389,7 +391,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         mut self,
         sorted_headers: Vec<Header>,
         string_table: &mut StringTable,
-    ) -> Result<AstEmission, CompilerMessages> {
+    ) -> Result<AstEmission, PreparedFailure> {
         // The environment owns the single resolved declaration table. Body contexts clone only
         // the Rc pointer so declaration metadata is not rebuilt during emission.
         let top_level_declarations = Rc::clone(&self.environment.lookups.declaration_table);
@@ -468,7 +470,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         continue;
                     }
 
-                    self.emit_struct(header, string_table)?;
+                    self.emit_struct(header)?;
                 }
 
                 // Constants and choices are fully handled during environment construction.
@@ -498,7 +500,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                             string_table
                         )?
                     );
-                    self.warnings.extend(context.take_emitted_warnings());
+                    for warning in context.take_emitted_warnings() {
+                        self.warnings.push(warning);
+                    }
 
                     let folded_result = timed_stage_attributed_opt!(
                         self.context.timing_metric_family.const_template_fold(),
@@ -555,7 +559,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         Ok(AstEmission {
             ast: self.ast,
-            warnings: self.warnings,
+            warnings: self.warnings.into_diagnostics(),
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests,
@@ -610,18 +614,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         parameter_list_id: GenericParameterListId,
         substitutions: Option<FxHashMap<GenericParameterId, TypeId>>,
         source_parameter_by_rebased_path: FxHashMap<PathId, GenericParameterId>,
-        string_table: &StringTable,
-    ) -> Result<ActiveGenericTypeContext, CompilerMessages> {
+    ) -> Result<ActiveGenericTypeContext, InfrastructureFailure> {
         let Some(parameter_list) = self
             .environment
             .type_environment
             .generic_parameters(parameter_list_id)
         else {
-            return Err(self.error_messages(
-                CompilerError::compiler_error(
-                    "Generic function body requested an unknown generic parameter list.",
-                ),
-                string_table,
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "Generic function body requested an unknown generic parameter list.",
             ));
         };
 
@@ -689,7 +690,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         request: GenericFunctionInstantiationRequest,
         active_stack: &[GenericFunctionInstanceKey],
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), PreparedFailure> {
         // --------------------------
         //  Deduplication and recursion guard
         // --------------------------
@@ -726,7 +727,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .cloned()
         else {
             return Err(self.error_messages(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Generic function instance requested for an unknown template.",
                 ),
                 string_table,
@@ -745,9 +747,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 .push(GenericRequestSlot::Concrete(request));
             return Ok(());
         };
-        let parse_owner = body
-            .parse_owner()
-            .map_err(|error| self.error_messages(error, string_table))?;
+        let parse_owner = body.parse_owner();
         let (mut body_cursor, body_source_id) = parse_owner
             .cursor()
             .map_err(|error| self.error_messages(error, string_table))?;
@@ -758,7 +758,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             request.key.type_arguments.as_ref(),
         ) else {
             return Err(self.error_messages(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Generic function instance request did not match its template parameter list.",
                 ),
                 string_table,
@@ -774,12 +775,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mapping,
             &mut self.environment.type_environment,
         );
-        rebase_signature_parameters(&mut signature, request.instance_path, &mut *self.path_fork);
+        rebase_signature_parameters(&mut signature, request.instance_path, &mut *self.path_fork)?;
         let generic_type_context = self.build_active_generic_type_context(
             template.generic_parameter_list_id,
             Some(mapping),
             self.source_parameter_origins_for_signature(&template.signature, &signature),
-            string_table,
         )?;
 
         // --------------------------
@@ -819,7 +819,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(facts) = body.resolution_facts() {
             let Some(services) = self.context.file_value_resolution.as_ref() else {
                 return Err(self.error_messages(
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Materialised generic body has Stage 0 facts but no file-value services",
                     ),
                     string_table,
@@ -854,37 +855,39 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
-        let warning_start = self.warnings.len();
-        let body = match function_body_to_ast(
+        let mut body_warnings = DiagnosticBag::new();
+        let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.context.expression_builder,
             &mut self.context.const_values,
-            &mut self.warnings,
+            &mut body_warnings,
             string_table,
             &mut *self.path_fork,
-        ) {
-            Ok(ParsedBody::Complete(body)) => {
-                if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
-                    for warning in &mut self.warnings[warning_start..] {
-                        attach_frozen_identity_handle_to_diagnostic(
-                            warning,
-                            frozen_identity_handle,
-                        );
-                    }
-                }
-                body
+        );
+        if matches!(&body_result, Ok(ParsedBody::Complete(_)))
+            && let Some(frozen_identity_handle) = frozen_identity_handle.as_ref()
+        {
+            for warning in body_warnings.iter_mut() {
+                warning.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
             }
+        }
+        self.warnings.append(body_warnings);
+        let body = match body_result {
+            Ok(ParsedBody::Complete(body)) => body,
             Ok(ParsedBody::Draft(_)) => {
                 return Err(self.error_messages(
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a materialised generic function body returned an unresolved numeric draft",
                     ),
                     string_table,
                 ));
             }
-            Err(ExpressionParseError::Diagnostic(diagnostic)) => {
+            Err(ExpressionParseError::Diagnostic(diagnostic))
+            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic))
+            | Err(ExpressionParseError::NonConstantReferenceInConstant(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
                     diagnostic,
                     GenericInstantiationDiagnosticContext {
@@ -934,7 +937,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), PreparedFailure> {
         // --------------------------
         //  Retrieve resolved signature and template
         // --------------------------
@@ -946,7 +949,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .cloned()
         else {
             return Err(self.error_messages(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Generic function signature was not resolved before body validation.",
                 ),
                 string_table,
@@ -961,7 +965,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .cloned()
         else {
             return Err(self.error_messages(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Generic function template was not stored before body validation.",
                 ),
                 string_table,
@@ -991,7 +996,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             template.generic_parameter_list_id,
             None,
             FxHashMap::default(),
-            string_table,
         )?;
         context = context.with_active_generic_type_context(generic_type_context);
         context.enclosing_callable = Some(enclosing_callable_contract(
@@ -1043,7 +1047,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), PreparedFailure> {
         // --------------------------
         //  Resolve signature
         // --------------------------
@@ -1055,7 +1059,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .cloned()
         else {
             return Err(self.error_messages(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Function signature was not resolved before AST emission.",
                 ),
                 string_table,
@@ -1120,16 +1125,18 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
+        let mut body_warnings = DiagnosticBag::new();
         let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.context.expression_builder,
             &mut self.context.const_values,
-            &mut self.warnings,
+            &mut body_warnings,
             string_table,
             &mut *self.path_fork,
         );
+        self.warnings.append(body_warnings);
 
         let body = body_result
             .and_then(|parsed| parsed.expect_complete_nodes("a source function body"))
@@ -1157,7 +1164,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), PreparedFailure> {
         // The synthetic signature owns the same propagation context as an authored
         // function. Keep Module parsing rules for root declarations and fragments.
         let mut context = self.build_base_scope_context(BaseScopeContextInput {
@@ -1212,16 +1219,18 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
+        let mut body_warnings = DiagnosticBag::new();
         let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.context.expression_builder,
             &mut self.context.const_values,
-            &mut self.warnings,
+            &mut body_warnings,
             string_table,
             &mut *self.path_fork,
         );
+        self.warnings.append(body_warnings);
 
         let body = body_result
             .and_then(|parsed| parsed.expect_complete_nodes("the implicit start function body"))
@@ -1235,7 +1244,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 start_src_path,
                 string_table.intern(IMPLICIT_START_FUNC_NAME),
             )
-            .expect("path table exhausted while creating implicit start function path");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
 
         self.ast.push(AstNode {
             kind: NodeKind::Function(full_name, start_signature, body),
@@ -1251,11 +1260,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     //  Emit struct definitions
     // --------------------------
 
-    fn emit_struct(
-        &mut self,
-        header: Header,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    fn emit_struct(&mut self, header: Header) -> Result<(), InfrastructureFailure> {
         let fields = self
             .environment
             .lookups
@@ -1263,11 +1268,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .get(&header.declaration_path)
             .cloned()
             .ok_or_else(|| {
-                self.error_messages(
-                    CompilerError::compiler_error(
-                        "Struct fields were not resolved before AST emission.",
-                    ),
-                    string_table,
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Struct fields were not resolved before AST emission.",
                 )
             })?;
 
@@ -1290,7 +1293,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         template_source: &Arc<SourceTokens>,
         context: &ScopeContext,
         string_table: &mut StringTable,
-    ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
+    ) -> Result<PreparedTemplateConstruction, PreparedFailure> {
         let source_path = context.scope;
         let mut template_cursor = match header.token_sequence {
             Some(sequence) => AstCursor::from_source_sequence(template_source, sequence),
@@ -1324,7 +1327,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         construction: PreparedTemplateConstruction,
         context: &ScopeContext,
         string_table: &mut StringTable,
-    ) -> Result<FoldedConstTemplateResult, CompilerMessages> {
+    ) -> Result<FoldedConstTemplateResult, PreparedFailure> {
         let PreparedTemplateConstruction {
             template,
             preparation,
@@ -1343,18 +1346,21 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Err(self.diagnostic_messages(
                 match preparation.outcome {
                     TemplatePreparationOutcome::SlotInsertHelper => {
-                        CompilerDiagnostic::invalid_template_structure(
+                        templates::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperInConstTemplate,
                             template.span,
                         )
                     }
                     TemplatePreparationOutcome::Runtime(_) => {
-                        CompilerDiagnostic::invalid_template_structure(
+                        templates::invalid_template_structure(
                             InvalidTemplateStructureReason::NonFoldableConstTemplate,
                             template.span,
                         )
                     }
-                    TemplatePreparationOutcome::Foldable => unreachable!(),
+                    TemplatePreparationOutcome::Foldable => crate::compiler_bug!(
+                        CompilerStage::AstConstruction,
+                        "fold_const_template already returned for Foldable; this match only handles non-Foldable outcomes"
+                    ),
                 },
                 string_table,
             ));
@@ -1393,43 +1399,50 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         Ok(result)
     }
 
-    /// Wraps an internal [`CompilerError`] into [`CompilerMessages`], preserving current
-    /// warnings and the module type environment for render-time type-name resolution.
+    /// Routes infrastructure failures through their typed lane.
     fn error_messages(
         &self,
         error: impl Into<Box<InfrastructureErrors>>,
-        string_table: &StringTable,
-    ) -> CompilerMessages {
-        let mut messages =
-            CompilerMessages::from_diagnostics(self.warnings.clone(), string_table.clone());
-        messages.append_infrastructure_errors(error.into());
-        messages.with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
+        _string_table: &StringTable,
+    ) -> PreparedFailure {
+        PreparedFailure::Infrastructure(error.into())
     }
 
-    /// Wraps a user-facing [`CompilerDiagnostic`] into [`CompilerMessages`], preserving current
-    /// warnings and the module type environment for render-time type-name resolution.
+    /// Captures a user-facing diagnostic and accumulated warnings before the environment drops.
     fn diagnostic_messages(
-        &self,
-        diagnostic: CompilerDiagnostic,
-        string_table: &StringTable,
-    ) -> CompilerMessages {
-        CompilerMessages::from_diagnostic_with_warnings(
-            diagnostic,
-            self.warnings.clone(),
-            string_table,
+        &mut self,
+        diagnostic: DiagnosticDraft,
+        string_table: &mut StringTable,
+    ) -> PreparedFailure {
+        self.diagnostic_bag_messages(DiagnosticBag::from(diagnostic), string_table)
+    }
+
+    fn diagnostic_bag_messages(
+        &mut self,
+        bag: DiagnosticBag,
+        string_table: &mut StringTable,
+    ) -> PreparedFailure {
+        let mut diagnostics = std::mem::take(&mut self.warnings);
+        diagnostics.append(bag);
+        PreparedFailure::capture_diagnosed(
+            diagnostics,
+            string_table.take_for_handoff(),
+            Some(&self.environment.type_environment),
+            Some(Arc::new(self.path_fork.shared_table())),
         )
-        .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
     }
 
     /// Converts a [`TemplateError`] (which may be user-facing or infrastructure) into the
-    /// appropriate [`CompilerMessages`] wrapper.
+    /// appropriate AST diagnostic failure lane.
     fn template_error_messages(
-        &self,
+        &mut self,
         error: TemplateError,
-        string_table: &StringTable,
-    ) -> CompilerMessages {
+        string_table: &mut StringTable,
+    ) -> PreparedFailure {
         match error {
-            TemplateError::Diagnostic(diagnostic) => {
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(error, string_table),
@@ -1441,13 +1454,24 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     /// A numeric deferral must never reach the emitter: every retaining lane completes at its
     /// body root, so a leak here is a precise invariant failure naming the boundary.
     fn expression_error_messages(
-        &self,
+        &mut self,
         error: ExpressionParseError,
-        string_table: &StringTable,
-    ) -> CompilerMessages {
+        string_table: &mut StringTable,
+    ) -> PreparedFailure {
         match error.at_boundary_without_numeric_retention("the module emitter body boundary") {
             Ok(diagnostic) => self.diagnostic_messages(diagnostic, string_table),
-            Err(error) => self.error_messages(error, string_table),
+            Err(ExpressionParseError::Infrastructure(errors)) => {
+                self.error_messages(errors, string_table)
+            }
+            Err(
+                ExpressionParseError::Diagnostic(_)
+                | ExpressionParseError::TemplateDirectiveEmptyArguments(_)
+                | ExpressionParseError::NonConstantReferenceInConstant(_)
+                | ExpressionParseError::NumericDeferral(_),
+            ) => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "module emitter body boundary received an unconverted parse error",
+            ),
         }
     }
 }

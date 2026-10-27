@@ -8,8 +8,9 @@ If the legality outcome itself is wrong, that is Correctness.
 
 ## Lane selection
 
-- Source, config, dependency, type, rule, borrow and target-contract failures use `CompilerDiagnostic`.
-- Impossible compiler states and infrastructure failures use `CompilerError`.
+- Source, config, dependency, type, rule, borrow and target-contract failures use `DiagnosticDraft`.
+- Operational failures (filesystem, tooling, providers, output, dev server) and unproven internal failures use `InfrastructureFailure`.
+- Proven-impossible compiler states use `compiler_bug!`, never a `Result` variant.
 - Filesystem errors are classified by whether the user can correct project input.
 - User input never reaches `panic!`, `todo!`, `unreachable!` or a user-data-driven `.unwrap()`.
 - Deferred-feature rejection stays distinct from outside-design-scope rejection.
@@ -57,7 +58,7 @@ For duplicate, collision, visibility, alias and cross-file errors: all materiall
 
 ## Smells
 
-`format!` strings in semantic payloads; ad hoc error text from low-level helpers; `CompilerError` for user-authored failures; source diagnostics without locations; broad generic "invalid" variants; rendered type names stored instead of IDs; cloned `PathBuf`s in payloads; renderers branching on codes to recreate meaning; diagnostics merged in hash-map or completion order; placeholder messages.
+`format!` strings in semantic payloads; ad hoc error text from low-level helpers; `InfrastructureFailure` or `compiler_bug!` for user-authored failures; source diagnostics without locations; broad generic "invalid" variants; rendered type names stored instead of IDs; cloned `PathBuf`s in payloads; renderers branching on codes to recreate meaning; diagnostics merged in hash-map or completion order; placeholder messages.
 
 ## Tests
 

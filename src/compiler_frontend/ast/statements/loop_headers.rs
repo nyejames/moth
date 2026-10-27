@@ -37,10 +37,14 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeId};
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_loop_condition;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
-    ValueReceiverContext,
+    InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -232,7 +236,7 @@ impl ParsedRangeSpec {
 fn built_range_slot(slot: StatementExpression, position: &str) -> LoopHeaderResult<ExprId> {
     match slot {
         StatementExpression::Built(expression) => Ok(expression),
-        StatementExpression::Retained(_) => Err(CompilerError::compiler_error(format!(
+        StatementExpression::Retained(_) => Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "a range header {position} operand was retained after the header decided it is concrete"
         ))
         .into()),
@@ -263,7 +267,7 @@ struct LoopHeaderParser<'a, 'types> {
     type_interner: &'a mut AstTypeInterner<'types>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
-    warnings: &'a mut Vec<CompilerDiagnostic>,
+    warnings: &'a mut Vec<DiagnosticDraft>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
 }
@@ -314,7 +318,7 @@ fn loop_header_error<T>(
     reason: InvalidLoopHeaderReason,
     span: Option<SourceSpan>,
 ) -> LoopHeaderResult<T> {
-    Err(CompilerDiagnostic::invalid_loop_header(reason, span).into())
+    Err(choices_control_flow::invalid_loop_header(reason, span).into())
 }
 
 /// Parse the sole loop-header grammar directly from its bounded cursor window.
@@ -332,7 +336,7 @@ pub(crate) fn parse_loop_header_cursor(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut Vec<DiagnosticDraft>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<(ParsedLoopHeader, ScopeContext)> {
@@ -769,7 +773,7 @@ fn detect_bare_loop_binding_suffix_cursor(
     token_stream: &AstCursor,
     header_start: usize,
     header_end: usize,
-) -> Result<Option<CursorBareLoopBindingSuffix>, CompilerError> {
+) -> Result<Option<CursorBareLoopBindingSuffix>, InfrastructureFailure> {
     let non_newline_indices =
         collect_top_level_cursor_indexes(token_stream, header_start, header_end, |tag| {
             tag != TokenTag::NEWLINE
@@ -1044,7 +1048,7 @@ fn declare_retained_range_counter(
     let path = parser
         .path_fork
         .try_intern_child(parser.scope_context.scope, binding_names.item.id)
-        .expect("path table exhausted while declaring a loop counter");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
     let counter = parser
         .scope_context
         .declare_pending_numeric_binding(
@@ -1173,7 +1177,7 @@ fn range_operand_domain(
     let domain = NumericScalar::from_type_id(operand_type, type_environment);
     match domain {
         Some(domain) if domain.is_integer() || domain.is_binary_float() => Ok(domain),
-        _ => Err(CompilerDiagnostic::invalid_range_operand(
+        _ => Err(calls_data::invalid_range_operand(
             kind,
             operand_type,
             InvalidRangeOperandReason::NotNumeric,
@@ -1208,7 +1212,7 @@ fn range_numeric_domain(
             }
             _ => (RangeOperandKind::End, end),
         };
-        return Err(CompilerDiagnostic::invalid_range_operand(
+        return Err(calls_data::invalid_range_operand(
             operand,
             offender.value_type_id()?,
             InvalidRangeOperandReason::IncompatibleDomain,
@@ -1243,7 +1247,10 @@ fn contextual_range_zero(
             )?)
         }
         NumericScalar::Number(_) => {
-            unreachable!("Number range domains are rejected before contextual zero materialisation")
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "Number range domains are rejected before contextual zero materialisation"
+            )
         }
     }
 }
@@ -1450,7 +1457,7 @@ fn declare_pending_collection_bindings(
     let path = parser
         .path_fork
         .try_intern_child(parser.scope_context.scope, binding_names.item.id)
-        .expect("path table exhausted while declaring a collection item");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
     let item = parser.scope_context.declare_pending_collection_element(
         source,
         AuthoredBindingFacts {
@@ -1509,10 +1516,10 @@ fn collection_source_diagnostic(
     context: &ScopeContext,
     environment: &TypeEnvironment,
     expression_builder: &AstExpressionBuilder,
-) -> LoopHeaderResult<CompilerDiagnostic> {
+) -> LoopHeaderResult<DiagnosticDraft> {
     let found_type =
         retained_known_result_type(&deferral.items, context, environment, expression_builder)?;
-    Ok(CompilerDiagnostic::invalid_loop_header(
+    Ok(choices_control_flow::invalid_loop_header(
         InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type },
         deferral.span,
     ))
@@ -1669,7 +1676,7 @@ fn parses_as_collection_cursor(
         Ok(expression) => expression,
         // Capacity exhaustion is not a rejected cursor shape: it must reach the module build.
         Err(ExpressionParseError::Diagnostic(diagnostic))
-            if !diagnostic.is_compiler_capacity_exceeded() =>
+            if diagnostic.code() != "MOTH-SYNTAX-0037" =>
         {
             return Ok(false);
         }
@@ -1719,7 +1726,7 @@ fn parses_as_range_cursor(input: RangeLoopSpecInput<'_, '_, '_, '_>) -> LoopHead
         Ok(_) => Ok(true),
         // Capacity exhaustion is not a rejected cursor shape: it must reach the module build.
         Err(ExpressionParseError::Diagnostic(diagnostic))
-            if !diagnostic.is_compiler_capacity_exceeded() =>
+            if diagnostic.code() != "MOTH-SYNTAX-0037" =>
         {
             Ok(false)
         }
@@ -1734,7 +1741,7 @@ fn has_top_level_range_marker_cursor(
     token_stream: &AstCursor,
     header_start: usize,
     header_end: usize,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     Ok(find_top_level_cursor_token(
         token_stream,
         header_start,
@@ -1753,7 +1760,7 @@ fn header_probe_walk<'a>(
     token_stream: &'a AstCursor<'a>,
     start: usize,
     end: usize,
-) -> Result<AstCursor<'a>, CompilerError> {
+) -> Result<AstCursor<'a>, InfrastructureFailure> {
     token_stream.subcursor_window(start, end)
 }
 
@@ -1762,7 +1769,7 @@ fn collect_top_level_cursor_indexes(
     start: usize,
     end: usize,
     predicate: impl Fn(TokenTag) -> bool,
-) -> Result<Vec<usize>, CompilerError> {
+) -> Result<Vec<usize>, InfrastructureFailure> {
     let mut walk = header_probe_walk(token_stream, start, end)?;
     let mut nesting_depth = NestingDepth::default();
     let mut indexes = Vec::new();
@@ -1786,7 +1793,7 @@ fn find_top_level_cursor_token(
     start: usize,
     end: usize,
     target: TokenTag,
-) -> Result<Option<usize>, CompilerError> {
+) -> Result<Option<usize>, InfrastructureFailure> {
     let mut walk = header_probe_walk(token_stream, start, end)?;
     let mut nesting_depth = NestingDepth::default();
     while !walk.is_at_end() {
@@ -1815,7 +1822,7 @@ fn find_top_level_expression_boundary_cursor_token(
     token_stream: &AstCursor,
     start: usize,
     end: usize,
-) -> Result<Option<usize>, CompilerError> {
+) -> Result<Option<usize>, InfrastructureFailure> {
     let mut walk = header_probe_walk(token_stream, start, end)?;
     let mut depth = ExpressionBoundaryDepth::default();
     while !walk.is_at_end() {
@@ -1872,7 +1879,7 @@ fn token_string_id_at(
     token_stream: &AstCursor,
     index: usize,
     string_table: &mut StringTable,
-) -> Result<Option<StringId>, CompilerError> {
+) -> Result<Option<StringId>, InfrastructureFailure> {
     if token_tag_at(token_stream, index) != Some(TokenTag::SYMBOL) {
         return Ok(None);
     }
@@ -1976,7 +1983,7 @@ fn declare_loop_binding(
         id: parser
             .path_fork
             .try_intern_child(parser.scope_context.scope, binding_name.id)
-            .expect("path table exhausted while declaring loop binding"),
+            .ok_or_else(token_lexical::logical_path_capacity)?,
         type_id,
         type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,

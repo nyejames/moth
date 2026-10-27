@@ -17,8 +17,11 @@ fn compact_choice_and_parameter_slot_guards_reject_before_storage_changes() {
         CallAccessMode, CallArgument, ParameterSlot,
     };
     use crate::compiler_frontend::ast::expressions::expression::ChoiceConstructInput;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
     use crate::compiler_frontend::compiler_messages::{
-        AstCapacityResource, CapacityResource, DiagnosticPayload,
+        AstCapacityResource, CapacityResource, DiagnosticBag,
     };
     use crate::compiler_frontend::source::{LocalSpan, SourceId};
     use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -60,13 +63,18 @@ fn compact_choice_and_parameter_slot_guards_reject_before_storage_changes() {
         let Err(ExpressionConstructionFailure::Diagnostic(diagnostic)) = result else {
             panic!("expected compact-index capacity rejection");
         };
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact.first().expect("the diagnostic is retained");
+        let facts = diagnostic
+            .family_view::<CompilerCapacityExceededView>()
+            .expect("the diagnostic is a capacity failure");
         assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompilerCapacityExceeded {
-                resource: CapacityResource::Ast(actual),
-            } if actual == resource
+            facts.resource,
+            CapacityResource::Ast(actual) if actual == resource
         ));
-        assert_eq!(diagnostic.primary_span, span);
+        assert!(
+            matches!(diagnostic.primary_site(), SiteRef::Local(actual) if Some(actual) == span)
+        );
     }
     let after = builder.store().storage_statistics();
     assert_eq!(after.rows, before.rows);
@@ -193,6 +201,9 @@ fn source_capacity_is_diagnostic_and_side_append_is_atomic() {
 }
 #[test]
 fn capacity_failure_is_classified_for_speculative_probes() {
+    use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
     let mut builder = AstExpressionBuilder {
         limit: 1,
         ..AstExpressionBuilder::new().unwrap()
@@ -202,11 +213,20 @@ fn capacity_failure_is_classified_for_speculative_probes() {
     else {
         panic!("expected a capacity diagnostic from the side append");
     };
-    assert!(capacity.is_compiler_capacity_exceeded());
+    let compact = compact_bag_for_test(DiagnosticBag::from(capacity), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert!(
+        diagnostic
+            .family_view::<CompilerCapacityExceededView>()
+            .is_some()
+    );
     assert!(builder.storage.result_types.is_empty());
 }
 #[test]
 fn row_capacity_failure_after_side_append_is_not_rolled_back() {
+    use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
     let mut builder = AstExpressionBuilder {
         limit: 1,
         ..AstExpressionBuilder::new().unwrap()
@@ -221,7 +241,13 @@ fn row_capacity_failure_after_side_append_is_not_rolled_back() {
     else {
         panic!("expected the row append to report capacity");
     };
-    assert!(capacity.is_compiler_capacity_exceeded());
+    let compact = compact_bag_for_test(DiagnosticBag::from(capacity), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert!(
+        diagnostic
+            .family_view::<CompilerCapacityExceededView>()
+            .is_some()
+    );
     assert_eq!(builder.len(), 1);
     assert_eq!(builder.storage.result_types.len(), side_before + 1);
 }

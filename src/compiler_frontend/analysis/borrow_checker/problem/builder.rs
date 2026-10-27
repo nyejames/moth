@@ -8,7 +8,8 @@
 //! plus existing call summaries and external access metadata; it does not parse source, mutate
 //! HIR, or decide borrow legality, last use, lifetime topology or backend ownership.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirProjection;
@@ -47,7 +48,7 @@ pub(crate) fn from_hir(
     function: &HirFunction,
     local_summaries: Option<&FxHashMap<FunctionId, PublicCallSummary>>,
     external_registry: Option<&ExternalPackageRegistry>,
-) -> Result<BorrowProblem, CompilerError> {
+) -> Result<BorrowProblem, InfrastructureFailure> {
     let builder =
         FunctionProblemBuilder::new(module, function, local_summaries, external_registry)?;
     builder.build()
@@ -168,18 +169,18 @@ impl<'a> FunctionProblemBuilder<'a> {
         function: &'a HirFunction,
         local_summaries: Option<&'a FxHashMap<FunctionId, PublicCallSummary>>,
         external_registry: Option<&'a ExternalPackageRegistry>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut block_by_id = BTreeMap::new();
         for block in &module.blocks {
             if block_by_id.insert(block.id.0, block).is_some() {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle problem extraction found duplicate HIR block {:?}",
                     block.id
                 )));
             }
         }
         if !block_by_id.contains_key(&function.entry.0) {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "Boracle problem extraction cannot find function entry block {:?}",
                 function.entry
             )));
@@ -187,12 +188,12 @@ impl<'a> FunctionProblemBuilder<'a> {
 
         let reachable_blocks = collect_reachable_blocks(function.entry, |block_id| {
             let block = block_by_id.get(&block_id.0).ok_or_else(|| {
-                compiler_error(format!(
+                internal_failure(format!(
                     "Boracle problem extraction reached missing HIR block {:?}",
                     block_id
                 ))
             })?;
-            Ok::<_, CompilerError>(terminator_targets(&block.terminator))
+            Ok::<_, InfrastructureFailure>(terminator_targets(&block.terminator))
         })?;
 
         let mut builder = Self {
@@ -227,7 +228,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         Ok(builder)
     }
 
-    fn build(mut self) -> Result<BorrowProblem, CompilerError> {
+    fn build(mut self) -> Result<BorrowProblem, InfrastructureFailure> {
         for hir_block_id in self.reachable_blocks.clone() {
             self.build_block(hir_block_id)?;
         }
@@ -257,7 +258,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         Ok(problem)
     }
 
-    fn assign_problem_block_ids(&mut self) -> Result<(), CompilerError> {
+    fn assign_problem_block_ids(&mut self) -> Result<(), InfrastructureFailure> {
         for (index, hir_block) in self.reachable_blocks.iter().enumerate() {
             let id = dense_id(index, "normalized CFG block")?;
             self.problem_block_by_hir.insert(hir_block.0, id);
@@ -267,14 +268,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         Ok(())
     }
 
-    fn collect_bindings(&mut self) -> Result<(), CompilerError> {
+    fn collect_bindings(&mut self) -> Result<(), InfrastructureFailure> {
         let mut locals = BTreeMap::<u32, HirLocal>::new();
         for block_id in self.reachable_blocks.clone() {
             let block = self.hir_block(block_id)?.clone();
             for local in block.locals {
                 let local_id = local.id;
                 if locals.insert(local_id.0, local).is_some() {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "Boracle problem extraction found duplicate HIR local {:?}",
                         local_id
                     )));
@@ -284,7 +285,7 @@ impl<'a> FunctionProblemBuilder<'a> {
 
         for parameter in &self.function.params {
             if !locals.contains_key(&parameter.0) {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle problem extraction cannot map parameter local {:?}",
                     parameter
                 )));
@@ -315,7 +316,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         Ok(())
     }
 
-    fn build_block(&mut self, hir_block_id: HirBlockId) -> Result<(), CompilerError> {
+    fn build_block(&mut self, hir_block_id: HirBlockId) -> Result<(), InfrastructureFailure> {
         let block = self.hir_block(hir_block_id)?.clone();
         let problem_block_id = self.problem_block(hir_block_id)?;
         self.current_problem_block = Some(problem_block_id);
@@ -350,7 +351,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             &mut event_ids,
         )?;
         if successors.is_empty() {
-            self.emit_scope_exit_events(&block, &mut event_ids, &block_source)?;
+            self.emit_scope_exit_events(&block, &mut event_ids, &block_source);
         }
         self.emit_event(
             &mut event_ids,
@@ -390,7 +391,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .find(|candidate| candidate.id == problem_block_id)
                 .and_then(|candidate| candidate.events.last())
                 .copied()
-                .ok_or_else(|| compiler_error("Invoke block has no normalized terminator"))?;
+                .ok_or_else(|| internal_failure("Invoke block has no normalized terminator"))?;
             self.events[terminator.index()].kind = EventKind::Terminator {
                 kind: TerminatorEventKind::Branch {
                     targets: targets.into_boxed_slice(),
@@ -429,7 +430,7 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn emit_parameter_origins(
         &mut self,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for (index, local) in self.function.params.iter().copied().enumerate() {
             let binding = self.binding_for_local(local)?;
             let source = self
@@ -440,7 +441,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             let place = self.local_place(local, &source)?;
             let origin = self.new_origin(OriginKind::Parameter {
                 index: u32::try_from(index).map_err(|_| {
-                    compiler_error("Boracle parameter origin index exceeds u32::MAX")
+                    internal_failure("Boracle parameter origin index exceeds u32::MAX")
                 })?,
             });
             self.emit_event(
@@ -459,7 +460,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         statement: &HirStatement,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let source = EventSource {
             hir_node: Some(statement.id),
             span: statement.span,
@@ -563,7 +564,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         place: &HirPlace,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let source_place = self.lower_place(place, source, event_ids)?;
         self.emit_read(source_place, source, event_ids)?;
         let is_exact_root_self_update = matches!(
@@ -588,7 +589,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match self.expression_plan(expression_id) {
             ExpressionPlan::Load(place)
                 if self.module.expressions.expression(expression_id).value_kind
@@ -654,7 +655,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(target) = target else {
             let _ = self.lower_expression(expression_id, source, event_ids)?;
             return Ok(());
@@ -696,7 +697,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let root_depth = self.expression_frames.len();
         self.push_aggregate_frame(expression_id, *source, target)?;
         self.run_expression_frames(root_depth, None, event_ids)?;
@@ -709,7 +710,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut index = 0;
         while let Some(child_id) = self.expression_child(expression_id, index) {
             self.lower_expression(child_id, source, event_ids)?;
@@ -833,7 +834,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         fallback_source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         let root_depth = self.expression_frames.len();
         match self.enter_expression(expression_id, fallback_source, event_ids)? {
             Some(value) => Ok(value),
@@ -849,7 +850,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         fallback_source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<Option<ValueRef>, CompilerError> {
+    ) -> Result<Option<ValueRef>, InfrastructureFailure> {
         let source = self.value_source(expression_id, fallback_source);
         match self.expression_plan(expression_id) {
             ExpressionPlan::Load(place) | ExpressionPlan::Copy(place) => {
@@ -898,7 +899,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: EventSource,
         target: BindingDestination,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let field_base = dense_u32(self.aggregate_fields.len(), "aggregate field stack")?;
         self.push_expression_frame(
             expression_id,
@@ -918,17 +919,17 @@ impl<'a> FunctionProblemBuilder<'a> {
         root_depth: usize,
         mut completed: Option<ValueRef>,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         loop {
             if self.expression_frames.len() == root_depth {
                 return completed.ok_or_else(|| {
-                    compiler_error(
+                    internal_failure(
                         "Boracle problem extraction finished an expression without a value",
                     )
                 });
             }
             let Some(mut frame) = self.expression_frames.pop() else {
-                return Err(compiler_error(
+                return Err(internal_failure(
                     "Boracle problem extraction lost an expression frame",
                 ));
             };
@@ -951,7 +952,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         frame: &mut LowerFrame,
         awaited: Option<ValueRef>,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<Advance, CompilerError> {
+    ) -> Result<Advance, InfrastructureFailure> {
         match frame.state {
             FrameState::Children => self.advance_children(frame, awaited, event_ids),
             FrameState::Place(place_id) => self.advance_place(frame, place_id, event_ids),
@@ -974,7 +975,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         frame: &mut LowerFrame,
         awaited: Option<ValueRef>,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<Advance, CompilerError> {
+    ) -> Result<Advance, InfrastructureFailure> {
         let expression_id = frame.expression_id;
         let source = frame.source;
         if let Some(child_id) = self.expression_child(expression_id, frame.cursor as usize) {
@@ -987,7 +988,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let value = match self.expression_plan(expression_id) {
             ExpressionPlan::VariantPayloadGet { field_index, .. } => {
                 let source_ref = awaited.ok_or_else(|| {
-                    compiler_error("Boracle problem extraction lost a variant payload source")
+                    internal_failure("Boracle problem extraction lost a variant payload source")
                 })?;
                 self.expression_projection(
                     expression_id,
@@ -1011,14 +1012,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         frame: &mut LowerFrame,
         mut place_id: PlaceId,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<Advance, CompilerError> {
+    ) -> Result<Advance, InfrastructureFailure> {
         let expression_id = frame.expression_id;
         let source = frame.source;
         let (hir_place, is_copy) = match self.expression_plan(expression_id) {
             ExpressionPlan::Load(place) => (place, false),
             ExpressionPlan::Copy(place) => (place, true),
             _ => {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle problem extraction expected a place expression at {expression_id:?}"
                 )));
             }
@@ -1062,18 +1063,18 @@ impl<'a> FunctionProblemBuilder<'a> {
         field_base: u32,
         awaited: Option<ValueRef>,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<Advance, CompilerError> {
+    ) -> Result<Advance, InfrastructureFailure> {
         let expression_id = frame.expression_id;
         if std::mem::take(&mut frame.awaiting) {
             let child = awaited.ok_or_else(|| {
-                compiler_error("Boracle problem extraction lost an aggregate field value")
+                internal_failure("Boracle problem extraction lost an aggregate field value")
             })?;
             if let Some(place) = child.place {
                 let index = (frame.cursor as usize).saturating_sub(1);
                 let projection = self
                     .aggregate_child_projection(expression_id, index)
                     .ok_or_else(|| {
-                        compiler_error("Boracle problem extraction lost an aggregate projection")
+                        internal_failure("Boracle problem extraction lost an aggregate projection")
                     })?;
                 self.aggregate_fields.push(AggregateField {
                     projection,
@@ -1104,7 +1105,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         if self.module.expressions.expression(expression_id).value_kind == ValueKind::Const {
             return Ok(ValueRef { place: None });
         }
@@ -1117,7 +1118,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         let destination = self.synthetic_place(expression_id.0)?;
         let origin = self.new_fresh_origin();
         self.emit_write(destination, source, event_ids)?;
@@ -1141,7 +1142,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         place: PlaceId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         let value_kind = self.module.expressions.expression(expression_id).value_kind;
         if value_kind != ValueKind::Const {
             self.emit_read(place, source, event_ids)?;
@@ -1171,7 +1172,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         source_place: PlaceId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         self.emit_read(source_place, source, event_ids)?;
         let destination = self.synthetic_place(expression_id.0)?;
         let origin = self.new_copy_origin();
@@ -1197,7 +1198,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         fields: Box<[AggregateField]>,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for field in fields.iter() {
             self.project_place(target.place(), field.projection)?;
         }
@@ -1222,7 +1223,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         projection: ProjectionElem,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
+    ) -> Result<ValueRef, InfrastructureFailure> {
         let Some(source_place) = source_ref.place else {
             return Ok(ValueRef { place: None });
         };
@@ -1252,7 +1253,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         projection: ProjectionElem,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(source_place) = source_ref.place else {
             return self.emit_fresh_write(target, source, event_ids);
         };
@@ -1277,7 +1278,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         operands: &crate::compiler_frontend::hir::numeric::HirNumericOperands,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match operands {
             crate::compiler_frontend::hir::numeric::HirNumericOperands::Unary { operand } => {
                 self.lower_expression(*operand, source, event_ids)?;
@@ -1297,7 +1298,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         results: &[HirLocalDestination],
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let arguments = self.lower_call_arguments(args, source, event_ids)?;
         let argument_sources = args
             .iter()
@@ -1327,7 +1328,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         result: Option<HirLocalDestination>,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut expression_ids = Vec::with_capacity(args.len() + 1);
         expression_ids.push(receiver);
         expression_ids.extend_from_slice(args);
@@ -1358,7 +1359,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         args: &[HirValueId],
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<Vec<PlaceId>, CompilerError> {
+    ) -> Result<Vec<PlaceId>, InfrastructureFailure> {
         args.iter()
             .map(|argument_id| {
                 let argument_source = self.value_source(*argument_id, source);
@@ -1382,11 +1383,11 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         spec: CallEffectSpec<'_>,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if spec.arguments.len() != spec.accesses.len()
             || spec.arguments.len() != spec.argument_sources.len()
         {
-            return Err(compiler_error(
+            return Err(internal_failure(
                 "Boracle problem extraction produced mismatched call argument metadata",
             ));
         }
@@ -1453,7 +1454,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 EventKind::CallArgument {
                     call: call_id,
                     index: u32::try_from(index).map_err(|_| {
-                        compiler_error("Boracle call argument index exceeds u32::MAX")
+                        internal_failure("Boracle call argument index exceeds u32::MAX")
                     })?,
                     argument: call_arguments
                         .last()
@@ -1538,14 +1539,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         block_id: HirBlockId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<TerminatorEventKind, CompilerError> {
+    ) -> Result<TerminatorEventKind, InfrastructureFailure> {
         let kind = match terminator {
             HirTerminator::Jump { target, args } => {
                 let mut destinations = BTreeSet::new();
                 let mut captured_arguments = Vec::with_capacity(args.len());
                 for argument in args {
                     if !destinations.insert(argument.destination.0) {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "Boracle problem extraction found duplicate jump destination {:?} into block {:?}",
                             argument.destination, target
                         )));
@@ -1619,7 +1620,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 TerminatorEventKind::AssertFailure
             }
             HirTerminator::Uninitialized => {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle problem extraction reached uninitialized HIR terminator in block {:?}",
                     block_id
                 )));
@@ -1633,7 +1634,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         arm: &HirMatchArm,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match &arm.pattern {
             HirPattern::Literal(value)
             | HirPattern::OptionValue { value }
@@ -1657,7 +1658,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         block: &HirBlock,
         event_ids: &mut Vec<EventId>,
         source: &EventSource,
-    ) -> Result<(), CompilerError> {
+    ) {
         let mut bindings = self.visible_bindings(block.region);
         bindings.sort_by_key(|binding| binding.raw());
         bindings.dedup();
@@ -1670,14 +1671,13 @@ impl<'a> FunctionProblemBuilder<'a> {
                 },
             );
         }
-        Ok(())
     }
 
     fn scope_exit_bindings(
         &self,
         block: &HirBlock,
         successor: HirBlockId,
-    ) -> Result<Box<[BindingId]>, CompilerError> {
+    ) -> Result<Box<[BindingId]>, InfrastructureFailure> {
         let next = self.hir_block(successor)?;
         let next_visible = self
             .visible_bindings(next.region)
@@ -1716,7 +1716,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         exited_bindings: Box<[BindingId]>,
         target: BlockId,
         source: EventSource,
-    ) -> Result<BlockId, CompilerError> {
+    ) -> Result<BlockId, InfrastructureFailure> {
         let HirTerminator::Invoke {
             operation,
             success_results,
@@ -1724,15 +1724,15 @@ impl<'a> FunctionProblemBuilder<'a> {
             ..
         } = terminator
         else {
-            return Err(compiler_error(
+            return Err(internal_failure(
                 "normalized Invoke edge requires an Invoke terminator",
             ));
         };
         let id = BlockId::new(self.next_problem_block_id);
-        self.next_problem_block_id = self
-            .next_problem_block_id
-            .checked_add(1)
-            .ok_or_else(|| compiler_error("normalized CFG block table is larger than u32::MAX"))?;
+        self.next_problem_block_id =
+            self.next_problem_block_id.checked_add(1).ok_or_else(|| {
+                internal_failure("normalized CFG block table is larger than u32::MAX")
+            })?;
         self.current_problem_block = Some(id);
         let entry = self.new_point(id, source);
         let mut events = Vec::new();
@@ -1823,7 +1823,10 @@ impl<'a> FunctionProblemBuilder<'a> {
                     }
                     HirFallibleOperation::RangeStepFailure { .. } => {}
                     HirFallibleOperation::Call { .. } | HirFallibleOperation::MapOp { .. } => {
-                        unreachable!("calls handled above")
+                        crate::compiler_bug!(
+                            CompilerStage::BorrowChecking,
+                            "Call and MapOp fallible operations are handled in the dedicated arms above this catch-all"
+                        )
                     }
                 }
                 self.emit_event(
@@ -1872,12 +1875,12 @@ impl<'a> FunctionProblemBuilder<'a> {
         bindings: Box<[BindingId]>,
         target: BlockId,
         source: EventSource,
-    ) -> Result<BlockId, CompilerError> {
+    ) -> Result<BlockId, InfrastructureFailure> {
         let id = BlockId::new(self.next_problem_block_id);
-        self.next_problem_block_id = self
-            .next_problem_block_id
-            .checked_add(1)
-            .ok_or_else(|| compiler_error("normalized CFG block table is larger than u32::MAX"))?;
+        self.next_problem_block_id =
+            self.next_problem_block_id.checked_add(1).ok_or_else(|| {
+                internal_failure("normalized CFG block table is larger than u32::MAX")
+            })?;
         let entry = self.new_point(id, source);
         let event_id = self.next_event_id()?;
         self.events.push(Event::new(
@@ -1913,20 +1916,20 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         block: BlockId,
         target_blocks: &BTreeMap<BlockId, BlockId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let event_id = self
             .blocks
             .iter()
             .find(|candidate| candidate.id == block)
             .and_then(|candidate| candidate.events.last().copied())
             .ok_or_else(|| {
-                compiler_error(format!("normalized CFG block {block:?} has no terminator"))
+                internal_failure(format!("normalized CFG block {block:?} has no terminator"))
             })?;
         let event = self.events.get_mut(event_id.index()).ok_or_else(|| {
-            compiler_error(format!("unknown normalized terminator event {event_id:?}"))
+            internal_failure(format!("unknown normalized terminator event {event_id:?}"))
         })?;
         let EventKind::Terminator { kind } = &mut event.kind else {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "normalized CFG block {block:?} does not end in a terminator event"
             )));
         };
@@ -1957,7 +1960,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         place: &HirPlace,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<PlaceId, CompilerError> {
+    ) -> Result<PlaceId, InfrastructureFailure> {
         let module = self.module;
         let mut place_id = self.local_place(place.root, source)?;
         for projection in module.expressions.projections(place.projections) {
@@ -2006,7 +2009,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         local: LocalId,
         _source: &EventSource,
-    ) -> Result<PlaceId, CompilerError> {
+    ) -> Result<PlaceId, InfrastructureFailure> {
         let binding = self.binding_for_local(local)?;
         self.intern_place(binding, Vec::new())
     }
@@ -2015,17 +2018,17 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         base: PlaceId,
         projection: ProjectionElem,
-    ) -> Result<PlaceId, CompilerError> {
+    ) -> Result<PlaceId, InfrastructureFailure> {
         let base_place = self
             .places
             .get(base.index())
-            .ok_or_else(|| compiler_error(format!("unknown normalized base place {base:?}")))?;
+            .ok_or_else(|| internal_failure(format!("unknown normalized base place {base:?}")))?;
         let mut projections = base_place.projections.to_vec();
         projections.push(projection);
         self.intern_place(base_place.root, projections)
     }
 
-    fn synthetic_place(&mut self, value_id: u32) -> Result<PlaceId, CompilerError> {
+    fn synthetic_place(&mut self, value_id: u32) -> Result<PlaceId, InfrastructureFailure> {
         let binding = if let Some(binding) = self.synthetic_binding_by_value.get(&value_id) {
             *binding
         } else {
@@ -2051,7 +2054,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         root: BindingId,
         projections: Vec<ProjectionElem>,
-    ) -> Result<PlaceId, CompilerError> {
+    ) -> Result<PlaceId, InfrastructureFailure> {
         let key = PlaceKey {
             root,
             projections: projections.clone(),
@@ -2071,7 +2074,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<PlaceId, CompilerError> {
+    ) -> Result<PlaceId, InfrastructureFailure> {
         if let Some(place) = value.place {
             return Ok(place);
         }
@@ -2095,14 +2098,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         source_place: PlaceId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let destination_place = destination.place();
         self.emit_binding_write(destination, source, event_ids)?;
         let destination_binding = self
             .places
             .get(destination_place.index())
             .ok_or_else(|| {
-                compiler_error(format!("unknown alias destination {destination_place:?}"))
+                internal_failure(format!("unknown alias destination {destination_place:?}"))
             })?
             .root;
         let destination_access = self.alias_access_kind(destination_binding);
@@ -2146,7 +2149,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         destination: BindingDestination,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let origin = self.new_fresh_origin();
         self.emit_binding_write(destination, source, event_ids)?;
         let event = EventKind::Fresh {
@@ -2163,7 +2166,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         value: super::events::RebindValue,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.emit_binding_write(destination, source, event_ids)?;
         self.emit_event(event_ids, *source, EventKind::Rebind { destination, value });
         Ok(())
@@ -2174,7 +2177,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         place: PlaceId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.emit_access(place, UseKind::Write, source, event_ids)
     }
 
@@ -2183,7 +2186,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         destination: BindingDestination,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.emit_access(
             destination.place(),
             UseKind::BindingWrite(destination),
@@ -2197,7 +2200,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         place: PlaceId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.emit_access(place, UseKind::Read, source, event_ids)
     }
 
@@ -2207,7 +2210,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         kind: UseKind,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let definition = kind.is_write()
             && self
                 .places
@@ -2223,7 +2226,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
         definition: bool,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let point = self.new_point(self.current_problem_block()?, *source);
         let use_id = self.next_use_id()?;
         self.uses.push(Use {
@@ -2265,7 +2268,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         &self,
         function_id: FunctionId,
         argument_count: usize,
-    ) -> Result<Option<Vec<AccessKind>>, CompilerError> {
+    ) -> Result<Option<Vec<AccessKind>>, InfrastructureFailure> {
         let Some(function) = self
             .module
             .functions
@@ -2275,7 +2278,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             return Ok(None);
         };
         if function.params.len() != argument_count {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "Boracle local call {:?} has {} arguments but its HIR function has {} parameters",
                 function_id,
                 argument_count,
@@ -2292,7 +2295,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .flat_map(|block| block.locals.iter())
                 .find(|local| local.id == *parameter)
                 .ok_or_else(|| {
-                    compiler_error(format!(
+                    internal_failure(format!(
                         "Boracle local call {:?} cannot resolve parameter local {:?}",
                         function_id, parameter
                     ))
@@ -2357,50 +2360,50 @@ impl<'a> FunctionProblemBuilder<'a> {
             .count() as u32
     }
 
-    fn next_use_id(&self) -> Result<super::ids::UseId, CompilerError> {
+    fn next_use_id(&self) -> Result<super::ids::UseId, InfrastructureFailure> {
         Ok(super::ids::UseId::new(dense_u32(
             self.uses.len(),
             "normalized use",
         )?))
     }
 
-    fn next_event_id(&self) -> Result<EventId, CompilerError> {
+    fn next_event_id(&self) -> Result<EventId, InfrastructureFailure> {
         Ok(EventId::new(dense_u32(
             self.events.len(),
             "normalized event",
         )?))
     }
 
-    fn next_call_id(&self) -> Result<CallId, CompilerError> {
+    fn next_call_id(&self) -> Result<CallId, InfrastructureFailure> {
         Ok(CallId::new(dense_u32(self.calls.len(), "normalized call")?))
     }
 
-    fn current_problem_block(&self) -> Result<BlockId, CompilerError> {
+    fn current_problem_block(&self) -> Result<BlockId, InfrastructureFailure> {
         self.current_problem_block
-            .ok_or_else(|| compiler_error("Boracle problem extraction has no current CFG block"))
+            .ok_or_else(|| internal_failure("Boracle problem extraction has no current CFG block"))
     }
 
-    fn problem_block(&self, block: HirBlockId) -> Result<BlockId, CompilerError> {
+    fn problem_block(&self, block: HirBlockId) -> Result<BlockId, InfrastructureFailure> {
         self.problem_block_by_hir
             .get(&block.0)
             .copied()
             .ok_or_else(|| {
-                compiler_error(format!("unknown normalized target for HIR block {block:?}"))
+                internal_failure(format!("unknown normalized target for HIR block {block:?}"))
             })
     }
 
-    fn hir_block(&self, block: HirBlockId) -> Result<&HirBlock, CompilerError> {
+    fn hir_block(&self, block: HirBlockId) -> Result<&HirBlock, InfrastructureFailure> {
         self.block_by_id
             .get(&block.0)
             .copied()
-            .ok_or_else(|| compiler_error(format!("unknown HIR block {block:?}")))
+            .ok_or_else(|| internal_failure(format!("unknown HIR block {block:?}")))
     }
 
-    fn binding_for_local(&self, local: LocalId) -> Result<BindingId, CompilerError> {
+    fn binding_for_local(&self, local: LocalId) -> Result<BindingId, InfrastructureFailure> {
         self.binding_by_local
             .get(&local.0)
             .copied()
-            .ok_or_else(|| compiler_error(format!("unknown HIR local {local:?}")))
+            .ok_or_else(|| internal_failure(format!("unknown HIR local {local:?}")))
     }
 
     fn block_source(&self, block: HirBlockId) -> EventSource {
@@ -2462,7 +2465,7 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn sorted_problem_targets(
         &self,
         targets: impl Iterator<Item = HirBlockId>,
-    ) -> Result<Box<[BlockId]>, CompilerError> {
+    ) -> Result<Box<[BlockId]>, InfrastructureFailure> {
         let mut targets = targets
             .map(|target| self.problem_block(target))
             .collect::<Result<Vec<_>, _>>()?;
@@ -2498,15 +2501,15 @@ fn binding_destination(destination: HirLocalDestination, place: PlaceId) -> Bind
     }
 }
 
-fn dense_id(index: usize, owner: &str) -> Result<BlockId, CompilerError> {
+fn dense_id(index: usize, owner: &str) -> Result<BlockId, InfrastructureFailure> {
     Ok(BlockId::new(dense_u32(index, owner)?))
 }
 
-fn dense_u32(index: usize, owner: &str) -> Result<u32, CompilerError> {
+fn dense_u32(index: usize, owner: &str) -> Result<u32, InfrastructureFailure> {
     u32::try_from(index)
-        .map_err(|_| compiler_error(format!("{owner} table is larger than u32::MAX rows")))
+        .map_err(|_| internal_failure(format!("{owner} table is larger than u32::MAX rows")))
 }
 
-fn compiler_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(message)
+fn internal_failure(message: impl Into<Box<str>>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(CompilerStage::BorrowChecking, message)
 }

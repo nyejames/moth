@@ -5,6 +5,7 @@
 //! WHY: the frontend needs one canonical source for external symbol metadata. Keeping
 //! registration and lookup in one place ensures consistency between the package surface maps,
 //! the ID-indexed maps, and the prelude.
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 
 use super::abi::{ExternalAccessKind, ExternalReturnAlias};
@@ -17,12 +18,11 @@ use super::ids::{
     ExternalSymbolId, ExternalTypeId,
 };
 use super::{ExternalSymbolPath, ExternalSymbolPathError};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::return_compiler_error;
 use rustc_hash::FxHashMap;
 
 /// Atomic reverse-identity record for one registered external symbol.
@@ -139,7 +139,7 @@ impl ExternalPackageRegistry {
         &mut self,
         path: impl Into<String>,
         origin: crate::builder_surface::PackageOrigin,
-    ) -> Result<ExternalPackageId, CompilerError> {
+    ) -> Result<ExternalPackageId, InfrastructureFailure> {
         let path = path.into();
         let path_without_introducer = path.strip_prefix('@').unwrap_or(&path);
         if path_without_introducer
@@ -147,13 +147,19 @@ impl ExternalPackageRegistry {
             .next()
             .is_some_and(|component| component == PROJECT_GLOBALS_DEPENDENCY_NAME)
         {
-            return Err(CompilerError::compiler_error(format!(
-                "External package path '{}' is reserved for the @project project-globals interface",
-                path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "External package path '{}' is reserved for the @project project-globals interface",
+                    path
+                ),
+            ));
         }
         if self.package_id_by_path.contains_key(&path) {
-            return_compiler_error!("External package '{}' is already registered.", path);
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!("External package '{}' is already registered.", path),
+            ));
         }
         let id = ExternalPackageId(self.next_package_id);
         self.next_package_id += 1;
@@ -180,13 +186,16 @@ impl ExternalPackageRegistry {
         path: ExternalSymbolPath,
         id: ExternalFunctionId,
         mut function: ExternalFunctionDef,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let package = self.packages.get(&package_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Cannot register function '{}' in unknown package '{:?}'.",
-                path.display_text(),
-                package_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "Cannot register function '{}' in unknown package '{:?}'.",
+                    path.display_text(),
+                    package_id
+                ),
+            )
         })?;
         let package_path_str = package.path.clone();
 
@@ -204,12 +213,15 @@ impl ExternalPackageRegistry {
                 && function.error_return_type.is_none()
                 && op.matches_signature(&function.parameters, &function.returns);
             if !valid_registration {
-                return Err(CompilerError::compiler_error(format!(
-                    "Invalid trusted external constant-evaluation registration for '{}' in package '{}': {:?} does not match its Core signature (compiler bug).",
-                    path.display_text(),
-                    package_path_str,
-                    op
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::DependencyResolution,
+                    format!(
+                        "Invalid trusted external constant-evaluation registration for '{}' in package '{}': {:?} does not match its Core signature (compiler bug).",
+                        path.display_text(),
+                        package_path_str,
+                        op
+                    ),
+                ));
             }
         }
 
@@ -259,7 +271,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         id: ExternalFunctionId,
         function: ExternalFunctionDef,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let path = one_component_symbol_path("function", &function.name)?;
         self.register_function_at_path(package_id, path, id, function)
     }
@@ -275,16 +287,19 @@ impl ExternalPackageRegistry {
         path: ExternalSymbolPath,
         id: ExternalTypeId,
         mut type_def: ExternalTypeDef,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let package_path_str = self
             .packages
             .get(&package_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Cannot register type '{}' in unknown package '{:?}'.",
-                    path.display_text(),
-                    package_id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::DependencyResolution,
+                    format!(
+                        "Cannot register type '{}' in unknown package '{:?}'.",
+                        path.display_text(),
+                        package_id
+                    ),
+                )
             })?
             .path
             .clone();
@@ -304,22 +319,25 @@ impl ExternalPackageRegistry {
                 .packages
                 .get(&existing_identity.package_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::DependencyResolution, format!(
                         "External type id {id:?} has reverse identity for missing package {:?}.",
                         existing_identity.package_id
                     ))
                 })?
                 .path
                 .as_str();
-            return_compiler_error!(
-                "External type id {:?} is already registered as '{}.{}'; it cannot be reused as \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "External type id {:?} is already registered as '{}.{}'; it cannot be reused as \
                  '{}.{}'.",
-                id,
-                existing_package_path,
-                existing_identity.symbol_path,
-                package_path_str,
-                path
-            );
+                    id,
+                    existing_package_path,
+                    existing_identity.symbol_path,
+                    package_path_str,
+                    path
+                ),
+            ));
         }
 
         let package = self
@@ -345,7 +363,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         id: ExternalTypeId,
         type_def: ExternalTypeDef,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let path = one_component_symbol_path("type", &type_def.name)?;
         self.register_type_at_path(package_id, path, id, type_def)
     }
@@ -361,16 +379,19 @@ impl ExternalPackageRegistry {
         path: ExternalSymbolPath,
         id: ExternalConstantId,
         mut constant: ExternalConstantDef,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let package_path_str = self
             .packages
             .get(&package_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Cannot register constant '{}' in unknown package '{:?}'.",
-                    path.display_text(),
-                    package_id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::DependencyResolution,
+                    format!(
+                        "Cannot register constant '{}' in unknown package '{:?}'.",
+                        path.display_text(),
+                        package_id
+                    ),
+                )
             })?
             .path
             .clone();
@@ -378,12 +399,13 @@ impl ExternalPackageRegistry {
         constant.name = path.leaf().to_owned();
 
         if !constant.value.matches_signature_type(&constant.data_type) {
-            return_compiler_error!(
-                "External constant '{}' declares semantic type {:?} incompatible with payload {:?}.",
-                constant.name,
-                constant.data_type,
-                constant.value
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "External constant '{}' declares semantic type {:?} incompatible with payload {:?}.",
+                    constant.name, constant.data_type, constant.value
+                ),
+            ));
         }
 
         self.reject_duplicate_path(
@@ -427,7 +449,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         id: ExternalConstantId,
         constant: ExternalConstantDef,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let path = one_component_symbol_path("constant", &constant.name)?;
         self.register_constant_at_path(package_id, path, id, constant)
     }
@@ -449,15 +471,18 @@ impl ExternalPackageRegistry {
         path: &ExternalSymbolPath,
         symbol_name: &str,
         kind: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.has_symbol_at_path(package_id, path) {
-            return_compiler_error!(
-                "External {} '{}' at path '{}' in package '{}' collides with another symbol at the same namespace slot.",
-                kind,
-                symbol_name,
-                path.display_text(),
-                package_path
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "External {} '{}' at path '{}' in package '{}' collides with another symbol at the same namespace slot.",
+                    kind,
+                    symbol_name,
+                    path.display_text(),
+                    package_path
+                ),
+            ));
         }
         Ok(())
     }
@@ -469,19 +494,22 @@ impl ExternalPackageRegistry {
         existing_identity: &ExternalSymbolReverseIdentity,
         new_package_path: &str,
         new_symbol_path: &ExternalSymbolPath,
-    ) -> CompilerError {
+    ) -> InfrastructureFailure {
         let existing_package_path = self
             .packages
             .get(&existing_identity.package_id)
             .map(|package| package.path.as_str())
             .unwrap_or("<missing-package>");
 
-        CompilerError::compiler_error(format!(
-            "External {category} id {id:?} is already registered as \
+        InfrastructureFailure::internal(
+            CompilerStage::DependencyResolution,
+            format!(
+                "External {category} id {id:?} is already registered as \
              '{existing_package_path}.{}'; it cannot be reused as \
              '{new_package_path}.{new_symbol_path}'.",
-            existing_identity.symbol_path,
-        ))
+                existing_identity.symbol_path,
+            ),
+        )
     }
 
     /// Returns true if any symbol (function, type, or constant) is registered at the path.
@@ -509,18 +537,24 @@ impl ExternalPackageRegistry {
         &mut self,
         public_name: &'static str,
         symbol_id: ExternalSymbolId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.prelude_symbols_by_name.contains_key(public_name) {
-            return_compiler_error!("Prelude symbol '{}' is already registered.", public_name);
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!("Prelude symbol '{}' is already registered.", public_name),
+            ));
         }
         if self
             .prelude_namespace_aliases_by_name
             .contains_key(public_name)
         {
-            return_compiler_error!(
-                "Prelude symbol '{}' collides with an existing prelude namespace alias.",
-                public_name
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "Prelude symbol '{}' collides with an existing prelude namespace alias.",
+                    public_name
+                ),
+            ));
         }
         self.prelude_symbols_by_name.insert(public_name, symbol_id);
         Ok(())
@@ -537,21 +571,27 @@ impl ExternalPackageRegistry {
         &mut self,
         local_name: &'static str,
         package_path: &'static str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self
             .prelude_namespace_aliases_by_name
             .contains_key(local_name)
         {
-            return_compiler_error!(
-                "Prelude namespace alias '{}' is already registered.",
-                local_name
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "Prelude namespace alias '{}' is already registered.",
+                    local_name
+                ),
+            ));
         }
         if self.prelude_symbols_by_name.contains_key(local_name) {
-            return_compiler_error!(
-                "Prelude namespace alias '{}' collides with an existing prelude symbol.",
-                local_name
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::DependencyResolution,
+                format!(
+                    "Prelude namespace alias '{}' collides with an existing prelude symbol.",
+                    local_name
+                ),
+            ));
         }
         self.prelude_namespace_aliases_by_name
             .insert(local_name, package_path);
@@ -597,7 +637,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         path: ExternalSymbolPath,
         spec: ExternalFunctionSpec,
-    ) -> Result<ExternalFunctionId, CompilerError> {
+    ) -> Result<ExternalFunctionId, InfrastructureFailure> {
         let id = ExternalFunctionId::Synthetic(self.next_synthetic_id);
         self.next_synthetic_id += 1;
         let mut function: ExternalFunctionDef = spec.into();
@@ -611,12 +651,13 @@ impl ExternalPackageRegistry {
     ///
     /// WHAT: builder-friendly entry point that does not require hardcoding an
     /// `ExternalFunctionId` enum variant.
-    /// WHY: alpha short-cut until the backend supports fully dynamic host imports.
+    /// WHY: the backend does not support fully dynamic host imports, so the path is derived
+    /// from the spec name.
     pub fn register_external_function(
         &mut self,
         package_id: ExternalPackageId,
         spec: ExternalFunctionSpec,
-    ) -> Result<ExternalFunctionId, CompilerError> {
+    ) -> Result<ExternalFunctionId, InfrastructureFailure> {
         let path = one_component_symbol_path("function", &spec.name)?;
         self.register_external_function_at_path(package_id, path, spec)
     }
@@ -628,7 +669,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         path: ExternalSymbolPath,
         spec: ExternalTypeSpec,
-    ) -> Result<ExternalTypeId, CompilerError> {
+    ) -> Result<ExternalTypeId, InfrastructureFailure> {
         let id = ExternalTypeId(self.next_synthetic_id);
         self.next_synthetic_id += 1;
         self.register_type_at_path(
@@ -650,7 +691,7 @@ impl ExternalPackageRegistry {
         &mut self,
         package_id: ExternalPackageId,
         spec: ExternalTypeSpec,
-    ) -> Result<ExternalTypeId, CompilerError> {
+    ) -> Result<ExternalTypeId, InfrastructureFailure> {
         let path = one_component_symbol_path("type", &spec.name)?;
         self.register_external_type_at_path(package_id, path, spec)
     }
@@ -662,7 +703,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         path: ExternalSymbolPath,
         constant: ExternalConstantDef,
-    ) -> Result<ExternalConstantId, CompilerError> {
+    ) -> Result<ExternalConstantId, InfrastructureFailure> {
         let id = ExternalConstantId(self.next_synthetic_id);
         self.next_synthetic_id += 1;
         self.register_constant_at_path(package_id, path, id, constant)?;
@@ -675,7 +716,7 @@ impl ExternalPackageRegistry {
         &mut self,
         package_id: ExternalPackageId,
         constant: ExternalConstantDef,
-    ) -> Result<ExternalConstantId, CompilerError> {
+    ) -> Result<ExternalConstantId, InfrastructureFailure> {
         let path = one_component_symbol_path("constant", &constant.name)?;
         self.register_external_constant_at_path(package_id, path, constant)
     }
@@ -689,7 +730,7 @@ impl ExternalPackageRegistry {
     pub fn register_function(
         &mut self,
         function: ExternalFunctionDef,
-    ) -> Result<ExternalFunctionId, CompilerError> {
+    ) -> Result<ExternalFunctionId, InfrastructureFailure> {
         let test_package_path = "@test/default";
         let package_id = match self.package_id_by_path.get(test_package_path).copied() {
             Some(id) => id,
@@ -1085,7 +1126,10 @@ fn external_package_path_from_components(
     package_path
 }
 
-fn one_component_symbol_path(kind: &str, name: &str) -> Result<ExternalSymbolPath, CompilerError> {
+fn one_component_symbol_path(
+    kind: &str,
+    name: &str,
+) -> Result<ExternalSymbolPath, InfrastructureFailure> {
     ExternalSymbolPath::try_from_single(name)
         .map_err(|error| invalid_external_symbol_path_error(kind, name, error))
 }
@@ -1094,10 +1138,11 @@ fn invalid_external_symbol_path_error(
     kind: &str,
     name: &str,
     error: ExternalSymbolPathError,
-) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Invalid external {kind} symbol path '{name}': {error:?}"
-    ))
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::DependencyResolution,
+        format!("Invalid external {kind} symbol path '{name}': {error:?}"),
+    )
 }
 
 #[cfg(test)]
@@ -1110,8 +1155,8 @@ pub(crate) mod test_support {
         ExternalFunctionDef, ExternalFunctionLowerings, external_success_returns,
     };
     use super::super::ids::ExternalFunctionId;
-    use super::CompilerError;
     use super::ExternalPackageRegistry;
+    use super::InfrastructureFailure;
     use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1170,7 +1215,7 @@ pub(crate) mod test_support {
         parameters: Vec<(ExternalSignatureType, TestExternalAccessKind)>,
         return_alias: TestExternalReturnAlias,
         return_type: TestExternalReturnType,
-    ) -> Result<ExternalFunctionId, CompilerError> {
+    ) -> Result<ExternalFunctionId, InfrastructureFailure> {
         registry.register_function(ExternalFunctionDef {
             name: name.into(),
             parameters: parameters

@@ -75,7 +75,6 @@ pub(crate) mod symbols {
 }
 
 pub(crate) use compiler_messages::compiler_errors;
-pub(crate) use compiler_messages::display_messages;
 pub(crate) mod datatypes;
 pub(crate) mod syntax_errors;
 pub(crate) mod type_coercion;

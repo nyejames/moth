@@ -6,7 +6,8 @@
 //! dispatch, so keeping them outside `lexer.rs` makes the main lexer easier to
 //! audit.
 
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidStringEscapeReason};
+use crate::compiler_frontend::compiler_messages::InvalidStringEscapeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{
     TokenizeResult, current_source_span, map_token_emit_error, source_span_for_bytes,
@@ -65,7 +66,7 @@ pub(super) fn tokenize_raw_string(
         token_value.push(ch);
     }
 
-    Err(CompilerDiagnostic::unterminated_string_literal(Some(current_source_span(stream)?)).into())
+    Err(token_lexical::unterminated_string_literal(Some(current_source_span(stream)?)).into())
 }
 
 /// WHAT: lexes a double-quoted string slice, decoding only the supported escapes.
@@ -83,10 +84,10 @@ pub(super) fn tokenize_string(
         let span_start_byte = stream.byte_offset;
 
         let Some(ch) = stream.next() else {
-            return Err(CompilerDiagnostic::unterminated_string_literal(Some(
-                current_source_span(stream)?,
-            ))
-            .into());
+            return Err(
+                token_lexical::unterminated_string_literal(Some(current_source_span(stream)?))
+                    .into(),
+            );
         };
 
         if ch == '\\' {
@@ -95,7 +96,7 @@ pub(super) fn tokenize_string(
 
             let Some(&escaped_char) = stream.peek() else {
                 // A backslash at end of source never received an escaped character.
-                return Err(CompilerDiagnostic::invalid_string_escape(
+                return Err(token_lexical::invalid_string_escape(
                     InvalidStringEscapeReason::TrailingBackslash,
                     Some(escape_span(stream, span_start_byte, after_backslash_byte)?),
                 )
@@ -105,7 +106,7 @@ pub(super) fn tokenize_string(
             // A physical newline after a backslash is a line-continuation attempt, not a
             // supported escape. LF and CRLF continuation are the same source mistake.
             if is_line_break(escaped_char) {
-                return Err(CompilerDiagnostic::invalid_string_escape(
+                return Err(token_lexical::invalid_string_escape(
                     InvalidStringEscapeReason::PhysicalNewline,
                     Some(escape_span(stream, span_start_byte, after_backslash_byte)?),
                 )
@@ -124,7 +125,7 @@ pub(super) fn tokenize_string(
                 'r' => token_value.push('\r'),
                 't' => token_value.push('\t'),
                 _ => {
-                    return Err(CompilerDiagnostic::invalid_string_escape(
+                    return Err(token_lexical::invalid_string_escape(
                         InvalidStringEscapeReason::UnsupportedEscape {
                             escaped: escaped_char,
                         },

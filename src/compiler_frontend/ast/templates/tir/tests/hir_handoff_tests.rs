@@ -54,7 +54,7 @@ use crate::compiler_frontend::ast::templates::tir::{TemplateSlotPlan, TemplateSl
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -89,7 +89,10 @@ fn handoff_for_view(
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     string_table: &StringTable,
-) -> Result<crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateHandoff, CompilerError> {
+) -> Result<
+    crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateHandoff,
+    InfrastructureFailure,
+> {
     let prepared = prepared_runtime(&view);
     owned_runtime_template_handoff_for_prepared_view(
         &prepared,
@@ -267,7 +270,7 @@ fn view_for(
 
 /// Materializes the parent template through the fold-context entry point,
 /// returning the full `Result` so success tests can unwrap and error tests
-/// can assert on the `CompilerError`.
+/// can assert on the `InfrastructureFailure`.
 fn materialize_parent_handoff_result(
     store: Rc<RefCell<TemplateIrStore>>,
     parent_template_id: TemplateIrId,
@@ -275,7 +278,7 @@ fn materialize_parent_handoff_result(
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
     view_context: TemplateViewContext,
-) -> Result<OwnedRuntimeTemplateBody, CompilerError> {
+) -> Result<OwnedRuntimeTemplateBody, InfrastructureFailure> {
     let store_ref = store.borrow();
     let view = view_for(&store_ref, parent_template_id, view_context);
     handoff_for_view(view, expressions, const_values, string_table).map(|handoff| handoff.body)
@@ -305,7 +308,7 @@ fn materialize_parent_handoff(
 /// Asserts an owned handoff node carries exactly the expected plain text.
 ///
 /// WHAT: reads the owned string payload directly rather than resolving a handle.
-/// WHY: the handoff now owns its text, so no string table is needed here; a piece list
+/// WHY: the handoff owns its text, so no string table is needed here; a piece list
 ///      containing a resource or site root returns `None` and fails this assertion.
 fn assert_owned_text_node(node: &OwnedRuntimeTemplateNode, expected: &str) {
     match node {
@@ -1236,8 +1239,8 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
             None,
         )
         .expect_err("accepted preparation cannot authorise a changed context");
-        assert_eq!(error.error_type, ErrorType::Compiler);
-        assert!(error.msg.contains("identity does not match"));
+        assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+        assert!(error.message.contains("identity does not match"));
 
         let mut handoff = owned_runtime_template_handoff_for_prepared_view(
             &prepared,
@@ -1525,7 +1528,7 @@ fn runtime_child_reference_uses_structural_handoff() {
 }
 
 #[test]
-fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff() {
+fn missing_child_node_authority_propagates_as_infrastructure_failure_through_hir_handoff() {
     let expressions = AstExpressionBuilder::new().unwrap();
     let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -1566,12 +1569,12 @@ fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff
     )
     .expect_err("malformed child authority must reach the HIR handoff caller");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("TirView::effective_node")
-            && error.msg.contains("TemplateIrNodeId(999)"),
+        error.message.contains("TirView::effective_node")
+            && error.message.contains("TemplateIrNodeId(999)"),
         "expected child node authority context, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -2133,12 +2136,12 @@ fn malformed_child_view_context_propagates_view_failure() {
         &mut strings,
         valid_context,
     )
-    .expect_err("malformed child overlay should produce a CompilerError");
+    .expect_err("malformed child overlay should produce an InfrastructureFailure");
 
     assert!(
-        error.msg.contains("slot resolution overlay"),
+        error.message.contains("slot resolution overlay"),
         "expected error about missing slot resolution overlay, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -2194,12 +2197,14 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
         &mut strings,
         context,
     )
-    .expect_err("missing wrapper tree node should produce a CompilerError");
+    .expect_err("missing wrapper tree node should produce an InfrastructureFailure");
 
     assert!(
-        error.msg.contains("TIR slot layout requested missing node"),
+        error
+            .message
+            .contains("TIR slot layout requested missing node"),
         "expected layout-owned node error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -2245,14 +2250,14 @@ fn missing_child_in_wrapper_propagates_layout_error() {
         &mut strings,
         context,
     )
-    .expect_err("missing child in wrapper should produce a CompilerError");
+    .expect_err("missing child in wrapper should produce an InfrastructureFailure");
 
     assert!(
         error
-            .msg
+            .message
             .contains("TIR slot layout referenced missing child template"),
         "expected layout-owned child-template error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -2402,7 +2407,11 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
     let view = view_for(&store, template_id, TemplateViewContext::default());
     let error = handoff_for_view(view, &expressions, &const_values, &strings)
         .expect_err("wrong-plan site must fail at handoff");
-    assert!(error.msg.contains("outside its owning slot application"));
+    assert!(
+        error
+            .message
+            .contains("outside its owning slot application")
+    );
 }
 
 #[test]
@@ -2419,7 +2428,7 @@ fn handoff_rejects_out_of_range_runtime_slot_site() {
     let view = view_for(&store, template_id, TemplateViewContext::default());
     let error = handoff_for_view(view, &expressions, &const_values, &StringTable::new())
         .expect_err("out-of-range site must fail at handoff");
-    assert!(error.msg.contains("out-of-range runtime slot site"));
+    assert!(error.message.contains("out-of-range runtime slot site"));
 }
 
 #[test]
@@ -2455,7 +2464,7 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
         .expect_err("mismatched site identity must fail");
     assert!(
         error
-            .msg
+            .message
             .contains("slot site whose stored identity does not match")
     );
 }
@@ -2491,7 +2500,7 @@ fn handoff_rejects_mismatched_loop_header_shape() {
         .expect_err("loop header shape mismatch must fail closed");
     assert!(
         error
-            .msg
+            .message
             .contains("loop header shape does not match its expression sites")
     );
 }
@@ -2528,5 +2537,5 @@ fn handoff_rejects_exact_view_child_cycle() {
 
     let error = handoff_for_view(view, &expressions, &const_values, &StringTable::new())
         .expect_err("exact-view child cycles must fail before handoff recursion");
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
 }

@@ -38,6 +38,22 @@ use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub(crate) fn assert_compiler_bug<T>(
+    stage: crate::compiler_frontend::compiler_messages::CompilerStage,
+    expected_message: &str,
+    operation: impl FnOnce() -> T,
+) {
+    let payload = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(_) => panic!("expected a compiler bug with message {expected_message}"),
+        Err(payload) => payload,
+    };
+    let report = payload
+        .downcast::<crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
+    assert_eq!(report.stage, stage);
+    assert_eq!(report.message.as_ref(), expected_message);
+}
+
 /// One already published boundary, as a module transaction sees it.
 ///
 /// WHY: the transaction reads published work through a borrowed view, never through the build
@@ -133,7 +149,6 @@ pub(crate) fn test_module() -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),

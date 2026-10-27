@@ -1,40 +1,58 @@
 //! Tests for build-loop state transitions and queued rebuild behavior.
 
 use super::{
-    DevBuildExecutor, ProjectBuildExecutor, dev_server_error_messages, run_builds_until_stable,
-    run_single_build_cycle,
+    DevBuildExecutor, DevBuildRequest, DevBuildWorker, ProjectBuildExecutor,
+    run_builds_until_stable, run_single_build_cycle,
 };
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{
-    BackendBuilder, BuildResult, FileKind, OutputFile, Project, ProjectBuilder,
-};
+use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project, ProjectBuilder};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
     ValidatedOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
-use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
-use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
+};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    BoundaryAccumulator, SuccessfulWarningBoundary, SuccessfulWarningPosition,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::dev_server::dev_client::tests::run_client_test;
 use crate::projects::dev_server::sse::tests::{close_sse, connect_sse, read_generations};
 use crate::projects::dev_server::state::{DevServerState, OutputCapturePoint};
 use crate::projects::dev_server::watch;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use crate::projects::settings::{Config, ProjectConfigError};
+use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-fn naming_convention_warning(name: StringId) -> CompilerDiagnostic {
-    CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None)
+fn naming_convention_warning(name: StringId) -> DiagnosticDraft {
+    names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, None)
+}
+fn infrastructure_failure(error: InfrastructureFailure) -> InfrastructureErrors {
+    error.into()
+}
+
+fn dev_server_failure(path: &Path, message: &str) -> InfrastructureErrors {
+    InfrastructureFailure::development_server(path, message).into()
 }
 
 fn test_build_output_owner() -> OutputOwner {
@@ -53,15 +71,12 @@ fn html_build_result() -> BuildResult {
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![],
-        string_table: StringTable::new(),
         source_database: None,
-        warning_source_contexts: Vec::new(),
+        warning_accumulator: BoundaryAccumulator::with_root_string_table(StringTable::new()),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -93,15 +108,12 @@ fn multi_page_html_build_result() -> BuildResult {
             ],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("project")),
-        warnings: vec![],
-        string_table: StringTable::new(),
         source_database: None,
-        warning_source_contexts: Vec::new(),
+        warning_accumulator: BoundaryAccumulator::with_root_string_table(StringTable::new()),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -110,6 +122,20 @@ fn multi_page_html_build_result() -> BuildResult {
 fn html_build_result_with_warning() -> BuildResult {
     let mut string_table = StringTable::new();
     let warning = naming_convention_warning(string_table.get_or_intern("dev_warning".to_string()));
+    let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    let (strings, mut sink) = warning_accumulator.compiler_parts_mut();
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(vec![warning]),
+        strings,
+        None,
+        || None,
+    )
+    .expect("warning should capture against the build string table");
+    sink.append(
+        SuccessfulWarningBoundary::Project,
+        SuccessfulWarningPosition::BaseModule(0),
+        batch,
+    );
 
     BuildResult {
         project: Project {
@@ -119,17 +145,82 @@ fn html_build_result_with_warning() -> BuildResult {
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![warning],
-        string_table,
         source_database: None,
-        warning_source_contexts: Vec::new(),
+        warning_accumulator,
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
+    }
+}
+fn html_build_result_with_warning_capacity_failure() -> BuildResult {
+    let mut build_result = html_build_result();
+    {
+        let (strings, mut sink) = build_result.warning_accumulator.compiler_parts_mut();
+        let warnings = ["dev_warning_first", "dev_warning_second"]
+            .into_iter()
+            .map(|name| naming_convention_warning(strings.get_or_intern(name.to_string())))
+            .collect();
+        let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+            DiagnosticBag::from_diagnostics(warnings),
+            strings,
+            None,
+            || None,
+        )
+        .expect("warning capacity fixture should capture against the build string table");
+        sink.append(
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::BaseModule(0),
+            batch,
+        );
+    }
+    build_result
+        .warning_accumulator
+        .set_record_limit_for_test(2);
+    build_result
+}
+
+#[test]
+fn warning_capacity_failure_is_not_published_as_dev_success() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let root = _temp.path().to_path_buf();
+    let output_dir = root.join("dev");
+    let state = Arc::new(DevServerState::new(output_dir));
+    let build_result = html_build_result_with_warning_capacity_failure();
+    let executor = FakeExecutor::with_compilation_results(vec![Ok(
+        successful_build_with_warnings(build_result),
+    )]);
+
+    let report = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &[]);
+
+    assert!(!report.build_ok);
+    assert!(report.success_messages.is_none());
+    let build_state = state
+        .build_state
+        .lock()
+        .expect("build state should not be poisoned");
+    assert!(!build_state.last_build_ok);
+    assert!(build_state.last_error_html.is_some());
+    assert!(
+        build_state
+            .last_build_messages_summary
+            .contains("MOTH-SYNTAX-0037")
+    );
+    assert!(
+        !build_state
+            .last_build_messages_summary
+            .lines()
+            .any(|line| line.starts_with("W|"))
+    );
+}
+
+fn successful_build_with_warnings(build_result: BuildResult) -> CompilationOutcome<BuildResult> {
+    CompilationOutcome::Success {
+        value: build_result,
+        warnings: None,
     }
 }
 
@@ -149,15 +240,12 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::html(),
-            warnings: vec![],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_root.to_path_buf()),
-        warnings: vec![],
-        string_table: StringTable::new(),
         source_database: None,
-        warning_source_contexts: Vec::new(),
+        warning_accumulator: BoundaryAccumulator::with_root_string_table(StringTable::new()),
         output_owner: owner,
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),
@@ -169,127 +257,201 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
     }
 }
 
+type FakeWriteCallback = Box<dyn Fn() -> Result<(), InfrastructureErrors> + Send>;
+
+enum FakeWorkerResponse {
+    Build {
+        value: Box<BuildResult>,
+        warnings: Option<DiagnosticReportSet>,
+    },
+    Diagnosed(DiagnosticReportSet),
+    Infrastructure(InfrastructureErrors),
+    CompilerBug,
+}
+
+#[derive(Clone)]
 struct FakeExecutor {
-    responses: Mutex<Vec<Result<BuildResult, CompilerMessages>>>,
-    call_count: AtomicUsize,
-    on_call: Option<Box<dyn Fn(usize) + Send + Sync>>,
-    on_write: Option<Box<dyn Fn() -> Result<(), CompilerMessages> + Send>>,
+    responses: Arc<Mutex<Vec<FakeWorkerResponse>>>,
+    call_count: Arc<AtomicUsize>,
+    worker_ids: Arc<Mutex<Vec<usize>>>,
+    on_call: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+    on_write: Arc<Mutex<Option<FakeWriteCallback>>>,
+    build_config_inputs: BuildConfigInputSet,
 }
 
 impl FakeExecutor {
-    fn new(responses: Vec<Result<BuildResult, CompilerMessages>>) -> Self {
+    fn successful_results(
+        responses: Vec<Result<BuildResult, InfrastructureErrors>>,
+    ) -> Vec<CompilationResult<BuildResult>> {
+        responses
+            .into_iter()
+            .map(|result| {
+                result.map(|value| CompilationOutcome::Success {
+                    value,
+                    warnings: None,
+                })
+            })
+            .collect()
+    }
+
+    fn new(responses: Vec<Result<BuildResult, InfrastructureErrors>>) -> Self {
+        Self::with_compilation_results(Self::successful_results(responses))
+    }
+
+    fn with_compilation_results(responses: Vec<CompilationResult<BuildResult>>) -> Self {
+        Self::with_worker_responses(
+            responses
+                .into_iter()
+                .map(|response| match response {
+                    Ok(CompilationOutcome::Success { value, warnings }) => {
+                        FakeWorkerResponse::Build {
+                            value: Box::new(value),
+                            warnings,
+                        }
+                    }
+                    Ok(CompilationOutcome::Diagnosed(reports)) => {
+                        FakeWorkerResponse::Diagnosed(reports)
+                    }
+                    Err(errors) => FakeWorkerResponse::Infrastructure(errors),
+                })
+                .collect(),
+        )
+    }
+
+    fn with_worker_responses(responses: Vec<FakeWorkerResponse>) -> Self {
         Self {
-            responses: Mutex::new(responses),
-            call_count: AtomicUsize::new(0),
+            responses: Arc::new(Mutex::new(responses)),
+            call_count: Arc::new(AtomicUsize::new(0)),
+            worker_ids: Arc::new(Mutex::new(Vec::new())),
             on_call: None,
-            on_write: None,
+            on_write: Arc::new(Mutex::new(None)),
+            build_config_inputs: BuildConfigInputSet::new(),
         }
     }
 
+    fn worker_ids(&self) -> Vec<usize> {
+        self.worker_ids
+            .lock()
+            .expect("fake worker identity lock should not be poisoned")
+            .clone()
+    }
+
     fn with_on_call(
-        responses: Vec<Result<BuildResult, CompilerMessages>>,
+        responses: Vec<Result<BuildResult, InfrastructureErrors>>,
         on_call: Box<dyn Fn(usize) + Send + Sync>,
     ) -> Self {
         Self {
-            responses: Mutex::new(responses),
-            call_count: AtomicUsize::new(0),
-            on_call: Some(on_call),
-            on_write: None,
+            on_call: Some(Arc::from(on_call)),
+            ..Self::new(responses)
         }
+    }
+
+    fn set_on_write(&mut self, on_write: FakeWriteCallback) {
+        *self
+            .on_write
+            .lock()
+            .expect("fake writer callback lock should not be poisoned") = Some(on_write);
     }
 }
 
 impl DevBuildExecutor for FakeExecutor {
-    fn build(
-        &mut self,
-        _entry_file: &Path,
-        _flags: &[crate::compiler_frontend::Flag],
-    ) -> Result<BuildResult, CompilerMessages> {
+    fn build_config_inputs(&self) -> &BuildConfigInputSet {
+        &self.build_config_inputs
+    }
+
+    fn create_worker(&self, request: DevBuildRequest) -> Box<dyn DevBuildWorker> {
         let call_index = self.call_count.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Some(ref callback) = self.on_call {
+        self.worker_ids
+            .lock()
+            .expect("fake worker identity lock should not be poisoned")
+            .push(call_index);
+        if let Some(callback) = &self.on_call {
             callback(call_index);
         }
 
-        self.responses
+        let response = self
+            .responses
             .lock()
-            .expect("responses mutex should not be poisoned")
-            .remove(0)
+            .expect("fake worker responses should not be poisoned")
+            .remove(0);
+        let on_write = self
+            .on_write
+            .lock()
+            .expect("fake writer callback lock should not be poisoned")
+            .take();
+        Box::new(FakeWorker {
+            request,
+            response: Some(response),
+            on_write,
+        })
+    }
+}
+
+struct FakeWorker {
+    request: DevBuildRequest,
+    response: Option<FakeWorkerResponse>,
+    on_write: Option<FakeWriteCallback>,
+}
+
+impl DevBuildWorker for FakeWorker {
+    fn request(&self) -> &DevBuildRequest {
+        &self.request
+    }
+
+    fn build(&mut self) -> CompilationResult<BuildResult> {
+        match self
+            .response
+            .take()
+            .expect("each fake worker builds exactly once")
+        {
+            FakeWorkerResponse::Build { value, warnings } => Ok(CompilationOutcome::Success {
+                value: *value,
+                warnings,
+            }),
+            FakeWorkerResponse::Diagnosed(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+            FakeWorkerResponse::Infrastructure(errors) => Err(errors),
+            FakeWorkerResponse::CompilerBug => crate::compiler_bug!(
+                CompilerStage::DevelopmentServer,
+                "synthetic compiler bug during dev worker rebuild"
+            ),
+        }
     }
 
     fn write_outputs(
         &mut self,
         build_result: &mut BuildResult,
-        entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages> {
-        let project_root = entry_file
+    ) -> Result<OutputWriteSummary, PreparedFailure> {
+        let project_root = self
+            .request
+            .entry_file
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .expect("fake requests use absolute entry paths")
+            .to_path_buf();
         let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
             OutputPlan::Directory(plan.clone())
         } else {
             OutputPlan::SingleFile(SingleFileOutputPlan {
-                output_root: project_root.join("dev"),
+                output_root: self.request.output_root.clone(),
                 project_root: Some(project_root),
                 owner: build_result.output_owner,
-                setting_span: None,
             })
         };
-        let summary = write_project_outputs(
-            &mut build_result.project,
-            &WriteOptions {
-                output_plan,
-                write_mode: WriteMode::AlwaysWrite,
-            },
-            &mut build_result.string_table,
-        )?;
-        if let Some(callback) = &self.on_write {
-            callback()?;
+        let summary = {
+            let mut diagnostic_strings =
+                DiagnosticStringBuilder::new(build_result.warning_accumulator.string_table_mut());
+            write_project_outputs(
+                &mut build_result.project,
+                &WriteOptions {
+                    output_plan,
+                    write_mode: self.request.write_mode,
+                },
+                &mut diagnostic_strings,
+            )?
+        };
+        if let Some(callback) = self.on_write.take() {
+            callback().map_err(|error| PreparedFailure::Infrastructure(Box::new(error)))?;
         }
         Ok(summary)
-    }
-}
-
-struct InvalidOutputWarningBuilder;
-
-impl BackendBuilder for InvalidOutputWarningBuilder {
-    fn build_backend(
-        &self,
-        _project_compilation: crate::build_system::build::ProjectCompilation,
-        _config: &Config,
-        _build_profile: BuildProfile,
-        _flags: &[crate::compiler_frontend::Flag],
-        string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
-        Ok(Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("../escape.js"),
-                FileKind::Js(String::from("console.log('broken');")),
-            )],
-            entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::generic([".js"]),
-            warnings: vec![naming_convention_warning(
-                string_table.get_or_intern("x".to_string()),
-            )],
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        })
-    }
-
-    fn validate_project_config(
-        &self,
-        _config: &Config,
-        _string_table: &mut StringTable,
-    ) -> Result<(), ProjectConfigError> {
-        Ok(())
-    }
-
-    fn frontend_surface(&self) -> BuilderSurface {
-        BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
     }
 }
 
@@ -301,10 +463,9 @@ fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
 
     let output_dir = root.join("dev");
     let state = Arc::new(DevServerState::new(output_dir.clone()));
-    let mut executor = FakeExecutor::new(vec![Ok(multi_page_html_build_result())]);
+    let executor = FakeExecutor::new(vec![Ok(multi_page_html_build_result())]);
 
-    let report =
-        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
+    let report = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &Vec::new());
     assert!(report.build_ok);
     assert_eq!(report.version, 1);
 
@@ -331,12 +492,12 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![
+    let executor = FakeExecutor::new(vec![
         Ok(directory_build_result(&root, "dev")),
         Ok(directory_build_result(&root, "preview")),
     ]);
 
-    let first_report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    let first_report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
     assert!(first_report.build_ok);
     assert_eq!(
         state
@@ -349,7 +510,7 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
             .join("dev")
     );
 
-    let second_report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    let second_report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
     assert!(second_report.build_ok);
     let build_state = state
         .build_state
@@ -376,12 +537,13 @@ fn failed_build_marks_state_and_stores_error_page() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let messages =
-        CompilerMessages::from_error(CompilerError::compiler_error("boom"), StringTable::new());
-    let mut executor = FakeExecutor::new(vec![Err(messages)]);
+    let failure = infrastructure_failure(InfrastructureFailure::internal(
+        CompilerStage::ProjectBuildAssembly,
+        "boom",
+    ));
+    let executor = FakeExecutor::new(vec![Err(failure)]);
 
-    let report =
-        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
+    let report = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &Vec::new());
     assert!(!report.build_ok);
     assert_eq!(report.version, 1);
 
@@ -402,9 +564,11 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut warning_build = html_build_result_with_warning();
     warning_build.project.entry_page_rel = None;
-    let mut executor = FakeExecutor::new(vec![Ok(warning_build)]);
+    let executor = FakeExecutor::with_compilation_results(vec![Ok(
+        successful_build_with_warnings(warning_build),
+    )]);
 
-    let report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    let report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
     assert!(!report.build_ok);
 
     let build_state = state
@@ -428,9 +592,10 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
             .lines()
             .filter(|line| line.starts_with("W|"))
             .count(),
-        1,
+        0,
+        "failed builds must not expose success warnings"
     );
-    assert_eq!(summary.lines().count(), 2);
+    assert_eq!(summary.lines().count(), 1);
     let html = build_state
         .last_error_html
         .as_ref()
@@ -449,9 +614,9 @@ fn invalid_site_config_preserves_interned_diagnostic_values() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_invalid_page_url_style())]);
+    let executor = FakeExecutor::new(vec![Ok(html_build_result_with_invalid_page_url_style())]);
 
-    let report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    let report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
     assert!(!report.build_ok);
 
     let build_state = state
@@ -471,17 +636,79 @@ fn invalid_site_config_preserves_interned_diagnostic_values() {
 }
 
 #[test]
+fn invalid_site_config_failure_drops_success_warnings() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    let mut build_result = html_build_result_with_warning();
+    build_result.config.html_section.page_url_style = Some(String::from("bad_style"));
+    let executor = FakeExecutor::with_compilation_results(vec![Ok(
+        successful_build_with_warnings(build_result),
+    )]);
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+
+    let entry_file = root.join("main.moth");
+    let report = run_single_build_cycle(&state, &executor, &entry_file, &[]);
+    assert!(!report.build_ok);
+    assert!(report.success_messages.is_none());
+    assert!(
+        report.watch_scope.is_some(),
+        "site-config parsing should fail after a successful compile and output write"
+    );
+    assert!(
+        root.join("dev/index.html").exists(),
+        "the build should write outputs before site-config parsing fails"
+    );
+
+    let build_state = state.build_state.lock().expect("build state");
+    assert!(!build_state.last_build_ok);
+    let rows: Vec<_> = build_state.last_build_messages_summary.lines().collect();
+    assert_eq!(rows.len(), 1, "failed compilation carries only its error");
+    assert_eq!(
+        rows.iter().filter(|row| row.starts_with("E|")).count(),
+        1,
+        "site-config failure should render exactly one error"
+    );
+    assert_eq!(
+        rows.iter().filter(|row| row.starts_with("W|")).count(),
+        0,
+        "warnings from a successful build are unavailable after a later failure"
+    );
+
+    let error_fields: Vec<_> = rows[0].split('|').collect();
+    assert_eq!(error_fields.len(), 5);
+    assert_eq!(error_fields[0], "E");
+    assert_eq!(error_fields[1], "MOTH-CONFIG-0001");
+    assert_eq!(
+        error_fields[4],
+        "Invalid value 'bad_style' for config setting 'page_url_style'. Expected 'trailing_slash', 'no_trailing_slash', or 'ignore'."
+    );
+
+    let html = build_state
+        .last_error_html
+        .as_ref()
+        .expect("site-config failure should publish an error page");
+    assert_eq!(html.matches("<article class=\"diagnostic\"").count(), 1);
+    assert_eq!(
+        html.matches("data-diagnostic-code=\"MOTH-CONFIG-0001\"")
+            .count(),
+        1
+    );
+    assert!(!html.contains("data-diagnostic-code=\"MOTH-RULE-0021\""));
+}
+
+#[test]
 fn build_version_increments_on_each_attempt() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![Ok(html_build_result()), Ok(html_build_result())]);
+    let executor = FakeExecutor::new(vec![Ok(html_build_result()), Ok(html_build_result())]);
 
-    let first = run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
-    let second =
-        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
+    let first = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &Vec::new());
+    let second = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &Vec::new());
 
     assert_eq!(first.version, 1);
     assert_eq!(second.version, 2);
@@ -500,7 +727,7 @@ fn queued_rebuild_runs_when_files_change_during_build() {
         watch::WatchSession::manual(watch_scope(&root, &output_dir));
 
     let watched_file = root.join("main.moth");
-    let mut executor = FakeExecutor::with_on_call(
+    let executor = FakeExecutor::with_on_call(
         vec![Ok(html_build_result()), Ok(html_build_result())],
         Box::new(move |call_index| {
             if call_index == 1 {
@@ -513,12 +740,11 @@ fn queued_rebuild_runs_when_files_change_during_build() {
 
     let builds = run_builds_until_stable(
         &state,
-        &mut executor,
+        &executor,
         &root.join("main.moth"),
         &Vec::new(),
         &watch_session,
-    )
-    .expect("build loop should complete");
+    );
 
     assert!(builds.watch_scope.is_some());
     assert_eq!(executor.call_count.load(Ordering::SeqCst), 2);
@@ -548,7 +774,7 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
     let counter_clone = counter.clone();
 
     // Mutate the watched file on every call so fingerprints always change.
-    let mut executor = FakeExecutor::with_on_call(
+    let executor = FakeExecutor::with_on_call(
         responses,
         Box::new(move |call_index| {
             counter_clone.store(call_index, Ordering::SeqCst);
@@ -560,12 +786,11 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
 
     let _builds = run_builds_until_stable(
         &state,
-        &mut executor,
+        &executor,
         &root.join("main.moth"),
         &Vec::new(),
         &watch_session,
-    )
-    .expect("build loop should complete despite instability");
+    );
 
     // The loop must stop at the safety limit rather than running forever.
     assert_eq!(
@@ -580,17 +805,20 @@ fn successful_build_with_warnings_preserves_structured_success_messages() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_warning())]);
+    let build_result = html_build_result_with_warning();
+    let executor = FakeExecutor::with_compilation_results(vec![Ok(
+        successful_build_with_warnings(build_result),
+    )]);
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let outcome = run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &[]);
+    let outcome = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &[]);
 
     assert!(outcome.build_ok);
     let messages = outcome
         .success_messages
         .expect("successful build with warnings should carry structured warnings");
-    assert_eq!(messages.warning_count(), 1);
-    assert_eq!(messages.error_count(), 0);
+    assert_eq!(messages.counts().warnings, 1);
+    assert_eq!(messages.counts().errors, 0);
     assert!(
         state
             .build_state
@@ -608,15 +836,79 @@ fn successful_build_without_warnings_has_no_success_messages() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let mut executor = FakeExecutor::new(vec![Ok(html_build_result())]);
+    let executor = FakeExecutor::new(vec![Ok(html_build_result())]);
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let outcome = run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &[]);
+    let outcome = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &[]);
 
     assert!(outcome.build_ok);
     assert!(
         outcome.success_messages.is_none(),
         "clean successful builds should not allocate an empty warning container"
+    );
+}
+
+#[test]
+fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        source_root.join("@page.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write page source with a frontend warning");
+
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let executor = ProjectBuildExecutor::new(
+        || ProjectBuilder::new(HtmlProjectBuilder::new()),
+        BuildConfigInputSet::new(),
+    );
+    let report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
+    assert!(report.build_ok);
+
+    let context = {
+        let messages = report
+            .success_messages
+            .as_ref()
+            .expect("a successful build with a warning should carry its warning report");
+        let (warning_report, warning) = messages
+            .iter_severity(DiagnosticSeverity::Warning)
+            .next()
+            .expect("the warning report should hold the frontend warning");
+        assert_eq!(warning.descriptor().code, "MOTH-RULE-0022");
+        let position = DiagnosticRenderContext::for_report(warning_report)
+            .site_position(warning.primary_site())
+            .expect("the warning should resolve through its report context");
+        assert!(position.path.ends_with("@page.moth"));
+        assert!(position.line.contains("\"one\" => result = \"one\""));
+        Arc::downgrade(&warning_report.shared_context())
+    };
+    assert!(
+        context.upgrade().is_some(),
+        "a held cycle report keeps its warning identity context alive"
+    );
+
+    drop(report);
+    assert!(
+        context.upgrade().is_none(),
+        "the live dev state and executor must not retain the cycle's identity context"
+    );
+    assert!(
+        state
+            .build_state
+            .lock()
+            .expect("build state")
+            .last_build_messages_summary
+            .contains("Unreachable match arm"),
+        "the dev state keeps only the rendered warning summary"
     );
 }
 
@@ -632,16 +924,18 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
     let (watch_session, _watch_trigger) =
         watch::WatchSession::manual(watch_scope(&root, &output_dir));
 
-    let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_warning())]);
+    let build_result = html_build_result_with_warning();
+    let executor = FakeExecutor::with_compilation_results(vec![Ok(
+        successful_build_with_warnings(build_result),
+    )]);
 
     let report = run_builds_until_stable(
         &state,
-        &mut executor,
+        &executor,
         &root.join("main.moth"),
         &Vec::new(),
         &watch_session,
-    )
-    .expect("build loop should complete");
+    );
 
     assert!(report.watch_scope.is_some());
 
@@ -662,82 +956,119 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
 #[cfg(unix)]
 #[test]
 fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
-    let entry_file = PathBuf::from(OsString::from_vec(b"entry-\xff.moth".to_vec()));
-    let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(HtmlProjectBuilder::new()),
+    let current_directory = std::env::current_dir().expect("resolve absolute test path");
+    let entry_file = current_directory.join(OsString::from_vec(b"entry-\xff.moth".to_vec()));
+    let executor = ProjectBuildExecutor::new(
+        || ProjectBuilder::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
-    let messages = match executor.build(&entry_file, &[]) {
-        Ok(_) => panic!("an unrepresentable entry path must not reach compilation"),
-        Err(messages) => messages,
+    let request = DevBuildRequest {
+        entry_file: entry_file.clone(),
+        flags: Vec::new(),
+        build_config_inputs: executor.build_config_inputs().clone(),
+        output_root: current_directory.join("dev"),
+        write_mode: WriteMode::SkipUnchanged,
     };
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("invalid host encoding must retain its filesystem failure");
-    assert_eq!(error.error_type, ErrorType::File);
+    let mut worker = executor.create_worker(request);
+    let failure = match worker.build() {
+        Ok(_) => panic!("an unrepresentable entry path must not reach compilation"),
+        Err(failure) => failure,
+    };
+    let error = &failure.primary;
+    assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
     assert_eq!(error.host_path.as_deref(), Some(entry_file.as_path()));
 }
-
 #[test]
-fn project_build_executor_preserves_warnings_when_output_write_fails() {
+fn project_build_executor_separates_warnings_from_output_write_failures() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-
     let entry_file = root.join("main.moth");
-    fs::write(&entry_file, "value = 1\n").expect("should write source file");
+    fs::write(
+        &entry_file,
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write source with a frontend warning");
 
     #[cfg(feature = "timers")]
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
-    let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(InvalidOutputWarningBuilder),
+    let executor = ProjectBuildExecutor::new(
+        || ProjectBuilder::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
-    let mut compiled = executor
-        .build(&entry_file, &[])
-        .expect("source should compile");
-    let messages = match executor.write_outputs(&mut compiled, &entry_file) {
+    let request = DevBuildRequest {
+        entry_file: entry_file.clone(),
+        flags: Vec::new(),
+        build_config_inputs: executor.build_config_inputs().clone(),
+        output_root: root.join("dev"),
+        write_mode: WriteMode::SkipUnchanged,
+    };
+    let mut worker = executor.create_worker(request);
+    let mut compiled = match worker.build() {
+        Ok(CompilationOutcome::Success {
+            value,
+            warnings: None,
+        }) => value,
+        Ok(CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        }) => {
+            panic!("build_project should leave warning freezing to its output owner: {warnings:?}")
+        }
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!(
+                "warning fixture unexpectedly diagnosed: {:?}",
+                reports.counts()
+            )
+        }
+        Err(errors) => panic!("warning fixture failed: {errors:?}"),
+    };
+    assert_eq!(compiled.warning_accumulator.diagnostic_count(), 1);
+    compiled.project.output_files[0] = OutputFile::new(
+        PathBuf::from("../escape.js"),
+        FileKind::Js(String::from("console.log('broken');")),
+    );
+    let failure = match worker.write_outputs(&mut compiled) {
+        Err(failure) => match compiled.finish_output(Err(failure)) {
+            Err(errors) => errors,
+            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                panic!(
+                    "invalid output path unexpectedly produced diagnostics: {:?}",
+                    reports.counts()
+                )
+            }
+            Ok(CompilationOutcome::Success { .. }) => {
+                panic!("invalid output path unexpectedly finalized successfully")
+            }
+        },
         Ok(_) => panic!("invalid output path should fail writing"),
-        Err(messages) => messages,
     };
 
     #[cfg(feature = "timers")]
-    let timing_snapshot = timing_session.finish();
+    {
+        let timing_snapshot = timing_session.finish();
+        assert_eq!(
+            timing_snapshot
+                .timings
+                .iter()
+                .find(|observation| observation.metric.descriptor().stable_name
+                    == "build.output.total")
+                .expect("failed dev output writes retain a dense output-total row")
+                .samples,
+            1,
+            "the failed output-plan/write span must finish"
+        );
+    }
 
-    #[cfg(feature = "timers")]
     assert_eq!(
-        timing_snapshot
-            .timings
-            .iter()
-            .find(|observation| observation.metric.descriptor().stable_name == "build.output.total")
-            .expect("failed dev output writes retain a dense output-total row")
-            .samples,
-        1,
-        "the failed output-plan/write span must finish before warning extension"
-    );
-
-    assert_eq!(messages.error_count(), 1);
-    let warnings: Vec<_> = messages.warnings().collect();
-    assert_eq!(warnings.len(), 1);
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("output write failure should be wrapped for rendering");
-    assert_eq!(
-        error.host_path.as_deref(),
+        failure.primary.host_path.as_deref(),
         Some(Path::new("../escape.js")),
         "output path failures should retain the rejected host path"
-    );
-    assert!(
-        error.source_span.is_none(),
-        "path-only output failures must not fabricate a source excerpt"
-    );
-    assert!(
-        warnings[0].primary_span.is_none(),
-        "synthetic warnings must not fabricate a source span"
     );
 }
 
@@ -766,59 +1097,32 @@ fn project_build_executor_writes_the_validated_directory_plan() {
             BuildConfigValueLocation::Command(BuildCommandLocation::new(1)),
         ))
         .expect("test command input should be unique");
-    let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(HtmlProjectBuilder::new()),
+    let executor = ProjectBuildExecutor::new(
+        || ProjectBuilder::new(HtmlProjectBuilder::new()),
         build_config_inputs,
     );
+    let state = Arc::new(DevServerState::new(root.join("dev")));
     #[cfg(feature = "timers")]
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
-    let mut build_result = executor
-        .build(&root, &[])
-        .expect("directory dev build should compile");
-    executor
-        .write_outputs(&mut build_result, &root)
-        .expect("directory output should write");
-    assert!(
-        build_result.config.config_resolution_records.is_empty(),
-        "successful builds must not retain transient config-resolution records"
-    );
+    let first = run_single_build_cycle(&state, &executor, &root, &[]);
+    assert!(first.build_ok);
     let first_output = fs::read_to_string(root.join("preview/index.html"))
         .expect("first directory dev build should write its page");
     assert!(
         first_output.contains("<h1>cli</h1>"),
         "first directory dev build must render the retained CLI input"
     );
-
     #[cfg(feature = "timers")]
     let timing_snapshot = timing_session.finish();
 
     #[cfg(feature = "timers")]
     let second_timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
-    let mut second_build_result = executor
-        .build(&root, &[])
-        .expect("repeated directory dev build should compile");
-    executor
-        .write_outputs(&mut second_build_result, &root)
-        .expect("repeated output should write");
-    assert!(
-        second_build_result
-            .config
-            .config_resolution_records
-            .is_empty(),
-        "repeated dev builds must also discard transient resolution records"
-    );
+    let second = run_single_build_cycle(&state, &executor, &root, &[]);
+    assert!(second.build_ok);
     #[cfg(feature = "timers")]
     let _second_timing_snapshot = second_timing_session.finish();
-    assert_eq!(
-        second_build_result
-            .directory_output_plan
-            .as_ref()
-            .expect("repeated directory build should return its output plan")
-            .output_root,
-        root.join("preview")
-    );
     let second_output = fs::read_to_string(root.join("preview/index.html"))
         .expect("repeated directory dev build should write its page");
     assert!(
@@ -838,13 +1142,17 @@ fn project_build_executor_writes_the_validated_directory_plan() {
         "the output-plan/filesystem-write span must finish before the executor returns"
     );
 
+    let published_output_dir = state
+        .build_state
+        .lock()
+        .expect("build state")
+        .output_dir
+        .clone();
     assert_eq!(
-        build_result
-            .directory_output_plan
-            .as_ref()
-            .expect("directory build should return its output plan")
-            .output_root,
+        published_output_dir,
         root.join("preview")
+            .canonicalize()
+            .expect("published preview directory should canonicalize")
     );
     assert!(root.join("preview/index.html").exists());
     assert!(!root.join("dev/index.html").exists());
@@ -867,13 +1175,13 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
         .expect("should write page source");
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(HtmlProjectBuilder::new()),
+    let executor = ProjectBuildExecutor::new(
+        || ProjectBuilder::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
 
-    let first = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
-    let second = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    let first = run_single_build_cycle(&state, &executor, &root, &Vec::new());
+    let second = run_single_build_cycle(&state, &executor, &root, &Vec::new());
 
     let first_snapshot = first
         .timing_snapshot
@@ -971,13 +1279,10 @@ fn failed_dev_build_still_drains_timing_snapshot() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![Err(dev_server_error_messages(
-        &root.join("main.moth"),
-        "synthetic failure",
-    ))]);
+    let failure = dev_server_failure(&root.join("main.moth"), "synthetic failure");
+    let executor = FakeExecutor::new(vec![Err(failure)]);
 
-    let report =
-        run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
+    let report = run_single_build_cycle(&state, &executor, &root.join("main.moth"), &Vec::new());
 
     assert!(!report.build_ok);
     assert!(
@@ -1085,50 +1390,13 @@ fn post_entry_error(state: &Arc<DevServerState>, version: u64) -> String {
 }
 
 #[test]
-fn recovered_build_generation_clears_lock_poison_for_http_reads_and_reports() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let temp = tempfile::tempdir().expect("create poison recovery project");
-    let entry = temp.path().join("main.moth");
-    let state = Arc::new(DevServerState::new(temp.path().join("dev")));
-    let mut first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
-    let first_report = run_single_build_cycle(&state, &mut first, &entry, &[]);
-    assert!(first_report.build_ok);
-    assert!(!state.build_state.is_poisoned());
-
-    // Poison the publication lock from a thread that dies while holding it. The join observes
-    // the panic, so the test channels only this deterministic state, not sleep timing.
-    let poisoned = Arc::clone(&state);
-    let panicking = std::thread::spawn(move || {
-        let _held = poisoned
-            .build_state
-            .lock()
-            .expect("first lock acquisition succeeds");
-        panic!("poison the publication lock");
-    });
-    assert!(panicking.join().is_err());
-    assert!(state.build_state.is_poisoned());
-
-    let mut next = FakeExecutor::new(vec![Ok(generation_build_result(2))]);
-    let recovered = run_single_build_cycle(&state, &mut next, &entry, &[]);
-    assert!(recovered.build_ok);
-    assert_eq!(recovered.version, 2);
-    assert!(!state.build_state.is_poisoned());
-
-    let page = get_page(&state);
-    assert!(page.contains("generation-2"));
-    assert!(page.contains("const build = \"2\";"));
-    assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 204 "));
-    assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 204 "));
-}
-
-#[test]
-fn output_reader_capture_blocks_rebuild_until_generation_bytes_are_read() {
+fn output_reader_capture_keeps_generation_bytes_stable_across_rebuild() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("create publication project");
     let entry = temp.path().join("main.moth");
     let state = Arc::new(DevServerState::new(temp.path().join("dev")));
-    let mut first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
-    assert!(run_single_build_cycle(&state, &mut first, &entry, &[]).build_ok);
+    let first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
+    assert!(run_single_build_cycle(&state, &first, &entry, &[]).build_ok);
 
     let (captured_sender, captured_receiver) = std::sync::mpsc::channel();
     let (release_sender, release_receiver) = std::sync::mpsc::channel();
@@ -1147,29 +1415,37 @@ fn output_reader_capture_blocks_rebuild_until_generation_bytes_are_read() {
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("reader captures generation before output read");
 
+    assert!(
+        matches!(
+            state.build_state.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ),
+        "the response must capture published metadata and bytes under the state lock"
+    );
+
     let (compiled_sender, compiled_receiver) = std::sync::mpsc::channel();
     let compile_state = Arc::clone(&state);
-    let mut next = FakeExecutor::with_on_call(
+    let next = FakeExecutor::with_on_call(
         vec![Ok(generation_build_result(2))],
         Box::new(move |_| {
-            // Compilation must run while the reader owns publication, not behind that lock.
-            assert!(matches!(
-                compile_state.build_state.try_lock(),
-                Err(std::sync::TryLockError::WouldBlock)
-            ));
+            let build_state = compile_state
+                .build_state
+                .try_lock()
+                .expect("worker construction must happen outside the state lock");
+            drop(build_state);
             compiled_sender
                 .send(())
-                .expect("signal concurrent compilation");
+                .expect("signal worker construction");
         }),
     );
     let rebuild_state = Arc::clone(&state);
     let rebuild =
-        std::thread::spawn(move || run_single_build_cycle(&rebuild_state, &mut next, &entry, &[]));
-    compiled_receiver
-        .recv_timeout(std::time::Duration::from_secs(10))
-        .expect("rebuild compiles between capture and read");
+        std::thread::spawn(move || run_single_build_cycle(&rebuild_state, &next, &entry, &[]));
     release_sender.send(()).expect("release reader capture");
     let old_page = reader.join().expect("reader should finish");
+    compiled_receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("rebuild starts after captured response bytes are released");
     assert!(old_page.contains("generation-1"));
     assert!(old_page.contains("const build = \"1\";"));
     assert!(!old_page.contains("generation-2"));
@@ -1181,60 +1457,53 @@ fn output_reader_capture_blocks_rebuild_until_generation_bytes_are_read() {
 }
 
 #[test]
-fn output_write_and_metadata_publication_exclude_concurrent_get() {
+fn output_writing_does_not_lock_state_and_serves_previous_snapshot_until_publication() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("create publication project");
     let entry = temp.path().join("main.moth");
-    let state = Arc::new(DevServerState::new(temp.path().join("dev")));
-    let mut first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
-    assert!(run_single_build_cycle(&state, &mut first, &entry, &[]).build_ok);
+    let output_dir = temp.path().join("dev");
+    let state = Arc::new(DevServerState::new(output_dir.clone()));
+    let first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
+    assert!(run_single_build_cycle(&state, &first, &entry, &[]).build_ok);
 
     let (written_sender, written_receiver) = std::sync::mpsc::channel();
     let (publish_sender, publish_receiver) = std::sync::mpsc::channel();
     let mut next = FakeExecutor::new(vec![Ok(generation_build_result(2))]);
-    next.on_write = Some(Box::new(move || {
+    next.set_on_write(Box::new(move || {
         written_sender.send(()).expect("signal written outputs");
         publish_receiver
             .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("release metadata publication");
+            .expect("release artifact publication");
         Ok(())
     }));
     let rebuild_state = Arc::clone(&state);
     let rebuild =
-        std::thread::spawn(move || run_single_build_cycle(&rebuild_state, &mut next, &entry, &[]));
+        std::thread::spawn(move || run_single_build_cycle(&rebuild_state, &next, &entry, &[]));
     written_receiver
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("new outputs reach write barrier");
     assert!(
-        fs::read_to_string(temp.path().join("dev/index.html"))
+        fs::read_to_string(output_dir.join("index.html"))
             .expect("written page")
             .contains("generation-2")
     );
-    assert!(matches!(
-        state.build_state.try_lock(),
-        Err(std::sync::TryLockError::WouldBlock)
-    ));
+    assert!(
+        state.build_state.try_lock().is_ok(),
+        "output writing must not hold the publication lock"
+    );
+    let page_during_write = get_page(&state);
+    assert!(page_during_write.contains("generation-1"));
+    assert!(page_during_write.contains("const build = \"1\";"));
+    assert_eq!(get_bytes(&state, "/page.js"), b"generation-1");
 
-    let (get_sender, get_receiver) = std::sync::mpsc::channel();
-    *state.capture_hook.lock().expect("read hook") = Some(Box::new(move |point| {
-        if matches!(point, OutputCapturePoint::BeforeLock) {
-            get_sender.send(()).expect("signal GET capture attempt");
-        }
-    }));
-    let reader_state = Arc::clone(&state);
-    let reader = std::thread::spawn(move || get_page(&reader_state));
-    get_receiver
-        .recv_timeout(std::time::Duration::from_secs(10))
-        .expect("GET attempts before publication");
     publish_sender
         .send(())
         .expect("publish completed generation");
     assert_eq!(rebuild.join().expect("rebuild finishes").version, 2);
-    let page = reader.join().expect("GET finishes");
-    assert!(page.contains("generation-2"));
-    assert!(page.contains("const build = \"2\";"));
-    assert!(!page.contains("const build = \"1\";"));
-    *state.capture_hook.lock().expect("read hook") = None;
+    let published_page = get_page(&state);
+    assert!(published_page.contains("generation-2"));
+    assert!(published_page.contains("const build = \"2\";"));
+    assert_eq!(get_bytes(&state, "/page.js"), b"generation-2");
 }
 
 #[test]
@@ -1243,16 +1512,16 @@ fn companion_requests_cross_publication_but_reports_keep_page_generation() {
     let temp = tempfile::tempdir().expect("create publication project");
     let entry = temp.path().join("main.moth");
     let state = Arc::new(DevServerState::new(temp.path().join("dev")));
-    let mut executor = FakeExecutor::new(vec![
+    let executor = FakeExecutor::new(vec![
         Ok(generation_build_result(1)),
         Ok(generation_build_result(2)),
     ]);
-    assert!(run_single_build_cycle(&state, &mut executor, &entry, &[]).build_ok);
+    assert!(run_single_build_cycle(&state, &executor, &entry, &[]).build_ok);
     let old_page = get_page(&state);
     assert!(old_page.contains("generation-1"));
     assert!(old_page.contains("const build = \"1\";"));
     assert_eq!(get_bytes(&state, "/page.js"), b"generation-1");
-    assert!(run_single_build_cycle(&state, &mut executor, &entry, &[]).build_ok);
+    assert!(run_single_build_cycle(&state, &executor, &entry, &[]).build_ok);
 
     assert_eq!(get_bytes(&state, "/page.js"), b"generation-2");
     assert_eq!(get_bytes(&state, "/page.wasm"), vec![0, 97, 115, 109, 2]);
@@ -1305,15 +1574,15 @@ fn stale_page_that_missed_the_publication_broadcast_reloads_on_connection() {
     let temp = tempfile::tempdir().expect("create publication project");
     let entry = temp.path().join("main.moth");
     let state = Arc::new(DevServerState::new(temp.path().join("dev")));
-    let mut executor = FakeExecutor::new(vec![
+    let executor = FakeExecutor::new(vec![
         Ok(generation_build_result(1)),
         Ok(generation_build_result(2)),
     ]);
-    assert!(run_single_build_cycle(&state, &mut executor, &entry, &[]).build_ok);
+    assert!(run_single_build_cycle(&state, &executor, &entry, &[]).build_ok);
     let stale_page = get_page(&state);
     assert!(stale_page.contains("generation-1"));
 
-    let missed = run_single_build_cycle(&state, &mut executor, &entry, &[]);
+    let missed = run_single_build_cycle(&state, &executor, &entry, &[]);
     assert_eq!((missed.version, missed.clients_notified), (2, 0));
     assert_eq!(get_bytes(&state, "/page.js"), b"generation-2");
     assert!(post_entry_error(&state, 1).starts_with("HTTP/1.1 409 "));
@@ -1355,70 +1624,245 @@ fn output_write_failure_publishes_diagnostics_not_partial_success() {
     let entry = temp.path().join("main.moth");
     let output = temp.path().join("dev");
     let state = Arc::new(DevServerState::new(output.clone()));
-    let mut first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
-    assert!(run_single_build_cycle(&state, &mut first, &entry, &[]).build_ok);
+    let first = FakeExecutor::new(vec![Ok(generation_build_result(1))]);
+    assert!(run_single_build_cycle(&state, &first, &entry, &[]).build_ok);
     let mut next = FakeExecutor::new(vec![Ok(generation_build_result(2))]);
-    next.on_write = Some(Box::new(move || {
+    let partial_output = output.clone();
+    next.set_on_write(Box::new(move || {
         // A late emission/finalisation failure can leave bytes changed without completing a batch.
-        fs::write(output.join("index.html"), "<html>partial-generation-2")
-            .expect("leave partially written page");
-        Err(dev_server_error_messages(
-            &output,
+        fs::write(
+            partial_output.join("index.html"),
+            "<html>partial-generation-2",
+        )
+        .expect("leave partially written page");
+        Err(dev_server_failure(
+            &partial_output,
             "publication write failed",
         ))
     }));
-    let failed = run_single_build_cycle(&state, &mut next, &entry, &[]);
+    let failed = run_single_build_cycle(&state, &next, &entry, &[]);
     assert!(!failed.build_ok);
     assert_eq!(failed.version, 2);
     let page = get_page(&state);
     assert!(page.contains("publication write failed"));
     assert!(!page.contains("partial-generation-2"));
     assert!(!page.contains("generation-1"));
-    assert_eq!(get_bytes(&state, "/page.js"), b"generation-2");
+    assert_eq!(get_bytes(&state, "/page.js"), b"generation-1");
+    assert_eq!(
+        fs::read(output.join("page.js")).expect("writer emitted partial second generation"),
+        b"generation-2"
+    );
     assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 409 "));
     let build = state.build_state.lock().expect("build state");
     assert!(!build.last_build_ok);
+    assert_eq!(build.served_artifacts_version, 1);
     assert!(build.last_error_html.is_some());
 }
 
+#[test]
+fn exact_html_asset_uses_failed_generation_page_after_rebuild_failure() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("create exact HTML publication project");
+    let entry = temp.path().join("main.moth");
+    let output = temp.path().join("dev");
+    let state = Arc::new(DevServerState::new(output));
+
+    let mut first_build = html_build_result();
+    first_build.project.output_files = vec![OutputFile::new(
+        PathBuf::from("main.html"),
+        FileKind::Html(String::from(
+            "<html><body>generation-1 exact HTML</body></html>",
+        )),
+    )];
+    first_build.project.entry_page_rel = Some(PathBuf::from("main.html"));
+    let executor = FakeExecutor::with_worker_responses(vec![
+        FakeWorkerResponse::Build {
+            value: Box::new(first_build),
+            warnings: None,
+        },
+        FakeWorkerResponse::Infrastructure(dev_server_failure(&entry, "rebuild failed")),
+    ]);
+
+    assert!(run_single_build_cycle(&state, &executor, &entry, &[]).build_ok);
+    let failed = run_single_build_cycle(&state, &executor, &entry, &[]);
+    assert!(!failed.build_ok);
+    assert_eq!(failed.version, 2);
+
+    let body = String::from_utf8(get_bytes(&state, "/main.html")).expect("HTML response is UTF-8");
+    assert!(body.contains("Build Version: 2"), "failure page: {body}");
+    assert!(body.contains("rebuild failed"), "failure page: {body}");
+    assert!(
+        !body.contains("generation-1 exact HTML"),
+        "stale page: {body}"
+    );
+    assert!(
+        !body.contains("Build #1 succeeded"),
+        "stale dev-client version: {body}"
+    );
+
+    let build = state.build_state.lock().expect("build state");
+    assert_eq!(build.last_build_version, 2);
+    assert_eq!(build.served_artifacts_version, 1);
+}
+
+#[test]
+fn compiler_bug_rebuild_keeps_last_good_artifacts_and_runs_the_queued_rebuild() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("create compiler-bug rebuild project");
+    let root = temp.path();
+    let entry = root.join("main.moth");
+    fs::write(&entry, "watch this").expect("write watched entry");
+    let output_dir = root.join("dev");
+    let state = Arc::new(DevServerState::new(output_dir.clone()));
+    let (watch_session, watch_trigger) =
+        watch::WatchSession::manual(watch_scope(root, &output_dir));
+    let watch_trigger = Arc::new(watch_trigger);
+    let success = |generation| FakeWorkerResponse::Build {
+        value: Box::new(generation_build_result(generation)),
+        warnings: None,
+    };
+    let mut executor = FakeExecutor::with_worker_responses(vec![
+        success(1),
+        FakeWorkerResponse::CompilerBug,
+        success(3),
+    ]);
+    let observed_failure = Arc::new(Mutex::new(None));
+    let callback_state = Arc::clone(&state);
+    let callback_observation = Arc::clone(&observed_failure);
+    let callback_trigger = Arc::clone(&watch_trigger);
+    executor.on_call = Some(Arc::new(move |worker_id| match worker_id {
+        2 => callback_trigger.notify_change(),
+        3 => {
+            let (build_ok, version, served_version, summary) = {
+                let build = callback_state.build_state.lock().expect("build state");
+                (
+                    build.last_build_ok,
+                    build.last_build_version,
+                    build.served_artifacts_version,
+                    build.last_build_messages_summary.clone(),
+                )
+            };
+            *callback_observation
+                .lock()
+                .expect("compiler-bug observation lock") = Some((
+                build_ok,
+                version,
+                served_version,
+                summary,
+                get_page(&callback_state),
+                get_bytes(&callback_state, "/page.js"),
+            ));
+        }
+        _ => {}
+    }));
+
+    let initial = run_single_build_cycle(&state, &executor, &entry, &[]);
+    assert!(initial.build_ok);
+    assert_eq!(executor.worker_ids(), vec![1]);
+    watch_trigger.notify_change();
+
+    let rebuilt = run_builds_until_stable(&state, &executor, &entry, &[], &watch_session);
+    assert!(rebuilt.watch_scope.is_some());
+    assert_eq!(executor.worker_ids(), vec![1, 2, 3]);
+    let (build_ok, version, served_version, summary, page, js) = observed_failure
+        .lock()
+        .expect("compiler-bug observation lock")
+        .take()
+        .expect("the queued rebuild starts a fresh worker after the compiler bug");
+    assert!(!build_ok);
+    assert_eq!(version, 2);
+    assert_eq!(served_version, 1);
+    assert!(
+        summary.to_ascii_lowercase().contains("compiler bug"),
+        "host state should summarize the compiler bug"
+    );
+    assert!(page.contains("Compiler Bug"));
+    assert_eq!(js, b"generation-1");
+
+    let build = state.build_state.lock().expect("build state");
+    assert!(build.last_build_ok);
+    assert_eq!(build.last_build_version, 3);
+    drop(build);
+    assert!(get_page(&state).contains("generation-3"));
+}
+
 /// Records the existing writer's explicit branch, not timestamps or a parallel output writer.
+#[derive(Clone)]
 struct RecordingProjectExecutor {
     inner: ProjectBuildExecutor,
-    last_write: Option<OutputWriteSummary>,
+    last_write: Arc<Mutex<Option<OutputWriteSummary>>>,
+}
+
+impl RecordingProjectExecutor {
+    fn last_write(&self) -> Option<OutputWriteSummary> {
+        self.last_write
+            .lock()
+            .expect("recorded output summary lock should not be poisoned")
+            .clone()
+    }
+
+    fn clear_last_write(&self) {
+        *self
+            .last_write
+            .lock()
+            .expect("recorded output summary lock should not be poisoned") = None;
+    }
 }
 
 impl DevBuildExecutor for RecordingProjectExecutor {
-    fn build(
-        &mut self,
-        entry_file: &Path,
-        flags: &[crate::compiler_frontend::Flag],
-    ) -> Result<BuildResult, CompilerMessages> {
-        use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-        use crate::compiler_frontend::compiler_messages::{
-            DiagnosticPayload, InvalidFallibleHandlingReason,
-        };
+    fn build_config_inputs(&self) -> &BuildConfigInputSet {
+        self.inner.build_config_inputs()
+    }
 
-        let result = self.inner.build(entry_file, flags);
-        if let Err(messages) = &result {
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-            assert_eq!(
-                diagnostics.len(),
-                1,
-                "one invalid export should be diagnosed"
+    fn create_worker(&self, request: DevBuildRequest) -> Box<dyn DevBuildWorker> {
+        Box::new(RecordingProjectWorker {
+            inner: self.inner.create_worker(request),
+            last_write: Arc::clone(&self.last_write),
+        })
+    }
+}
+
+struct RecordingProjectWorker {
+    inner: Box<dyn DevBuildWorker>,
+    last_write: Arc<Mutex<Option<OutputWriteSummary>>>,
+}
+
+impl DevBuildWorker for RecordingProjectWorker {
+    fn request(&self) -> &DevBuildRequest {
+        self.inner.request()
+    }
+
+    fn build(&mut self) -> CompilationResult<BuildResult> {
+        let result = self.inner.build();
+        if let Ok(CompilationOutcome::Diagnosed(messages)) = &result {
+            let mut diagnostics = messages.iter_severity(DiagnosticSeverity::Error);
+            let (report, diagnostic) = diagnostics
+                .next()
+                .expect("one invalid export should have an error report");
+            assert!(
+                diagnostics.next().is_none(),
+                "one invalid export should produce exactly one diagnostic"
             );
             assert_eq!(
-                diagnostics[0].identity().reason_key,
+                diagnostic.reason_key(),
                 Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
             );
-            let DiagnosticPayload::InvalidFallibleHandling {
-                reason:
-                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-            } = &diagnostics[0].payload
-            else {
-                panic!("expected structured export failure: {:?}", diagnostics[0]);
-            };
-            assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-            assert!(witness.origin_span.is_some());
+            let mut origin_labels = diagnostic
+                .durable_labels()
+                .filter(|label| matches!(label.message, DurableLabelMessage::BuiltinFailureOrigin));
+            let origin = origin_labels
+                .next()
+                .expect("invalid export should retain its builtin failure origin label");
+            assert!(
+                origin_labels.next().is_none(),
+                "invalid export should have exactly one builtin failure origin label"
+            );
+            assert!(
+                DiagnosticRenderContext::for_report(report)
+                    .site_position(origin.site)
+                    .is_some(),
+                "the builtin failure origin label should retain a resolvable source site"
+            );
         }
         result
     }
@@ -1426,10 +1870,12 @@ impl DevBuildExecutor for RecordingProjectExecutor {
     fn write_outputs(
         &mut self,
         build_result: &mut BuildResult,
-        entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages> {
-        let summary = self.inner.write_outputs(build_result, entry_file)?;
-        self.last_write = Some(summary.clone());
+    ) -> Result<OutputWriteSummary, PreparedFailure> {
+        let summary = self.inner.write_outputs(build_result)?;
+        *self
+            .last_write
+            .lock()
+            .expect("recorded output summary lock should not be poisoned") = Some(summary.clone());
         Ok(summary)
     }
 }
@@ -1540,15 +1986,15 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     );
     fs::write(&helper_path, &successful).expect("write successful private helpers");
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = RecordingProjectExecutor {
+    let executor = RecordingProjectExecutor {
         inner: ProjectBuildExecutor::new(
-            ProjectBuilder::new(HtmlProjectBuilder::new()),
+            || ProjectBuilder::new(HtmlProjectBuilder::new()),
             BuildConfigInputSet::new(),
         ),
-        last_write: None,
+        last_write: Arc::new(Mutex::new(None)),
     };
 
-    let first = run_single_build_cycle(&state, &mut executor, root, &[]);
+    let first = run_single_build_cycle(&state, &executor, root, &[]);
     assert!(
         first.build_ok,
         "{}",
@@ -1561,8 +2007,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     let first_page = assert_served_entry_outcome(&state, first.version, None);
     assert_eq!(
         executor
-            .last_write
-            .as_ref()
+            .last_write()
             .expect("first write summary")
             .outcome_for(Path::new("index.html")),
         Some(OutputWriteOutcome::Written),
@@ -1570,7 +2015,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
 
     // Only the private body changes. The public Error! signature and entry source stay identical.
     fs::write(&helper_path, &failing_entry).expect("widen private helper");
-    let second = run_single_build_cycle(&state, &mut executor, root, &[]);
+    let second = run_single_build_cycle(&state, &executor, root, &[]);
     assert!(
         second.build_ok,
         "{}",
@@ -1601,23 +2046,22 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     );
 
     fs::write(&helper_path, &successful).expect("restore private helper");
-    let restored = run_single_build_cycle(&state, &mut executor, root, &[]);
+    let restored = run_single_build_cycle(&state, &executor, root, &[]);
     assert!(restored.build_ok);
     assert_served_entry_outcome(&state, restored.version, None);
     assert_eq!(
         executor
-            .last_write
-            .as_ref()
+            .last_write()
             .expect("restore summary")
             .outcome_for(Path::new("index.html")),
         Some(OutputWriteOutcome::Written),
     );
     assert!(post_entry_error(&state, second.version).starts_with("HTTP/1.1 409 "));
 
-    let unchanged = run_single_build_cycle(&state, &mut executor, root, &[]);
+    let unchanged = run_single_build_cycle(&state, &executor, root, &[]);
     assert!(unchanged.build_ok);
     assert_served_entry_outcome(&state, unchanged.version, None);
-    let summary = executor.last_write.as_ref().expect("unchanged summary");
+    let summary = executor.last_write().expect("unchanged summary");
     assert_eq!(
         summary.outcome_for(Path::new("index.html")),
         Some(OutputWriteOutcome::SkippedUnchanged),
@@ -1632,15 +2076,15 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     let supporting_asset = get_bytes(&state, "/site.css");
     assert_eq!(supporting_asset, b"body { color: green; }");
 
-    // A previously legal success-only export gains an escaping implicit failure.
+    // Turning the success-only export into an escaping implicit failure rejects the build.
     // No stale successful output may stand in for this diagnosed attempt.
     fs::write(&helper_path, &invalid_export).expect("invalidate success-only export");
-    executor.last_write = None;
-    let rejected = run_single_build_cycle(&state, &mut executor, root, &[]);
+    executor.clear_last_write();
+    let rejected = run_single_build_cycle(&state, &executor, root, &[]);
     assert!(!rejected.build_ok);
     assert_eq!(rejected.version, unchanged.version + 1);
     assert!(
-        executor.last_write.is_none(),
+        executor.last_write().is_none(),
         "diagnosed compilation must never write"
     );
     assert_eq!(

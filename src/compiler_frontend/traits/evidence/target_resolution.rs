@@ -8,8 +8,12 @@
 use super::diagnostics::invalid_conformance;
 use super::environment::TraitEvidenceKind;
 
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    draft::DiagnosticDraft,
+    families::{generics_traits_api, names_declarations},
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidTraitConformanceReason,
+    DeferredFeatureReason, InvalidTraitConformanceReason,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -30,9 +34,9 @@ use rustc_hash::FxHashMap;
 
 /// Result for the connected conformance-target resolution family.
 ///
-/// Target and trait lookup keep diagnosed failures as plain
-/// `CompilerDiagnostic` values without a separate local representation.
-type TargetResolutionResult<T> = Result<T, CompilerDiagnostic>;
+/// Target and trait lookup keep diagnosed failures as drafts without a separate
+/// local representation.
+type TargetResolutionResult<T> = Result<T, DiagnosticDraft>;
 
 #[derive(Clone)]
 pub(super) struct ConformanceTarget {
@@ -58,7 +62,7 @@ pub(super) fn resolve_conformance_target(
     context: ResolveConformanceTargetContext<'_>,
 ) -> TargetResolutionResult<ConformanceTarget> {
     if target.kind == ConformanceTargetKind::SpecializedGenericInstance {
-        return Err(CompilerDiagnostic::deferred_feature_reason(
+        return Err(names_declarations::deferred_feature_reason(
             DeferredFeatureReason::NamedFeature {
                 feature: target.name,
             },
@@ -106,7 +110,7 @@ pub(super) fn resolve_conformance_target(
     }
 
     let Some(target_path) = context.visibility.visible_source_names.get(&target.name) else {
-        return Err(CompilerDiagnostic::unknown_type_name(target.name, None));
+        return Err(names_declarations::unknown_type_name(target.name, None));
     };
     let Some(type_id) = context.nominal_type_ids_by_path.get(target_path).copied() else {
         return Err(invalid_conformance(
@@ -213,5 +217,5 @@ pub(super) fn resolve_trait_reference(
         return Ok(id);
     }
 
-    Err(CompilerDiagnostic::unknown_trait_name(trait_ref.name, None))
+    Err(generics_traits_api::unknown_trait(trait_ref.name, None))
 }

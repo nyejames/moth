@@ -32,6 +32,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// The source reason that lets signature parsing retain an unresolved type shape.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum TypeResolutionFailureKind {
+    #[default]
+    Other,
+    UnknownTypeName,
+    CapacityNotConstant,
+}
+
 /// Shared state for AST semantic type resolution.
 ///
 /// WHAT: bundles every lookup table and environment that resolution needs in one place.

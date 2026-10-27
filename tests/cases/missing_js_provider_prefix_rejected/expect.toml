@@ -1,0 +1,13 @@
+entry = "@page.moth"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0005"]
+message_contains = ["missing.js"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0005"
+path = "input/@page.moth"
+line = 1
+count = 1

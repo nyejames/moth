@@ -1,4 +1,4 @@
-# Retired: the unsupported-cast half of the old second statement now lives in
+# The unsupported-cast half of the second statement is covered by
 # implicit_failure_folded_catch_handler_no_evidence_cast_rejected. Validation
 # fails fast on the handler type mismatch below, so it cannot be observed here.
 

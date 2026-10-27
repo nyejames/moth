@@ -18,7 +18,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use super::head_chain::HeadChainResolutionInputs;
-use super::helpers::{compose_wrapper_application, internal_compiler_error};
+use super::helpers::{compose_wrapper_application, internal_infrastructure_failure};
 
 type ChildWrapperResult<T> = Result<T, TemplateError>;
 
@@ -39,7 +39,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
         .get_node(child_node_id)
         .map(|node| node.span)
         .ok_or_else(|| {
-            internal_compiler_error(
+            internal_infrastructure_failure(
                 "TIR child wrapper application: child node ID was not present in the store.",
             )
         })?;
@@ -109,7 +109,7 @@ fn build_tir_prepended_wrapper_template(
         .get_template(wrapper_reference.root)
         .map(|wrapper_template| wrapper_template.span)
         .ok_or_else(|| {
-            internal_compiler_error(
+            internal_infrastructure_failure(
                 "TIR child wrapper application: wrapper template ID was not present in the store.",
             )
         })?;

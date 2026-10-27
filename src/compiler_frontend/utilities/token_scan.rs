@@ -1,16 +1,18 @@
 //! Shared frontend token-scanning utilities.
 //!
 //! WHAT: centralizes reusable delimiter-depth and balanced-template scan helpers.
-//! WHY: declaration parsing, multi-bind parsing, header parsing, expression
-//! boundary scanning, and template parsing previously maintained duplicate depth
-//! bookkeeping logic.
+//! WHY: shared depth bookkeeping keeps declaration, multi-bind, header, expression-boundary and
+//! template scanners consistent.
 //!
 //! This module owns generic scan mechanics only.
 //! It does NOT own statement/feature semantics or diagnostics policy.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    draft::DiagnosticDraft, families::token_lexical,
+};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -24,8 +26,8 @@ use crate::compiler_frontend::tokenizer::tokens::{
 /// infrastructure instead of fabricating a user-facing diagnostic.
 #[derive(Debug)]
 pub(crate) enum TokenScanFailure {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
 /// A lightweight value-reference hint extracted from a token slice.
@@ -605,7 +607,8 @@ pub(crate) fn collect_declaration_initializer_range(
             Some(if include_boundary {
                 TokenIndex::try_from_index(current_ref.index().index().saturating_add(1))
                     .ok_or_else(|| {
-                        TokenScanFailure::Infrastructure(CompilerError::compiler_error(
+                        TokenScanFailure::Infrastructure(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "declaration initializer boundary exceeded its checked token index",
                         ))
                     })?
@@ -623,7 +626,7 @@ pub(crate) fn collect_declaration_initializer_range(
             Some(if include_boundary {
                 TokenIndex::try_from_index(current_ref.index().index().saturating_add(1))
                     .ok_or_else(|| {
-                        TokenScanFailure::Infrastructure(CompilerError::compiler_error(
+                        TokenScanFailure::Infrastructure(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "declaration initializer newline boundary exceeded its checked token index",
                         ))
                     })?
@@ -636,15 +639,17 @@ pub(crate) fn collect_declaration_initializer_range(
 
         if let Some(end) = boundary_end {
             let range = TokenRange::try_new_for(source_tokens, start, end).map_err(|error| {
-                TokenScanFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "declaration initializer range was invalid: {error:?}",
-                )))
+                TokenScanFailure::Infrastructure(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("declaration initializer range was invalid: {error:?}",),
+                ))
             })?;
             let facts =
                 TokenFactView::from_source_range(source_tokens, range).map_err(|error| {
-                    TokenScanFailure::Infrastructure(CompilerError::compiler_error(format!(
-                        "declaration initializer reference view was invalid: {error:?}",
-                    )))
+                    TokenScanFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!("declaration initializer reference view was invalid: {error:?}",),
+                    ))
                 })?;
             return Ok((range, collect_scanned_symbol_references(facts, source_id)));
         }
@@ -656,14 +661,15 @@ pub(crate) fn collect_declaration_initializer_range(
                 }
                 None => {
                     return Err(TokenScanFailure::Infrastructure(
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "declaration-initializer scanner reported a nested state with no open construct",
                         ),
                     ));
                 }
             };
             return Err(TokenScanFailure::Diagnostic(
-                CompilerDiagnostic::unexpected_end_of_file(
+                token_lexical::unexpected_end_of_file(
                     expected_delimiter,
                     Some(current_ref.source_span()),
                 ),
@@ -787,14 +793,16 @@ pub(crate) fn collect_declaration_initializer_range(
 
     let end = cursor.position();
     let range = TokenRange::try_new_for(source_tokens, start, end).map_err(|error| {
-        TokenScanFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "declaration initializer range was invalid at stream end: {error:?}",
-        )))
+        TokenScanFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("declaration initializer range was invalid at stream end: {error:?}",),
+        ))
     })?;
     let facts = TokenFactView::from_source_range(source_tokens, range).map_err(|error| {
-        TokenScanFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "declaration initializer reference view was invalid at stream end: {error:?}",
-        )))
+        TokenScanFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("declaration initializer reference view was invalid at stream end: {error:?}",),
+        ))
     })?;
     Ok((range, collect_scanned_symbol_references(facts, source_id)))
 }
@@ -887,18 +895,19 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
 ///
 /// The opening token is already consumed by the caller; the returned position is the first token
 /// after the close. Tags and spans are read only through checked `TokenRef`s owned by the cursor's
-/// canonical source, so this helper never creates a compatibility token window.
+/// canonical source, so this helper never creates a separate token window.
 pub(crate) fn consume_balanced_template_region_from_source<E>(
     cursor: &mut TokenCursor<'_>,
     opening: TokenRef<'_>,
     mut on_token: impl FnMut(TokenRef<'_>),
     on_eof_error: impl Fn(SourceSpan) -> E,
-    on_infrastructure_error: impl Fn(CompilerError) -> E,
+    on_infrastructure_error: impl Fn(InfrastructureFailure) -> E,
 ) -> Result<TokenIndex, E> {
     let source_tokens = cursor.source_tokens();
     let source_id = source_tokens.source();
     if opening.source() != source_id {
-        return Err(on_infrastructure_error(CompilerError::compiler_error(
+        return Err(on_infrastructure_error(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "template opening source token owner does not match its cursor owner",
         )));
     }
@@ -909,17 +918,20 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
         .checked_add(1)
         .and_then(TokenIndex::try_from_index)
         .ok_or_else(|| {
-            on_infrastructure_error(CompilerError::compiler_error(
+            on_infrastructure_error(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "template body index exceeded the source token index space",
             ))
         })?;
     if cursor.position() != expected_current {
-        return Err(on_infrastructure_error(CompilerError::compiler_error(
+        return Err(on_infrastructure_error(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "template cursor was not positioned after its opening token",
         )));
     }
     if opening.tag() != TokenTag::TEMPLATE_HEAD {
-        return Err(on_infrastructure_error(CompilerError::compiler_error(
+        return Err(on_infrastructure_error(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "template range did not begin with a template opening token",
         )));
     }
@@ -927,12 +939,14 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
     let mut balance = TemplateBalance::with_opening_template();
     while balance.has_unclosed_templates() {
         let token = cursor.current().ok_or_else(|| {
-            on_infrastructure_error(CompilerError::compiler_error(
+            on_infrastructure_error(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "template cursor exceeded its source token owner before its closing delimiter",
             ))
         })?;
         if token.source() != source_id {
-            return Err(on_infrastructure_error(CompilerError::compiler_error(
+            return Err(on_infrastructure_error(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "template cursor token owner changed its source identity",
             )));
         }

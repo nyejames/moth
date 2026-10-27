@@ -26,10 +26,14 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticPayload, InvalidCastReason,
+    CompileTimeEvaluationErrorReason, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -55,7 +59,8 @@ use std::borrow::Cow;
 
 #[derive(Debug)]
 pub(crate) enum ConstantFoldError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
+    NumericFailure(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 #[derive(Debug)]
@@ -68,14 +73,14 @@ pub(crate) enum ConstantFoldOutcome {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum ConstantFoldRefusalReason {
-    StructuralTextUnavailable(CompilerDiagnostic),
-    EvaluationOutputBoundExceeded(CompilerDiagnostic),
+    StructuralTextUnavailable(DiagnosticDraft),
+    EvaluationOutputBoundExceeded(DiagnosticDraft),
 }
 
 impl ConstantFoldRefusalReason {
-    pub(crate) fn into_diagnostic(self) -> CompilerDiagnostic {
+    pub(crate) fn into_draft(self) -> DiagnosticDraft {
         match self {
             Self::StructuralTextUnavailable(diagnostic)
             | Self::EvaluationOutputBoundExceeded(diagnostic) => diagnostic,
@@ -148,14 +153,14 @@ pub(crate) fn registered_external_const_eval_op(
     registry?.get_function_by_id(function_id)?.const_eval
 }
 
-impl From<CompilerDiagnostic> for ConstantFoldError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
-        ConstantFoldError::Diagnostic(diagnostic)
+impl From<DiagnosticDraft> for ConstantFoldError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for ConstantFoldError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for ConstantFoldError {
+    fn from(error: InfrastructureFailure) -> Self {
         ConstantFoldError::Infrastructure(error.into())
     }
 }
@@ -169,8 +174,12 @@ impl From<Box<InfrastructureErrors>> for ConstantFoldError {
 impl From<TemplateError> for ConstantFoldError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => ConstantFoldError::Diagnostic(diagnostic),
-            TemplateError::Infrastructure(error) => ConstantFoldError::Infrastructure(error),
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
+                Self::Diagnostic(diagnostic)
+            }
+            TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -197,7 +206,7 @@ pub(crate) fn require_concrete_text(
     constants: &ConstValueStore,
     requirement: ConstStringRequirement,
     strings: &mut StringTable,
-) -> Result<Option<StringId>, CompilerDiagnostic> {
+) -> Result<Option<StringId>, DiagnosticDraft> {
     let ExpressionOperationView::Constant(id) = value.operation() else {
         return Ok(None);
     };
@@ -211,7 +220,7 @@ pub(super) fn concrete_payload_text(
     span: Option<SourceSpan>,
     requirement: ConstStringRequirement,
     strings: &mut StringTable,
-) -> Result<Option<StringId>, CompilerDiagnostic> {
+) -> Result<Option<StringId>, DiagnosticDraft> {
     let ConstValuePayload::String(value) = payload else {
         return Ok(None);
     };
@@ -224,7 +233,7 @@ pub(super) fn concrete_payload_text(
                     ConstStringPiece::Text(part) => text.push_str(strings.resolve(*part)),
                     ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
                         let operation = strings.intern(requirement.operation_name());
-                        return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                        return Err(choices_control_flow::compile_time_evaluation_error(
                             CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                             Some(operation),
                             span,
@@ -262,12 +271,13 @@ impl<'a> FoldBoundary<'a> {
     }
 
     /// The type environment that composite folds consult; only constant content boundaries carry one.
-    fn types(self) -> Result<&'a TypeEnvironment, CompilerError> {
+    fn types(self) -> Result<&'a TypeEnvironment, InfrastructureFailure> {
         match self {
             Self::Content { types, .. } => Ok(types),
-            Self::Runtime { .. } => Err(CompilerError::compiler_error(
+            Self::Runtime { .. } => crate::compiler_bug!(
+                CompilerStage::ConstantEvaluation,
                 "Composite constant folding requires a constant content boundary.",
-            )),
+            ),
         }
     }
 }
@@ -357,7 +367,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         error: ConstantFoldError,
         operands: &[ConstValueId],
     ) -> ConstantFoldError {
-        let ConstantFoldError::Diagnostic(mut diagnostic) = error else {
+        let ConstantFoldError::NumericFailure(diagnostic) = error else {
             return error;
         };
         let provenances = operands
@@ -365,13 +375,9 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             .filter_map(|operand| self.values.metadata(*operand))
             .map(|metadata| &metadata.synthetic_interface_provenance)
             .collect::<Vec<_>>();
-        match attach_source_config_origin_labels(
-            &mut diagnostic,
-            &provenances,
-            self.strings,
-            self.scope,
-        ) {
-            Ok(()) => ConstantFoldError::Diagnostic(diagnostic),
+        match attach_source_config_origin_labels(diagnostic, &provenances, self.strings, self.scope)
+        {
+            Ok(diagnostic) => ConstantFoldError::NumericFailure(diagnostic),
             Err(error) => error,
         }
     }
@@ -414,7 +420,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         }
         match walk.results.pop() {
             Some(value) => Ok(value),
-            None => Err(CompilerError::compiler_error(
+            None => Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Constant fold walk finished without a root result.",
             )
             .into()),
@@ -446,7 +453,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 let mut provenance = SyntheticInterfaceProvenance::empty();
                 for argument in arguments.iter().flatten() {
                     let argument_metadata = self.values.metadata(*argument).ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::ConstantEvaluation,
                             "Settled external-call argument lost its metadata.",
                         )
                     })?;
@@ -474,10 +482,10 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         call: ExpressionView<'_>,
     ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
         let ExpressionOperationView::Call(record) = call.operation() else {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::ConstantEvaluation,
                 "Host result folding was given a row that is not a call.",
-            )
-            .into());
+            );
         };
         // The argument buffer leaves `self` for the duration of the walks, because each walk
         // borrows `self` mutably.
@@ -509,7 +517,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         match expression.operation() {
             Operation::Constant(id) => {
                 if self.values.metadata(id).map(|metadata| metadata.type_id) != Some(type_id) {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Constant expression disagrees with content type.",
                     )
                     .into());
@@ -522,7 +531,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     return Ok(FoldEntry::Settled(None));
                 };
                 if self.values.metadata(id).map(|metadata| metadata.type_id) != Some(type_id) {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Constant binding disagrees with reference type.",
                     )
                     .into());
@@ -699,7 +709,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                         InvalidCastReason::GenericBoundEvidenceNotConstFoldable
                     }
                 };
-                Err(CompilerDiagnostic::invalid_cast(
+                Err(calls_data::invalid_cast(
                     reason,
                     Some(facts.source_type_id),
                     Some(facts.target_type_id),
@@ -789,7 +799,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     return Ok(None);
                 };
                 if children.len() != call.arguments().len() {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "External call completion lost an argument result slot.",
                     )
                     .into());
@@ -801,7 +812,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     return Ok(None);
                 }
                 let &[value] = self.external_calls.slots.as_slice() else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Trusted Core Text call did not materialise its one success slot.",
                     )
                     .into());
@@ -862,7 +874,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             Operation::Choice { tag, fields } if self.boundary.folds_composites() => {
                 let types = self.boundary.types()?;
                 let SuccessShape::One(type_id) = expression.success_shape() else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Folded choice lost its success type.",
                     )
                     .into());
@@ -871,7 +884,8 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     return Ok(None);
                 };
                 let nominal_path = *types.nominal_path(type_id).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Folded choice has no canonical nominal identity.",
                     )
                 })?;
@@ -899,8 +913,9 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             return Ok(None);
         };
         let Some((source, facts)) = cast_operands(expression)? else {
-            return Err(
-                CompilerError::compiler_error("Cast completion lost its cast operands.").into(),
+            crate::compiler_bug!(
+                CompilerStage::ConstantEvaluation,
+                "Cast completion lost its cast operands.",
             );
         };
         self.cast_complete(expression, source, facts, policy, value)
@@ -945,7 +960,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             _ => return Ok(None),
         };
         let literal = apply_builtin_cast_policy(policy, &literal).map_err(|_| {
-            CompilerDiagnostic::invalid_cast(
+            calls_data::invalid_cast(
                 InvalidCastReason::BuiltinCastFailedInConst,
                 Some(facts.source_type_id),
                 Some(facts.target_type_id),
@@ -993,7 +1008,8 @@ fn child_slots<const N: usize>(
     children: &[Option<ConstValueId>],
 ) -> Result<[Option<ConstValueId>; N], ConstantFoldError> {
     <[Option<ConstValueId>; N]>::try_from(children).map_err(|_| {
-        ConstantFoldError::from(CompilerError::compiler_error(
+        ConstantFoldError::from(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Constant fold walk settled an unexpected child count.",
         ))
     })
@@ -1018,7 +1034,7 @@ fn record_fields(
 /// Catch wraps. `None` means the expression is not a cast fold.
 fn cast_operands(
     expression: ExpressionView<'_>,
-) -> Result<Option<(ExpressionView<'_>, &CastFacts)>, CompilerError> {
+) -> Result<Option<(ExpressionView<'_>, &CastFacts)>, InfrastructureFailure> {
     match expression.operation() {
         ExpressionOperationView::Cast { source, facts } => Ok(Some((source, facts))),
         ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
@@ -1037,7 +1053,7 @@ fn cast_operands(
 enum PayloadFoldOutcome {
     Folded(ConstValuePayload),
     NotConstant,
-    TextUnavailable(CompilerDiagnostic),
+    TextUnavailable(DiagnosticDraft),
 }
 /// A numeric coercion is transparent to arithmetic and comparison, so a `Coerced` operand
 /// reads as the scalar it wraps.
@@ -1070,14 +1086,17 @@ fn numeric_negation_payload(
         string_table: strings,
     };
     let ResolvedOperationKind::Numeric(numeric) = facts.kind else {
-        return Err(
-            CompilerError::compiler_error("Numeric unary operation lacks numeric facts.").into(),
-        );
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Numeric unary operation lacks numeric facts.",
+        )
+        .into());
     };
     match numeric.domain {
         NumericScalar::Number(_) => {
             let ConstValuePayload::Number(value) = value else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
                     "Dec negation received a non-Dec operand.",
                 )
                 .into());
@@ -1086,7 +1105,10 @@ fn numeric_negation_payload(
         }
         domain if domain.is_integer() => {
             let value = integer_value_from_payload(value).ok_or_else(|| {
-                CompilerError::compiler_error("Integer negation received a non-integer operand.")
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Integer negation received a non-integer operand.",
+                )
             })?;
             let Some(value) = value.checked_neg() else {
                 return integer_overflow_error(&mut context);
@@ -1098,11 +1120,17 @@ fn numeric_negation_payload(
             Ok(integer_result_payload(domain, value))
         }
         domain => {
-            let precision = domain
-                .binary_float_precision()
-                .ok_or_else(|| CompilerError::compiler_error("Negation lacks a numeric domain."))?;
+            let precision = domain.binary_float_precision().ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Negation lacks a numeric domain.",
+                )
+            })?;
             let value = float_value_from_payload(value).ok_or_else(|| {
-                CompilerError::compiler_error("Float negation received a non-float operand.")
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Float negation received a non-float operand.",
+                )
             })?;
             Ok(float_result_payload(
                 domain,
@@ -1470,7 +1498,7 @@ pub(crate) fn fold_expression_with_bindings(
                         folding.requirement,
                     ) {
                         Ok(ConstantFoldOutcome::Refused { reason, .. }) if !folding.speculative => {
-                            return Err(reason.into_diagnostic().into());
+                            return Err(reason.into_draft().into());
                         }
                         Ok(ConstantFoldOutcome::Refused { reason, root }) => {
                             walk.refusal.get_or_insert(reason);
@@ -1479,8 +1507,12 @@ pub(crate) fn fold_expression_with_bindings(
                         Ok(outcome) => outcome_root(outcome),
                         // Capacity exhaustion is never a speculative refusal: it must reach the module build.
                         Err(ConstantFoldError::Diagnostic(diagnostic))
-                            if folding.speculative
-                                && !diagnostic.is_compiler_capacity_exceeded() =>
+                            if folding.speculative && diagnostic.code() != "MOTH-SYNTAX-0037" =>
+                        {
+                            result
+                        }
+                        Err(ConstantFoldError::NumericFailure(diagnostic))
+                            if folding.speculative && diagnostic.code() != "MOTH-SYNTAX-0037" =>
                         {
                             result
                         }
@@ -1500,7 +1532,8 @@ pub(crate) fn fold_expression_with_bindings(
             expression,
             refusal: walk.refusal,
         }),
-        None => Err(CompilerError::compiler_error(
+        None => Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Binding substitution finished without a root result.",
         )
         .into()),
@@ -1708,18 +1741,11 @@ fn fold_root(
     ))
 }
 fn attach_source_config_origin_labels(
-    diagnostic: &mut CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     provenances: &[&SyntheticInterfaceProvenance],
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
-) -> Result<(), ConstantFoldError> {
-    if !matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::CompileTimeEvaluationError { .. }
-    ) {
-        return Ok(());
-    }
-
+) -> Result<DiagnosticDraft, ConstantFoldError> {
     let mut input_names = provenances
         .iter()
         .flat_map(|provenance| provenance.source_config_member_names())
@@ -1727,11 +1753,11 @@ fn attach_source_config_origin_labels(
     input_names.sort_unstable();
     input_names.dedup();
     if input_names.is_empty() {
-        return Ok(());
+        return Ok(diagnostic);
     }
 
     let Some(scope_context) = scope_context else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
             "A numeric compile-time diagnostic retained source #Config provenance without its owning scope resolver.",
         )
         .into());
@@ -1741,21 +1767,21 @@ fn attach_source_config_origin_labels(
         let Some((origin, Some(label_span))) =
             scope_context.source_config_diagnostic_origin(input_name)
         else {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation, format!(
                 "A numeric compile-time diagnostic retained source #Config input '{input_name}' without a matching resolver origin and source anchor."
             ))
             .into());
         };
-        diagnostic.labels.push(DiagnosticLabel::secondary(
+        diagnostic = diagnostic.with_label(
             Some(label_span),
-            Some(DiagnosticLabelMessage::ConfigInputOrigin {
+            Some(LabelDraftMessage::ConfigInputOrigin {
                 input_name: string_table.intern(input_name),
                 origin,
             }),
-        ));
+        );
     }
 
-    Ok(())
+    Ok(diagnostic)
 }
 
 fn compile_time_evaluation_diagnostic(
@@ -1765,8 +1791,9 @@ fn compile_time_evaluation_diagnostic(
     span: Option<SourceSpan>,
 ) -> ConstantFoldError {
     let operation = operation.map(|operation| string_table.get_or_intern(operation));
-
-    CompilerDiagnostic::compile_time_evaluation_error(reason, operation, span).into()
+    ConstantFoldError::NumericFailure(choices_control_flow::compile_time_evaluation_error(
+        reason, operation, span,
+    ))
 }
 
 fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
@@ -1866,10 +1893,13 @@ fn checked_int_binary_result(
             }
         }
         NumericOperator::Divide | NumericOperator::Negate => {
-            return Err(CompilerError::compiler_error(format!(
-                "Integer folding received unsupported numeric operator '{}'",
-                ctx.operator.to_str()
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                format!(
+                    "Integer folding received unsupported numeric operator '{}'",
+                    ctx.operator.to_str()
+                ),
+            )
             .into());
         }
     };
@@ -1972,10 +2002,16 @@ fn integer_result_payload(domain: NumericScalar, value: i128) -> ConstValuePaylo
                 ConstValuePayload::FixedScalar(value)
             }
             FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => {
-                unreachable!("integer result domain must be an integer scalar")
+                crate::compiler_bug!(
+                    CompilerStage::ConstantEvaluation,
+                    "integer result domain must be an integer scalar"
+                )
             }
         },
-        NumericScalar::Number(_) => unreachable!("Number results use the exact Number constructor"),
+        NumericScalar::Number(_) => crate::compiler_bug!(
+            CompilerStage::ConstantEvaluation,
+            "Number results use the exact Number constructor"
+        ),
     }
 }
 
@@ -1986,9 +2022,10 @@ fn float_result_payload(domain: NumericScalar, value: f64) -> ConstValuePayload 
                 .expect("rounded finite result fits the fixed float domain");
             ConstValuePayload::FixedScalar(value)
         }
-        NumericScalar::Fixed(_) | NumericScalar::Number(_) => {
-            unreachable!("float result domain must be a binary float scalar")
-        }
+        NumericScalar::Fixed(_) | NumericScalar::Number(_) => crate::compiler_bug!(
+            CompilerStage::ConstantEvaluation,
+            "float result domain must be a binary float scalar"
+        ),
     }
 }
 
@@ -2017,7 +2054,8 @@ fn fold_number_binary(
 ) -> Result<ConstValuePayload, ConstantFoldError> {
     let numeric_operator = numeric.operator;
     let NumericScalar::Number(scale) = numeric.domain else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Dec folding received a non-Dec operation domain.",
         )
         .into());
@@ -2025,7 +2063,8 @@ fn fold_number_binary(
 
     let result = if numeric_operator == NumericOperator::Power {
         let ConstValuePayload::Number(base) = lhs else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Dec power folding received a non-Dec base.",
             )
             .into());
@@ -2034,19 +2073,22 @@ fn fold_number_binary(
         // exact `I32` exponent, so any other exponent is a broken invariant rather than a
         // wider receiver repair.
         let ConstValuePayload::FixedScalar(exponent) = rhs else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Dec power folding received a non-I32 exponent.",
             )
             .into());
         };
         if exponent.scalar() != FixedScalar::I32 {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Dec power folding received a non-I32 exponent.",
             )
             .into());
         }
         let Some(exponent) = exponent.as_i64() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Dec power folding received an unreadable I32 exponent.",
             )
             .into());
@@ -2054,14 +2096,16 @@ fn fold_number_binary(
         base.checked_power(exponent)
     } else {
         let Some(left_value) = number_operand_in_domain(lhs, scale, numeric.left_conversion) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Dec folding could not materialize the left operand in the result scale.",
             )
             .into());
         };
         let Some(right_value) = number_operand_in_domain(rhs, scale, numeric.right_conversion)
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Dec folding could not materialize the right operand in the result scale.",
             )
             .into());
@@ -2081,10 +2125,13 @@ fn fold_number_binary(
             return exponent_operand_context_error(ctx);
         }
         Err(NumberArithmeticError::InvalidOperation) => {
-            return Err(CompilerError::compiler_error(format!(
-                "Dec folding received unsupported numeric operator '{}'",
-                ctx.operator.to_str()
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                format!(
+                    "Dec folding received unsupported numeric operator '{}'",
+                    ctx.operator.to_str()
+                ),
+            )
             .into());
         }
     };
@@ -2110,7 +2157,8 @@ fn fold_numeric_binary(
         let right_value = integer_value_from_payload(rhs)
             .expect("integer operation domains only accept integer-valued expressions");
         let Some(range) = domain.integer_range() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Integer folding received a non-integer result domain.",
             )
             .into());
@@ -2121,7 +2169,8 @@ fn fold_numeric_binary(
     }
 
     let Some(precision) = domain.binary_float_precision() else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Numeric folding received a domain without integer or binary-float arithmetic.",
         )
         .into());
@@ -2149,10 +2198,13 @@ fn fold_numeric_binary(
         }
         NumericOperator::Power => numeric_power::pow(left_value, right_value),
         NumericOperator::IntegerDivide | NumericOperator::Negate => {
-            return Err(CompilerError::compiler_error(format!(
-                "Binary-float folding received unsupported numeric operator '{}'",
-                ctx.operator.to_str()
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                format!(
+                    "Binary-float folding received unsupported numeric operator '{}'",
+                    ctx.operator.to_str()
+                ),
+            )
             .into());
         }
     };

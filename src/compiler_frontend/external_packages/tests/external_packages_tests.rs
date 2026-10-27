@@ -374,7 +374,7 @@ fn register_package_rejects_reserved_project_namespace() {
             .expect_err("binding packages must not claim the @project namespace");
         assert!(
             error
-                .msg
+                .message
                 .contains("reserved for the @project project-globals interface")
         );
     }
@@ -471,7 +471,7 @@ fn resolve_package_function_selects_correct_package() {
 }
 
 // ------------------------------------------------------------------
-// Package identity refactor tests
+// Package identity tests
 // ------------------------------------------------------------------
 
 #[test]
@@ -1411,7 +1411,7 @@ fn prelude_symbols_and_namespace_aliases_cannot_share_public_name() {
 
 /// Verifies that the five V1 console functions are registered under `@core/io`.
 /// WHAT: ensures the public `io.print/line/debug/warn/error` surface is present.
-/// WHY: the previous flat `io(...)` function and `IO` type are gone; these replace them.
+/// WHY: the flat `io(...)` function and `IO` type are not part of the `@core/io` surface.
 #[test]
 fn core_io_console_functions_are_registered_at_namespace_path() {
     let registry = ExternalPackageRegistry::new();
@@ -1441,8 +1441,8 @@ fn core_io_console_functions_are_registered_at_namespace_path() {
 
 /// Verifies that each console function accepts only string-content input.
 /// WHAT: console output must reject non-string values at the external boundary.
-/// WHY: this replaces the old IO-specific scalar-rendering validation branch with the
-/// reusable `StringContent` signature path.
+/// WHY: console output validates through the reusable `StringContent` signature path
+/// rather than an IO-specific scalar-rendering branch.
 #[test]
 fn core_io_console_functions_use_string_content_parameter() {
     let registry = ExternalPackageRegistry::new();
@@ -1559,9 +1559,9 @@ fn core_io_functions_have_js_lowerings_and_no_wasm_lowerings() {
     }
 }
 
-/// Verifies that the old public `IO` type is no longer registered in `@core/io`.
-/// WHAT: the `IO` external opaque type was part of the callable `io(...)` API.
-/// WHY: removing it confirms the public type surface is gone.
+/// Verifies that the public `IO` type is not registered in `@core/io`.
+/// WHAT: @core/io exposes namespace functions, not a callable io value or public IO opaque type.
+/// WHY: the prelude's io binding must remain a namespace alias.
 #[test]
 fn core_io_public_type_is_not_registered() {
     let registry = ExternalPackageRegistry::new();
@@ -1924,10 +1924,10 @@ fn clone_preserves_type_reverse_lookup() {
     assert_eq!(symbol_path.display_text(), "Handle");
 }
 
-/// Verifies that duplicate type registration at the same path remains a `CompilerError`, so the
+/// Verifies that duplicate type registration at the same path remains an `InfrastructureFailure`, so the
 /// reverse lookup never observes inconsistent state.
 #[test]
-fn duplicate_type_registration_remains_compiler_error() {
+fn duplicate_type_registration_remains_infrastructure_failure() {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package("@test/dup", crate::builder_surface::PackageOrigin::Builder)
@@ -1955,11 +1955,11 @@ fn duplicate_type_registration_remains_compiler_error() {
     );
     assert!(
         second.is_err(),
-        "duplicate type registration at the same path must remain a CompilerError"
+        "duplicate type registration at the same path must remain an InfrastructureFailure"
     );
 }
 
-/// Verifies that reusing one `ExternalTypeId` at a second distinct path is a `CompilerError` and
+/// Verifies that reusing one `ExternalTypeId` at a second distinct path is an `InfrastructureFailure` and
 /// leaves the original reverse identity intact. The duplicate is rejected before any registry
 /// state mutates, so the first registration's package path and symbol path survive unchanged.
 #[test]
@@ -2002,7 +2002,7 @@ fn duplicate_external_type_id_at_distinct_path_is_rejected_and_preserves_origina
     );
     assert!(
         duplicate.is_err(),
-        "reusing an ExternalTypeId at a second path must be a CompilerError"
+        "reusing an ExternalTypeId at a second path must be an InfrastructureFailure"
     );
 
     // The original reverse identity must remain intact after the failed duplicate.
@@ -2025,7 +2025,7 @@ fn duplicate_external_type_id_at_distinct_path_is_rejected_and_preserves_origina
     );
 }
 
-/// Verifies that reusing one `ExternalTypeId` across two distinct packages is a `CompilerError`
+/// Verifies that reusing one `ExternalTypeId` across two distinct packages is an `InfrastructureFailure`
 /// and preserves the first package's reverse identity.
 #[test]
 fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
@@ -2063,7 +2063,7 @@ fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
     );
     assert!(
         duplicate.is_err(),
-        "reusing an ExternalTypeId in a second package must be a CompilerError"
+        "reusing an ExternalTypeId in a second package must be an InfrastructureFailure"
     );
 
     let (package, symbol_path) = registry

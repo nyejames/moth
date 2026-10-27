@@ -27,9 +27,9 @@ use crate::compiler_frontend::ast::statements::match_headers::{
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchPattern, MatchSubject};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchPatternReason,
-    ValueReceiverContext,
+    InvalidControlFlowStatementReason, InvalidMatchPatternReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -131,8 +131,7 @@ impl IfHeaderClassification {
 
 /// Stage-local result for `if` header parsing and option-present capture helpers.
 ///
-/// `ExpressionParseError` keeps diagnosed failures as plain `CompilerDiagnostic`
-/// values and infrastructure failures on their typed outer lane.
+/// Diagnosed failures travel as compact drafts; infrastructure failures remain on their typed lane.
 type IfHeaderResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse the header after `if`, leaving the stream at the colon or body marker.
@@ -174,14 +173,14 @@ pub(crate) fn parse_if_header(
     }
 
     if if_condition_is_missing(token_stream) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
             Some(token_stream.current_span()),
         )
         .into());
     }
 
-    let condition_context = if_condition_parse_context(context, string_table, path_fork);
+    let condition_context = if_condition_parse_context(context, string_table, path_fork)?;
     let condition = match create_header_expression(
         token_stream,
         &condition_context,
@@ -476,7 +475,7 @@ fn parse_match_style_if_header(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
-    let condition_context = if_condition_parse_context(context, string_table, path_fork);
+    let condition_context = if_condition_parse_context(context, string_table, path_fork)?;
     let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &condition_context,
@@ -500,7 +499,7 @@ fn parse_option_present_capture_if_header(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
-    let condition_context = if_condition_parse_context(context, string_table, path_fork);
+    let condition_context = if_condition_parse_context(context, string_table, path_fork)?;
     let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &condition_context,
@@ -538,7 +537,7 @@ fn parse_option_present_capture_if_header(
         MatchSubject::Pending | MatchSubject::PendingChoice(_) => false,
     };
     if !is_option {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
             None,
             None,
@@ -578,7 +577,7 @@ fn ensure_option_present_capture_pattern(pattern: &DeferredArmPattern) -> IfHead
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::invalid_match_pattern(
+    Err(choices_control_flow::invalid_match_pattern(
         InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
         None,
         None,
@@ -591,7 +590,7 @@ fn if_condition_parse_context(
     context: &ScopeContext,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> ScopeContext {
+) -> Result<ScopeContext, crate::compiler_frontend::compiler_messages::DiagnosticDraft> {
     context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)
 }
 

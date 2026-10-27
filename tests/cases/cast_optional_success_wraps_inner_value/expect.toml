@@ -8,5 +8,11 @@ rendered_output_contains = ["optional cast success: 42"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-INFRA-0001"]
-message_contains = ["Wasm backend does not yet support variant payload fields"]
+diagnostic_codes = ["MOTH-RULE-0064"]
+message_contains = ["variant payload fields"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.variant_payload_values"
+path = "input/@page.moth"
+line = 1

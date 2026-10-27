@@ -15,7 +15,8 @@
 
 use crate::compiler_frontend::build_config::BuildConfigFingerprint;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::public_interface::{
     PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
@@ -108,15 +109,16 @@ impl ProjectGlobalsInterface {
     pub(crate) fn new(
         project_package: StablePackageIdentity,
         mut fields: Vec<ProjectGlobalsFieldInput>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         fields.sort_by(|left, right| left.name.cmp(&right.name));
 
         for pair in fields.windows(2) {
             if pair[0].name == pair[1].name {
-                return Err(CompilerError::compiler_error(format!(
+                crate::compiler_bug!(
+                    CompilerStage::DependencyResolution,
                     "duplicate project-global field name '{}'",
                     pair[0].name
-                )));
+                );
             }
         }
 
@@ -236,11 +238,11 @@ mod tests {
     use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
     use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-    fn span(byte_offset: i32) -> Option<SourceSpan> {
+    fn span(byte_offset: i32) -> SourceSpan {
         let mut extended = ExtendedSpanBuilder::default();
         let local = LocalSpan::exact(byte_offset as u32, 1, &mut extended)
             .expect("test span should fit compact encoding");
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local))
+        SourceSpan::new(SourceId::COMPILATION_ROOT, local)
     }
 
     fn field(name: &str, line: i32, fingerprint: u64) -> ProjectGlobalsFieldInput {
@@ -256,7 +258,7 @@ mod tests {
                 FixedScalarValue::signed(FixedScalar::I32, i64::from(line))
                     .expect("test project-global line fits I32"),
             ),
-            span(line),
+            Some(span(line)),
             BuildConfigFingerprint(fingerprint),
             SyntheticInterfaceProvenance::single(member),
         )
@@ -300,16 +302,23 @@ mod tests {
 
     #[test]
     fn duplicate_field_names_are_rejected() {
-        let error = ProjectGlobalsInterface::new(
-            StablePackageIdentity::project_local("duplicates"),
-            vec![field("same", 1, 1), field("same", 2, 2)],
-        )
-        .expect_err("duplicate project fields must fail");
-
-        assert!(
-            error
-                .msg
-                .contains("duplicate project-global field name 'same'")
+        let payload = std::panic::catch_unwind(|| {
+            let _ = ProjectGlobalsInterface::new(
+                StablePackageIdentity::project_local("duplicates"),
+                vec![field("same", 1, 1), field("same", 2, 2)],
+            );
+        })
+        .expect_err("duplicate project fields must report a compiler bug");
+        let report = payload
+            .downcast::<crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport>()
+            .unwrap_or_else(|_| panic!("duplicate project fields must carry a CompilerBugReport"));
+        assert_eq!(
+            report.stage,
+            crate::compiler_frontend::compiler_messages::CompilerStage::DependencyResolution
+        );
+        assert_eq!(
+            report.message.as_ref(),
+            "duplicate project-global field name 'same'"
         );
     }
 
@@ -326,7 +335,7 @@ mod tests {
             .find(|metadata| metadata.identity.member() == "version")
             .expect("metadata should be indexed by field name");
 
-        assert_eq!(metadata.span, span(17));
+        assert_eq!(metadata.span, Some(span(17)));
         assert_eq!(metadata.fingerprint, BuildConfigFingerprint(0xfeed));
         assert_eq!(
             metadata.identity,

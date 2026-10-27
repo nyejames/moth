@@ -29,9 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidExpressionReason,
-};
+use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -64,7 +62,22 @@ fn group_distance_capacity_is_a_typed_diagnostic() {
     else {
         panic!("an exhausted group distance must be a typed capacity diagnostic");
     };
-    assert!(diagnostic.is_compiler_capacity_exceeded());
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+    use crate::compiler_frontend::compiler_messages::{
+        AstCapacityResource, CapacityResource, DiagnosticBag,
+    };
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0037");
+    let facts = diagnostic
+        .family_view::<CompilerCapacityExceededView>()
+        .expect("the diagnostic is a capacity failure");
+    assert_eq!(
+        facts.resource,
+        CapacityResource::Ast(AstCapacityResource::GroupDistances)
+    );
 }
 
 #[test]
@@ -167,7 +180,6 @@ fn hash_in_expression_position_rejected() {
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
-    // First token: NumericLiteral(1)
     let result = dispatch_expression_token(
         TokenTag::NUMERIC_LITERAL,
         &mut stream,
@@ -395,18 +407,15 @@ fn hash_from_tokenized_source_rejected() {
 
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_primary_span, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 
 #[test]
 fn full_frontend_stray_hash_error() {
     let source = "result = 1 # 2";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
-    ));
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
 }
 
 #[test]
@@ -530,18 +539,13 @@ fn constant_identifier_uses_module_store_tir() {
 //  Adjacent operand spans
 // ----------------------------------
 
-fn assert_adjacent_operand_reason(diagnostic: &CompilerDiagnostic) {
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidExpression {
-                reason: InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-            }
-        ),
-        "adjacent operands must use the structured missing-operator reason, got {:?}",
-        diagnostic.payload,
+fn assert_adjacent_operand_reason(failure: &CompilationResult<()>) {
+    let diagnostic = assert_ast_diagnostic(
+        failure,
+        "MOTH-SYNTAX-0023",
+        Some("invalid_expression.expected_operator_before_expression"),
     );
-    assert!(diagnostic.primary_span.is_some());
+    assert!(ast_error_primary_span(diagnostic).is_some());
 }
 
 #[test]

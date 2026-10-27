@@ -4,11 +4,8 @@
 //!      benchmark line and human summary obeys. One dense registry maps every
 //!      `TimingMetric` to its stable name, presentation level, measurement
 //!      relation, attribution kind, owner and command scope.
-//! WHY:  before collector and call-site work, metric identity must be settled
-//!       once. A dense typed registry replaces provisional string names with a
-//!       single account-of-record, keeps the descriptor table parallel to the
-//!       enum, and lets later phases build dense aggregate storage, snapshot
-//!       ordering and benchmark fingerprints from the same table.
+//! WHY: one dense typed registry keeps metric identity, aggregate storage, snapshot ordering and
+//!      benchmark fingerprints consistent with the descriptor table.
 //!
 //! Compatibility: timing data recorded before schema v2 is legacy and
 //! non-comparable. This module performs no numeric migration and carries no
@@ -35,8 +32,8 @@ pub const TIMING_SCHEMA_VERSION: u32 = 2;
 /// - aggregate output semantics
 ///
 /// Adding an independent metric that preserves every existing meaning may stay
-/// within the same schema; record that decision in the plan checkpoint.
-/// The session command kind reused for command applicability and command-total
+/// within the same schema.
+/// The session command kind is reused for command applicability and command-total
 /// ownership, so the registry never duplicates the session's command enum.
 pub(crate) use super::session::TimingCommandKind as TimingCommand;
 

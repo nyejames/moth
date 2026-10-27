@@ -13,11 +13,12 @@ use super::traces::{RuntimeConflictWitness, TraceEntry};
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, BorrowProblem, CallId, Place, PlaceId, ProjectionElem,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Unbounded};
 
-// LEAVE-LOCAL: independent static-origin and shared structural overlap lanes stay distinct at boracle/relations.rs:237 and problem/places.rs:64.
+// The independent static-origin and shared structural overlap lanes stay distinct at boracle/relations.rs:237 and problem/places.rs:64.
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DynamicOverlap {
@@ -26,7 +27,7 @@ pub(crate) enum DynamicOverlap {
     Undecidable,
 }
 
-// LEAVE-LOCAL: independent static loan-liveness logic is at boracle/loans.rs:989.
+// The independent static loan-liveness logic is at boracle/loans.rs:989.
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 pub(crate) fn exercise_capabilities(
     problem: &BorrowProblem,
@@ -35,18 +36,21 @@ pub(crate) fn exercise_capabilities(
     _target: &RuntimeAccessTarget,
     event_index: usize,
     excluded_call: Option<CallId>,
-) -> Result<Box<[RuntimeCapabilityId]>, CompilerError> {
+) -> Result<Box<[RuntimeCapabilityId]>, InfrastructureFailure> {
     let place = problem.places().get(place_id.index()).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "Boracle oracle cannot locate access place {:?}",
-            place_id
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            format!("Boracle oracle cannot locate access place {:?}", place_id),
+        )
     })?;
     if place.id != place_id {
-        return Err(CompilerError::compiler_error(format!(
-            "Boracle oracle access place index {:?} names {:?}",
-            place_id, place.id
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            format!(
+                "Boracle oracle access place index {:?} names {:?}",
+                place_id, place.id
+            ),
+        ));
     }
 
     let capability_ids = state.capabilities.keys().copied().collect::<Vec<_>>();
@@ -54,7 +58,10 @@ pub(crate) fn exercise_capabilities(
     for capability_id in capability_ids {
         let (covered, covered_through_surviving_holder, _source, ended, end_reason, post_call) = {
             let capability = state.capabilities.get(&capability_id).ok_or_else(|| {
-                CompilerError::compiler_error("Boracle oracle lost a capability row")
+                InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    "Boracle oracle lost a capability row",
+                )
             })?;
             // An open invocation withholds its own argument capabilities from sibling arguments.
             // Once its effect is recorded, `post_call` below keeps that capability out of later
@@ -109,10 +116,13 @@ pub(crate) fn exercise_capabilities(
                     continue;
                 }
                 Some(CapabilityEndReason::HolderRetired) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Boracle oracle access at event {} exercises capability {:?} after its end",
-                        event_index, capability_id
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "Boracle oracle access at event {} exercises capability {:?} after its end",
+                            event_index, capability_id
+                        ),
+                    ));
                 }
                 Some(CapabilityEndReason::LoanKill)
                     if has_later_covering_capability(
@@ -127,23 +137,31 @@ pub(crate) fn exercise_capabilities(
                     continue;
                 }
                 Some(CapabilityEndReason::LoanKill) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Boracle oracle access at event {} exercises capability {:?} after its end",
-                        event_index, capability_id
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "Boracle oracle access at event {} exercises capability {:?} after its end",
+                            event_index, capability_id
+                        ),
+                    ));
                 }
                 None => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Boracle oracle capability {:?} has an end without a reason",
-                        capability_id
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "Boracle oracle capability {:?} has an end without a reason",
+                            capability_id
+                        ),
+                    ));
                 }
             }
         }
-        let capability = state
-            .capabilities
-            .get_mut(&capability_id)
-            .ok_or_else(|| CompilerError::compiler_error("Boracle oracle lost a capability row"))?;
+        let capability = state.capabilities.get_mut(&capability_id).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                "Boracle oracle lost a capability row",
+            )
+        })?;
         capability.last_exercised = event_index;
         exercised.push(capability_id);
     }

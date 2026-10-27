@@ -17,8 +17,10 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOperationView,
 };
 use crate::compiler_frontend::ast::generic_bounds::{BoundEvidenceSelection, evidence_for_type};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidReceiverCallReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -134,7 +136,7 @@ fn evidence_for_bound_method<'a>(
     receiver_type_id: TypeId,
     scope_context: &'a ScopeContext,
     type_environment: &TypeEnvironment,
-) -> Result<Option<&'a TraitEvidenceDefinition>, ExpressionParseError> {
+) -> Option<&'a TraitEvidenceDefinition> {
     let evidence_environment = scope_context.trait_evidence_environment();
     match evidence_for_type(
         receiver_type_id,
@@ -144,9 +146,9 @@ fn evidence_for_bound_method<'a>(
         evidence_environment,
     ) {
         Some(BoundEvidenceSelection::Registered(evidence_id)) => {
-            Ok(evidence_environment.get(evidence_id))
+            evidence_environment.get(evidence_id)
         }
-        Some(BoundEvidenceSelection::BuiltinCastProof { .. }) | None => Ok(None),
+        Some(BoundEvidenceSelection::BuiltinCastProof { .. }) | None => None,
     }
 }
 
@@ -198,7 +200,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
     );
     match candidates.as_slice() {
         [] => Ok(None),
-        [_first, _second, ..] => Err(CompilerDiagnostic::invalid_receiver_call(
+        [_first, _second, ..] => Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::AmbiguousGenericBoundMethod,
             None,
             Some(member_name),
@@ -218,7 +220,8 @@ pub(super) fn lookup_generic_bound_receiver_method(
                         candidate.requirement.name,
                     )
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "path table exhausted while interning synthetic trait method",
                         )
                     })?
@@ -228,8 +231,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
                     receiver_type_id,
                     scope_context,
                     type_environment,
-                )?
-                else {
+                ) else {
                     return Ok(None);
                 };
 
@@ -247,7 +249,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
                 receiver_type_id,
                 string_table,
                 path_fork,
-            );
+            )?;
 
             Ok(Some(TraitSurfaceReceiverMethod {
                 method_path,

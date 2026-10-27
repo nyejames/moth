@@ -4,8 +4,8 @@
 //! exponent of that series' timing metric against the declared input size, and
 //! holds the result to the series budget.
 //! WHY: The normal suites compare a case against its own recorded history, so
-//! they answer "did this change". A cost that has been superlinear since the day
-//! it was written never changes, so it never reports. This lane asks the
+//! they answer "did this change". A cost that is superlinear from the start never moves
+//! between runs, so history never reports it. This lane asks the
 //! question history cannot: how does this cost grow when the module grows.
 //! MUST NOT: Write local history or tracked summaries. A scaling verdict is a
 //! statement about program shape, not a recorded measurement of this machine.

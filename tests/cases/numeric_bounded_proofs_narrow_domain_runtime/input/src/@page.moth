@@ -1,5 +1,5 @@
--- Explicit operand widening preserves the former wide numerical witnesses.
--- Separate narrow operations assert D15 completion and exact overflow edges.
+-- Explicit operand widening preserves the wide numerical witnesses.
+-- Separate narrow operations assert completion and exact overflow edges.
 -- HTML renders all exact values from parameter operands without constant folding.
 -- Other operations retain checked failure, including wide_minus_zero's
 -- subtraction after an infallible cast, division, power and the final pair-add.

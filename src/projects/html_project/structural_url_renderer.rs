@@ -16,7 +16,8 @@ use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::build_system::output::{
     PortableRelativePath, parse_relative_path, percent_encode_url_segment,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -51,7 +52,10 @@ impl<'a> StructuralUrlRenderer<'a> {
     }
 
     /// Render an owned folded string at this artefact boundary.
-    pub(crate) fn render_owned(&self, value: &OwnedFoldedString) -> Result<String, CompilerError> {
+    pub(crate) fn render_owned(
+        &self,
+        value: &OwnedFoldedString,
+    ) -> Result<String, InfrastructureFailure> {
         match value {
             OwnedFoldedString::Text(text) => Ok(text.clone()),
             OwnedFoldedString::Pieces(pieces) => {
@@ -77,7 +81,7 @@ impl<'a> StructuralUrlRenderer<'a> {
         &self,
         resources: &ModuleResourceTable,
         reachability: &HirReachability,
-    ) -> Result<Arc<StructuralStringUrlMap>, CompilerError> {
+    ) -> Result<Arc<StructuralStringUrlMap>, InfrastructureFailure> {
         let mut resource_urls = HashMap::with_capacity(reachability.reachable_resource_uses.len());
         for resource_use in &reachability.reachable_resource_uses {
             let origin = &resources.try_origin(resource_use.resource_id)?.origin;
@@ -100,12 +104,12 @@ impl<'a> StructuralUrlRenderer<'a> {
     fn render_resource_origin(
         &self,
         origin: &StableResourceOriginId,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let record = self
             .output_plan
             .record_for_origin(origin)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                     "HTML structural URL renderer has no planned output path for resource origin {origin:?}"
                 ))
             })?;
@@ -114,7 +118,8 @@ impl<'a> StructuralUrlRenderer<'a> {
         let context_path = parse_portable_path(context_path, "context artefact")?;
         let context_segments = context_path.components();
         let Some(context_file) = context_segments.len().checked_sub(1) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "HTML structural URL renderer received an empty context artefact path",
             ));
         };
@@ -175,18 +180,22 @@ impl<'a> StructuralUrlRenderer<'a> {
 fn parse_portable_path(
     path: &Path,
     path_kind: &str,
-) -> Result<PortableRelativePath, CompilerError> {
+) -> Result<PortableRelativePath, InfrastructureFailure> {
     let raw = path.to_str().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "HTML structural URL renderer received a non-UTF-8 {path_kind} path"
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!("HTML structural URL renderer received a non-UTF-8 {path_kind} path"),
+        )
     })?;
 
     parse_relative_path(raw).map_err(|reason| {
-        CompilerError::compiler_error(format!(
-            "HTML structural URL renderer received an invalid {path_kind} path '{raw}': \
+        InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "HTML structural URL renderer received an invalid {path_kind} path '{raw}': \
              {reason:?}"
-        ))
+            ),
+        )
     })
 }
 

@@ -1,19 +1,18 @@
 //! Export section emission.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::lir::linkage::WasmExportKind;
 use crate::backends::wasm::lir::module::WasmLirModule;
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use wasm_encoder::{ExportKind, ExportSection};
 
 pub(crate) fn build_export_section(
     module: &WasmLirModule,
     plan: &WasmEmitPlan,
     request: &WasmBackendRequest,
-) -> Result<ExportSection, CompilerError> {
+) -> Result<ExportSection, InfrastructureFailure> {
     let mut section = ExportSection::new();
 
     // WHAT: emit LIR-declared exports first.
@@ -26,10 +25,9 @@ pub(crate) fn build_export_section(
                     .get(&function_id)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::wasm_generation(format!(
                             "Wasm emission could not resolve function index for export '{function_id:?}'"
                         ))
-                        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
                     })?;
                 section.export(
                     export.export_name.as_str(),
@@ -99,12 +97,14 @@ pub(crate) fn build_export_section(
     Ok(section)
 }
 
-fn helper_index(plan: &WasmEmitPlan, helper: WasmRuntimeHelper) -> Result<u32, CompilerError> {
+fn helper_index(
+    plan: &WasmEmitPlan,
+    helper: WasmRuntimeHelper,
+) -> Result<u32, InfrastructureFailure> {
     plan.helper_indices.get(&helper).copied().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
+        InfrastructureFailure::wasm_generation(format!(
             "Wasm emission missing helper function index for {}",
             crate::backends::wasm::emit::sections::helper_name(helper)
         ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
     })
 }

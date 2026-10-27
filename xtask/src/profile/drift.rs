@@ -242,7 +242,6 @@ pub fn compute_drift(
         let previous_wall = previous_case.observation_wall_ms;
         let wall_delta = current_wall - previous_wall;
 
-        // Compare functions.
         for current_func in &current.hot_functions {
             let Some(previous_func) = previous_case
                 .hot_functions
@@ -287,7 +286,6 @@ pub fn compute_drift(
             }
         }
 
-        // Compare stage timings.
         for current_stage in &current.stage_timings {
             let Some(previous_stage) = previous_case
                 .stage_timings
@@ -311,7 +309,6 @@ pub fn compute_drift(
             }
         }
 
-        // Compare counters.
         for current_counter in &current.counters {
             let Some(previous_counter) = previous_case
                 .counters
@@ -341,7 +338,7 @@ pub fn compute_drift(
         }
     }
 
-    // Sort by absolute delta descending.
+    // Largest increase first.
     function_increases.sort_by(|a, b| b.delta_pct.total_cmp(&a.delta_pct));
     function_decreases.sort_by(|a, b| a.delta_pct.total_cmp(&b.delta_pct));
     stage_movements.sort_by(|a, b| b.delta_ms.abs().total_cmp(&a.delta_ms.abs()));
@@ -461,26 +458,22 @@ fn classify_function_drift(
     estimated_ms_delta: f64,
     wall_delta: f64,
 ) -> FunctionDriftResult {
-    // Check sample count threshold.
     if current.inclusive_samples < FUNCTION_MIN_SAMPLE_COUNT as f64
         && previous.inclusive_samples < FUNCTION_MIN_SAMPLE_COUNT as f64
     {
         return FunctionDriftResult::BelowThreshold;
     }
 
-    // Check inclusive percent threshold.
     if current.inclusive_pct < FUNCTION_MIN_INCLUSIVE_PCT
         && previous.inclusive_pct < FUNCTION_MIN_INCLUSIVE_PCT
     {
         return FunctionDriftResult::BelowThreshold;
     }
 
-    // Check absolute delta threshold.
     if delta_pct.abs() < FUNCTION_MIN_DELTA_PCT {
         return FunctionDriftResult::BelowThreshold;
     }
 
-    // Check estimated ms delta threshold.
     if estimated_ms_delta.abs() < FUNCTION_MIN_MS_DELTA {
         return FunctionDriftResult::BelowThreshold;
     }
@@ -608,7 +601,6 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
         lines.push(String::new());
     }
 
-    // Significant increases.
     lines.push("## Significant increases".to_string());
     lines.push(String::new());
     if report.function_increases.is_empty() {
@@ -625,7 +617,6 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
     }
     lines.push(String::new());
 
-    // Significant decreases.
     lines.push("## Significant decreases".to_string());
     lines.push(String::new());
     if report.function_decreases.is_empty() {
@@ -642,7 +633,6 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
     }
     lines.push(String::new());
 
-    // Stage movement.
     lines.push("## Significant stage movement".to_string());
     lines.push(String::new());
     if report.stage_movements.is_empty() {
@@ -656,7 +646,6 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
     }
     lines.push(String::new());
 
-    // Counter movement.
     lines.push("## Significant counter movement".to_string());
     lines.push(String::new());
     if report.counter_movements.is_empty() {
@@ -670,7 +659,6 @@ pub fn format_drift_markdown(report: &DriftReport) -> String {
     }
     lines.push(String::new());
 
-    // Ignored noise.
     let total_ignored =
         report.ignored_function_count + report.ignored_stage_count + report.ignored_counter_count;
 

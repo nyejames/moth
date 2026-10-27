@@ -49,7 +49,8 @@ use super::{
 };
 use crate::build_system::build::{BuildResult, DeferredResourceOutput, OutputFile};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -169,12 +170,25 @@ pub(crate) fn validate_rendered_output_fragments(
 pub(crate) fn validate_success_result(
     case: &TestCaseSpec,
     mut build_result: BuildResult,
+    warnings: Option<
+        crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet,
+    >,
     expectation: &SuccessExpectation,
 ) -> CaseExecutionResult {
+    let warning_codes = warnings.as_ref().into_iter().flat_map(|reports| {
+        reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .map(|(_, view)| view.descriptor().code)
+    });
     if let Some(reason) =
-        warnings::validate_warning_expectation(build_result.warnings.iter(), &expectation.warnings)
+        warnings::validate_warning_expectation(warning_codes, &expectation.warnings)
     {
-        return fail(build_result, reason, FailureKind::ExpectationViolation);
+        return fail(
+            build_result,
+            warnings,
+            reason,
+            FailureKind::ExpectationViolation,
+        );
     }
 
     // The index borrows the output slices while rendered-output execution reads the disjoint
@@ -186,14 +200,18 @@ pub(crate) fn validate_success_result(
         &mut build_result.project.resource_inputs,
         expectation,
     ) {
-        return fail(build_result, reason, kind);
+        return fail(build_result, warnings, reason, kind);
     }
 
     CaseExecutionResult {
         passed: true,
         panic_message: None,
-        build_result: Some(build_result),
-        messages: None,
+        messages: warnings.map(|reports| {
+            Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: Some(reports),
+            })
+        }),
         failure_reason: None,
         failure_kind: None,
     }
@@ -206,7 +224,7 @@ pub(crate) fn validate_success_result(
 /// WHY: artifact identity is proved once, before any assertion consumes it. An ambiguous output
 ///      set (duplicate paths, case aliases, non-UTF-8 paths) is a harness failure, because every
 ///      later assertion would silently inspect whichever artifact won a first-match lookup.
-fn validate_indexed_success_assertions(
+pub(super) fn validate_indexed_success_assertions(
     case: &TestCaseSpec,
     output_files: &[OutputFile],
     deferred_resources: &[DeferredResourceOutput],
@@ -269,24 +287,35 @@ fn validate_indexed_success_assertions(
     None
 }
 
-fn fail(build_result: BuildResult, reason: String, kind: FailureKind) -> CaseExecutionResult {
+fn fail(
+    _build_result: BuildResult,
+    warnings: Option<
+        crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet,
+    >,
+    reason: String,
+    kind: FailureKind,
+) -> CaseExecutionResult {
     CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: Some(build_result),
-        messages: None,
+        messages: warnings.map(|reports| {
+            Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: Some(reports),
+            })
+        }),
         failure_reason: Some(reason),
         failure_kind: Some(kind),
     }
 }
 
 pub(crate) fn validate_failure_result(
-    messages: CompilerMessages,
+    messages: CompilationResult<()>,
     expectation: &FailureExpectation,
     fixture_root: &Path,
 ) -> CaseExecutionResult {
     if let Some(reason) =
-        warnings::validate_warning_expectation(messages.warnings(), &expectation.warnings)
+        warnings::validate_warning_expectation(std::iter::empty(), &expectation.warnings)
     {
         return failure_messages(messages, reason);
     }
@@ -298,18 +327,16 @@ pub(crate) fn validate_failure_result(
     CaseExecutionResult {
         passed: true,
         panic_message: None,
-        build_result: None,
         messages: Some(messages),
         failure_reason: None,
         failure_kind: None,
     }
 }
 
-fn failure_messages(messages: CompilerMessages, reason: String) -> CaseExecutionResult {
+fn failure_messages(messages: CompilationResult<()>, reason: String) -> CaseExecutionResult {
     CaseExecutionResult {
         passed: false,
         panic_message: None,
-        build_result: None,
         messages: Some(messages),
         failure_reason: Some(reason),
         failure_kind: Some(FailureKind::ExpectationViolation),

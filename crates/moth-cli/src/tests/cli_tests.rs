@@ -1,5 +1,7 @@
 //! Tests for CLI parsing, command status and terminal presentation.
 
+#[cfg(unix)]
+use super::convert_cli_args;
 use super::{
     Command, CommandInputArgument, CommandStatus, command_input_set, compact_whitespace,
     format_terse_summary_line, get_command, help_build_flag_entries, integration_run_status,
@@ -1131,4 +1133,28 @@ fn unknown_input_names_remain_in_the_set_for_later_contract_validation() {
         .cloned()
         .expect("unknown name must remain in the set");
     assert_eq!(entry.value(), &value);
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_argument_conversion_skips_program_name_and_reports_non_utf8_position() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let error = convert_cli_args([
+        OsString::from_vec(b"moth\xff".to_vec()),
+        OsString::from("check"),
+        OsString::from_vec(b"bad\xff".to_vec()),
+    ])
+    .expect_err("non-UTF-8 CLI arguments should be rejected");
+
+    assert!(error.contains("Argument position 1"), "{error}");
+    assert!(
+        error.contains(&format!("'bad{}'", char::REPLACEMENT_CHARACTER)),
+        "{error}"
+    );
+    assert!(
+        error.contains("Moth arguments must be valid UTF-8"),
+        "{error}"
+    );
 }

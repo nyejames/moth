@@ -13,10 +13,22 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAlias, TypeResolutionContext, resolve_parsed_type_annotation,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCollectionTypeCode, InvalidCollectionTypeView, InvalidMapTypeCode, InvalidMapTypeView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationShape, InvalidGenericApplicationView, InvalidGenericInstantiationView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    InvalidTypeAnnotationCode, InvalidTypeAnnotationView, UnknownTypeNameView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    ExpectedTokenView, UnexpectedTokenShape, UnexpectedTokenView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, GenericApplicationErrorReason,
-    InvalidCollectionTypeReason, InvalidGenericInstantiationReason, InvalidMapTypeReason,
-    InvalidTypeAnnotationReason, NameNamespace,
+    DiagnosticBag, DiagnosticDraft, DiagnosticToken, GenericApplicationErrorReason,
 };
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -91,8 +103,7 @@ fn parse_type_annotation_test(
     let cursor = stream
         .cursor(range)
         .expect("test canonical source owner must accept its checked full range");
-    let mut declaration_cursor =
-        DeclarationCursor::new(cursor).expect("test canonical cursor must build");
+    let mut declaration_cursor = DeclarationCursor::new(cursor);
     parse_type_annotation_cursor(&mut declaration_cursor, context, string_table)
 }
 
@@ -103,17 +114,21 @@ fn symbol_token(value: StringId) -> FixturePart {
     FixturePart::Symbol(value)
 }
 
-fn assert_diagnostic_payload(
-    diagnostic: impl std::borrow::Borrow<CompilerDiagnostic>,
-    expected: impl FnOnce(&DiagnosticPayload) -> bool,
+fn assert_diagnostic_family_view<View: FamilyView>(
+    diagnostic: DiagnosticDraft,
+    expected: impl FnOnce(View) -> bool,
     expected_description: &str,
 ) {
-    let diagnostic = diagnostic.borrow();
-
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("type syntax diagnostic should compact");
+    let facts = diagnostic
+        .family_view::<View>()
+        .unwrap_or_else(|| panic!("expected {expected_description} family facts"));
     assert!(
-        expected(&diagnostic.payload),
-        "expected {expected_description}, got {:?}",
-        diagnostic.payload
+        expected(facts),
+        "expected {expected_description} typed family facts",
     );
 }
 
@@ -123,7 +138,7 @@ fn assert_diagnostic_payload(
 ///       instead of conflating infrastructure failure with a source diagnostic.
 /// WHY: infrastructure failures must abort the test explicitly rather than being mistaken
 ///      for a source diagnostic.
-fn unwrap_type_parse_diagnostic(failure: HeaderParseFailure) -> CompilerDiagnostic {
+fn unwrap_type_parse_diagnostic(failure: HeaderParseFailure) -> DiagnosticDraft {
     match failure {
         HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
         HeaderParseFailure::Infrastructure(error) => {
@@ -155,7 +170,7 @@ fn resolve_type_annotation_error(
     parsed: ParsedTypeRef,
     string_table: &mut StringTable,
     expected_failure: &str,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(
         Vec::new(),
         &PathInternerFork::empty(),
@@ -365,8 +380,7 @@ fn invalid_and_retired_scaled_spellings_stay_named_types() {
     let _path_fork = PathInternerFork::empty();
 
     // Invalid scale spellings (`Dec01`, `Dec257`) stay named so resolution reports the
-    // familiar unknown-type diagnostic, and the retired `Number` family spellings are
-    // ordinary named types now.
+    // familiar unknown-type diagnostic, and the `Number` spellings parse as ordinary named types.
     for spelling in ["Dec01", "Dec257", "DecBox", "Number", "Number0", "Number2"] {
         let name = string_table.intern(spelling);
         let stream = stream_from_tokens(
@@ -409,13 +423,14 @@ fn signature_parameter_rejects_none_type() {
         .expect_err("none parameter type should fail"),
     );
 
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::InvalidTypeAnnotation {
-            context: TypeAnnotationContext::SignatureParameter,
-            reason: InvalidTypeAnnotationReason::NoneNotAllowed,
-        }
-    ));
+    assert_diagnostic_family_view::<InvalidTypeAnnotationView>(
+        error,
+        |facts| {
+            facts.context == TypeAnnotationContext::SignatureParameter
+                && facts.code == InvalidTypeAnnotationCode::NoneNotAllowed
+        },
+        "InvalidTypeAnnotation(NoneNotAllowed)",
+    );
 }
 
 #[test]
@@ -436,13 +451,14 @@ fn signature_parameter_rejects_reserved_trait_this_type() {
         .expect_err("reserved trait keyword type should fail"),
     );
 
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::InvalidTypeAnnotation {
-            context: TypeAnnotationContext::SignatureParameter,
-            reason: InvalidTypeAnnotationReason::ReservedTraitKeyword,
-        }
-    ));
+    assert_diagnostic_family_view::<InvalidTypeAnnotationView>(
+        error,
+        |facts| {
+            facts.context == TypeAnnotationContext::SignatureParameter
+                && facts.code == InvalidTypeAnnotationCode::ReservedTraitKeyword
+        },
+        "InvalidTypeAnnotation(ReservedTraitKeyword)",
+    );
 }
 
 #[test]
@@ -463,13 +479,15 @@ fn declaration_target_rejects_type_keyword_inside_type_annotation() {
         .expect_err("type keyword should be reserved"),
     );
 
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::InvalidTypeAnnotation {
-            context: TypeAnnotationContext::DeclarationTarget,
-            reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
-        } if found == DiagnosticToken::from_static_tag(TokenTag::TYPE)
-    ));
+    assert_diagnostic_family_view::<InvalidTypeAnnotationView>(
+        error,
+        |facts| {
+            facts.context == TypeAnnotationContext::DeclarationTarget
+                && facts.code == InvalidTypeAnnotationCode::ExpectedTypeAnnotation
+                && facts.token == Some(DiagnosticToken::from_static_tag(TokenTag::TYPE))
+        },
+        "InvalidTypeAnnotation(ExpectedTypeAnnotation(Type))",
+    );
 }
 
 #[test]
@@ -490,11 +508,17 @@ fn signature_return_rejects_bare_of_keyword_with_structured_syntax_error() {
         .expect_err("of keyword should fail in type position"),
     );
 
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from_static_tag(TokenTag::OF)
-    ));
+    assert_diagnostic_family_view::<UnexpectedTokenView>(
+        error,
+        |facts| {
+            matches!(
+                facts.shape,
+                UnexpectedTokenShape::Token(found)
+                    if found == DiagnosticToken::from_static_tag(TokenTag::OF)
+            )
+        },
+        "UnexpectedToken(Of)",
+    );
 }
 
 #[test]
@@ -568,19 +592,17 @@ fn public_option_type_syntax_is_deferred() {
         "public Option of T syntax should be rejected",
     );
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    reason: InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported,
-                    ..
-                }
-            )
-        },
-        "InvalidGenericInstantiation(OptionTypeSyntaxNotSupported)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("unsupported option syntax should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("unsupported option syntax should retain generic-instantiation facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::OptionTypeSyntaxNotSupported { .. }
+    ));
 }
 
 #[test]
@@ -614,19 +636,17 @@ fn public_result_type_syntax_is_deferred() {
         "public Result of T, E syntax should be rejected",
     );
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    reason: InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported,
-                    ..
-                }
-            )
-        },
-        "InvalidGenericInstantiation(ResultTypeSyntaxNotSupported)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("unsupported result syntax should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("unsupported result syntax should retain generic-instantiation facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::ResultTypeSyntaxNotSupported { .. }
+    ));
 }
 
 #[test]
@@ -710,16 +730,9 @@ fn rejects_nested_generic_type_application() {
         .expect_err("nested generic type application should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidGenericApplicationView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericApplication {
-                    reason: GenericApplicationErrorReason::NestedApplication,
-                }
-            )
-        },
+        |facts| facts.reason == GenericApplicationErrorReason::NestedApplication,
         "InvalidGenericApplication(NestedApplication)",
     );
 }
@@ -747,17 +760,9 @@ fn duplicate_optional_marker_is_rejected() {
         .expect_err("duplicate optional marker should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidTypeAnnotationView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidTypeAnnotation {
-                    reason: InvalidTypeAnnotationReason::DuplicateOptional,
-                    ..
-                }
-            )
-        },
+        |facts| facts.code == InvalidTypeAnnotationCode::DuplicateOptional,
         "InvalidTypeAnnotation(DuplicateOptional)",
     );
 }
@@ -829,19 +834,14 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     )
     .expect_err("alias-expanded nested option should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidTypeAnnotation {
-                    reason: InvalidTypeAnnotationReason::NestedOptional,
-                    ..
-                }
-            )
-        },
-        "InvalidTypeAnnotation(NestedOptional)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("nested optional annotation should compact");
+    let facts = diagnostic
+        .family_view::<InvalidTypeAnnotationView>()
+        .expect("nested optional annotation should retain typed facts");
+    assert_eq!(facts.code, InvalidTypeAnnotationCode::NestedOptional);
 }
 
 #[test]
@@ -1062,22 +1062,19 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     )
     .expect_err("wrong generic arity should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    type_name,
-                    reason: InvalidGenericInstantiationReason::WrongArgumentCount {
-                        expected: 1,
-                        found: 2,
-                    },
-                } if *type_name == Some(box_name)
-            )
-        },
-        "InvalidGenericInstantiation(WrongArgumentCount)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact.first().expect("wrong generic arity should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("wrong generic arity should retain typed facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::WrongArgumentCount {
+            type_name: Some(name),
+            expected: 1,
+            found: 2,
+        } if name == box_name
+    ));
 }
 
 #[test]
@@ -1138,19 +1135,19 @@ fn bare_generic_type_name_requires_type_arguments() {
     )
     .expect_err("bare generic type name should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    type_name,
-                    reason: InvalidGenericInstantiationReason::MissingTypeArguments,
-                } if *type_name == Some(box_name)
-            )
-        },
-        "InvalidGenericInstantiation(MissingTypeArguments)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("missing generic arguments should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("missing generic arguments should retain typed facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::MissingTypeArguments {
+            type_name: Some(name),
+        } if name == box_name
+    ));
 }
 
 #[test]
@@ -1184,19 +1181,13 @@ fn unknown_named_type_reports_consistent_error() {
     )
     .expect_err("unknown type should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::UnknownName {
-                    name,
-                    namespace: NameNamespace::Type,
-                } if *name == missing
-            )
-        },
-        "UnknownName(type)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact.first().expect("unknown type should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unknown type should retain typed name facts");
+    assert_eq!(facts.name, missing);
 }
 
 #[test]
@@ -1280,19 +1271,15 @@ fn unresolved_generic_argument_does_not_intern_instance() {
         None,
     )
     .expect_err("an unresolved generic argument must fail");
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::UnknownName {
-                    name,
-                    namespace: NameNamespace::Type,
-                } if *name == missing_type
-            )
-        },
-        "UnknownName(type)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("unresolved generic argument should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unresolved generic argument should retain typed name facts");
+    assert_eq!(facts.name, missing_type);
     let interned_generic_instances = (0..128)
         .filter(|id| {
             matches!(
@@ -1411,17 +1398,13 @@ fn rejects_old_post_element_collection_capacity_syntax() {
         .expect_err("old post-element capacity syntax should not parse"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<ExpectedTokenView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::ExpectedToken {
-                    expected,
-                    found: Some(found),
-                } if *expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY)
-                    && found.tag() == TokenTag::NUMERIC_LITERAL
-            )
+        |facts| {
+            facts.expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY)
+                && facts
+                    .found
+                    .is_some_and(|found| found.tag() == TokenTag::NUMERIC_LITERAL)
         },
         "ExpectedToken(CloseCurly, NumericLiteral(64))",
     );
@@ -1493,17 +1476,9 @@ fn rejects_collection_capacity_arithmetic_before_optional_element() {
         .expect_err("arithmetic in capacity position should be rejected"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidCollectionTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidCollectionType {
-                    reason: InvalidCollectionTypeReason::CapacityNotConstant,
-                    ..
-                }
-            )
-        },
+        |facts| facts.reason == InvalidCollectionTypeCode::CapacityNotConstant,
         "InvalidCollectionType(CapacityNotConstant)",
     );
 }
@@ -1625,16 +1600,9 @@ fn rejects_capacity_only_shorthand_in_signature_context() {
         .expect_err("capacity-only shorthand should be rejected in signature context"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidCollectionTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidCollectionType {
-                    reason: InvalidCollectionTypeReason::ShorthandCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidCollectionTypeCode::ShorthandCapacityNotAllowed,
         "InvalidCollectionType(ShorthandCapacityNotAllowed)",
     );
 }
@@ -1663,16 +1631,9 @@ fn rejects_lower_snake_capacity_only_shorthand_in_signature_context() {
         .expect_err("lower-snake capacity-only shorthand should be rejected in signatures"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidCollectionTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidCollectionType {
-                    reason: InvalidCollectionTypeReason::ShorthandCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidCollectionTypeCode::ShorthandCapacityNotAllowed,
         "InvalidCollectionType(ShorthandCapacityNotAllowed)",
     );
 }
@@ -1733,17 +1694,11 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
         .expect_err("missing collection close delimiter should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<ExpectedTokenView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::ExpectedToken {
-                    expected,
-                    found: Some(found),
-                } if *expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY)
-                    && *found == DiagnosticToken::from_static_tag(TokenTag::EOF)
-            )
+        |facts| {
+            facts.expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY)
+                && facts.found == Some(DiagnosticToken::from_static_tag(TokenTag::EOF))
         },
         "ExpectedToken(CloseCurly)",
     );
@@ -1907,16 +1862,9 @@ fn rejects_map_type_with_empty_key() {
         .expect_err("empty map key should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::EmptyMapKeyType,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::EmptyMapKeyType,
         "InvalidMapType(EmptyMapKeyType)",
     );
 }
@@ -1945,16 +1893,9 @@ fn rejects_map_type_with_empty_value() {
         .expect_err("empty map value should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::EmptyMapValueType,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::EmptyMapValueType,
         "InvalidMapType(EmptyMapValueType)",
     );
 }
@@ -1986,16 +1927,9 @@ fn rejects_map_type_with_multiple_separators() {
         .expect_err("multiple map separators should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::MultipleMapSeparators,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::MultipleMapSeparators,
         "InvalidMapType(MultipleMapSeparators)",
     );
 }
@@ -2026,16 +1960,9 @@ fn rejects_fixed_capacity_map_syntax_on_key_side() {
         .expect_err("fixed capacity on key side should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::FixedCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::FixedCapacityNotAllowed,
         "InvalidMapType(FixedCapacityNotAllowed)",
     );
 }
@@ -2066,16 +1993,9 @@ fn rejects_fixed_capacity_map_syntax_on_value_side() {
         .expect_err("fixed capacity on value side should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::FixedCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::FixedCapacityNotAllowed,
         "InvalidMapType(FixedCapacityNotAllowed)",
     );
 }
@@ -2107,16 +2027,9 @@ fn rejects_named_capacity_map_syntax() {
         .expect_err("named capacity on map key side should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::FixedCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::FixedCapacityNotAllowed,
         "InvalidMapType(FixedCapacityNotAllowed)",
     );
 }
@@ -2148,16 +2061,9 @@ fn rejects_postfix_capacity_map_syntax_with_colon() {
         .expect_err("postfix capacity with colon on map value side should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::FixedCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::FixedCapacityNotAllowed,
         "InvalidMapType(FixedCapacityNotAllowed)",
     );
 }
@@ -2188,16 +2094,9 @@ fn rejects_postfix_capacity_map_syntax_with_number() {
         .expect_err("postfix capacity with number on map value side should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::FixedCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::FixedCapacityNotAllowed,
         "InvalidMapType(FixedCapacityNotAllowed)",
     );
 }
@@ -2229,16 +2128,9 @@ fn rejects_postfix_capacity_map_syntax_on_key_side() {
         .expect_err("postfix capacity with colon on map key side should fail"),
     );
 
-    assert_diagnostic_payload(
+    assert_diagnostic_family_view::<InvalidMapTypeView>(
         error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidMapType {
-                    reason: InvalidMapTypeReason::FixedCapacityNotAllowed,
-                }
-            )
-        },
+        |facts| facts.reason == InvalidMapTypeCode::FixedCapacityNotAllowed,
         "InvalidMapType(FixedCapacityNotAllowed)",
     );
 }
@@ -2307,8 +2199,14 @@ fn map_type_walker_visits_named_types_in_key_and_value() {
     assert_eq!(
         found,
         vec![
-            ParsedNamedTypeReference::Bare(key_name),
-            ParsedNamedTypeReference::Bare(value_name),
+            ParsedNamedTypeReference::Bare {
+                name: key_name,
+                span: None,
+            },
+            ParsedNamedTypeReference::Bare {
+                name: value_name,
+                span: None,
+            },
         ]
     );
 }
@@ -2332,7 +2230,10 @@ fn named_type_walker_preserves_qualified_path() {
 
     assert_eq!(
         found,
-        vec![ParsedNamedTypeReference::Qualified(&[root, member])]
+        vec![ParsedNamedTypeReference::Qualified {
+            path: &[root, member],
+            span: None,
+        }]
     );
 }
 
@@ -2397,15 +2298,9 @@ fn rejects_generic_application_on_qualified_base() {
         .expect_err("generic application on qualified base should fail"),
     );
 
-    assert!(
-        matches!(
-            error.payload,
-            DiagnosticPayload::InvalidGenericApplication {
-                reason: GenericApplicationErrorReason::OnNonNamedType,
-                ..
-            }
-        ),
-        "expected OnNonNamedType error, got {:?}",
-        error.payload
+    assert_diagnostic_family_view::<InvalidGenericApplicationView>(
+        error,
+        |facts| facts.reason == GenericApplicationErrorReason::OnNonNamedType,
+        "InvalidGenericApplication(OnNonNamedType)",
     );
 }

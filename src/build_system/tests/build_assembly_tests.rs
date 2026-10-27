@@ -4,7 +4,8 @@
 //! exact handoff where they would otherwise widen or shrink the selected resource set.
 
 use crate::build_system::build::{
-    ProjectAssemblyError, ProjectCompilation, validate_frontend_facade_boundaries,
+    ProjectAssemblyError, ProjectCompilation, finalize_project_assembly_failure,
+    validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::compiled_boundary::{
     CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry,
@@ -23,8 +24,18 @@ use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    BoundaryAccumulator, SuccessfulWarningBoundary, SuccessfulWarningPosition,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ProjectContextEscapeReason, RuleDiagnosticKind,
+    DiagnosticBag, DiagnosticCategory, DiagnosticSeverity, PreparedFailure,
+    ProjectContextEscapeReason,
 };
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
@@ -72,17 +83,39 @@ fn assert_project_context_diagnostic(
     expected_reason: ProjectContextEscapeReason,
 ) {
     let mut string_table = StringTable::new();
-    let messages = error.into_messages(&mut string_table);
-    assert_eq!(messages.error_count(), 1);
+    let failure = {
+        let diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        error.into_prepared_failure(&diagnostic_strings)
+    };
+    let PreparedFailure::Diagnosed(batch) = failure else {
+        panic!("project-context assembly failure should retain its prepared diagnostic batch");
+    };
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    accumulator.append_prepared(batch, None);
+    let reports = accumulator
+        .finish(InstallMode::Frozen)
+        .expect("synthetic assembly diagnostic should freeze");
+    assert_project_context_reports(&reports, expected_reason);
+}
 
-    let diagnostics = messages.diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
+fn assert_project_context_reports(
+    reports: &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet,
+    expected_reason: ProjectContextEscapeReason,
+) {
+    assert_eq!(reports.counts().errors, 1);
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::ProjectContextEscape)
+        reports.iter().count(),
+        1,
+        "the frozen report set should contain exactly one record",
     );
-    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0086");
+
+    let errors = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    let diagnostic = errors[0].1;
+    assert_eq!(diagnostic.category(), DiagnosticCategory::Rule);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0086");
     let expected_reason_key = match expected_reason {
         ProjectContextEscapeReason::ExportedDeclaration => {
             "project_context_escape.exported_declaration"
@@ -91,13 +124,13 @@ fn assert_project_context_diagnostic(
             "project_context_escape.reachable_executable"
         }
     };
-    assert_eq!(diagnostic.identity().reason_key, Some(expected_reason_key));
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::ProjectContextEscape { reason } if *reason == expected_reason
-    ));
-    assert_eq!(
-        diagnostic.primary_span, None,
+    assert_eq!(diagnostic.reason_key(), Some(expected_reason_key));
+    let facts = diagnostic
+        .family_view::<ProjectContextEscapeView>()
+        .expect("project-context escape should retain typed rule facts");
+    assert_eq!(facts.reason, expected_reason);
+    assert!(
+        matches!(diagnostic.primary_site(), SiteRef::Absent),
         "synthetic assembly fixtures have no authored source span",
     );
 }
@@ -230,7 +263,6 @@ fn synthetic_module(
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from(entry_point),
-            warnings: Vec::new(),
             const_top_level_fragments: const_fragments
                 .into_iter()
                 .enumerate()
@@ -389,23 +421,35 @@ fn package_facade_rejects_project_context_declaration_provenance() {
         .expect_err("check facade validation should reject ProjectContext provenance");
     assert_project_context_diagnostic(check_error, ProjectContextEscapeReason::ExportedDeclaration);
 
-    let ProjectFrontendCompilation {
-        project,
-        source_packages,
-        resource_inputs,
-        ..
-    } = frontend;
-    let build_error = match ProjectCompilation::from_successful_boundaries(
-        project,
-        source_packages,
-        resource_inputs,
-    ) {
-        Ok(_) => {
-            panic!("project facade assembly should reject ProjectContext declaration provenance")
-        }
-        Err(error) => error,
-    };
-    assert_project_context_diagnostic(build_error, ProjectContextEscapeReason::ExportedDeclaration);
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    {
+        let (strings, mut sink) = warning_owner.compiler_parts_mut();
+        let warning_name = strings.intern("pre-assembly-warning");
+        let warning = names_declarations::unknown_value_name(warning_name, None)
+            .with_severity(DiagnosticSeverity::Warning);
+        let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+            DiagnosticBag::from_diagnostics(vec![warning]),
+            strings,
+            None,
+            || None,
+        )
+        .expect("staged warning should capture against the report owner's string table");
+        sink.append(
+            SuccessfulWarningBoundary::Project,
+            SuccessfulWarningPosition::BaseModule(0),
+            batch,
+        );
+    }
+    let build_error = validate_frontend_facade_boundaries(&frontend)
+        .expect_err("build facade validation should reject ProjectContext provenance");
+    let reports = finalize_project_assembly_failure(build_error, warning_owner, None)
+        .expect("diagnosed assembly failure should retain its report");
+    assert_eq!(
+        reports.counts().warnings,
+        0,
+        "success-only assembly failure must drop frontend warning drafts"
+    );
+    assert_project_context_reports(&reports, ProjectContextEscapeReason::ExportedDeclaration);
 }
 
 #[test]
@@ -910,9 +954,26 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         ResourceInputRegistry::new(),
     )
     .expect("synthetic package boundary should assemble");
-    let paths = compilation
+    let assembly = compilation
         .package_assembly()
-        .expect("facade should produce package assembly")
+        .expect("facade should produce package assembly");
+    assert!(matches!(
+        assembly.facade_module_ref(),
+        crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+            _
+        )
+    ));
+    assert_eq!(assembly.selected_modules().len(), 1);
+    assert!(assembly.linked_modules().is_empty());
+    assert_eq!(
+        assembly
+            .facade_reachability()
+            .backend_selection()
+            .function_count(),
+        0
+    );
+
+    let paths = assembly
         .resource_union()
         .iter()
         .map(|origin| origin.logical_path().as_str().to_owned())
@@ -1040,14 +1101,30 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         ResourceInputRegistry::new(),
     )
     .expect("synthetic nominal package should assemble");
-    let paths = compilation
+    let assembly = compilation
         .package_assembly()
-        .expect("facade should produce package assembly")
+        .expect("facade should produce package assembly");
+    assert!(matches!(
+        assembly.facade_module_ref(),
+        crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+            _
+        )
+    ));
+    assert_eq!(assembly.selected_modules().len(), 1);
+    assert_eq!(assembly.linked_modules().len(), 1);
+    assert_eq!(
+        assembly
+            .facade_reachability()
+            .backend_selection()
+            .function_count(),
+        0
+    );
+
+    let paths = assembly
         .resource_union()
         .iter()
         .map(|origin| origin.logical_path().as_str().to_owned())
         .collect::<Vec<_>>();
-
     assert!(
         paths.iter().any(|path| path == "assets/card.svg"),
         "receiver method reachable from the facade's closed nominal should be rooted: {paths:?}"

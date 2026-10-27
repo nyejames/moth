@@ -3,7 +3,8 @@
 //! Registry order is stable and intentionally used for diagnostics, so unsupported-directive
 //! errors show a deterministic directive list.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::style_directives::builtins::frontend_built_in_directives;
 use crate::compiler_frontend::style_directives::specs::StyleDirectiveSpec;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
@@ -34,26 +35,32 @@ impl StyleDirectiveRegistry {
     /// - Frontend-owned directive names cannot be overridden by project builders.
     /// - Project builders may only provide `StyleDirectiveKind::Handler`.
     /// - For project-owned names, later entries replace earlier entries by exact name.
-    pub fn merged(builder_specs: &[StyleDirectiveSpec]) -> Result<Self, CompilerError> {
+    pub fn merged(builder_specs: &[StyleDirectiveSpec]) -> Result<Self, InfrastructureFailure> {
         let frontend_owned = frontend_built_in_directives();
         let mut merged = frontend_owned.clone();
 
         for builder_spec in builder_specs {
             if builder_spec.is_core() {
-                return Err(CompilerError::compiler_error(format!(
-                    "Project builder style directive '${}' cannot be registered as a core directive.",
-                    builder_spec.name
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "Project builder style directive '${}' cannot be registered as a core directive.",
+                        builder_spec.name
+                    ),
+                ));
             }
 
             if let Some(frontend_conflict) = frontend_owned
                 .iter()
                 .find(|spec| spec.name == builder_spec.name)
             {
-                return Err(CompilerError::compiler_error(format!(
-                    "Project builder style directive '${}' cannot override frontend-owned directive '${}'.",
-                    builder_spec.name, frontend_conflict.name
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "Project builder style directive '${}' cannot override frontend-owned directive '${}'.",
+                        builder_spec.name, frontend_conflict.name
+                    ),
+                ));
             }
 
             if let Some(existing) = merged

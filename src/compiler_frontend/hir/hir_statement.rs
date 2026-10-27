@@ -5,7 +5,7 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
+//! `InfrastructureFailure::hir_transformation` in this module means an internal
 //! HIR transformation or lowering invariant failure only. Function-body terminality is owned by
 //! AST; a fallthrough that reaches HIR lowering indicates a compiler invariant failure.
 
@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -29,7 +29,6 @@ use crate::compiler_frontend::hir::terminators::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::return_hir_transformation_error;
 
 use crate::hir_log;
 
@@ -61,21 +60,15 @@ impl<'a> HirBuilder<'a> {
 
             NodeKind::StructDefinition(_, _) => Ok(()),
 
-            NodeKind::Return(_) | NodeKind::ReturnError(_) => Err(CompilerError::new(
+            NodeKind::Return(_) | NodeKind::ReturnError(_) => Err(InfrastructureFailure::hir_transformation(
                 "HIR invariant: Top-level return reached HIR lowering. Returns must appear inside function bodies in well-formed AST.",
-                self.hir_error_location(&node.span),
-                ErrorType::HirTransformation,
             )
             .into()),
 
-            _ => Err(CompilerError::new(
-                format!(
-                    "HIR invariant: unsupported top-level AST node reached HIR lowering: {:?}",
-                    node.kind
-                ),
-                self.hir_error_location(&node.span),
-                ErrorType::HirTransformation,
-            )
+            _ => Err(InfrastructureFailure::hir_transformation(format!(
+                "HIR invariant: unsupported top-level AST node reached HIR lowering: {:?}",
+                node.kind
+            ))
             .into()),
         }
     }
@@ -95,9 +88,9 @@ impl<'a> HirBuilder<'a> {
         body: &[AstNode],
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let function_id = self.resolve_function_id_or_error(function_name, span)?;
+        let function_id = self.resolve_function_id_or_error(function_name)?;
 
-        self.enter_function(function_id, span)?;
+        self.enter_function(function_id)?;
 
         // WHAT: for entry start(), allocate the Vec<String> fragment accumulator before lowering.
         // WHY: PushStartRuntimeFragment nodes in the body push to this local; the implicit return
@@ -119,16 +112,16 @@ impl<'a> HirBuilder<'a> {
         body: &[AstNode],
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        self.lower_parameter_locals(function_id, signature, span)?;
+        self.lower_parameter_locals(function_id, signature)?;
         self.lower_statement_sequence(expressions, body)?;
 
-        let current_block = self.current_block_id_or_error(span)?;
-        if self.block_has_explicit_terminator(current_block, span)? {
+        let current_block = self.current_block_id_or_error()?;
+        if self.block_has_explicit_terminator(current_block)? {
             return Ok(());
         }
 
         if self
-            .function_by_id_or_error(function_id, span)?
+            .function_by_id_or_error(function_id)?
             .returns
             .is_empty()
         {
@@ -150,10 +143,8 @@ impl<'a> HirBuilder<'a> {
         // AST terminality validation should have rejected any function that can reach this point.
         // A fallthrough here is therefore an internal compiler invariant failure, not a user
         // diagnostic.
-        Err(CompilerError::new(
+        Err(InfrastructureFailure::hir_transformation(
             "HIR lowering reached a non-terminal function body after AST terminality validation",
-            self.hir_error_location(span),
-            ErrorType::HirTransformation,
         )
         .into())
     }
@@ -171,8 +162,8 @@ impl<'a> HirBuilder<'a> {
         nodes: &[AstNode],
     ) -> Result<(), HirConstructionFailure> {
         for node in nodes {
-            let current_block = self.current_block_id_or_error(&node.span)?;
-            if self.block_has_explicit_terminator(current_block, &node.span)? {
+            let current_block = self.current_block_id_or_error()?;
+            if self.block_has_explicit_terminator(current_block)? {
                 break;
             }
 
@@ -204,12 +195,9 @@ impl<'a> HirBuilder<'a> {
                 node.span,
             ),
 
-            NodeKind::MultiBind { targets, value } => self.lower_multi_bind_statement(
-                targets,
-                expressions.view(*value)?,
-                &node.span,
-                node.span,
-            ),
+            NodeKind::MultiBind { targets, value } => {
+                self.lower_multi_bind_statement(targets, expressions.view(*value)?, node.span)
+            }
 
             NodeKind::ExpressionStatement(expr) => {
                 self.lower_expression_statement(expressions.view(*expr)?, &node.span, node.span)
@@ -307,10 +295,7 @@ impl<'a> HirBuilder<'a> {
                 // WHY: the fragment accumulator local was allocated at function entry; each
                 //      PushStartRuntimeFragment appends one evaluated string to it.
                 let Some(vec_local) = self.entry_fragment_vec_local else {
-                    return_hir_transformation_error!(
-                        "PushStartRuntimeFragment encountered outside entry start() — no fragment vec local is active",
-                        self.hir_error_location(&node.span)
-                    );
+                    return Err(InfrastructureFailure::hir_transformation("PushStartRuntimeFragment encountered outside entry start() — no fragment vec local is active").into());
                 };
 
                 let value =
@@ -322,13 +307,13 @@ impl<'a> HirBuilder<'a> {
                 )
             }
 
-            _ => return_hir_transformation_error!(
-                format!(
+            _ => {
+                return Err(InfrastructureFailure::hir_transformation(format!(
                     "Unsupported AST statement node during HIR lowering: {:?}",
                     node.kind
-                ),
-                self.hir_error_location(&node.span)
-            ),
+                ))
+                .into());
+            }
         };
 
         if result.is_ok() {
@@ -352,7 +337,7 @@ impl<'a> HirBuilder<'a> {
         let (target_prelude, target_place) = self.lower_place_expression_to_hir_place(target)?;
 
         for prelude in target_prelude {
-            self.emit_statement_to_current_block(prelude, span)?;
+            self.emit_statement_to_current_block(prelude)?;
         }
 
         // A compound-assignment target is a side-effect-free local/field place. Its synthetic
@@ -377,41 +362,38 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         targets: &[MultiBindTarget],
         value: ExpressionView<'_>,
-        span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         // Save every RHS slot before changing existing targets, preserving swaps and aliases.
         if targets.len() < 2 {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Single-target bind unexpectedly reached multi-bind lowering",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
 
         let rhs_values = self.lower_expression_results_to_current_block(value)?;
         let success_types = value.success_types();
 
         if success_types.len() != targets.len() || rhs_values.len() != targets.len() {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Multi-bind slot arity does not match lowered result channels",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
 
         let mut write_targets = Vec::with_capacity(targets.len());
         let mut staged_results = Vec::with_capacity(targets.len());
         for (slot_index, bind_target) in targets.iter().enumerate() {
-            let slot_type = self.lower_type_id(success_types[slot_index], &value.span())?;
-            let target_type = self.lower_type_id(bind_target.type_id, &bind_target.span)?;
+            let slot_type = self.lower_type_id(success_types[slot_index])?;
+            let target_type = self.lower_type_id(bind_target.type_id)?;
 
             if slot_type != target_type {
-                return_hir_transformation_error!(
-                    format!(
-                        "Lowered multi-bind slot type mismatch at index {}",
-                        slot_index
-                    ),
-                    self.hir_error_location(&bind_target.span)
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "Lowered multi-bind slot type mismatch at index {}",
+                    slot_index
+                ))
+                .into());
             }
 
             let target = match bind_target.kind {
@@ -425,50 +407,44 @@ impl<'a> HirBuilder<'a> {
                     .map(HirWriteTarget::DefineLocal)?,
                 MultiBindTargetKind::Assignment => {
                     let Some(local_id) = self.locals_by_name.get(&bind_target.id).copied() else {
-                        return_hir_transformation_error!(
-                            format!(
-                                "Multi-bind assignment target '{}' is missing from local bindings",
-                                self.symbol_name_for_diagnostics(&bind_target.id)
-                            ),
-                            self.hir_error_location(&bind_target.span)
-                        );
+                        return Err(InfrastructureFailure::hir_transformation(format!(
+                            "Multi-bind assignment target '{}' is missing from local bindings",
+                            self.symbol_name_for_diagnostics(&bind_target.id)
+                        ))
+                        .into());
                     };
 
                     let Some((block_index, local_index)) =
                         self.local_index_by_id.get(&local_id).copied()
                     else {
-                        return_hir_transformation_error!(
+                        return Err(InfrastructureFailure::hir_transformation(
                             "Multi-bind assignment target local is not registered in HIR blocks",
-                            self.hir_error_location(&bind_target.span)
-                        );
+                        )
+                        .into());
                     };
 
                     let local = &self.module.blocks[block_index].locals[local_index];
                     if !local.mutable {
-                        return_hir_transformation_error!(
-                            format!(
-                                "Multi-bind assignment target '{}' lowered as immutable local",
-                                self.symbol_name_for_diagnostics(&bind_target.id)
-                            ),
-                            self.hir_error_location(&bind_target.span)
-                        );
+                        return Err(InfrastructureFailure::hir_transformation(format!(
+                            "Multi-bind assignment target '{}' lowered as immutable local",
+                            self.symbol_name_for_diagnostics(&bind_target.id)
+                        ))
+                        .into());
                     }
 
                     if local.ty != target_type {
-                        return_hir_transformation_error!(
-                            format!(
-                                "Multi-bind assignment target '{}' lowered with mismatched local type",
-                                self.symbol_name_for_diagnostics(&bind_target.id)
-                            ),
-                            self.hir_error_location(&bind_target.span)
-                        );
+                        return Err(InfrastructureFailure::hir_transformation(format!(
+                            "Multi-bind assignment target '{}' lowered with mismatched local type",
+                            self.symbol_name_for_diagnostics(&bind_target.id)
+                        ))
+                        .into());
                     }
 
                     HirWriteTarget::AssignPlace(HirPlace::local(local_id))
                 }
             };
 
-            let slot_region = self.current_region_or_error(&bind_target.span)?;
+            let slot_region = self.current_region_or_error()?;
             let slot_value = rhs_values[slot_index];
 
             let staged_local = self.allocate_temp_local(slot_type, None)?;
@@ -558,7 +534,7 @@ impl<'a> HirBuilder<'a> {
         // Statically known false → immediate assertion failure, no pass block needed.
         if self.expression_constant_bool(condition) == Some(false) {
             let message_value = self.lower_expression_value_to_current_block(message)?;
-            let failure_block = self.current_block_id_or_error(span)?;
+            let failure_block = self.current_block_id_or_error()?;
             return self.emit_terminator_with_span(
                 failure_block,
                 HirTerminator::AssertFailure {
@@ -580,13 +556,13 @@ impl<'a> HirBuilder<'a> {
 
         // Dynamic condition: lower it, then branch to pass / failure blocks.
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
-        let condition_block = self.current_block_id_or_error(span)?;
+        let condition_block = self.current_block_id_or_error()?;
 
-        let parent_region = self.current_region_or_error(span)?;
+        let parent_region = self.current_region_or_error()?;
         let pass_region = self.create_child_region(parent_region);
         let failure_region = self.create_child_region(parent_region);
-        let pass_block = self.create_block(pass_region, span, "assert-pass")?;
-        let failure_block = self.create_block(failure_region, span, "assert-fail")?;
+        let pass_block = self.create_block(pass_region, span, "assert-pass");
+        let failure_block = self.create_block(failure_region, span, "assert-fail");
 
         // Authored assert header: the condition branch carries the statement span so
         // diagnostics can point at the authored `assert(...)`.
@@ -603,9 +579,9 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(condition_block, pass_block, "assert.true");
         self.log_control_flow_edge(condition_block, failure_block, "assert.false");
 
-        self.set_current_block(failure_block, span)?;
+        self.set_current_block(failure_block)?;
         let message_value = self.lower_expression_value_to_current_block(message)?;
-        let failure_tail_block = self.current_block_id_or_error(span)?;
+        let failure_tail_block = self.current_block_id_or_error()?;
         self.emit_terminator_with_span(
             failure_tail_block,
             HirTerminator::AssertFailure {
@@ -619,7 +595,7 @@ impl<'a> HirBuilder<'a> {
             statement_span,
         )?;
 
-        Ok(self.set_current_block(pass_block, span)?)
+        Ok(self.set_current_block(pass_block)?)
     }
 
     // -------------------------
@@ -691,7 +667,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.side_table.map_statement(span.to_owned(), &statement);
-        self.emit_statement_to_current_block(statement, span)
+        self.emit_statement_to_current_block(statement)
     }
 
     // -------------------------

@@ -22,6 +22,7 @@ use crate::compiler_frontend::ast::generic_bounds::{
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionResult, context::TypeResolutionContext,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
@@ -84,7 +85,8 @@ pub(super) fn instantiate_generic_nominal(
             )?;
             Ok(Some(type_id))
         }
-        GenericDeclarationKind::Function => unreachable!(
+        GenericDeclarationKind::Function => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "generic nominal instantiation reached lookup with a function declaration kind"
         ),
     }

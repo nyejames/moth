@@ -351,7 +351,6 @@ fn peek_profile_first_byte_errors_on_empty_gzip() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let profile_path = temp_dir.path().join("profile.json.gz");
 
-    // Empty gzip stream.
     write_gzip_file(&profile_path, b"");
 
     let result = peek_profile_first_byte(&profile_path);

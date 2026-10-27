@@ -296,7 +296,7 @@ fn every_review_rule_records_why_its_disposition_holds() {
     }
 }
 
-/// The plan names six dispositions; a disposition no rule uses is one nobody decided.
+/// The audit offers six dispositions; a disposition no rule uses is one nobody decided.
 #[test]
 fn every_disposition_the_audit_offers_is_used_by_something() {
     let used: BTreeSet<Disposition> = REVIEW_RULES
@@ -324,7 +324,7 @@ fn every_disposition_the_audit_offers_is_used_by_something() {
     }
 }
 
-/// The audit must not become a blanket ban on the categories the plan says to keep legal.
+/// The audit reviews broad categories without turning them into blanket bans.
 #[test]
 fn the_broad_categories_the_plan_protects_are_review_rules_and_never_hard_ones() {
     let hard_codes: Vec<&str> = HARD_RULES.iter().map(|rule| rule.code).collect();

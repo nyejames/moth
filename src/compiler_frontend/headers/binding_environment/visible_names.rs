@@ -8,9 +8,10 @@
 //! and public export resolution).
 
 use crate::compiler_frontend::builtins::casts::traits::for_each_core_cast_trait_name;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ParameterContractKind, ReservedNameOwner,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::{ParameterContractKind, ReservedNameOwner};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceRecordSource;
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
@@ -133,7 +134,7 @@ impl VisibleNameRegistry {
         local_name: StringId,
         binding: VisibleNameBinding,
         span: Option<SourceSpan>,
-    ) -> Result<(), CompilerDiagnostic> {
+    ) -> Result<(), DiagnosticDraft> {
         if let Some(entry) = self.names.get(&local_name) {
             if can_coexist(&entry.binding, &binding) {
                 return Ok(());
@@ -147,8 +148,8 @@ impl VisibleNameRegistry {
             };
             if let Some(owner) = reserved_owner {
                 let mut diagnostic =
-                    CompilerDiagnostic::reserved_name_collision(local_name, owner, span);
-                diagnostic.primary_span = span;
+                    names_declarations::reserved_name_collision(local_name, owner, span);
+                diagnostic.set_primary_span(span);
                 return Err(diagnostic);
             }
             let diagnostic = diagnostics::dependency_name_collision(local_name, span, entry.span);
@@ -273,7 +274,7 @@ pub(crate) fn check_alias_case_warning(
     alias: &DependencyAlias,
     string_table: &StringTable,
     symbol_name: StringId,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     let alias_str = string_table.resolve(alias.name);
     let symbol_str = string_table.resolve(symbol_name);
 
@@ -291,7 +292,7 @@ pub(crate) fn check_alias_case_warning(
     }
     let span = Some(alias.span);
 
-    Some(CompilerDiagnostic::dependency_alias_case_mismatch(
+    Some(imports::dependency_alias_case_mismatch(
         alias.name,
         symbol_name,
         span,

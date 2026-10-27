@@ -13,29 +13,147 @@ use crate::compiler_frontend::ast::templates::template_head_parser::directive_ar
     reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCallShapeCode, InvalidCallShapeView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::MalformedCssTemplateView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    ExpectedTokenView, UnexpectedTokenShape, UnexpectedTokenView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
-    SyntaxDiagnosticKind,
+    DiagnosticBag, DiagnosticToken, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use std::rc::Rc;
 use std::sync::Arc;
 
-type DirectiveStyleTestResult<T> = Result<T, CompilerDiagnostic>;
+type DirectiveStyleTestResult<T> = Result<T, DirectiveStyleTestError>;
 
-fn directive_diagnostic(error: TemplateError) -> CompilerDiagnostic {
-    match error {
-        TemplateError::Diagnostic(diagnostic) => diagnostic,
-        TemplateError::Infrastructure(error) => {
-            panic!("expected directive source diagnostic, got infrastructure failure: {error:?}")
-        }
+#[derive(Debug)]
+struct DirectiveStyleTestError {
+    diagnostics: Vec<DirectiveStyleTestDiagnostic>,
+}
+
+impl DirectiveStyleTestError {
+    fn first(&self) -> Option<&DirectiveStyleTestDiagnostic> {
+        self.diagnostics.first()
     }
 }
 
+#[derive(Debug)]
+struct DirectiveStyleTestDiagnostic {
+    kind: DirectiveStyleTestDiagnosticKind,
+    primary_site: DirectiveStyleTestSite,
+    label_count: usize,
+}
+
+#[derive(Debug)]
+enum DirectiveStyleTestDiagnosticKind {
+    InvalidTemplateDirective {
+        reason: InvalidTemplateDirectiveCode,
+        detail: Option<StringId>,
+    },
+    UnexpectedToken(Option<DiagnosticToken>),
+    ExpectedToken(DiagnosticToken),
+    InvalidCallShape(InvalidCallShapeCode),
+    Other,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DirectiveStyleTestSite {
+    Absent,
+    Local(SourceSpan),
+    Foreign,
+}
+
+fn directive_diagnostic(error: TemplateError) -> DirectiveStyleTestError {
+    summarize_diagnostics(expect_template_diagnostic(error))
+}
+
+fn summarize_diagnostics(diagnostics: CompactDiagnosticBagForTest) -> DirectiveStyleTestError {
+    DirectiveStyleTestError {
+        diagnostics: diagnostics
+            .views()
+            .map(|view| {
+                let kind = if let Some(facts) = view.family_view::<InvalidTemplateDirectiveView>() {
+                    DirectiveStyleTestDiagnosticKind::InvalidTemplateDirective {
+                        reason: facts.reason,
+                        detail: facts.detail,
+                    }
+                } else if let Some(facts) = view.family_view::<UnexpectedTokenView>() {
+                    let found = match facts.shape {
+                        UnexpectedTokenShape::Token(found) => Some(found),
+                        UnexpectedTokenShape::MultiBind { .. } => None,
+                    };
+                    DirectiveStyleTestDiagnosticKind::UnexpectedToken(found)
+                } else if let Some(facts) = view.family_view::<ExpectedTokenView>() {
+                    DirectiveStyleTestDiagnosticKind::ExpectedToken(facts.expected)
+                } else if let Some(facts) = view.family_view::<InvalidCallShapeView>() {
+                    DirectiveStyleTestDiagnosticKind::InvalidCallShape(facts.reason)
+                } else {
+                    DirectiveStyleTestDiagnosticKind::Other
+                };
+                let primary_site = match view.primary_site() {
+                    SiteRef::Absent => DirectiveStyleTestSite::Absent,
+                    SiteRef::Local(span) => DirectiveStyleTestSite::Local(span),
+                    SiteRef::Foreign { .. } => DirectiveStyleTestSite::Foreign,
+                };
+                DirectiveStyleTestDiagnostic {
+                    kind,
+                    primary_site,
+                    label_count: view.durable_labels().count(),
+                }
+            })
+            .collect(),
+    }
+}
+
+fn assert_invalid_template_directive(
+    diagnostic: &DirectiveStyleTestError,
+    expected: InvalidTemplateDirectiveCode,
+) {
+    let facts = diagnostic
+        .first()
+        .expect("directive error should compact to one record");
+    match &facts.kind {
+        DirectiveStyleTestDiagnosticKind::InvalidTemplateDirective { reason, .. } => {
+            assert_eq!(*reason, expected);
+        }
+        other => panic!("expected invalid-template-directive facts, found {other:?}"),
+    }
+}
+
+fn assert_unexpected_token(diagnostic: &DirectiveStyleTestError, expected: DiagnosticToken) {
+    let facts = diagnostic
+        .first()
+        .expect("unexpected-token diagnostic should compact to one record");
+    match &facts.kind {
+        DirectiveStyleTestDiagnosticKind::UnexpectedToken(Some(found)) => {
+            assert_eq!(*found, expected);
+        }
+        other => panic!("expected unexpected-token facts, found {other:?}"),
+    }
+}
+
+fn assert_expected_token(diagnostic: &DirectiveStyleTestError, expected: DiagnosticToken) {
+    let facts = diagnostic
+        .first()
+        .expect("expected-token diagnostic should compact to one record");
+    match &facts.kind {
+        DirectiveStyleTestDiagnosticKind::ExpectedToken(found) => assert_eq!(*found, expected),
+        other => panic!("expected expected-token facts, found {other:?}"),
+    }
+}
 fn directive_tokens(
     source: &str,
     string_table: &mut StringTable,
@@ -161,7 +279,12 @@ fn parse_required_parenthesized_expression_for_test(
         string_table,
         path_fork,
     )
-    .map_err(directive_diagnostic)
+    .map_err(|error| {
+        directive_diagnostic(error.into_template_error(
+            directive_name,
+            InvalidTemplateDirectiveReason::EmptyArguments,
+        ))
+    })
 }
 
 fn parse_optional_expression_source(source: &str) -> DirectiveStyleTestResult<Option<ExprId>> {
@@ -173,9 +296,7 @@ fn parse_optional_expression_source(source: &str) -> DirectiveStyleTestResult<Op
     let file_tokens =
         directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -210,9 +331,7 @@ fn reject_arguments_succeeds_when_no_parens() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("note");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -237,9 +356,7 @@ fn reject_arguments_fails_when_parens_present() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("note");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -250,13 +367,11 @@ fn reject_arguments_fails_when_parens_present() {
         .expect("test token stream position must remain in canonical range");
     let result = reject_unexpected_directive_arguments(directive_name, &cursor);
     assert!(result.is_err());
-    assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnexpectedArguments,
-            ..
-        }
-    ));
+    let diagnostic = directive_diagnostic(result.unwrap_err());
+    assert_invalid_template_directive(
+        &diagnostic,
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
+    );
 }
 
 // ------------------------------------------------------------------------
@@ -275,9 +390,7 @@ fn optional_slot_target_no_parens_returns_default() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -293,7 +406,10 @@ fn optional_slot_target_no_parens_returns_default() {
         &mut string_table,
         &mut path_fork,
     );
-    assert_eq!(result.unwrap(), SlotKey::Default);
+    assert_eq!(
+        result.unwrap_or_else(|_| panic!("slot target should parse successfully")),
+        SlotKey::Default
+    );
 }
 
 #[test]
@@ -308,9 +424,7 @@ fn optional_slot_target_named_string() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -326,7 +440,10 @@ fn optional_slot_target_named_string() {
         &mut string_table,
         &mut path_fork,
     );
-    assert!(matches!(result.unwrap(), SlotKey::Named(_)));
+    assert!(matches!(
+        result.unwrap_or_else(|_| panic!("named slot target should parse successfully")),
+        SlotKey::Named(_)
+    ));
 }
 
 #[test]
@@ -341,9 +458,7 @@ fn optional_slot_target_positive_positional() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -359,7 +474,10 @@ fn optional_slot_target_positive_positional() {
         &mut string_table,
         &mut path_fork,
     );
-    assert_eq!(result.unwrap(), SlotKey::Positional(1));
+    assert_eq!(
+        result.unwrap_or_else(|_| panic!("positional slot target should parse successfully")),
+        SlotKey::Positional(1)
+    );
 }
 
 #[test]
@@ -374,9 +492,7 @@ fn optional_slot_target_zero_errors() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -393,13 +509,10 @@ fn optional_slot_target_zero_errors() {
         &mut path_fork,
     );
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err().payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidSlotTarget,
-            ..
-        }
-    ));
+    assert_invalid_template_directive(
+        &result.unwrap_err(),
+        InvalidTemplateDirectiveCode::InvalidSlotTarget,
+    );
 }
 
 #[test]
@@ -411,9 +524,7 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
     let file_tokens =
         directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -430,15 +541,17 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
         &mut path_fork,
     )
     .expect_err("a symbol is not a valid slot target");
-
-    let primary_span = diagnostic
-        .primary_span
-        .expect("slot target diagnostics should retain the offending token span");
+    let first = diagnostic
+        .first()
+        .expect("slot target diagnostic should compact to one record");
+    let DirectiveStyleTestSite::Local(primary_span) = first.primary_site else {
+        panic!("slot target diagnostic should retain its local offending-token span");
+    };
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (7, 9));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
-    assert!(diagnostic.labels.is_empty());
+    assert_eq!(first.label_count, 0);
 }
 
 #[test]
@@ -453,9 +566,7 @@ fn optional_slot_target_negative_errors() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -486,9 +597,7 @@ fn optional_slot_target_empty_parens_errors() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -505,13 +614,10 @@ fn optional_slot_target_empty_parens_errors() {
         &mut path_fork,
     );
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err().payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
-            ..
-        }
-    ));
+    assert_invalid_template_directive(
+        &result.unwrap_err(),
+        InvalidTemplateDirectiveCode::EmptyArguments,
+    );
 }
 
 #[test]
@@ -526,9 +632,7 @@ fn optional_slot_target_missing_close_paren_errors() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("slot");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -545,11 +649,10 @@ fn optional_slot_target_missing_close_paren_errors() {
         &mut path_fork,
     );
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err().payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE)
-    ));
+    assert_unexpected_token(
+        &result.unwrap_err(),
+        DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE),
+    );
 }
 
 // ------------------------------------------------------------------------
@@ -568,9 +671,7 @@ fn required_slot_name_missing_parens_errors() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("insert");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -587,11 +688,10 @@ fn required_slot_name_missing_parens_errors() {
         &mut path_fork,
     );
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err().payload,
-        DiagnosticPayload::ExpectedToken { expected, .. }
-            if expected == DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS)
-    ));
+    assert_expected_token(
+        &result.unwrap_err(),
+        DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
+    );
 }
 
 #[test]
@@ -606,9 +706,7 @@ fn required_slot_name_string_literal_ok() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("insert");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -639,9 +737,7 @@ fn required_slot_name_positional_rejected() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("insert");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -658,13 +754,10 @@ fn required_slot_name_positional_rejected() {
         &mut path_fork,
     );
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err().payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidInsertTarget,
-            ..
-        }
-    ));
+    assert_invalid_template_directive(
+        &result.unwrap_err(),
+        InvalidTemplateDirectiveCode::InvalidInsertTarget,
+    );
 }
 
 #[test]
@@ -679,9 +772,7 @@ fn required_slot_name_empty_parens_errors() {
         &mut path_fork,
     );
     let directive_name = string_table.intern("insert");
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -698,19 +789,15 @@ fn required_slot_name_empty_parens_errors() {
         &mut path_fork,
     );
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err().payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
-            ..
-        }
-    ));
+    assert_invalid_template_directive(
+        &result.unwrap_err(),
+        InvalidTemplateDirectiveCode::EmptyArguments,
+    );
 }
 
 #[test]
 fn optional_string_literal_not_a_string_errors() {
-    // After the $code refactor into the HTML project builder, argument type
-    // validation lives in normalize_provided_style_argument_value (called by
+    // Argument type validation lives in normalize_provided_style_argument_value (called by
     // apply_handler_style_directive), not in parse_optional_parenthesized_expression.
     let error = template_parse_error("[$code(42): body]");
     assert!(!error.is_empty());
@@ -734,9 +821,7 @@ fn optional_expression_no_parens_returns_none() {
         &mut path_fork,
     );
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -770,9 +855,7 @@ fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
         &mut path_fork,
     );
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -811,9 +894,7 @@ fn optional_expression_empty_parens_errors() {
         &mut path_fork,
     );
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -850,9 +931,7 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
         &mut path_fork,
     );
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -870,13 +949,7 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
         &mut path_fork,
     );
     let diagnostic = result.expect_err("whitespace-only directive argument should error");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
-            ..
-        }
-    ));
+    assert_invalid_template_directive(&diagnostic, InvalidTemplateDirectiveCode::EmptyArguments);
 }
 
 #[test]
@@ -890,9 +963,7 @@ fn optional_expression_extra_comma_errors() {
     let file_tokens =
         directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -911,14 +982,16 @@ fn optional_expression_extra_comma_errors() {
     );
     assert!(result.is_err());
     let diagnostic = result.unwrap_err();
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
-    ));
-    let primary_span = diagnostic
-        .primary_span
-        .expect("extra-argument diagnostics should retain the offending comma span");
+    assert_unexpected_token(
+        &diagnostic,
+        DiagnosticToken::from_static_tag(TokenTag::COMMA),
+    );
+    let first = diagnostic
+        .first()
+        .expect("extra-argument diagnostic should compact to one record");
+    let DirectiveStyleTestSite::Local(primary_span) = first.primary_site else {
+        panic!("extra-argument diagnostic should retain its local offending-comma span");
+    };
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (14, 15));
     assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
@@ -929,12 +1002,13 @@ fn optional_expression_named_argument_is_rejected() {
     let diagnostic = parse_optional_expression_source("[$children(value = 1)]")
         .expect_err("directive expressions must reject named arguments");
 
+    let facts = diagnostic
+        .first()
+        .expect("named-argument diagnostic should compact to one record");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidCallShape {
-            reason: InvalidCallShapeReason::NamedArgumentsNotSupported,
-            ..
-        }
+        &facts.kind,
+        DirectiveStyleTestDiagnosticKind::InvalidCallShape(reason)
+            if *reason == InvalidCallShapeCode::NamedArgumentsNotSupported
     ));
 }
 
@@ -943,16 +1017,16 @@ fn optional_expression_mutable_argument_is_rejected() {
     let diagnostic = parse_optional_expression_source("[$children(~1)]")
         .expect_err("directive expressions must reject mutable arguments");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason:
-                crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidArgument {
-                    detail: None,
-                },
-            ..
+    let facts = diagnostic
+        .first()
+        .expect("mutable argument diagnostic should compact to one record");
+    match &facts.kind {
+        DirectiveStyleTestDiagnosticKind::InvalidTemplateDirective { reason, detail } => {
+            assert_eq!(*reason, InvalidTemplateDirectiveCode::InvalidArgument);
+            assert_eq!(*detail, None);
         }
-    ));
+        other => panic!("expected invalid-template-directive facts, found {other:?}"),
+    }
 }
 
 #[test]
@@ -960,11 +1034,10 @@ fn optional_expression_double_comma_errors() {
     let diagnostic = parse_optional_expression_source("[$children(\"a\",,)]")
         .expect_err("directive expressions must reject double commas");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
-    ));
+    assert_unexpected_token(
+        &diagnostic,
+        DiagnosticToken::from_static_tag(TokenTag::COMMA),
+    );
 }
 
 #[test]
@@ -972,11 +1045,10 @@ fn optional_expression_missing_close_paren_errors() {
     let diagnostic = parse_optional_expression_source("[$children(\"a\"]")
         .expect_err("directive expressions must require a closing parenthesis");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE)
-    ));
+    assert_unexpected_token(
+        &diagnostic,
+        DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE),
+    );
 }
 #[test]
 fn required_expression_missing_parens_errors() {
@@ -992,9 +1064,7 @@ fn required_expression_missing_parens_errors() {
         &mut path_fork,
     );
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1013,11 +1083,10 @@ fn required_expression_missing_parens_errors() {
     );
     assert!(result.is_err());
     let diagnostic = result.unwrap_err();
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ExpectedToken { expected, .. }
-            if expected == DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS)
-    ));
+    assert_expected_token(
+        &diagnostic,
+        DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
+    );
 }
 
 #[test]
@@ -1034,9 +1103,7 @@ fn required_expression_compile_time_constant_ok() {
         &mut path_fork,
     );
     let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1054,7 +1121,7 @@ fn required_expression_compile_time_constant_ok() {
         &mut path_fork,
     );
     assert!(result.is_ok());
-    let expr = result.unwrap();
+    let expr = result.unwrap_or_else(|_| panic!("required expression should parse successfully"));
     let view = expression_builder
         .view(expr)
         .expect("directive expression should be owned by the test builder");
@@ -1125,9 +1192,7 @@ fn insert_directive_can_coexist_with_other_meaningful_head_items() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1189,9 +1254,7 @@ fn non_formatter_and_formatter_directives_can_coexist() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1236,9 +1299,7 @@ fn doc_templates_treat_brackets_as_literal_text() {
         &mut string_table,
         &mut path_fork,
     );
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1300,9 +1361,7 @@ fn doc_templates_are_markdown_formatted_by_default() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1356,9 +1415,7 @@ fn doc_brackets_remain_literal_text() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1414,9 +1471,7 @@ fn css_without_argument_uses_css_formatter() {
     let source_path = file_tokens.source_path;
     let context =
         new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1460,9 +1515,7 @@ fn css_inline_argument_parses_correctly() {
     let source_path = file_tokens.source_path;
     let context =
         new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1523,18 +1576,19 @@ fn const_css_template_emits_malformed_css_warnings() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
 
     assert!(!warnings.is_empty());
-    assert!(warnings.iter().all(|warning| {
-        matches!(
-            warning.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-        )
-    }));
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .all(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
 }
 
 #[test]
@@ -1545,13 +1599,24 @@ fn css_validation_warnings_keep_authored_spans() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let expected_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(6, 47, &mut ExtendedSpanBuilder::new())
+            .expect("CSS body literal span should fit"),
+    );
 
     assert!(!warnings.is_empty());
     assert!(
+        warnings.views().all(|warning| {
+            warning.family_view::<MalformedCssTemplateView>().is_some()
+                && matches!(warning.primary_site(), SiteRef::Local(span) if span == expected_span)
+        }),
+        "css warnings should keep their exact authored source span: {:?}",
         warnings
-            .iter()
-            .all(|warning| warning.primary_span.is_some()),
-        "css warnings should keep authored source spans"
+            .views()
+            .map(|warning| warning.primary_site())
+            .collect::<Vec<_>>(),
     );
 }
 
@@ -1563,11 +1628,13 @@ fn inline_css_warns_when_blocks_are_used() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
 
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
 }
 
 #[test]
@@ -1578,11 +1645,13 @@ fn runtime_css_templates_emit_warnings_for_static_body_segments() {
         true,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
     assert!(!warnings.is_empty());
-    assert!(warnings.iter().all(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .all(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
 }
 
 #[test]
@@ -1674,9 +1743,7 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
         &mut string_table,
         &mut path_fork,
     );
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");

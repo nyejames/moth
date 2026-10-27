@@ -34,7 +34,7 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let value = self.make_expression(
             span_ref,
             HirExpressionKind::Copy(HirPlace::local(accumulator)),

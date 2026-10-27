@@ -139,6 +139,42 @@ fn freezing_root_table_preserves_ids_and_moves_string_storage() {
 }
 
 #[test]
+fn frozen_snapshot_keeps_prefix_when_mutable_table_continues_interning() {
+    let mut table = StringTable::new();
+    let prefix = table.intern("prefix");
+    let prefix_pointer = table.resolve(prefix).as_ptr();
+
+    let frozen = table.freeze_snapshot();
+    let appended = table.intern("appended");
+
+    assert_eq!(appended, StringId::from_index(1));
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen.resolve(prefix), "prefix");
+    assert_eq!(frozen.resolve(prefix).as_ptr(), prefix_pointer);
+    assert_eq!(frozen.try_resolve(appended), None);
+    assert_eq!(table.resolve(prefix), "prefix");
+    assert_eq!(table.resolve(appended), "appended");
+}
+#[test]
+fn root_preserving_clone_shares_strings_and_remaps_local_delta() {
+    let mut root = StringTable::new();
+    let inherited = root.intern("inherited");
+    let inherited_pointer = root.resolve(inherited).as_ptr();
+
+    let mut fork = root.clone_preserving_inherited_prefix();
+    assert_eq!(fork.len(), root.len());
+    assert_eq!(fork.resolve(inherited).as_ptr(), inherited_pointer);
+
+    let fork_local = fork.intern("fork-local");
+    let _root_local = root.intern("root-local");
+    let remap = root.merge_delta_from(&fork, 1);
+
+    let merged_fork_local = remap.get(fork_local);
+    assert_ne!(merged_fork_local, fork_local);
+    assert_eq!(root.resolve(merged_fork_local), "fork-local");
+}
+
+#[test]
 fn freezing_after_non_identity_merge_preserves_remapped_ids() {
     let mut merged = StringTable::new();
     let shared_id = merged.intern("shared");
@@ -179,4 +215,34 @@ fn freezing_module_fork_requires_merge_into_root_first() {
     let (fork, _) = root.fork_for_module().into_parts();
 
     let _ = fork.freeze();
+}
+
+#[test]
+fn flattening_freeze_keeps_fork_ids_whether_or_not_the_prefix_is_shared() {
+    let mut root = StringTable::new();
+    let inherited_id = root.intern("inherited");
+    let inherited_pointer = root.resolve(inherited_id).as_ptr();
+    let source = root.fork_source();
+
+    // `source` still holds the prefix, so the fork shares its immutable string allocation.
+    let (mut shared_fork, _) = source.fork_for_module().into_parts();
+    let shared_local_id = shared_fork.intern("shared-local");
+    let shared = shared_fork.freeze_flattening();
+    assert_eq!(shared.resolve(inherited_id).as_ptr(), inherited_pointer);
+
+    // This fork holds the last reference to the base, so its Arc handles move into the frozen table.
+    let (mut sole_fork, _) = source.fork_for_module().into_parts();
+    drop(source);
+    let sole_local_id = sole_fork.intern("sole-local");
+    let sole = sole_fork.freeze_flattening();
+    assert_eq!(sole.resolve(inherited_id).as_ptr(), inherited_pointer);
+
+    for (frozen, local_id, local) in [
+        (&shared, shared_local_id, "shared-local"),
+        (&sole, sole_local_id, "sole-local"),
+    ] {
+        assert_eq!(frozen.len(), 2);
+        assert_eq!(frozen.resolve(inherited_id), "inherited");
+        assert_eq!(frozen.resolve(local_id), local);
+    }
 }

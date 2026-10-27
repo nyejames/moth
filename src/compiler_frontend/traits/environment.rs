@@ -12,7 +12,8 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalCoreTraitIdentity, CanonicalTraitIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -138,7 +139,7 @@ impl TraitEnvironment {
         // Core cast traits never use mutable source access; `cast` must not
         // require mutable access or consume the source. `DISPLAYABLE` follows
         // the same convention because user receiver methods implement
-        // `display |This| -> String` immutably today.
+        // `display |This| -> String` immutably.
         let receiver = TraitReceiverRequirement::Immutable { this_type };
         let mut returns = vec![ResolvedTraitReturn {
             type_id: success_type,
@@ -360,13 +361,14 @@ impl TraitEnvironment {
         &mut self,
         path: PathId,
         trait_id: TraitId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let Some(existing_id) = self.ids_by_path.get(&path) {
             if *existing_id == trait_id {
                 return Ok(());
             }
 
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "A trait path resolved to two different trait identities.",
             ));
         }
@@ -394,13 +396,14 @@ impl TraitEnvironment {
         &mut self,
         identity: CanonicalTraitIdentity,
         trait_id: TraitId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let Some(existing_id) = self.ids_by_canonical_identity.get(&identity) {
             if *existing_id == trait_id {
                 return Ok(());
             }
 
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "A canonical trait identity resolved to two consumer-local trait definitions.",
             ));
         }
@@ -444,10 +447,8 @@ impl TraitEnvironment {
     ///      Returns `None` for user-authored trait names.
     /// WHY: core trait metadata is not registered through normal file
     ///      visibility, but user source still refers to it with the ordinary
-    ///      trait name in conformances and static bounds. Centralising the
-    ///      lookup here removes the previous one-off `DISPLAYABLE` helper
-    ///      and prevents future one-off helpers for every new core cast
-    ///      trait.
+    ///      trait name in conformances and static bounds. One lookup serves every core
+    ///      trait, including `DISPLAYABLE` and the core cast traits.
     pub(crate) fn core_trait_id_for_name(
         &self,
         trait_name: StringId,

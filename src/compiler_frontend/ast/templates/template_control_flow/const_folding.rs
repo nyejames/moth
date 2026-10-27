@@ -4,11 +4,8 @@
 //!       const-required template loops, and builds the per-iteration fold bindings
 //!       that template folding substitutes into body expressions.
 //!
-//! WHY: These helpers are owned by template control flow (the shape of a const
-//!       loop header and its bindings), but they previously lived in the general
-//!       template folding module. Moving them here keeps `template_folding.rs`
-//!       focused on render-plan emission orchestration while giving const-loop
-//!       mechanics a single, focused owner.
+//! WHY: const-loop header and binding mechanics have a focused owner, leaving
+//! `template_folding.rs` responsible for render-plan emission orchestration.
 
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
@@ -18,9 +15,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OccurrenceFacts,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -75,7 +72,7 @@ enum ConstRangeCursorKind {
     },
     /// A fixed binary-float cursor that rounds every candidate to its own precision.
     ///
-    /// WHY: D15 keeps the range's selected precision, so an `F16` counter advances
+    /// WHY: the range's selected precision is kept, so an `F16` counter advances
     ///      exactly as `F16` arithmetic does rather than widening to `F32`.
     FixedFloat {
         current: f64,
@@ -207,7 +204,7 @@ impl ConstRangeCursor {
                 });
             }
             FixedScalarClass::BinaryFloat => {
-                // D15: every candidate rounds to the range's own precision before the
+                // Every candidate rounds to the range's own precision before the
                 // endpoint and no-progress checks, so `F16` advances exactly as `F16`
                 // arithmetic does instead of widening through an `F32` floor.
                 let precision = scalar
@@ -277,7 +274,7 @@ impl ConstRangeCursor {
                 }
 
                 if self.emitted_iterations >= self.limit {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: self.limit,
                         },
@@ -320,7 +317,7 @@ impl ConstRangeCursor {
                 }
 
                 if self.emitted_iterations >= self.limit {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: self.limit,
                         },
@@ -397,7 +394,7 @@ fn fixed_integer_max_magnitude(scalar: FixedScalar) -> Option<i128> {
 fn invalid_range_bounds(
     span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> TemplateError {
-    CompilerDiagnostic::invalid_template_structure(
+    templates::invalid_template_structure(
         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
         span,
     )
@@ -481,7 +478,7 @@ pub(crate) fn const_collection_items(
         _ => None,
     };
     let Some(values) = values else {
-        return Err(CompilerDiagnostic::invalid_template_structure(
+        return Err(templates::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
             span,
         )
@@ -490,7 +487,8 @@ pub(crate) fn const_collection_items(
     let mut items = Vec::with_capacity(values.len());
     for &value in values {
         let metadata = constants.metadata(value).ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Missing const collection item.",
             )
         })?;
@@ -622,7 +620,8 @@ fn iteration_index_binding(
     constants: &mut ConstValueStore,
 ) -> Result<TemplateFoldBinding, TemplateError> {
     let position = i32::try_from(zero_based_index).map_err(|_| {
-        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+        crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Const loop position exceeded I32.",
         )
     })?;

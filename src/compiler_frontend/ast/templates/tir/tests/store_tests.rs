@@ -325,7 +325,7 @@ fn slot_plan_cannot_be_committed_twice() {
     let error = store
         .commit_slot_plan(reserved, runtime_slot_plan(render_root))
         .expect_err("a committed plan cannot be committed again");
-    assert!(error.msg.contains("committed more than once"));
+    assert!(error.message.contains("committed more than once"));
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn checked_template_kind_write_rejects_missing_id() {
     let error = store
         .set_template_kind(TemplateIrId::new(3), TemplateType::String)
         .expect_err("missing templates cannot receive a kind write");
-    assert!(error.msg.contains("no template"));
+    assert!(error.message.contains("no template"));
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn overlay_allocation_rejects_duplicate_and_out_of_range_keys() {
     assert!(
         duplicate
             .expect_err("duplicate overlay keys must be rejected")
-            .msg
+            .message
             .contains("duplicate child-template-occurrence")
     );
 
@@ -363,7 +363,7 @@ fn overlay_allocation_rejects_duplicate_and_out_of_range_keys() {
     assert!(
         out_of_range
             .expect_err("unallocated overlay keys must be rejected")
-            .msg
+            .message
             .contains("out-of-range slot-occurrence")
     );
 }
@@ -400,7 +400,7 @@ fn control_flow_body_replacement_rejects_missing_owner() {
             replacement,
         )
         .expect_err("a missing control-flow node cannot receive a body");
-    assert!(error.msg.contains("no node"));
+    assert!(error.message.contains("no node"));
 }
 
 #[test]
@@ -423,7 +423,7 @@ fn slot_plan_commit_rejects_source_id_that_differs_from_index() {
             },
         )
         .expect_err("source IDs must match their vector index");
-    assert!(error.msg.contains("contribution source"));
+    assert!(error.message.contains("contribution source"));
     assert!(store.get_slot_plan(reserved).is_none());
 }
 
@@ -446,7 +446,7 @@ fn slot_plan_commit_rejects_site_id_that_differs_from_index() {
             },
         )
         .expect_err("site IDs must match their vector index");
-    assert!(error.msg.contains("slot-plan site"));
+    assert!(error.message.contains("slot-plan site"));
     assert!(store.get_slot_plan(reserved).is_none());
 }
 
@@ -469,7 +469,7 @@ fn slot_plan_commit_rejects_missing_source_render_root() {
             },
         )
         .expect_err("source render roots must exist");
-    assert!(error.msg.contains("missing render root"));
+    assert!(error.message.contains("missing render root"));
     assert!(store.get_slot_plan(reserved).is_none());
 }
 
@@ -480,7 +480,7 @@ fn slot_plan_commit_rejects_missing_site_render_root() {
     let error = store
         .commit_slot_plan(reserved, runtime_slot_plan(TemplateIrNodeId::new(99)))
         .expect_err("site render roots must exist");
-    assert!(error.msg.contains("missing render root"));
+    assert!(error.message.contains("missing render root"));
     assert!(store.get_slot_plan(reserved).is_none());
 }
 
@@ -612,7 +612,7 @@ fn reserved_plan_cannot_be_attached_to_a_template() {
     let error = store
         .attach_runtime_slot_plan(template_id, reserved)
         .expect_err("reserved plans are not attachable");
-    assert!(error.msg.contains("uncommitted"));
+    assert!(error.message.contains("uncommitted"));
 }
 
 #[test]
@@ -629,7 +629,7 @@ fn control_flow_lookup_reports_missing_node_as_error() {
     let error = store
         .control_flow_node_id_in_subtree(TemplateIrNodeId::new(99))
         .expect_err("missing nodes are compiler errors");
-    assert!(error.msg.contains("no node"));
+    assert!(error.message.contains("no node"));
 }
 
 #[test]
@@ -656,7 +656,7 @@ fn control_flow_lookup_reports_missing_forwarding_template_as_error() {
     let error = store
         .control_flow_node_id_in_subtree(sequence)
         .expect_err("missing forwarding templates are compiler errors");
-    assert!(error.msg.contains("no forwarding template"));
+    assert!(error.message.contains("no forwarding template"));
 }
 
 #[test]
@@ -672,7 +672,7 @@ fn control_flow_lookup_reports_cycle_as_error() {
     let error = store
         .control_flow_node_id_in_subtree(sequence)
         .expect_err("cycles are compiler errors");
-    assert!(error.msg.contains("cycle"));
+    assert!(error.message.contains("cycle"));
 }
 
 #[test]
@@ -687,7 +687,7 @@ fn derived_publication_rejects_unknown_source() {
             ),
         )
         .expect_err("unknown sources cannot be derivation authority");
-    assert!(error.msg.contains("unknown source"));
+    assert!(error.message.contains("unknown source"));
 }
 
 #[test]

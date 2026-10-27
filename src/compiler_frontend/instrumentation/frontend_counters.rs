@@ -165,10 +165,6 @@ pub(crate) enum FrontendCounter {
     StringTableMergeFromSourceEntriesScanned,
     StringTableDeltaMergeCalls,
     StringTableDeltaEntriesScanned,
-    /// Rows copied by cloning a flat declaration table instead of sharing it as an inherited
-    /// generated prefix. Generated-layer clones deliberately contribute zero.
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    GeneratedDeclarationInheritedRowCopies,
     // These identity/non-identity counters are emitted only by explicit
     // benchmark-counter identity scans so default builds avoid extra remap
     // traversal cost.
@@ -424,7 +420,6 @@ mod detailed {
     static CONVERGENCE_SUMMARY_CHANGES: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_MERGE_CALLS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
-    static GENERATED_DECLARATION_INHERITED_ROW_COPIES: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_NON_IDENTITY_REMAPS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_NON_IDENTITY_ENTRIES: AtomicUsize = AtomicUsize::new(0);
@@ -699,7 +694,6 @@ mod detailed {
             FrontendCounter::StringTableMergeFromSourceEntriesScanned,
             FrontendCounter::StringTableDeltaMergeCalls,
             FrontendCounter::StringTableDeltaEntriesScanned,
-            FrontendCounter::GeneratedDeclarationInheritedRowCopies,
             FrontendCounter::StringTableDeltaIdentityRemaps,
             FrontendCounter::StringTableDeltaNonIdentityRemaps,
             FrontendCounter::StringTableDeltaNonIdentityEntries,
@@ -1035,10 +1029,6 @@ mod detailed {
             FrontendCounter::StringTableDeltaMergeCalls => &STRING_TABLE_DELTA_MERGE_CALLS,
 
             FrontendCounter::StringTableDeltaEntriesScanned => &STRING_TABLE_DELTA_ENTRIES_SCANNED,
-
-            FrontendCounter::GeneratedDeclarationInheritedRowCopies => {
-                &GENERATED_DECLARATION_INHERITED_ROW_COPIES
-            }
 
             FrontendCounter::StringTableDeltaIdentityRemaps => &STRING_TABLE_DELTA_IDENTITY_REMAPS,
 
@@ -1451,10 +1441,6 @@ mod detailed {
             FrontendCounter::StringTableDeltaMergeCalls => "string_table_delta_merge_calls",
 
             FrontendCounter::StringTableDeltaEntriesScanned => "string_table_delta_entries_scanned",
-
-            FrontendCounter::GeneratedDeclarationInheritedRowCopies => {
-                "generated_declaration_inherited_row_copies"
-            }
 
             FrontendCounter::StringTableDeltaIdentityRemaps => "string_table_delta_identity_remaps",
 

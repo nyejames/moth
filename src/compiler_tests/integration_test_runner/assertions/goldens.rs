@@ -241,8 +241,8 @@ pub(super) fn validate_golden_outputs(
 
         // The authored golden's artifact kind decides the comparison before any content is read.
         // A directory or an unbuilt entry is a kind mismatch, never an empty file: comparing them
-        // as empty bytes let an empty golden pass against a path that holds no file at all. A
-        // produced kind the golden did not claim is a mismatch too, so identical bytes emitted as
+        // as empty bytes could let an empty golden pass against a path that holds no file.
+        // A produced kind the golden did not claim is a mismatch too, so identical bytes emitted as
         // a different artifact kind cannot satisfy the golden.
         let produced = match (file.expected_kind, output.file_kind()) {
             (ArtifactKind::Html, FileKind::Html(content))

@@ -38,9 +38,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
     FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts, TopLevelDeclarationTable,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidExpressionReason, InvalidTemplateStructureReason, NameNamespace,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -119,9 +117,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
         &style_directives,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -146,7 +142,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains("missing same-store template"),
+        error.message.contains("missing same-store template"),
         "unexpected infrastructure error: {error:?}"
     );
 }
@@ -263,9 +259,7 @@ fn const_required_option_capture_template_with_direct_tir(
     }
 }
 
-fn parse_template_error(
-    source: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+fn parse_template_error(source: &str) -> CompactDiagnosticBagForTest {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -275,9 +269,7 @@ fn parse_template_error(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -314,9 +306,7 @@ fn parse_control_flow_template_after_composition(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -350,7 +340,7 @@ fn parse_control_flow_template_after_composition(
 
 fn parse_control_flow_template_after_composition_error(
     source: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+) -> CompactDiagnosticBagForTest {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -358,9 +348,7 @@ fn parse_control_flow_template_after_composition_error(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -405,9 +393,7 @@ fn parse_runtime_template_without_validation(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -533,9 +519,7 @@ fn const_required_construction(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -569,9 +553,7 @@ fn parse_const_required_template(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -596,9 +578,7 @@ fn parse_const_required_template(
     (template, context, string_table)
 }
 
-fn parse_const_required_template_error(
-    source: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+fn parse_const_required_template_error(source: &str) -> CompactDiagnosticBagForTest {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -608,9 +588,7 @@ fn parse_const_required_template_error(
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -640,9 +618,9 @@ fn assert_internal_template_error_contains(error: TemplateError, expected_messag
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains(expected_message),
+        error.message.contains(expected_message),
         "error message should contain {expected_message:?}, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1032,18 +1010,6 @@ fn assert_body_node_static_excludes(
         !rendered.contains(unexpected),
         "expected {rendered:?} to exclude {unexpected:?}"
     );
-}
-
-fn assert_invalid_template_structure(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
-    expected_reason: InvalidTemplateStructureReason,
-) {
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateStructure { reason } => {
-            assert_eq!(*reason, expected_reason);
-        }
-        payload => panic!("expected invalid template structure payload, found {payload:?}"),
-    }
 }
 
 fn expect_conditional_node(template: &Template, context: &ScopeContext) -> TemplateIrNodeId {

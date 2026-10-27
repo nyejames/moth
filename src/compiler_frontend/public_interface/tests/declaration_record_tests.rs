@@ -5,7 +5,7 @@
 //! generic identities and ordered source/core trait bounds on generic free functions,
 //! stability of generic identity across donor-local allocation differences, nested
 //! option/collection and imported public nominal references projecting to canonical
-//! identities, the `CompilerError` totality failures for missing nominal origin, missing
+//! identities, the `InfrastructureFailure` totality failures for missing nominal origin, missing
 //! signature `TypeId`, category mismatch and unregistered generic parameters, and the
 //! receiver-method join invariants: same-named methods on distinct receivers join by exact
 //! stable origin, and duplicate receiver seed, path and category mismatches are rejected.
@@ -38,7 +38,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity,
     CanonicalTypeIdentity, ExportedGenericParameterIdentity, GenericDeclarationOrigin,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -52,7 +52,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::public_interface::{
     CallableSeed, CallableSeedKind, PublicDeclarationSemantics, PublicFunctionCategory,
-    PublicGenericParameterSurface, PublicStructSemantics,
+    PublicGenericParameterSurface, PublicInterfaceDraftBuildFailure, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
@@ -403,7 +403,7 @@ fn build_draft(
     bindings: Vec<ExportBinding>,
     trait_source_facts: FxHashMap<TraitId, crate::compiler_frontend::ast::ResolvedTraitSourceFact>,
     refs: &DraftRefs<'_>,
-) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+) -> Result<Vec<PublicDeclarationRecord>, PublicInterfaceDraftBuildFailure> {
     build_draft_with_constants(
         roots,
         receiver_methods,
@@ -421,7 +421,7 @@ fn build_draft_with_constants(
     trait_source_facts: FxHashMap<TraitId, crate::compiler_frontend::ast::ResolvedTraitSourceFact>,
     module_constants: &ConstValueStore,
     refs: &DraftRefs<'_>,
-) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+) -> Result<Vec<PublicDeclarationRecord>, PublicInterfaceDraftBuildFailure> {
     let table = root_table(roots, receiver_methods, trait_source_facts);
     let export_seed = DirectExportSeed::new(active_module_origin(), bindings, FxHashMap::default());
     let projection_input = AstPublicInterfaceProjectionInput {
@@ -446,6 +446,17 @@ fn build_draft_with_constants(
     })
     .build()
     .map(|result| result.draft.declarations)
+}
+
+fn expect_infrastructure_failure(
+    failure: PublicInterfaceDraftBuildFailure,
+) -> InfrastructureFailure {
+    match failure {
+        PublicInterfaceDraftBuildFailure::Infrastructure(error) => error,
+        PublicInterfaceDraftBuildFailure::Diagnostic(_) => {
+            panic!("expected an infrastructure failure")
+        }
+    }
 }
 
 fn field_declaration_with_default(
@@ -473,7 +484,7 @@ fn project_struct_record(
     retained_fields: Vec<Declaration>,
     constants: &ConstValueStore,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+) -> Result<Vec<PublicDeclarationRecord>, PublicInterfaceDraftBuildFailure> {
     let struct_path = path("Widget", string_table, path_fork);
     let (_, type_id) = register_struct_at_path(env, struct_path, field_definitions, None);
     let root = struct_root("Widget", type_id, retained_fields, string_table, path_fork);
@@ -1017,7 +1028,7 @@ fn multiple_bounds_preserve_declaration_order() {
 }
 
 #[test]
-fn missing_trait_source_fact_is_compiler_error() {
+fn missing_trait_source_fact_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1063,12 +1074,12 @@ fn missing_trait_source_fact_is_compiler_error() {
 
     assert!(
         result.is_err(),
-        "a bound TraitId with no retained trait source fact must be a CompilerError"
+        "a bound TraitId with no retained trait source fact must be an InfrastructureFailure"
     );
 }
 
 #[test]
-fn duplicate_canonical_generic_bound_identity_is_compiler_error() {
+fn duplicate_canonical_generic_bound_identity_is_diagnostic() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1136,10 +1147,10 @@ fn duplicate_canonical_generic_bound_identity_is_compiler_error() {
     )
     .expect_err("duplicate canonical generic bounds must be rejected");
 
-    assert!(
-        result.msg.contains("same canonical trait identity"),
-        "the failure should identify the collapsed canonical bound identity"
-    );
+    let PublicInterfaceDraftBuildFailure::Diagnostic(diagnostic) = result else {
+        panic!("duplicate canonical generic bounds must produce a diagnostic");
+    };
+    assert_eq!(diagnostic.code(), "MOTH-SYNTAX-0020");
 }
 
 #[test]
@@ -1505,7 +1516,7 @@ fn projects_imported_public_nominal_reference_to_provider_origin() {
 }
 
 #[test]
-fn imported_nominal_required_but_absent_from_index_is_compiler_error() {
+fn imported_nominal_required_but_absent_from_index_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1550,7 +1561,7 @@ fn imported_nominal_required_but_absent_from_index_is_compiler_error() {
     let binding = export_binding("Widget", OriginDeclarationId::Type(struct_origin("Widget")));
 
     // The index carries only the active-root nominal; "Imported" is absent, so its required
-    // nominal reference cannot resolve and must fail with a precise CompilerError rather than a
+    // nominal reference cannot resolve and must fail with a precise InfrastructureFailure rather than a
     // path/display identity fallback.
     let nominal_map = nominal_origins_map(
         vec![("Widget", struct_origin("Widget"))],
@@ -1574,16 +1585,16 @@ fn imported_nominal_required_but_absent_from_index_is_compiler_error() {
     assert!(
         result.is_err(),
         "a public field referencing an imported nominal absent from the source-nominal origin \
-         index (None owner) must be a CompilerError"
+         index (None owner) must be an InfrastructureFailure"
     );
 }
 
 // ---------------------------------------------------------------------------
-//  CompilerError totality failures
+//  InfrastructureFailure totality failures
 // ---------------------------------------------------------------------------
 
 #[test]
-fn missing_nominal_origin_is_compiler_error() {
+fn missing_nominal_origin_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1629,7 +1640,7 @@ fn missing_nominal_origin_is_compiler_error() {
 }
 
 #[test]
-fn missing_signature_slot_type_id_is_compiler_error() {
+fn missing_signature_slot_type_id_is_infrastructure_failure() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1668,12 +1679,12 @@ fn missing_signature_slot_type_id_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "a return slot with no TypeId must be a CompilerError, not silently omitted"
+        "a return slot with no TypeId must be an InfrastructureFailure, not silently omitted"
     );
 }
 
 #[test]
-fn category_mismatch_between_root_and_binding_is_compiler_error() {
+fn category_mismatch_between_root_and_binding_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1726,7 +1737,7 @@ fn category_mismatch_between_root_and_binding_is_compiler_error() {
 }
 
 #[test]
-fn unregistered_generic_parameter_in_signature_is_compiler_error() {
+fn unregistered_generic_parameter_in_signature_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1768,12 +1779,12 @@ fn unregistered_generic_parameter_in_signature_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "a generic parameter whose owner was not registered must be a CompilerError"
+        "a generic parameter whose owner was not registered must be an InfrastructureFailure"
     );
 }
 
 #[test]
-fn non_trait_binding_without_matching_root_is_compiler_error() {
+fn non_trait_binding_without_matching_root_is_infrastructure_failure() {
     let env = TypeEnvironment::new();
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
@@ -1798,12 +1809,12 @@ fn non_trait_binding_without_matching_root_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "a non-trait binding with no matching root must be a CompilerError"
+        "a non-trait binding with no matching root must be an InfrastructureFailure"
     );
 }
 
 #[test]
-fn unmatched_extra_root_is_compiler_error() {
+fn unmatched_extra_root_is_infrastructure_failure() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1827,7 +1838,7 @@ fn unmatched_extra_root_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "a root with no matching export binding must be a CompilerError"
+        "a root with no matching export binding must be an InfrastructureFailure"
     );
 }
 
@@ -2097,7 +2108,7 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
 }
 
 #[test]
-fn duplicate_receiver_method_entry_is_compiler_error() {
+fn duplicate_receiver_method_entry_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -2153,12 +2164,12 @@ fn duplicate_receiver_method_entry_is_compiler_error() {
     assert!(
         result.is_err(),
         "two receiver-method entries sharing the exact stable receiver origin and method name \
-         must be a CompilerError, not a silent overwrite"
+         must be an InfrastructureFailure, not a silent overwrite"
     );
 }
 
 #[test]
-fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
+fn duplicate_exact_seed_path_with_distinct_origins_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -2213,10 +2224,10 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "two receiver-method seeds sharing the exact declaration path must be a CompilerError \
+        "two receiver-method seeds sharing the exact declaration path must be an InfrastructureFailure \
          even when their stable origins differ"
     );
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(
         message.contains("duplicate public callable declaration path"),
         "expected a duplicate-path diagnostic, got: {message}"
@@ -2224,7 +2235,7 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
 }
 
 #[test]
-fn struct_receiver_key_with_choice_origin_is_compiler_error() {
+fn struct_receiver_key_with_choice_origin_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -2270,13 +2281,13 @@ fn struct_receiver_key_with_choice_origin_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "a struct receiver key whose resolved nominal origin is a choice must be a CompilerError \
+        "a struct receiver key whose resolved nominal origin is a choice must be an InfrastructureFailure \
          rather than a silent coercion"
     );
 }
 
 #[test]
-fn choice_receiver_key_with_struct_origin_is_compiler_error() {
+fn choice_receiver_key_with_struct_origin_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -2323,7 +2334,7 @@ fn choice_receiver_key_with_struct_origin_is_compiler_error() {
     );
     assert!(
         result.is_err(),
-        "a choice receiver key whose resolved nominal origin is a struct must be a CompilerError \
+        "a choice receiver key whose resolved nominal origin is a struct must be an InfrastructureFailure \
          rather than a silent coercion"
     );
 }
@@ -2412,7 +2423,12 @@ fn struct_record_rejects_field_count_mismatch() {
     )
     .expect_err("a missing retained field declaration must be rejected");
 
-    assert!(error.msg.contains("retained declaration count must match"));
+    let error = expect_infrastructure_failure(error);
+    assert!(
+        error
+            .message
+            .contains("retained declaration count must match")
+    );
 }
 
 #[test]
@@ -2442,7 +2458,8 @@ fn struct_record_rejects_field_name_or_order_mismatch() {
     )
     .expect_err("retained field order must match the canonical definition");
 
-    assert!(error.msg.contains("field name or order mismatch"));
+    let error = expect_infrastructure_failure(error);
+    assert!(error.message.contains("field name or order mismatch"));
 }
 
 #[test]
@@ -2480,7 +2497,8 @@ fn struct_record_rejects_field_type_id_mismatch() {
     )
     .expect_err("a retained field TypeId mismatch must be rejected");
 
-    assert!(error.msg.contains("TypeId mismatch"));
+    let error = expect_infrastructure_failure(error);
+    assert!(error.message.contains("TypeId mismatch"));
 }
 
 #[test]
@@ -2510,7 +2528,8 @@ fn struct_record_rejects_duplicate_canonical_field_name() {
     )
     .expect_err("duplicate canonical field names must be rejected");
 
-    assert!(error.msg.contains("duplicate field name"));
+    let error = expect_infrastructure_failure(error);
+    assert!(error.message.contains("duplicate field name"));
 }
 
 fn origin_defining_name(origin: &OriginDeclarationId) -> &str {

@@ -31,9 +31,12 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary,
     TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, InvalidFallibleHandlingReason,
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -126,13 +129,21 @@ fn assert_escape_span(fx: &TestExpressions, message: ExprId) -> Option<SourceSpa
         assert_message_escape_diagnostic(fx.view(message), &TemplateIrStore::new(), &fx.builder)
             .expect("assertion-message traversal should not fail")
             .expect("message should reject escaping control flow");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-        }
-    ));
-    diagnostic.primary_span
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("assertion-message escape should be invalid fallible handling");
+    assert_eq!(
+        facts.reason,
+        InvalidFallibleHandlingCode::AssertionMessageCannotEscape
+    );
+    match diagnostic.primary_site() {
+        SiteRef::Local(span) => Some(span),
+        SiteRef::Absent | SiteRef::Foreign { .. } => None,
+    }
 }
 
 #[test]
@@ -242,11 +253,24 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
         .template(template, ValueMode::ImmutableOwned)
         .expect("fixture template message")
         .id();
-
     let diagnostic = assert_message_escape_diagnostic(fx.view(message), &store, &fx.builder)
-        .expect("raw TIR traversal should not fail")
-        .expect("raw TIR dynamic expressions must reject propagation");
-    assert_eq!(diagnostic.primary_span, span);
+        .expect("assertion-message traversal should not fail")
+        .expect("raw TIR dynamic expression should reject escaping control flow");
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("raw TIR dynamic expression retains fallible-handling facts");
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(actual_span) | SiteRef::Foreign { span: actual_span, .. }
+                if Some(actual_span) == span
+        ) || matches!(diagnostic.primary_site(), SiteRef::Absent if span.is_none())
+    );
 }
 
 #[test]
@@ -383,27 +407,24 @@ check || -> String:
     return "done"
 ;
 "#;
-    let payload =
-        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(source)
-            .payload;
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidControlFlowStatement {
-            reason: InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
-        }
-    ));
+    let failure =
+        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(source);
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0042",
+        Some("invalid_control_flow_statement.value_block_outside_receiver"),
+    );
 }
 
 #[test]
 fn static_true_assertion_still_validates_invalid_template_message_source() {
-    let diagnostic =
-        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
-            "assert(true, [: before [break] after])\n",
-        );
+    let failure = crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
+        "assert(true, [: before [break] after])\n",
+    );
 
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
-    ));
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0002",
+        None,
+    );
 }

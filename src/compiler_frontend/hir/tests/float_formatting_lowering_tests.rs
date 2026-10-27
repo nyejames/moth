@@ -91,9 +91,7 @@ fn find_format_float_statements(
                 result,
                 ..
             } => {
-                let result_type = builder
-                    .local_type_id_or_error(result.local(), &statement.span)
-                    .ok();
+                let result_type = builder.local_type_id_or_error(result.local()).ok();
                 result_type.map(|ty| (*failure_mode, ty))
             }
             _ => None,

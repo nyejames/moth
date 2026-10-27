@@ -22,9 +22,6 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_builder::{
-    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
-};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
@@ -44,6 +41,9 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -274,8 +274,7 @@ fn lower_with_converged_summaries(
         string_table,
     )
     .expect("catch-pruning fixtures must pass borrow checking");
-    infer_builtin_failure_summaries(&hir, &mut report)
-        .expect("catch-pruning fixture summaries must converge");
+    infer_builtin_failure_summaries(&hir, &mut report);
     (hir, report, type_environment)
 }
 
@@ -496,9 +495,9 @@ fn validation_rejects_missing_provenance_coverage() {
     assert!(result.is_err());
     let error = result.unwrap_err();
     assert!(
-        error.msg.contains("function_provenance"),
+        error.message.contains("function_provenance"),
         "error should mention function_provenance, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -546,9 +545,9 @@ fn validation_rejects_extra_provenance_entry() {
     assert!(result.is_err());
     let error = result.unwrap_err();
     assert!(
-        error.msg.contains("function_provenance"),
+        error.message.contains("function_provenance"),
         "error should mention function_provenance, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -599,9 +598,9 @@ fn validation_rejects_replaced_out_of_range_provenance_key() {
     assert!(result.is_err());
     let error = result.unwrap_err();
     assert!(
-        error.msg.contains("function_provenance"),
+        error.message.contains("function_provenance"),
         "error should mention function_provenance, got: {}",
-        error.msg
+        error.message
     );
 }
 

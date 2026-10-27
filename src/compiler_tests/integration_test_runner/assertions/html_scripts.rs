@@ -2,11 +2,9 @@
 //!
 //! WHAT: parses emitted HTML for the exact script shapes the Node harness can execute and rejects
 //!       every other shape.
-//! WHY: a permissive substring scanner silently decides what "runtime output" means. It executed
-//!      data blocks such as `<script type="importmap">`, ignored external `src` scripts whose code
-//!      never ran, matched tags case-sensitively and stopped quietly at a malformed closing tag —
-//!      each of which lets a case claim runtime evidence the harness never produced. Unsupported
-//!      shapes are harness failures here so that claim cannot be made silently.
+//! WHY: executing data blocks, skipping external scripts, matching tags case-sensitively or
+//!      truncating malformed markup would let cases claim runtime evidence the harness did not
+//!      produce. Unsupported shapes are harness failures.
 //!
 //! Supported shapes:
 //! - `<script>` with no `type`, executed as classic script source
@@ -56,7 +54,7 @@ pub(crate) struct ExecutableScripts {
 
 /// Returns the supported inline script sources in document order.
 ///
-/// Empty classic scripts are dropped as before. The single module block is retained verbatim so
+/// Empty classic scripts are dropped. The single module block is retained verbatim so
 /// the harness can import it with native ESM semantics instead of concatenating it as classic JS.
 pub(crate) fn extract_executable_scripts(
     html: &str,

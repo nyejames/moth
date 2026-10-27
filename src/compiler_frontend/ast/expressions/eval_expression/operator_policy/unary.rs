@@ -6,8 +6,8 @@
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::negation_domain;
@@ -33,7 +33,7 @@ pub(super) fn resolve_unary_operator_type(
             if operand == bool_type_id {
                 Ok(bool_type_id)
             } else {
-                Err(CompilerDiagnostic::unsupported_operator_types(
+                Err(types_borrows_targets::unsupported_operator_types(
                     diagnostic_operator_from_ast(op),
                     operand,
                     None,
@@ -50,7 +50,7 @@ pub(super) fn resolve_unary_operator_type(
             if let Some(domain) = domain {
                 Ok(domain.type_id(type_environment))
             } else {
-                Err(CompilerDiagnostic::unsupported_operator_types(
+                Err(types_borrows_targets::unsupported_operator_types(
                     diagnostic_operator_from_ast(op),
                     operand,
                     None,
@@ -60,12 +60,13 @@ pub(super) fn resolve_unary_operator_type(
             }
         }
 
-        // Defensive fallback: `Not` and `Negate` are the only operators that can appear in
-        // unary position. Keeping the arm unreachable without a panic preserves totality.
-        _ => Err(CompilerError::compiler_error(format!(
-            "Unsupported unary operator in expression typing: {:?}",
+        // `Not` and `Negate` are the only operators with required_values() == 1
+        // (`expression_kind.rs`); result typing builds Unary children only for those
+        // (`result_type.rs` arity-1 arm).
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "resolve_unary_operator_type received {:?}; Unary children are built only for Not and Negate",
             op
-        ))
-        .into()),
+        ),
     }
 }

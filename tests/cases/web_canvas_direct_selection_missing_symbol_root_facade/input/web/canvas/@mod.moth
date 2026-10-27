@@ -1,1 +1,1 @@
--- This facade shape previously caused missing external symbols to report facade diagnostics.
+-- This facade shape reports a missing external symbol as MOTH-IMPORT-0013.

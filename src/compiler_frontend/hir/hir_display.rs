@@ -2,9 +2,8 @@
 //!
 //! Responsible for providing a way to get location and variable name information back from HIR.
 //!
-//! This will be used to help the rest of the HIR and borrow checker stages to create and return useful errors and warnings.
-//! (CompilerMessages)
-//! It will also enable printing out Hir structures for easy debugging also.
+//! HIR lowering logs use these helpers to render expressions, terminators and call bindings.
+//! Under the `show_hir` feature and in tests, they also print whole HIR structures for debugging.
 
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::datatypes::definitions::{

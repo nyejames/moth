@@ -1,5 +1,17 @@
+//! Provider-backed import resolution for Stage 0 discovery.
+//!
+//! WHAT: `resolve_provider_backed_import` resolves a provider-backed import prefix to a canonical
+//!       filesystem path, checks the build cache, calls the provider if needed, and records the
+//!       result in the resolution table and package registry.
+//! WHY:  directory projects resolve provider-owned targets through the boundary-aware namespace
+//!       shared with compiler-semantic dependencies. Single-file synthetic compilation keeps its
+//!       separate filesystem-backed resolver. Both lanes finish before the mutable fork
+//!       is moved into the provider context.
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, project_config};
 use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 // -------------------------
 //  Provider-backed import resolution
@@ -66,10 +78,11 @@ pub(super) fn resolve_provider_backed_import(
 /// the resolver's root tables. This is deliberately separate from the directory index path.
 fn resolve_provider_target_via_filesystem(
     request: &ProviderBackedImportRequest<'_>,
-    string_table: &mut StringTable,
+    string_table: &StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let canonical_source_path = resolve_provider_prefix_to_canonical_path(
         request.prefix_path,
+        request.source_span,
         request.path_fork,
         request.consumer_canonical_path,
         request.project_path_resolver,
@@ -144,7 +157,7 @@ fn invoke_provider_and_record_resolution(
 
         provider
             .resolve_external_import(provider_request, &mut context)
-            .map_err(SourceDiscoveryError::from)?
+            .map_err(SourceDiscoveryError::Premerge)?
     };
 
     if let Some(resolved) = result {
@@ -167,10 +180,11 @@ fn invoke_provider_and_record_resolution(
 /// extension candidate selection used by isolated compiler-source resolution.
 fn resolve_provider_prefix_to_canonical_path(
     prefix_path: PathId,
+    source_span: Option<SourceSpan>,
     path_fork: &PathInternerFork,
     declaring_file: &Path,
     project_path_resolver: &ProjectPathResolver,
-    string_table: &mut StringTable,
+    string_table: &StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
     let (base_kind, filesystem_base) = if let Some(package_root) = project_path_resolver
         .source_package_root_for_dependency(prefix_path, path_fork, string_table)
@@ -195,17 +209,20 @@ fn resolve_provider_prefix_to_canonical_path(
     let normalized =
         join_and_normalize_path(&filesystem_base, prefix_path, path_fork, string_table);
 
-    let canonical = fs::canonicalize(&normalized)
-        .map_err(|error| {
-            CompilerError::file_error(
+    let canonical = fs::canonicalize(&normalized).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            SourceDiscoveryError::from(imports::missing_import_target(prefix_path, source_span))
+        } else {
+            SourceDiscoveryError::from(InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 declaring_file,
                 format!(
                     "Failed to canonicalize external import prefix '{}': {error}",
                     normalized.display()
                 ),
-            )
-        })
-        .map_err(SourceDiscoveryError::from)?;
+            ))
+        }
+    })?;
 
     crate::compiler_frontend::paths::dependency_resolution::validate_dependency_boundary(
         &canonical,
@@ -228,12 +245,9 @@ fn source_file_logical_path(
         .logical_path_for_canonical_file(canonical_file)
         .map_err(SourceDiscoveryError::from)?;
     let logical_text = logical.to_str().ok_or_else(|| {
-        SourceDiscoveryError::from(CompilerError::file_error(
-            &logical,
-            format!(
-                "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-            ),
-        ))
+        SourceDiscoveryError::from(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &logical, format!(
+            "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+        )))
     })?;
     Ok(logical_text.replace('\\', "/"))
 }
@@ -259,7 +273,7 @@ fn check_provider_dependency_module_boundary(
 
     if consumer_container != target_container {
         return Err(SourceDiscoveryError::from(
-            CompilerDiagnostic::cross_module_import_not_exported(dependency_path, source_span),
+            imports::cross_module_import_not_exported(dependency_path, source_span),
         ));
     }
 
@@ -300,18 +314,18 @@ fn provider_dependency_container(
 pub(super) fn unsupported_builder_package_error(
     package_path: &str,
     source_span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    let package_path_id = string_table.intern(package_path);
-    CompilerDiagnostic::unsupported_builder_package(package_path_id, source_span)
+    strings: &mut DiagnosticStringBuilder<'_>,
+) -> DiagnosticDraft {
+    let package_path_id = strings.intern(package_path);
+    project_config::unsupported_builder_package(package_path_id, source_span)
 }
 
 pub(super) fn unsupported_external_extension_error(
     import_path: PathId,
     extension: &str,
     source_span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    let extension_id = string_table.intern(extension);
-    CompilerDiagnostic::unsupported_external_extension(import_path, extension_id, source_span)
+    strings: &mut DiagnosticStringBuilder<'_>,
+) -> DiagnosticDraft {
+    let extension_id = strings.intern(extension);
+    imports::unsupported_external_extension(import_path, extension_id, source_span)
 }

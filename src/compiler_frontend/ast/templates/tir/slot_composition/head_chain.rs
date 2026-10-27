@@ -20,7 +20,8 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use super::helpers::{
-    children_of_node, compose_wrapper_application, internal_compiler_error, rebuild_root_sequence,
+    children_of_node, compose_wrapper_application, internal_infrastructure_failure,
+    rebuild_root_sequence,
 };
 
 /// Typed result for the TIR head-chain composition family.
@@ -135,7 +136,7 @@ pub(super) fn root_sequence_children(
     node_id: TemplateIrNodeId,
 ) -> HeadChainResult<Option<&[TemplateIrNodeId]>> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(internal_compiler_error(
+        return Err(internal_infrastructure_failure(
             "TIR head-chain composition: root node ID was not present in the store.",
         ));
     };
@@ -164,7 +165,7 @@ fn partition_tir_children_by_origin(
 
     for child_id in children {
         let child_node = store.get_node(*child_id).ok_or_else(|| {
-            internal_compiler_error(
+            internal_infrastructure_failure(
                 "TIR head-chain composition: child node ID was not present in the store while partitioning.",
             )
         })?;
@@ -209,7 +210,7 @@ fn is_tir_receiver(
     node_id: TemplateIrNodeId,
 ) -> HeadChainResult<Option<(TemplateWrapperReference, TirSlotLayout)>> {
     let Some(node) = store.get_node(node_id) else {
-        return Err(internal_compiler_error(
+        return Err(internal_infrastructure_failure(
             "TIR head-chain composition: child node ID was not present in the store while checking receiver.",
         ));
     };
@@ -219,7 +220,7 @@ fn is_tir_receiver(
     };
 
     let Some(template_ir) = store.get_template(reference.root) else {
-        return Err(internal_compiler_error(
+        return Err(internal_infrastructure_failure(
             "TIR head-chain composition: child template ID was not present in the store.",
         ));
     };
@@ -386,7 +387,7 @@ fn resolve_tir_chain_layer(
         .get_node(original_node_id)
         .map(|node| node.span)
         .ok_or_else(|| {
-            internal_compiler_error(
+            internal_infrastructure_failure(
                 "TIR head-chain composition: original wrapper node ID was not present in the store.",
             )
         })?;

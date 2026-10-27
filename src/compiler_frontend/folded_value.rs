@@ -18,7 +18,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
     GenericParameterOriginResolver, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -113,7 +114,7 @@ pub(crate) fn owned_folded_string_from_const_string(
     value: &ConstStringValue,
     resources: &ModuleResourceTable,
     string_table: &StringTable,
-) -> Result<OwnedFoldedString, CompilerError> {
+) -> Result<OwnedFoldedString, InfrastructureFailure> {
     match value {
         ConstStringValue::Text(text) => Ok(OwnedFoldedString::Text(
             string_table.resolve(*text).to_owned(),
@@ -134,7 +135,7 @@ fn owned_folded_string_from_pieces(
     pieces: &[ConstStringPiece],
     resources: &ModuleResourceTable,
     string_table: &StringTable,
-) -> Result<OwnedFoldedString, CompilerError> {
+) -> Result<OwnedFoldedString, InfrastructureFailure> {
     let mut public_pieces = Vec::with_capacity(pieces.len());
     for piece in pieces {
         let public_piece = match piece {
@@ -156,8 +157,8 @@ fn owned_folded_string_from_pieces(
 ///
 /// WHAT: one explicit public-interface value vocabulary for the complete normalized
 /// compile-time shapes that can legally reach the draft boundary after AST normalization:
-/// directly exported constants (R2b) and function-parameter, receiver-parameter or
-/// struct-field defaults (R2c). Every leaf is an owned stable value: no `TypeId`,
+/// directly exported constants and retained function-parameter, receiver-parameter or
+/// struct-field defaults. Every leaf is an owned stable value: no `TypeId`,
 /// `NominalTypeId`, `StringId`,
 /// `PathId`, source location, AST/TIR identity, HIR ID, local choice tag/index or
 /// absolute path crosses this boundary. Choice variants carry a stable variant name
@@ -320,7 +321,7 @@ pub(crate) struct PublicConstTemplateSlot {
 ///
 /// WHAT: folded constant values are concrete, so a `GenericParameterId` reaching
 /// the canonical type projection during folded-value conversion is an internal invariant
-/// violation. This resolver returns a precise `CompilerError` instead of inventing an
+/// violation. This resolver returns a precise `InfrastructureFailure` instead of inventing an
 /// identity. Default projection supplies its declaration-aware generic resolver separately.
 pub(crate) struct FoldedValueGenericParameterResolver;
 
@@ -328,13 +329,16 @@ impl GenericParameterOriginResolver for FoldedValueGenericParameterResolver {
     fn resolve_generic_parameter_origin(
         &self,
         parameter_id: GenericParameterId,
-    ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
-        Err(CompilerError::compiler_error(format!(
-            "public-interface draft folded-value projection: GenericParameterId({}) reached \
+    ) -> Result<ExportedGenericParameterIdentity, InfrastructureFailure> {
+        Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            format!(
+                "public-interface draft folded-value projection: GenericParameterId({}) reached \
              canonical projection inside a folded constant value; folded constants are concrete \
              so a generic parameter is an internal invariant violation",
-            parameter_id.0
-        )))
+                parameter_id.0
+            ),
+        ))
     }
 }
 
@@ -343,8 +347,9 @@ impl GenericParameterOriginResolver for FoldedValueGenericParameterResolver {
 /// WHAT: carries the type, string and canonical-projection authorities used by both direct
 /// expression projection and module-store projection. `resources` is present for ordinary module
 /// projection and absent for generated generic materialisation, which must reject structural
-/// strings until a later phase supplies the consuming module's table.
-/// WHY: resource identity is module-local while this converter emits portable public values; the
+/// strings because it has no consuming module's table to resolve them against.
+/// WHY: resource identity is module-local while this converter emits portable public values, so
+///      only the consuming module's table can resolve it.
 pub(crate) struct FoldedValueProjectionContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) string_table: &'a StringTable,
@@ -357,12 +362,15 @@ fn project_number_value(
     value: &NumberValue,
     type_id: TypeId,
     type_environment: &TypeEnvironment,
-) -> Result<PublicFoldedValue, CompilerError> {
+) -> Result<PublicFoldedValue, InfrastructureFailure> {
     if type_environment.number_scale(type_id) != Some(value.scale()) {
-        return Err(CompilerError::compiler_error(format!(
-            "folded Dec value at scale {} disagrees with its semantic type",
-            value.scale()
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            format!(
+                "folded Dec value at scale {} disagrees with its semantic type",
+                value.scale()
+            ),
+        ));
     }
     Ok(PublicFoldedValue::Number(value.clone()))
 }
@@ -376,14 +384,15 @@ pub(crate) fn owned_folded_string_from_store_string(
     value: &ConstStringValue,
     resources: Option<&ModuleResourceTable>,
     string_table: &StringTable,
-) -> Result<OwnedFoldedString, CompilerError> {
+) -> Result<OwnedFoldedString, InfrastructureFailure> {
     match value {
         ConstStringValue::Text(text) => Ok(OwnedFoldedString::Text(
             string_table.resolve(*text).to_owned(),
         )),
         ConstStringValue::Pieces(_) => {
             let resources = resources.ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
                     "public-interface folded store projection: a structural string reached \
                      a projection context without its module resource table",
                 )
@@ -403,7 +412,7 @@ pub(crate) fn convert_const_value_to_folded_value(
     const_values: &ConstValueStore,
     value_id: ConstValueId,
     context: &FoldedValueProjectionContext<'_>,
-) -> Result<PublicFoldedValue, CompilerError> {
+) -> Result<PublicFoldedValue, InfrastructureFailure> {
     convert_const_value_to_folded_value_with_provenance(const_values, value_id, context)
         .map(|(value, _)| value)
 }
@@ -418,7 +427,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
     const_values: &ConstValueStore,
     value_id: ConstValueId,
     context: &FoldedValueProjectionContext<'_>,
-) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), CompilerError> {
+) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), InfrastructureFailure> {
     let type_environment = context.type_environment;
     let string_table = context.string_table;
     let projection_context = context.projection_context;
@@ -450,7 +459,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                             .component(*field.name)
                             .map(|name| string_table.resolve(name))
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
                                     "public-interface folded store record field has no resolvable name",
                                 )
                             })?;
@@ -465,7 +474,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                             value: field.value,
                         })
                     })
-                    .collect::<Result<Vec<_>, CompilerError>>()?,
+                    .collect::<Result<Vec<_>, InfrastructureFailure>>()?,
             )),
             ConstValueVisit::Choice { tag, fields, .. } => {
                 let type_identity = project_type_id_to_canonical_identity(
@@ -487,7 +496,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                             .component(*field.name)
                             .map(|name| string_table.resolve(name))
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
                                     "public-interface folded store choice field has no resolvable name",
                                 )
                             })?;
@@ -502,7 +511,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                             value: field.value,
                         })
                     })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                    .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
                 Ok(PublicFoldedValue::Choice {
                     type_identity: Box::new(type_identity),
                     variant_name,
@@ -539,22 +548,28 @@ pub(crate) fn resolve_choice_variant_name(
     tag: usize,
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let variants = type_environment.variants_for(type_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "public-interface draft folded-value projection: the choice construct TypeId({}) \
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            format!(
+                "public-interface draft folded-value projection: the choice construct TypeId({}) \
              has no choice definition in the TypeEnvironment; a ChoiceConstruct must \
              resolve to a choice or generic choice instance",
-            type_id.0
-        ))
+                type_id.0
+            ),
+        )
     })?;
 
     let variant = variants.iter().find(|v| v.tag == tag).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "public-interface draft folded-value projection: the choice construct TypeId({}) \
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            format!(
+                "public-interface draft folded-value projection: the choice construct TypeId({}) \
              has no variant with tag {}; the tag is out of range",
-            type_id.0, tag
-        ))
+                type_id.0, tag
+            ),
+        )
     })?;
 
     Ok(string_table.resolve(variant.name).to_owned())

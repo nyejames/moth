@@ -1,13 +1,27 @@
+//! Reachable-source traversal for the synthetic single-file Stage 0 lane.
+//!
+//! WHAT: `discover_reachable_source_files` runs the shared BFS over dependency paths. The
+//!       provider-capable path owns external-provider resolution; the shared BFS owns queue
+//!       handling, canonicalization, source preparation and local queuing.
+//! WHY:  directory projects use indexed discovery and never run this BFS. They reuse the
+//!       provider-capable decision through `resolve_structural_provider_reference`, which maps
+//!       `DependencyPolicyAction` to `StructuralProviderAction`.
 use super::discovery_finalization::finalize_reachable_files;
 use super::discovery_provider_imports::{
     ProviderBackedImportRequest, resolve_provider_backed_import, unsupported_builder_package_error,
     unsupported_external_extension_error,
 };
 use super::*;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternerFork,
 };
@@ -220,13 +234,15 @@ fn traverse_reachable_source_files(
     path_fork: &mut PathInternerFork,
 ) -> Result<ReachableTraversalOutcome, SourceDiscoveryError> {
     let canonical_entry_path = fs::canonicalize(&entry_paths[0]).map_err(|error| {
-        CompilerError::file_error(
+        InfrastructureFailure::filesystem(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             &entry_paths[0],
             format!("Failed to canonicalize entry file path: {error}"),
         )
     })?;
     let root_directory = canonical_entry_path.parent().ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             "canonical synthetic entry path has no containing module root",
         )
     })?;
@@ -327,7 +343,8 @@ fn walk_reachable_sources(
     let mut dependency_clauses_scanned: usize = 0;
     while let Some(next_file) = queue.pop_front() {
         let canonical_file = fs::canonicalize(&next_file.path).map_err(|error| {
-            CompilerError::file_error(
+            InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 &next_file.path,
                 format!("Failed to canonicalize module file path: {error}"),
             )
@@ -379,7 +396,10 @@ fn walk_reachable_sources(
                 local_source_cache,
                 string_table,
             ),
-            SourceFileKind::PlainMarkdown => unreachable!(),
+            SourceFileKind::PlainMarkdown => crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "PlainMarkdown sources continue before scan dispatch; scan_and_cache is only for Moth and MothTemplate"
+            ),
         };
         let scanned = match scan_result {
             Ok(scanned) => scanned,
@@ -497,8 +517,12 @@ fn walk_reachable_sources(
                     .and_then(|extension| extension.to_str())
                     .unwrap_or_default();
                 let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
-                    return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-                        "resolved supported content target has no registered source kind",
+                    // A symlinked reference can resolve to a target whose extension names no
+                    // source kind, so this is project layout, not a compiler invariant.
+                    return Err(SourceDiscoveryError::from(InfrastructureFailure::filesystem(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                        canonical,
+                        "content reference resolves to a file whose extension has no registered source kind",
                     )));
                 };
                 let content_file = ReachableSourceFile {
@@ -515,7 +539,7 @@ fn walk_reachable_sources(
 
     // Record concise counters for the completed traversal. Counters are only
     // recorded when `benchmark_counters` is active, and reach stdout only when
-    // `MOTH_COUNTERS` requests it (summary/full).
+    // `MOTH_COUNTERS=summary` requests it.
     counter_observation!(
         "stage0.reachable_discovery.reachable_files",
         reachable.len() as f64,
@@ -657,42 +681,44 @@ fn resolve_module_root_bare_dependency(
         .strip_prefix(project_path_resolver.entry_root())
         .ok()
         .ok_or_else(|| {
-            SourceDiscoveryError::from(CompilerError::compiler_error(format!(
-                "Owning module root '{}' is outside entry root '{}'",
-                module_root.display(),
-                project_path_resolver.entry_root().display()
-            )))
+            SourceDiscoveryError::from(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Owning module root '{}' is outside entry root '{}'",
+                    module_root.display(),
+                    project_path_resolver.entry_root().display()
+                ),
+            ))
         })?;
     let module_prefix = path_fork
         .try_intern_filesystem_path(module_prefix, string_table)
         .map_err(|error| match error {
             crate::compiler_frontend::symbols::path_interner::PathInternError::NonUtf8(
                 NonUtf8PathComponent { path },
-            ) => SourceDiscoveryError::from(CompilerError::file_error(
-                &path,
-                format!(
-                    "Owning module path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                ),
-            )),
+            ) => SourceDiscoveryError::from(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!(
+                "Owning module path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+            ))),
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                SourceDiscoveryError::Diagnostic(
-                    CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::LogicalPath,
-                    ),
-                )
+                SourceDiscoveryError::Diagnostic(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
+                    SourceSpanCapacityResource::LogicalPath,
+                    None,
+                ))
             }
             crate::compiler_frontend::symbols::path_interner::PathInternError::BaseMismatch {
                 ..
-            } => SourceDiscoveryError::Infrastructure(CompilerError::compiler_error(
-                "logical path merge base is not a structural prefix of the destination table",
-            )),
+            } => SourceDiscoveryError::Infrastructure(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "logical path merge base is not a structural prefix of the destination table")),
         })?;
     let mut scratch = Vec::new();
     let module_local_provider = path_fork
         .try_join(module_prefix, provider, &mut scratch)
         .ok_or_else(|| {
-            SourceDiscoveryError::Diagnostic(CompilerDiagnostic::source_table_capacity(
+            SourceDiscoveryError::Diagnostic(token_lexical::source_span_capacity(
+                0,
+                u32::MAX,
                 SourceSpanCapacityResource::LogicalPath,
+                None,
             ))
         })?;
 
@@ -740,7 +766,7 @@ fn handle_provider_capable_dependency(
         {
             return Ok(DependencyPolicyAction::Skip);
         }
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
+        return Err(project_config::invalid_dependency_clause(
             clause_kind,
             InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
             dependency_span,
@@ -769,12 +795,17 @@ fn handle_provider_capable_dependency(
         .unsupported_known_package_dependency(dependency_path, path_fork, string_table)
     {
         return Err(SourceDiscoveryError::from(
-            unsupported_builder_package_error(package_path, dependency_span, string_table),
+            unsupported_builder_package_error(
+                package_path,
+                dependency_span,
+                &mut DiagnosticStringBuilder::new(string_table),
+            ),
         ));
     }
     if matches!(target, DependencyTargetKind::ExternalProvider { .. }) {
         let checked = provider_target.ok_or_else(|| {
-            SourceDiscoveryError::Infrastructure(CompilerError::compiler_error(
+            SourceDiscoveryError::Infrastructure(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "retained provider classification is missing its checked target fact",
             ))
         })?;
@@ -830,7 +861,7 @@ fn handle_provider_capable_dependency(
                 dependency_path,
                 &extension,
                 dependency_span,
-                string_table,
+                &mut DiagnosticStringBuilder::new(string_table),
             ),
         ));
     }
@@ -844,10 +875,10 @@ fn handle_provider_capable_dependency(
 /// provider itself. Those lanes retain their existing ownership and source context; only the
 /// direct diagnostic produced at this dependency boundary is attributed to the clause span.
 fn with_provider_dependency_span(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     source_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    diagnostic.primary_span = source_span;
+) -> DiagnosticDraft {
+    diagnostic.set_primary_span(source_span);
     diagnostic
 }
 

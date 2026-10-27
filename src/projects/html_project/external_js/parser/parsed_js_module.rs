@@ -41,7 +41,7 @@ impl JsSourceSpan {
 /// WHAT: each variant maps to a specific user-facing error or warning produced by
 ///       the JS annotation scanner.
 /// WHY: structured kinds let the provider layer convert these into stable
-///      `CompilerDiagnostic` codes later.
+///      diagnostic-family codes later.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsDiagnosticKind {
     UnsupportedPackageTag,
@@ -82,8 +82,8 @@ pub enum JsDiagnosticKind {
 /// A diagnostic emitted by the JS parser before conversion to compiler diagnostics.
 ///
 /// WHAT: carries a human-readable message, the offending span, and a structured kind.
-/// WHY: the provider layer can transform these into stable diagnostic codes while
-///      the parser itself stays independent of `CompilerDiagnostic` construction.
+/// WHY: the provider layer can transform these into stable diagnostic-family codes while
+///      the parser itself stays independent of diagnostic draft construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsParserDiagnostic {
     pub message: String,

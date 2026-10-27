@@ -85,8 +85,7 @@ fn a_resource_bearing_generated_sidecar_publishes_and_preserves_origin() {
         sidecar,
     };
 
-    validate_completed_generated_record(&record)
-        .expect("a resource-bearing sidecar with a local resource table should publish");
+    validate_completed_generated_record(&record);
 
     let statement = &record.sidecar.module.executable.hir.blocks[0].statements[0];
     let HirStatementKind::Expr(expression) = &statement.kind else {
@@ -152,8 +151,7 @@ fn a_text_only_generated_sidecar_publishes_and_remaps_piece_handles_through_a_me
         sidecar,
     };
 
-    validate_completed_generated_record(&record)
-        .expect("a sidecar whose structural pieces carry only text must stay publishable");
+    validate_completed_generated_record(&record);
 
     // Merge the module-local table into a boundary table whose indices differ, exactly as a
     // module result merges before publication, then remap through the generated delta lane.

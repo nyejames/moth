@@ -25,9 +25,11 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     AstDocFragment, AstDocFragmentKind,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
+    CompileTimeEvaluationErrorReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::SourceSpan;
@@ -122,7 +124,7 @@ fn as_top_level_template_comment_declaration(
     node: &AstNode,
     expression_builder: &AstExpressionBuilder,
     store: &Rc<RefCell<TemplateIrStore>>,
-) -> Result<Option<(Template, CommentDirectiveKind)>, CompilerError> {
+) -> Result<Option<(Template, CommentDirectiveKind)>, InfrastructureFailure> {
     let NodeKind::PushStartRuntimeFragment(expression) = &node.kind else {
         return Ok(None);
     };
@@ -174,7 +176,7 @@ fn collect_doc_fragments(
                 preparation
             }
             _ => {
-                return Err(CompilerDiagnostic::invalid_template_structure(
+                return Err(templates::invalid_template_structure(
                     InvalidTemplateStructureReason::NonFoldableConstTemplate,
                     template.span,
                 )
@@ -232,7 +234,7 @@ fn flatten_documentation_string(
             ConstStringPiece::SiteRoot => text.push_str("@/"),
             ConstStringPiece::Resource(_) => {
                 let operation = string_table.intern("documentation fragment");
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                return Err(choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                     Some(operation),
                     span,

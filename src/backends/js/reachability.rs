@@ -9,7 +9,7 @@
 //! generation. Those responsibilities belong to their focused owners.
 
 use crate::backends::js::JsEmitter;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 
@@ -17,12 +17,12 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn collect_reachable_blocks(
         &self,
         entry_block: BlockId,
-    ) -> Result<Vec<BlockId>, CompilerError> {
+    ) -> Result<Vec<BlockId>, InfrastructureFailure> {
         let mut order = crate::compiler_frontend::hir::utils::collect_reachable_blocks(
             entry_block,
             |block_id| {
                 let block = self.block_by_id(block_id)?;
-                Ok::<_, CompilerError>(terminator_targets(&block.terminator))
+                Ok::<_, InfrastructureFailure>(terminator_targets(&block.terminator))
             },
         )?;
         order.sort_by_key(|block_id| block_id.0);

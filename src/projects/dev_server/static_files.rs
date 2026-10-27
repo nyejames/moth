@@ -3,10 +3,13 @@
 //! This module resolves safe output-relative paths, maps content types and installs the
 //! development client before application bootstrap scripts can call its outcome hooks.
 
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::dev_server::dev_client::{DEV_CLIENT_MARKER, dev_client_snippet};
+use crate::projects::dev_server::state::{ServedArtifactSnapshot, ServedHtmlEntrySnapshot};
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle, prefix_origin};
 use std::path::{Component, Path, PathBuf};
 
+use std::sync::Arc;
 /// Classification used to keep page-routing behavior separate from exact asset serving behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedRequestKind {
@@ -83,6 +86,22 @@ pub fn is_known_entry(entry: &str, output_dir: &Path) -> bool {
     page.starts_with(output_root) && page.is_file()
 }
 
+/// Freeze the output-relative HTML paths that passed path and containment validation.
+pub fn validated_html_entries(
+    output_dir: &Path,
+    artifacts: &ServedArtifactSnapshot,
+) -> ServedHtmlEntrySnapshot {
+    Arc::new(
+        artifacts
+            .keys()
+            .filter_map(|relative_path| {
+                let entry = portable_path_text(relative_path);
+                is_known_entry(&entry, output_dir).then_some(entry)
+            })
+            .collect(),
+    )
+}
+
 pub fn content_type_for_path(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("html") | Some("htm") => "text/html; charset=utf-8",
@@ -109,6 +128,7 @@ pub fn is_html_content_type(content_type: &str) -> bool {
 ///
 /// WHAT: applies strict path sanitization, exact-file asset lookup, and page canonicalization.
 /// WHY: page routes and assets must remain separate so canonical redirects never affect assets.
+#[cfg(test)]
 pub fn resolve_request(
     request_path: &str,
     request_query: Option<&str>,
@@ -116,12 +136,30 @@ pub fn resolve_request(
     entry_page_rel: Option<&Path>,
     config: HtmlSiteConfig,
 ) -> ResolvedRequest {
+    resolve_request_with_file_exists(
+        request_path,
+        request_query,
+        output_dir,
+        entry_page_rel,
+        config,
+        |path| path.is_file(),
+    )
+}
+
+pub(crate) fn resolve_request_with_file_exists(
+    request_path: &str,
+    request_query: Option<&str>,
+    output_dir: &Path,
+    entry_page_rel: Option<&Path>,
+    config: HtmlSiteConfig,
+    file_exists: impl Fn(&Path) -> bool,
+) -> ResolvedRequest {
     if request_path == "/" {
         let Some(entry_page) = entry_page_rel else {
             return ResolvedRequest::MissingEntryPage;
         };
         return match resolve_relative_path(entry_page, output_dir) {
-            Ok(path) if path.exists() && path.is_file() => ResolvedRequest::File {
+            Ok(path) if file_exists(&path) => ResolvedRequest::File {
                 path,
                 kind: ResolvedRequestKind::PageHtml,
             },
@@ -143,7 +181,7 @@ pub fn resolve_request(
             Err(_) => return ResolvedRequest::InvalidPath,
         };
 
-        if !page_file_path.exists() || !page_file_path.is_file() {
+        if !file_exists(&page_file_path) {
             return ResolvedRequest::NotFound;
         }
 
@@ -170,7 +208,7 @@ pub fn resolve_request(
             Err(_) => return ResolvedRequest::InvalidPath,
         };
 
-        if exact_file_path.exists() && exact_file_path.is_file() {
+        if file_exists(&exact_file_path) {
             return ResolvedRequest::File {
                 path: exact_file_path,
                 kind: ResolvedRequestKind::Asset,
@@ -186,7 +224,7 @@ pub fn resolve_request(
         Err(_) => return ResolvedRequest::InvalidPath,
     };
 
-    if !page_file_path.exists() || !page_file_path.is_file() {
+    if !file_exists(&page_file_path) {
         return ResolvedRequest::NotFound;
     }
 

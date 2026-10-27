@@ -21,7 +21,8 @@ use crate::compiler_frontend::analysis::borrow_checker::problem::{
     ValueOrigin, ValueOriginId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{Loan, LoanId};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug)]
@@ -62,7 +63,7 @@ pub(super) struct OracleExecutionContext<'problem, 'path> {
 pub(super) fn execute_block<'problem, 'path>(
     context: &mut OracleExecutionContext<'problem, 'path>,
     mut cursor: EventCursor,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     // The cursor never leaves this block, so resolve it once. `problem` is copied out of the
     // context so the event slice borrows the problem rather than the mutably borrowed context.
     let problem = context.problem;
@@ -146,7 +147,7 @@ pub(super) fn execute_block<'problem, 'path>(
 fn dispatch_event<'problem, 'path>(
     context: &mut OracleExecutionContext<'problem, 'path>,
     event: &'problem Event,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     match &event.kind {
         EventKind::Fresh {
             destination,
@@ -247,7 +248,7 @@ fn execute_fresh<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     binding_destination: BindingDestination,
     origin: ValueOriginId,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let destination = binding_destination.place();
     require_place(problem, destination, "fresh destination")?;
@@ -359,13 +360,13 @@ pub(super) fn finish_definition_transition(
 ///
 /// Write-through definitions still validate their ignored inputs, but resolving those inputs
 /// would create generations and could make an otherwise allocation-free event inconclusive.
-// LEAVE-LOCAL: independent static place-ancestor prefix logic is at boracle/origins.rs:1499.
+// The independent static place-ancestor prefix logic is at boracle/origins.rs:1499.
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 pub(super) fn is_place_available_without_materialising(
     problem: &BorrowProblem,
     state: &OracleState,
     place_id: PlaceId,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     let place = require_place(problem, place_id, "availability check")?;
     Ok(problem.places().iter().any(|candidate| {
         candidate.root == place.root
@@ -386,7 +387,7 @@ fn execute_alias<'problem>(
     source: PlaceId,
     binding_destination: BindingDestination,
     access: AccessKind,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let trace_index = context.trace_index;
@@ -473,7 +474,7 @@ fn execute_copy<'problem>(
     _event: &Event,
     source: PlaceId,
     binding_destination: BindingDestination,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let state = &mut *context.state;
@@ -520,7 +521,7 @@ fn execute_copy<'problem>(
             Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
         };
     let source_target =
-        match state.resolve_target(source_target.target, bounds.max_dynamic_generations)? {
+        match state.resolve_target(source_target.target, bounds.max_dynamic_generations) {
             Ok(source_target) => source_target,
             Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
         };
@@ -606,7 +607,7 @@ fn execute_projection<'problem>(
     source: PlaceId,
     binding_destination: BindingDestination,
     origin: ValueOriginId,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let trace_index = context.trace_index;
@@ -647,7 +648,7 @@ fn execute_projection<'problem>(
             path: target_path.into_boxed_slice(),
         },
         bounds.max_dynamic_generations,
-    )? {
+    ) {
         Ok(target) => target,
         Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
     };
@@ -704,7 +705,7 @@ fn execute_rebind<'problem>(
     event: &Event,
     binding_destination: BindingDestination,
     value: &RebindValue,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let trace_index = context.trace_index;
@@ -845,7 +846,7 @@ fn execute_aggregate<'problem>(
     event: &Event,
     binding_destination: BindingDestination,
     fields: &[AggregateField],
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let destination = binding_destination.place();
     require_place(problem, destination, "aggregate destination")?;
@@ -941,7 +942,7 @@ fn execute_aggregate<'problem>(
 fn resolve_aggregate_field_targets<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     fields: &[AggregateField],
-) -> Result<Result<Vec<RuntimeAccessTarget>, OracleLimitReason>, CompilerError> {
+) -> Result<Result<Vec<RuntimeAccessTarget>, OracleLimitReason>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let bounds = context.bounds;
@@ -965,7 +966,7 @@ fn resolve_aggregate_field_targets<'problem>(
         };
         let source_target = match context
             .state
-            .resolve_target(source_target.target, bounds.max_dynamic_generations)?
+            .resolve_target(source_target.target, bounds.max_dynamic_generations)
         {
             Ok(source_target) => source_target,
             Err(reason) => return Ok(Err(reason)),
@@ -990,7 +991,7 @@ fn issue_aggregate_provenance(
     destination: PlaceId,
     fields: &[AggregateField],
     source_targets: &[RuntimeAccessTarget],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // A normalised projected place is the field holder. Synthetic inputs can omit that child,
     // so the destination is the same fallback used by the reference.
     debug_assert_eq!(fields.len(), source_targets.len());
@@ -1020,7 +1021,7 @@ pub(super) fn execute_access(
     event: &Event,
     use_id: UseId,
     call: Option<CallId>,
-) -> Result<AccessExecutionResult, CompilerError> {
+) -> Result<AccessExecutionResult, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let state = &mut *context.state;
@@ -1191,7 +1192,7 @@ pub(super) fn execute_access(
                 capability_kind: AccessKind::Shared,
                 access_target: target.clone(),
                 // The witness names the capability's own storage position, which a prefix
-                // overlap no longer equals the access target, so the trace stays replayable
+                // overlap does not equal the access target, so the trace stays replayable
                 // against the capability row it records.
                 capability_target: capability.target(),
             },
@@ -1213,7 +1214,7 @@ fn execute_loan_issue<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     event: &Event,
     loan_id: LoanId,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let state = &mut *context.state;
@@ -1304,7 +1305,7 @@ fn execute_loan_issue<'problem>(
 fn execute_loan_kill<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     loan_id: LoanId,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     let state = &mut *context.state;
     let trace = &mut *context.trace;
@@ -1324,7 +1325,7 @@ fn execute_terminator<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     event: &Event,
     kind: &'problem TerminatorEventKind,
-) -> Result<EventExecutionResult<'problem>, CompilerError> {
+) -> Result<EventExecutionResult<'problem>, InfrastructureFailure> {
     let problem = context.problem;
     match kind {
         TerminatorEventKind::Jump { target, arguments } => {
@@ -1356,7 +1357,7 @@ fn execute_terminator<'problem>(
                 };
                 let source = match context
                     .state
-                    .resolve_target(source.target, context.bounds.max_dynamic_generations)?
+                    .resolve_target(source.target, context.bounds.max_dynamic_generations)
                 {
                     Ok(source) => source,
                     Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
@@ -1421,7 +1422,9 @@ fn execute_terminator<'problem>(
     }
 }
 
-pub(super) fn validate_branch_targets(problem: &BorrowProblem) -> Result<(), CompilerError> {
+pub(super) fn validate_branch_targets(
+    problem: &BorrowProblem,
+) -> Result<(), InfrastructureFailure> {
     for event in problem.events() {
         let EventKind::Terminator {
             kind: TerminatorEventKind::Branch { targets },
@@ -1442,7 +1445,7 @@ pub(super) fn validate_branch_targets(problem: &BorrowProblem) -> Result<(), Com
 pub(super) fn require_block(
     problem: &BorrowProblem,
     block: BlockId,
-) -> Result<&CfgBlock, CompilerError> {
+) -> Result<&CfgBlock, InfrastructureFailure> {
     let row = problem
         .control_flow()
         .blocks
@@ -1462,7 +1465,7 @@ pub(super) fn require_block(
     Ok(row)
 }
 
-fn require_event(problem: &BorrowProblem, event: EventId) -> Result<&Event, CompilerError> {
+fn require_event(problem: &BorrowProblem, event: EventId) -> Result<&Event, InfrastructureFailure> {
     let row = problem
         .events()
         .get(event.index())
@@ -1480,7 +1483,7 @@ pub(super) fn require_place<'a>(
     problem: &'a BorrowProblem,
     place: PlaceId,
     owner: &str,
-) -> Result<&'a Place, CompilerError> {
+) -> Result<&'a Place, InfrastructureFailure> {
     let row = problem
         .places()
         .get(place.index())
@@ -1498,7 +1501,7 @@ pub(super) fn require_origin<'a>(
     problem: &'a BorrowProblem,
     origin: ValueOriginId,
     owner: &str,
-) -> Result<&'a ValueOrigin, CompilerError> {
+) -> Result<&'a ValueOrigin, InfrastructureFailure> {
     let row = problem
         .origins()
         .get(origin.index())
@@ -1516,7 +1519,7 @@ pub(super) fn require_use<'a>(
     problem: &'a BorrowProblem,
     use_id: UseId,
     owner: &str,
-) -> Result<&'a Use, CompilerError> {
+) -> Result<&'a Use, InfrastructureFailure> {
     let row = problem
         .uses()
         .get(use_id.index())
@@ -1534,7 +1537,7 @@ pub(super) fn require_loan<'a>(
     problem: &'a BorrowProblem,
     loan: LoanId,
     owner: &str,
-) -> Result<&'a Loan, CompilerError> {
+) -> Result<&'a Loan, InfrastructureFailure> {
     let row = problem
         .loans()
         .get(loan.index())
@@ -1552,7 +1555,7 @@ pub(super) fn require_call<'a>(
     problem: &'a BorrowProblem,
     call: CallId,
     owner: &str,
-) -> Result<&'a Call, CompilerError> {
+) -> Result<&'a Call, InfrastructureFailure> {
     let row = problem
         .calls()
         .get(call.index())
@@ -1566,6 +1569,9 @@ pub(super) fn require_call<'a>(
     Ok(row)
 }
 
-pub(super) fn oracle_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(format!("Boracle operational oracle: {}", message.into()))
+pub(super) fn oracle_error(message: impl Into<String>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::BorrowChecking,
+        format!("Boracle operational oracle: {}", message.into()),
+    )
 }

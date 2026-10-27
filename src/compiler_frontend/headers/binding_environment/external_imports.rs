@@ -14,7 +14,7 @@ use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_sha
 use crate::compiler_frontend::symbols::string_interning::StringId;
 /// Result for external import registration.
 ///
-/// Diagnosed failures remain plain `CompilerDiagnostic` values and
+/// Diagnosed failures remain `DiagnosticDraft` values and
 /// infrastructure failures remain typed in `BindingEnvironmentError`.
 type ExternalImportResult<T> = Result<T, BindingEnvironmentError>;
 

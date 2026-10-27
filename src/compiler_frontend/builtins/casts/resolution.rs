@@ -22,9 +22,8 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::generic_functions::instantiate_generic_cast_evidence_method;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCastReason, ValueReceiverContext,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::{InvalidCastReason, ValueReceiverContext};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
@@ -100,7 +99,7 @@ pub(crate) fn resolve_cast_expression(
     let source_span = source_view.span();
 
     if type_interner.environment().is_option(source_type_id) {
-        return Err(CompilerDiagnostic::invalid_cast(
+        return Err(calls_data::invalid_cast(
             InvalidCastReason::SourceIsOptional,
             Some(source_type_id),
             Some(target_type_id),
@@ -110,7 +109,7 @@ pub(crate) fn resolve_cast_expression(
     }
 
     if source_type_id == target_type_id {
-        return Err(CompilerDiagnostic::invalid_cast(
+        return Err(calls_data::invalid_cast(
             InvalidCastReason::SameSourceAndTarget,
             Some(source_type_id),
             Some(target_type_id),
@@ -148,7 +147,7 @@ pub(crate) fn resolve_cast_expression(
             // Core evidence registration forbids both classes for one pair. Treat an absent or
             // contradictory pair as unavailable rather than coupling selection to cast spelling.
             (None, None) | (Some(_), Some(_)) => {
-                return Err(CompilerDiagnostic::invalid_cast(
+                return Err(calls_data::invalid_cast(
                     InvalidCastReason::NoEvidence,
                     Some(source_type_id),
                     Some(target_type_id),

@@ -835,12 +835,12 @@ fn receiver_method_semantics_from_seed_rejects_missing_signature_without_panic()
     let result = receiver_method_semantics_from_seed(&seed, &signatures);
     assert!(
         result.is_err(),
-        "a receiver-method seed with no projected signature must be a CompilerError"
+        "a receiver-method seed with no projected signature must be an InfrastructureFailure"
     );
 }
 
 // ---------------------------------------------------------------------------
-//  Default retention tests (R2c)
+//  Default retention tests
 // ---------------------------------------------------------------------------
 
 #[test]

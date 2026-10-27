@@ -23,10 +23,10 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{ExpressionSiteId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::TemplateLoopHeaderExpressionSites;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -89,11 +89,17 @@ fn resolve_range_constant_operands(
         .map(|step| resolve_range_constant_operand(step, fold_context))
         .transpose()?;
 
-    let refusal = start
-        .refusal
-        .clone()
-        .or_else(|| end.refusal.clone())
-        .or_else(|| step.as_ref().and_then(|resolved| resolved.refusal.clone()));
+    let ResolvedRangeOperand {
+        bound: start,
+        refusal: start_refusal,
+    } = start;
+    let ResolvedRangeOperand {
+        bound: end,
+        refusal: end_refusal,
+    } = end;
+    let (step, step_refusal) =
+        step.map_or((None, None), |resolved| (resolved.bound, resolved.refusal));
+    let refusal = start_refusal.or(end_refusal).or(step_refusal);
     if refusal.is_some() {
         return Ok(ResolvedRangeOperands {
             spec: None,
@@ -101,9 +107,6 @@ fn resolve_range_constant_operands(
         });
     }
 
-    let start = start.bound;
-    let end = end.bound;
-    let step = step.and_then(|resolved| resolved.bound);
     let start_unchanged = start.is_none_or(|id| id == range.start);
     let end_unchanged = end.is_none_or(|id| id == range.end);
     let step_unchanged = match (range.step, step) {
@@ -184,14 +187,13 @@ fn resolve_range_constant_operand(
             bound: None,
             refusal: None,
         }),
-        Err(ConstantFoldError::Diagnostic(diagnostic))
-            if !diagnostic.is_compiler_capacity_exceeded() =>
-        {
-            Ok(ResolvedRangeOperand {
-                bound: None,
-                refusal: None,
-            })
-        }
+        Err(
+            ConstantFoldError::Diagnostic(diagnostic)
+            | ConstantFoldError::NumericFailure(diagnostic),
+        ) if diagnostic.code() != "MOTH-SYNTAX-0037" => Ok(ResolvedRangeOperand {
+            bound: None,
+            refusal: None,
+        }),
         Err(error) => Err(error.into()),
     }
 }
@@ -226,7 +228,8 @@ fn resolve_source_constant_references(
             return Ok(None);
         };
         let Some(metadata) = fold_context.const_values.metadata(value) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR fold: module constant is missing const metadata.",
             )
             .into());
@@ -386,7 +389,8 @@ pub(super) fn fold_tir_conditional_with_insertion(
     insertion: FoldInsertion<'_>,
 ) -> Result<(), TemplateError> {
     if insertion.is_aggregate() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR fold: malformed aggregate wrapper subtree contains a conditional.",
         )
         .into());
@@ -481,7 +485,8 @@ pub(super) fn fold_tir_loop(
             let site_id = match header_sites {
                 TemplateLoopHeaderExpressionSites::Conditional { condition } => condition,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR fold: loop header/header_sites shape mismatch (Conditional).",
                     )
                     .into());
@@ -516,7 +521,7 @@ pub(super) fn fold_tir_loop(
                 return Ok(());
             }
 
-            return Err(CompilerDiagnostic::invalid_template_structure(
+            return Err(templates::invalid_template_structure(
                 InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
                 fold_context
                     .expression_builder
@@ -531,7 +536,8 @@ pub(super) fn fold_tir_loop(
             let (start_site, end_site, step_site) = match header_sites {
                 TemplateLoopHeaderExpressionSites::Range { start, end, step } => (start, end, step),
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR fold: loop header/header_sites shape mismatch (Range).",
                     )
                     .into());
@@ -624,7 +630,8 @@ pub(super) fn fold_tir_loop(
             let site_id = match header_sites {
                 TemplateLoopHeaderExpressionSites::Collection { iterable } => iterable,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR fold: loop header/header_sites shape mismatch (Collection).",
                     )
                     .into());
@@ -662,7 +669,7 @@ pub(super) fn fold_tir_loop(
             for (index, item) in items.iter().enumerate() {
                 add_ast_counter(AstCounter::TemplateFoldLoopIterations, 1);
                 if index >= fold_context.template_const_loop_iteration_limit {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: fold_context.template_const_loop_iteration_limit,
                         },

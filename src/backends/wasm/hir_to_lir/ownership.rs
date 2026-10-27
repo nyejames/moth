@@ -1,4 +1,4 @@
-//! Ownership-scaffolding lowering helpers.
+//! Ownership lowering helpers.
 
 use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
 use crate::backends::wasm::lir::instructions::WasmLirStmt;
@@ -11,9 +11,9 @@ pub(crate) fn insert_advisory_drops(
     block_id: BlockId,
     statements: &mut Vec<WasmLirStmt>,
 ) {
-    // WHAT: project borrow-checker advisory sites into the current `DropIfOwned` scaffolding.
-    // WHY: the backend has not migrated to plan-driven cleanup yet. Final full-control release
-    // lowering consumes `ValidatedMemoryPlan` and cannot fall back to tracing garbage collection.
+    // WHAT: project borrow-checker advisory sites into `DropIfOwned` statements.
+    // WHY: this lowering does not consume `ValidatedMemoryPlan`. Release lowering would have to
+    // consume it rather than fall back to tracing garbage collection; it is not implemented.
     let Some(drop_sites) = context
         .module_context
         .borrow_facts

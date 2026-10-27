@@ -203,7 +203,7 @@ Current source syntax has no mandatory-consuming ordinary-value operation. There
 
 A user-facing use-after-consumption diagnostic is reserved for a future accepted mandatory-consuming surface. It isn't valid for ordinary optional transfer.
 
-Internal inconsistent-analysis or impossible metadata uses `CompilerError`.
+Internal inconsistent-analysis or impossible metadata uses `InfrastructureFailure`.
 
 ## Control-flow requirements
 
@@ -310,10 +310,10 @@ The source, verified implementation inventory, known alpha precision limits, per
 
 ## Diagnostics
 
-- Access conflicts remain user-facing `CompilerDiagnostic` values.
+- Access conflicts remain user-facing typed `DiagnosticDraft` values.
 - Diagnostics carry source locations and structured reasons.
 - Lack of optional move/transfer proof isn't a diagnostic.
-- Internal malformed-HIR or impossible-analysis state uses `CompilerError`.
+- Internal malformed-HIR or impossible-analysis state uses `InfrastructureFailure`.
 - Conflicting mutable/shared access, duplicate exclusive access and invalid place access need distinct reasons.
 - Diagnostics must not be stored as analysis state.
 

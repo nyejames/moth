@@ -1,4 +1,4 @@
--- Plan section 5.2: every supported external binary-float result is rounded and validated at its
+-- Every supported external binary-float result is rounded and validated at its
 -- resolved exact precision before ordinary Moth code observes it. A declared builtin `Error!`
 -- channel keeps that shared boundary guard recoverable with code 304; other contexts keep the
 -- fatal integrity guard.

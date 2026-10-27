@@ -86,7 +86,11 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let prepared = prepare_header_syntax(
         &mut outputs,
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut path_fork,
     )
     .expect("header syntax should aggregate");
@@ -180,24 +184,27 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let diagnostics = match prepare_header_syntax(
         &mut outputs,
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut path_fork,
     ) {
         Err(failure) => expect_aggregation_diagnostics(failure),
         Ok(_) => panic!("a nested config qualifier should fail aggregation"),
     };
-    assert!(diagnostics.errors().any(|diagnostic| matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            ..
-        }
-    )));
+    let diagnostics = compact_bag_for_test(diagnostics, None);
+    assert!(diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<project_config::InvalidConfigView>()
+            .is_some_and(|_| {
+                diagnostic.reason_key() == Some("invalid_config.config_qualifier_invalid_placement")
+            })
+    }));
     let primary_span = diagnostics
-        .errors()
-        .next()
-        .expect("config placement diagnostic")
-        .primary_span
+        .first()
+        .and_then(diagnostic_primary_span)
         .expect("aggregation captures its primary span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let marker_range =
@@ -264,17 +271,20 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
     let failure = prepare_header_syntax(
         &mut outputs,
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut path_fork,
     )
     .err()
     .expect("nested qualifiers fail aggregation");
-    let diagnostics = expect_aggregation_diagnostics(failure).into_diagnostics();
+    let diagnostics = compact_bag_for_test(expect_aggregation_diagnostics(failure), None);
     assert_eq!(diagnostics.len(), 2);
-    for (index, diagnostic) in diagnostics.iter().enumerate() {
-        let span = diagnostic
-            .primary_span
-            .expect("aggregation retains primary source span");
+    for (index, diagnostic) in diagnostics.views().enumerate() {
+        let span =
+            diagnostic_primary_span(diagnostic).expect("aggregation retains primary source span");
         assert_eq!(span.source(), SourceId::from_index(index + 1));
         let range = span.resolve_with(builders[index].resolver_for(span.source()));
         assert_eq!(
@@ -314,9 +324,11 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("expected source diagnostic");
     };
-    let primary_span = error
-        .diagnostic
-        .primary_span
+    let diagnostic_bag = diagnostic_view_for_test(error.diagnostic);
+    let diagnostic = diagnostic_bag
+        .first()
+        .expect("per-file preparation diagnostic should compact");
+    let primary_span = diagnostic_primary_span(diagnostic)
         .expect("per-file preparation captures the primary name span");
     assert_eq!(primary_span.source(), context.source_id);
     let primary_range = primary_span.resolve_with(spans.resolver_for(primary_span.source()));
@@ -324,11 +336,9 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
         &source[primary_range.start() as usize..primary_range.end() as usize],
         "value"
     );
-    assert_eq!(error.diagnostic.labels.len(), 1);
-    let comma_label = &error.diagnostic.labels[0];
-    let span = comma_label
-        .span
-        .expect("per-file preparation captures related labels");
+    assert_eq!(diagnostic.durable_labels().count(), 1);
+    let span =
+        diagnostic_label_span(diagnostic, 0).expect("per-file preparation captures related labels");
     assert_eq!(span.source(), context.source_id);
     let range = span.resolve_with(spans.resolver_for(span.source()));
     assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
@@ -398,12 +408,14 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     };
 
     assert!(
-        error.warnings.is_empty(),
+        error.warnings.as_slice().is_empty(),
         "empty export block should not emit preparation warnings"
     );
-    let diagnostic_span = error
-        .diagnostic
-        .primary_span
+    let diagnostic_bag = diagnostic_view_for_test(error.diagnostic);
+    let diagnostic = diagnostic_bag
+        .first()
+        .expect("empty export diagnostic should compact");
+    let diagnostic_span = diagnostic_primary_span(diagnostic)
         .expect("empty export block should retain its source span");
     assert_eq!(diagnostic_span.source(), source_id);
     let diagnostic_range =

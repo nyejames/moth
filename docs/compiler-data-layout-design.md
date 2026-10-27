@@ -1,23 +1,12 @@
 # Moth Compiler Data Layout Design
 
-> **Repository path:** `docs/compiler-data-layout-design.md`
+> **Current architecture.** This document owns the compiler's physical source, path, token and
+> diagnostic representations, their lifetimes, and the boundary between user diagnostics,
+> infrastructure failures and compiler bugs.
 >
-> **Status:** Accepted end-state architecture. The progress matrices own current
-> implementation support, and the owning data-layout plan records checkpoint
-> evidence, locked budgets and sequencing for diagnostic-layout work.
->
-> **Historical layout evidence:** Phase 3 source-owned-token checkpoint
-> `6309adf6d` and R5 closeout `4cfd9d492` record constant and nominal fits
-> within their locked budgets. The owning plan explicitly accepts the inherited
-> generic `n^1.70` exception (`n^1.770`) without raising or loosening that budget
-> or claiming no worsening.
->
-> **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
-> `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening
-> prerequisite at `03168082d`. The baseline validation was green:
-> `just validate`, plus Clippy with warnings denied on `aarch64-apple-darwin`,
-> `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` under Rust 1.97.1. This records the
-> starting point only; it is not a report of the current workspace.
+> `docs/src/docs/progress/@page.moth` records implementation support. This document describes the
+> current data and ownership contracts.
+
 
 ## Authority and ownership
 
@@ -48,16 +37,15 @@ It does not override:
 - `docs/src/developer-docs/language/overview.mtf` and its selected canonical references for source-language behaviour
 - the memory-management authorities for Moth program semantics
 - `docs/src/docs/progress/@page.moth` for current implementation status
-- `docs/roadmap/roadmap.md` and the owning implementation plan for sequencing
+- `docs/roadmap/roadmap.md` for sequencing and deferred work
 
-Where an implementation slice changes a boundary shared with one of those authorities, both
-documents must be updated in the same accepted slice. A roadmap plan cannot silently override this
-document.
+Update every shared boundary in both owning authorities in the same change. This document sets
+physical representation and ownership contracts; it does not replace stage, scheduling or language
+semantics owned elsewhere.
 
 ## Change-control policy
 
-The design deliberately distinguishes locked architecture from measured implementation choices.
-This prevents benchmark work from becoming an excuse to weaken the original goals.
+The distinction keeps hard layout contracts separate from measured representation choices.
 
 ### Locked decisions
 
@@ -77,9 +65,8 @@ approval and a corresponding architecture update:
 - complex token payloads and unusual diagnostic data use typed side stores rather than widening
   common records.
 - `PathId` is a genuine interned path identity, not a wrapper around an owned component vector.
-- one source-owned `PathSyntaxTable` — evolved from the file-owned implementation table — owns
-  every authored path in a source; path tokens carry canonical `TokenTag` plus dense
-  `PathSyntaxId` handles and never expanded per-component payloads.
+- one source-owned `PathSyntaxTable` owns every authored path in a source; path tokens carry the
+  canonical `TokenTag` plus a dense `PathSyntaxId` handle rather than expanded component payloads.
 - diagnostic families are declared through one schema authority.
 - user mistakes, operational infrastructure failures and compiler bugs are three separate failure
   lanes.
@@ -88,27 +75,16 @@ approval and a corresponding architecture update:
 - normal compilation and rendering contexts are shared or moved, not deep-cloned.
 - process-local compact IDs are not persistent artefact identities.
 
-### Benchmark-selectable decisions
+### Current measured choices
 
-An implementation agent may change the following only after running the required bounded
-experiment, recording the result and updating this document in the same slice:
+`LocalSpan` uses a 22-bit start/index and 10-bit length split. Source tokens use separate dense
+shape and span arrays, with numeric, path and segmented-sequence data in typed source-local stores.
+Logical paths use eight-byte parent-linked `PathNode` rows. Extended spans are append-only and are
+not deduplicated.
 
-- the final start/length bit split inside `LocalSpan`
-- compact array-of-structs versus struct-of-arrays token storage
-- the exact internal record shapes of uncommon token and diagnostic side stores
-- whether extended spans are deduplicated within one source
-- a terminator-match encoding, but only if it meets every stop/go rule in this document
-- additional packing inside already fixed-width records when every encoded domain has a formal,
-  tested bound
-
-Benchmark-selected changes may not alter the locked sizes, exactness, ownership or failure-lane
-contracts.
-
-### Repository-discovered corrections
-
-File names, module boundaries and migration order may be updated after the implementation worker
-refreshes the repository. Those corrections must keep one current implementation path, remove
-superseded owners and update the implementation map in this document.
+Changes to these choices require an explicit architecture update, a bounded experiment against the
+current corpus, and the re-entry evidence in `Deferred capabilities`. Record exact measurements and
+maintenance costs in the existing benchmark report.
 
 ## Design goals
 
@@ -151,24 +127,38 @@ This design does not introduce:
 
 All size assertions below apply to supported 64-bit targets. Types made entirely from fixed-width
 integers must also retain their stated logical size on supported 32-bit targets.
+Code paths in the table are relative to `src/compiler_frontend/`.
 
-| Type | Required size | Required properties |
+| Type | Asserted size | Assertion owner |
 |---|---:|---|
-| `SourceId` | 4 bytes | non-zero build-lifetime ID, `Copy` |
-| `LocalSpan` | 4 bytes | exact source-local byte range, `Copy` |
-| `Option<LocalSpan>` | 4 bytes | niche-encoded absence |
-| `SourceSpan` | 8 bytes | `SourceId` plus `LocalSpan`, `Copy` |
-| `Option<SourceSpan>` | 8 bytes | niche-encoded absence |
-| `PathId` | 4 bytes | non-zero path-table identity, `Copy` |
-| `Option<PathId>` | 4 bytes | niche-encoded absence |
-| `PathSyntaxId` | 4 bytes | dense source-local path-syntax handle; zero means no path row |
-| `TokenShape` | 8 bytes | fixed tag, flags and one `u32` payload |
-| `DiagnosticToken` | 8 bytes | compact diagnostic projection of a token |
-| `DiagnosticCode` | 2 bytes | explicit non-zero internal code |
-| `DiagnosticExtraId` | 4 bytes | zero means no extra data |
-| `SecondaryDiagnosticLabel` | 12 bytes | global span plus compact message/data word |
-| `DiagnosticRecord` | 32 bytes | fixed common durable diagnostic record |
-| `DiagnosticDraft` | at most 48 bytes | move-only common record plus rare draft indirection |
+| `SourceId` | 4 bytes | `source/tests/database_tests.rs` |
+| `Option<SourceId>` | 4 bytes | `source/tests/database_tests.rs` |
+| `LocalSpan` | 4 bytes | `source/span.rs` |
+| `Option<LocalSpan>` | 4 bytes | `source/span.rs` |
+| `SourceSpan` | 8 bytes | `source/span.rs` |
+| `Option<SourceSpan>` | 8 bytes | `source/span.rs` |
+| `ExtendedSpan` | 8 bytes | `source/span.rs` |
+| `PathId` | 4 bytes | `symbols/path_interner/tests.rs` |
+| `Option<PathId>` | 4 bytes | `symbols/path_interner/tests.rs` |
+| `PathNode` | 8 bytes | `symbols/path_interner/tests.rs` |
+| Test-only `LogicalPath` wrapper | 4 bytes | `symbols/path_interner/tests.rs` |
+| `Option<LogicalPath>` | 4 bytes | `symbols/path_interner/tests.rs` |
+| `TokenShape` | 8 bytes | `tokenizer/schema.rs` |
+| `TokenSequenceRange` | 8 bytes | `tokenizer/storage.rs` |
+| `DiagnosticToken` | 8 bytes | `compiler_messages/diagnostic_token.rs` |
+| `DiagnosticTypeRecord` | 12 bytes | `compiler_messages/diagnostic_types/type_display_snapshot.rs` |
+| `ExtraDataRef` | 12 bytes | `compiler_messages/diagnostics/extras.rs` |
+| `DiagnosticExtraRecord` | 28 bytes | `compiler_messages/diagnostics/extras.rs` |
+| `ForeignSiteRecord` | 8 bytes | `compiler_messages/diagnostics/foreign.rs` |
+| `GenericSubstitutionRecord` | 8 bytes | `compiler_messages/diagnostics/labels.rs` |
+| `SecondaryDiagnosticLabel` | 12 bytes | `compiler_messages/diagnostics/labels.rs` |
+| `DiagnosticRecord` | 32 bytes | `compiler_messages/diagnostics/record.rs` |
+| `DiagnosticDraft` | at most 48 bytes | `compiler_messages/diagnostics/draft.rs` |
+| `InfrastructureFailure` | at most 56 bytes | `compiler_messages/compiler_errors.rs` |
+| `PendingDiagnostics` | at most 48 bytes | `compiler_messages/diagnostics/freeze.rs` |
+| `PreparedDiagnosticBatch` | at most 48 bytes | `compiler_messages/prepared_batch.rs` |
+| `DiagnosticRun` | 12 bytes | `compiler_messages/diagnostics/report.rs` |
+| `DiagnosticReportSet` | at most 48 bytes | `compiler_messages/diagnostics/report.rs` |
 
 The implementation must use compile-time or unit-test layout assertions. Exact layout is a real
 internal invariant here, so the testing rule against incidental layout assertions does not apply.
@@ -183,26 +173,6 @@ The following are also hard rules:
 - no missing identity is represented by a magic valid ID
 - reserved bits must be zero on construction and validated when records cross a trust boundary
 
-## Historical activation shape and current target
-
-The left-hand column records the predecessor representation measured at plan activation. It is
-historical evidence, not a description of the current workspace; the right-hand column is the
-accepted layout.
-
-| Historical activation shape | Current target shape |
-|---|---|
-| `SourceLocation { InternedPath, start line/column, end line/column }` | `SourceSpan { SourceId, LocalSpan }` |
-| source paths cloned into each token and diagnostic | one path and source record in shared tables |
-| `Token { TokenKind, SourceLocation }` | source-owned `TokenShape` plus `LocalSpan` |
-| `TokenKind` widened to 24 bytes by its inline numeric literal payload | 8-byte `TokenShape` plus typed source-local cold stores |
-| declaration shells clone `Vec<Token>` | `TokenRange` into immutable source-owned tokens |
-| `InternedPath(Vec<StringId>)` | `PathId` into a dense path trie/table |
-| wide `CompilerDiagnostic` and `DiagnosticPayload` | small `DiagnosticDraft`, 32-byte `DiagnosticRecord`, side stores |
-| primary location also cloned into first label | primary span in the record; side store contains secondary labels only |
-| full `TypeEnvironment` retained for rendering | minimal immutable `DiagnosticTypeStore` |
-| deep-cloned `StringTable` in message containers | frozen shared compilation render context |
-| `CompilerError` mixes bugs and expected infrastructure failures | `InfrastructureFailure` plus `compiler_bug!` invariant panic |
-
 ## Compilation identity context
 
 One project or package compilation boundary owns one identity context. That context is mutable while
@@ -210,36 +180,31 @@ compilation runs and becomes a lookup-only frozen bundle afterwards. Diagnostics
 the frozen identity bundle; they belong to the report that a diagnosed or warning outcome owns.
 
 ```rust
-/// Mutable build-lifetime identity construction. One explicit owner.
-pub struct IdentityContextBuilder {
-    sources: SourceDatabaseBuilder,
-    strings: StringTableBuilder,
-    paths: PathTableBuilder,
-}
-
-/// Lookup-only immutable identity. Owns no diagnostics, no report-local type
-/// display data, no driver, no scheduler and no injected services.
-pub struct FrozenIdentityContext {
+/// Immutable source, string and logical-path identity for one compiler boundary.
+pub(crate) struct FrozenIdentityContext {
     sources: FrozenSourceDatabase,
-    strings: FrozenStringTable,
-    paths: FrozenPathTable,
+    strings: Arc<FrozenStringTable>,
 }
 
-/// One report has one normal identity domain. Rare foreign sites use explicit
-/// typed cold ownership data rather than changing that domain.
-pub struct DiagnosticReport {
+/// One frozen diagnostic identity domain and its compact records.
+pub(crate) struct DiagnosticReport {
     context: Arc<FrozenIdentityContext>,
+    foreign_contexts: Vec<Option<Arc<FrozenIdentityContext>>>,
     diagnostics: DiagnosticStore,
-    types: DiagnosticTypeStore,
+    types: TypeDisplaySnapshot,
+    counts: SeverityCounts,
 }
 
-/// The command-level one-or-many container over independent project/package domains.
+/// Move-only ordered reports and the runs that preserve cross-domain order.
 pub struct DiagnosticReportSet {
     reports: Vec<DiagnosticReport>,
+    runs: Vec<DiagnosticRun>,
 }
 ```
-
-Exact Rust names may change. The ownership rules may not.
+These are the current owners. `FrozenIdentityContext::sources` is a `FrozenSourceDatabase` that owns
+the source slots, snapshots and path table; the context's `strings` field shares the frozen string
+table. Mutable construction uses the existing source-database and string-table owners rather than a
+separate aggregate identity builder.
 
 - Mutable builders have one explicit owner.
 - Compiler APIs borrow only the tables they can extend or inspect.
@@ -250,8 +215,8 @@ Exact Rust names may change. The ownership rules may not.
 - A result retains `Arc<FrozenIdentityContext>` only while it still contains compact IDs that need
   it. A clean success whose final outputs carry no compact compiler IDs builds no frozen context at
   all and drops source/token/identity data at its last diagnostic-capable boundary.
-- `DiagnosticReport` owns its own dense diagnostic and type-display stores; `DiagnosticReportSet`
-  owns only the ordered collection and adds no second context or store layer.
+- `DiagnosticReport` owns its compact `DiagnosticStore` and `TypeDisplaySnapshot`;
+  `DiagnosticReportSet` owns ordered reports and canonical runs without a second context or store layer.
 - Bulk owning stores are move-only until frozen.
 - Compact IDs and records may be `Copy`.
 - Broad `Clone` implementations on report sets, diagnostic bags, source databases and owning render
@@ -270,21 +235,22 @@ key or a cross-process protocol.
 pub struct SourceId(NonZeroU32);
 ```
 
-`SourceId` identifies one source snapshot inside one identity context.
+`SourceId` identifies one source slot inside an identity context; only a successfully loaded slot
+has a `SourceRecord` snapshot.
 
 Rules:
 
-- `SourceId(1)` is a deterministic synthetic compilation-root slot that never loads a snapshot. It
-  gives project-wide user diagnostics an exact context-owned primary span before or outside any
-  physical source. It is not a fake filesystem path and its provenance is `CompilationRoot`.
-- Physical and other synthetic IDs begin after that root slot.
+- `SourceId::COMPILATION_ROOT` is the deterministic synthetic compilation-root slot that never
+  loads a snapshot. It gives project-wide user diagnostics an exact context-owned primary span
+  before or outside any physical source. Its provenance is `SourceProvenance::CompilationRoot`,
+  not a fake filesystem path.
+- All non-root registered source slots use `SourceProvenance::AuthoredPhysical` and begin after
+  the root.
 - Inventory-backed lanes assign final IDs in canonical order before tokenization. Traversal-only
   lanes use the single private discovery-finalization barrier below. Every discovery output and
   downstream compiler boundary carries final, immutable source identities.
 - Physical sources are sorted by canonical logical source order, never filesystem iteration or
   worker completion order.
-- Compiler-known synthetic sources are registered in a deterministic category and owner order before
-  source IDs freeze.
 - A source adapter may produce synthetic token content, but it must retain provenance to the authored
   source record when diagnostics should point to authored bytes.
 - No parallel stage may allocate final `SourceId`s from a shared atomic counter.
@@ -293,7 +259,7 @@ Rules:
   ID escapes the stage. Late IDs may not leak directly from workers.
 - `SourceId` values are not serialized. Persistent artefacts store canonical source identity plus
   exact byte ranges and remap into a new context.
-- Absence uses `Option<SourceSpan>`, never `SourceId(0)` or a fabricated source.
+- Absence uses `Option<SourceSpan>`, never a zero source ID or a fabricated source.
 
 ### Private discovery finalization
 
@@ -330,31 +296,33 @@ only a candidate that fails to load occupies a failure row.
 
 ```rust
 pub struct SourceSlot {
-    id: SourceId,
-    logical_path: PathId,
-    canonical_os_path: Option<Box<Path>>,
-    kind: Option<SourceKind>,
-    provenance: SourceProvenance,
-    load: SourceLoadStatus,
+    pub id: SourceId,
+    pub canonical_os_path: Option<Box<Path>>,
+    pub logical_path: PathId,
+    pub kind: Option<SourceKind>,
+    pub provenance: SourceProvenance,
+    pub(super) load: SourceLoadStatus,
 }
 
 pub struct SourceRecord {
-    text: Box<str>,
-    line_starts: Box<[u32]>,
-    extended_spans: Box<[ExtendedSpan]>,
+    pub(super) text: Box<str>,
+    pub(super) line_starts: Box<[u32]>,
+    pub(super) extended_spans: Option<ExtendedSpanTable>,
 }
 ```
+This is the current field layout. A record exists only after a successful load; its `extended_spans`
+table is installed at the final span-producing boundary.
 
-The final arrays may split hot and cold fields further after measurement. Their semantics are
-fixed:
+This is the current split: registration metadata belongs to source slots, snapshots to loaded
+records, and failure payloads to the database-owned cold array.
 
 - a slot exists for every registered candidate, addressed directly by its `SourceId`.
 - `logical_path` is the compiler-visible logical path.
 - `canonical_os_path` exists only for filesystem-adjacent operations and is absent for synthetic
   sources.
 - `load` is the candidate's lifecycle: identity assigned and nothing attempted, one loaded record,
-  or one read failure. A failure belongs to the slot's lifecycle, but its payload does not: a
-  `CompilerError` is wide and absent for every source in a successful build, so it lives in a cold
+  or one read failure. A failure belongs to the slot's lifecycle, but its payload does not: an
+  `InfrastructureFailure` is wide and absent for every source in a successful build, so it lives in a cold
   database-owned failure array that the slot indexes. The transition out of the pending state
   happens exactly once per candidate, and both indexes stay private to the source database.
 - a record is created only by a successful load, so it unconditionally owns its payload and has no
@@ -365,10 +333,9 @@ fixed:
   entry at `0`; an empty snapshot has no lines, so its table is empty rather than carrying a
   phantom entry every consumer would have to special-case.
 - `extended_spans` owns exact ranges that do not fit inline in `LocalSpan`.
-- `kind` identifies Moth, Moth template, Markdown, config or another recognized source kind, or
-  marks the candidate as provider-owned. It is absent only for the reserved compilation root, which
-  is not a file and has no lexical kind; an adapted or synthetic source that does carry content
-  keeps its real kind here.
+- `kind` stores `SourceKind::Compiler(SourceFileKind)` for compiler-recognized inputs or
+  `SourceKind::ProviderOwned` for provider-owned files. It is `None` only for the reserved
+  compilation root, which is not a file and has no lexical kind.
 - `SourceKind` needs a provider-owned variant because the database is registered from Stage 0's
   whole sorted canonical inventory, which includes provider-owned physical files such as an
   external `.js` module. Those slots exist to hold an identity, not to be compiled, so they
@@ -377,8 +344,8 @@ fixed:
   it is the kind of the authored spelling rather than of whatever the path resolves to. Registration
   is unconditional: an unsupported kind still gets an identity, and support is diagnosed where the
   source is referenced.
-- `provenance` distinguishes authored physical source from synthetic or adapted source and points to
-  its owning source where needed.
+- `SourceProvenance` distinguishes `SourceProvenance::CompilationRoot` from
+  `SourceProvenance::AuthoredPhysical`.
 
 The source database takes ownership of source strings already loaded by Stage 0. It must not retain a
 second full copy merely for diagnostics.
@@ -437,7 +404,8 @@ source-span module.
 
 ### Logical bit layout
 
-`LocalSpan` uses one fixed split selected during the implementation's span-census phase:
+`LocalSpan` uses the fixed 22-bit start/index and 10-bit length split asserted in
+`source/span_encoding.rs`:
 
 ```text
 31                                      LENGTH_BITS  LENGTH_BITS - 1            0
@@ -460,7 +428,7 @@ Interpretation:
   - upper payload = exact start byte offset
   - lower code = exact byte length
 - `length_code == LENGTH_SENTINEL` means an exact source-local extended span.
-  - upper payload = zero-based `ExtendedSpanIndex`
+  - upper payload = zero-based `u32` index into the source-local extended-span table
   - the source record supplies exact `start` and `length`
 - the all-ones logical word is reserved for niche encoding and cannot be used as an extended index
 
@@ -477,82 +445,23 @@ Resolving an inline span is arithmetic only. Resolving an extended span is one b
 in the source-local extended-span table. No source scan, token scan, delimiter matching or parser
 state is involved.
 
-### Final bit-split selection
+### Selected `LocalSpan` split
 
-The architecture has a deterministic selection procedure rather than an unresolved design choice.
-The implementation phase must evaluate these candidates over the committed representative corpus:
+`LENGTH_BITS = 10` and `PAYLOAD_BITS = 22`: the high 22 bits carry either the inline start byte
+offset or an extended-table index, and the low 10 bits carry the length code. Inline starts are
+below 4 MiB and inline lengths are at most 1,022 bytes. Length code 1,023 marks an extended span.
+The codec reserves the all-ones logical word and accepts extended indexes through 4,194,302.
 
-| Length bits | Inline start range | Inline maximum length |
-|---:|---:|---:|
-| 8 | below 16 MiB | 254 bytes |
-| 9 | below 8 MiB | 510 bytes |
-| 10 | below 4 MiB | 1,022 bytes |
-| 11 | below 2 MiB | 2,046 bytes |
-| 12 | below 1 MiB | 4,094 bytes |
+The final corpus census counted 661,044 exact spans across 6,623 tokenized files, with 4,560,698
+source bytes. It recorded 355 extended rows (2,840 bytes), at most 18 in one source, no start
+overflow for any tested split from 8 to 12 length bits, and a maximum start of 226,191. Span
+lengths had a median of 1 byte, p95 of 13, p99 of 25 and a maximum of 31,164 bytes. These results
+support the current 22/10 split: it keeps the extended table small while preserving a 4 MiB inline
+start range and exact encoding.
 
-For each candidate, record:
-
-- total spans
-- inline spans
-- start-overflow spans
-- length-overflow spans
-- combined extended spans
-- maximum extended entries in one source
-- estimated extended-table bytes
-- span construction time
-- span resolution time for representative rendering and tooling queries
-
-Selection rules, in order:
-
-1. Reject a candidate that cannot index the maximum observed extended-span count with at least a
-   four-times safety margin.
-2. Reject a candidate that makes a representative source impossible to encode exactly.
-3. Choose the candidate with the fewest total extended spans across the weighted corpus.
-4. If candidates differ by less than 0.1% of total spans, choose the candidate with the larger inline
-   start range.
-5. If still tied, choose the 22/10 split (`LENGTH_BITS = 10`).
-6. Record the chosen constants and evidence in this document and in the benchmark report before the
-   old location model is removed.
-
-The initial design default is therefore 22 start/index bits and 10 length bits. Benchmark evidence
-may select another listed split, but it may not invent an unreviewed format.
-
-#### Selected split, frozen by measurement
-
-`LENGTH_BITS = 10`: **22 start/index bits, 10 length bits**, a 4 MiB inline start range and a
-1,022-byte inline maximum length. The measured corpus is 4,585 tokenized sources, 2,352,836 bytes
-and 286,779 exact token spans; the census is `just span-census` and its evidence is recorded in
-`benchmarks/frontend-optimization-results.md`.
-
-| `LENGTH_BITS` | Extended spans | Excess over the best | Share of all spans | Max entries in one source | Extended-table bytes |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 8 | 808 | +763 | 0.266% | 49 | 6,464 |
-| 9 | 453 | +408 | 0.142% | 22 | 3,624 |
-| 10 | 249 | +204 | 0.071% | 16 | 1,992 |
-| 11 | 123 | +78 | 0.027% | 9 | 984 |
-| 12 | 45 | — | — | 5 | 360 |
-
-No candidate suffers a start overflow: the largest source is 92,557 bytes, well under the tightest
-candidate's 1 MiB start range. Rules 1 and 2 reject nothing. Every candidate can index four times
-its observed maximum per-source extended count with room to spare: usable capacities of
-16,777,215, 8,388,607, 4,194,303, 2,097,151 and 1,048,575 entries stand against required margins of
-196, 88, 64, 36 and 20, and even the smallest usable capacity exceeds its requirement by over
-5,000 times. The extended table can encode any range exactly, so no source is impossible to
-encode. Rule 3 prefers `LENGTH_BITS = 12`; rule 4 then admits every candidate within 0.1% of it —
-10, 11 and 12 — and selects the largest inline start range among them, which is
-`LENGTH_BITS = 10`. Rule 5 is not reached.
-
-Timing does not separate the candidates. Encoding all 286,779 spans takes roughly 9 ms and
-decoding them roughly 7 ms for every candidate, and the same candidate varies more between runs
-than the candidates vary from each other in one run, with the fastest-to-slowest ordering changing
-run to run. No candidate is timing-preferred on this evidence, so the decision rests on
-extended-span count and start range alone. The measurement establishes nothing further: it times an
-enum-tagged prototype, not the packed production codec, so it predicts neither `LocalSpan`'s speed
-nor that the selected split is free of a cost the prototype cannot express.
-
-Length overflow is one authored shape: a long `StringSliceLiteral`, almost always a template body
-in a documentation `.mtf`. The longest single span in the corpus is 31,475 bytes. Median span
-length is 1 byte and p99 is 52 bytes, so the inline case is overwhelmingly the common case.
+The constants and reserved-word conditions are compile-time assertions in
+`src/compiler_frontend/source/span_encoding.rs`. The selected split is a current representation
+choice. Reconsider it only with a new corpus census and the full architecture and performance gates.
 
 ### Extended-span insertion
 
@@ -566,52 +475,6 @@ entries are deduplicated is not observable through `LocalSpan`.
 Construction returns a typed capacity error when the exact range cannot be encoded. The caller maps
 that to the source-size/source-complexity diagnostic lane for authored input.
 
-### Terminator-based encoding experiment
-
-A terminator recipe such as “continue until the next balanced template close” is not part of the
-canonical format. It may be prototyped once during the span-selection phase because the design goal is
-aggressive memory efficiency.
-
-It is accepted only if all of the following are true:
-
-- decoding returns an exact range without scanning source bytes or tokens
-- it depends only on an immutable retained match table, not parser or tokenizer state
-- malformed and unclosed source has a deterministic exact fallback
-- strings, escapes, comments, templates and nested balanced modes require no duplicate lexical rules
-- source ordering, overlap checks and LSP conversion remain constant-time after at most one table
-  lookup
-- the terminator match table plus any fallback spans consumes at least 10% less retained memory than
-  the exact overflow-table design on the measured corpus
-- median compile time and diagnostic rendering time do not regress by more than 2%
-- the implementation is simpler or equally auditable at every consumer boundary
-
-Failure of any condition rejects the experiment. The result is recorded as a deliberately deferred
-or rejected optimisation in the roadmap. A durable span must never store an instruction that asks a
-renderer to reparse source.
-
-#### Result: deliberately deferred, not evaluated
-
-No terminator prototype was built at slice 1C2, and none of the eight acceptance gates was
-evaluated. This is a deliberate decision not to spend the investigation, recorded here as the
-authority requires, and it is not a measured failure of any gate.
-
-The census bounds what the investigation could win. At the selected split the exact overflow-table
-design retains **1,992 bytes** for the entire corpus: 249 extended spans at 8 bytes each, against
-2,352,836 bytes of source text. Eliminating that table outright — a saving no real design achieves
-— would recover 0.085% of the text those spans point into, and the memory gate's own bar is
-199 bytes. An optimisation whose entire ceiling is under 2 KB does not justify prototyping a second
-span encoding, so the work is declined on that ground alone.
-
-Two things are explicitly **not** claimed. The memory gate is not shown to be unreachable: the
-corpus's largest start and length both fit in 24 bits, so a packed pair of endpoints is a concrete
-6-byte match record, and 249 such records retain 1,494 bytes, which is 25% below the baseline.
-Nor is the auditability gate shown to fail, because no implementation exists to audit. A future
-reviewer should treat both gates as open questions, not as settled against the design.
-
-Reopening is legitimate when the premise changes: a corpus whose extended-span retention is large
-enough that a fraction of it is worth engineering. The absolute figure above, not this paragraph,
-is the thing to re-measure.
-
 ### Span API
 
 The span module exposes named operations rather than public fields or raw bit functions:
@@ -621,23 +484,23 @@ impl LocalSpan {
     pub fn exact(start: u32, length: u32, extended: &mut ExtendedSpanBuilder)
         -> Result<Self, SpanCapacityError>;
 
-    pub fn resolve(self, source: &SourceRecord) -> ResolvedByteRange;
-    pub fn is_empty(self, source: &SourceRecord) -> bool;
+    pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange;
 }
 
 impl SourceSpan {
     pub fn source(self) -> SourceId;
-    pub fn byte_range(self, sources: &SourceDatabase) -> ResolvedByteRange;
-    pub fn start(self, sources: &SourceDatabase) -> u32;
-    pub fn end(self, sources: &SourceDatabase) -> u32;
-    pub fn overlaps(self, other: Self, sources: &SourceDatabase) -> bool;
-    pub fn contains(self, other: Self, sources: &SourceDatabase) -> bool;
+    pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange;
+    pub(crate) fn byte_range<S: SourceSpanDatabase>(self, sources: &S) -> ResolvedByteRange;
+}
+
+impl ResolvedByteRange {
+    pub fn start(self) -> u32;
+    pub fn end(self) -> u32;
 }
 ```
-
-Comparing ranges from different sources is never an overlap. Deterministic display ordering compares
-`SourceId`, then start, then end. The current location `PartialOrd` behaviour must be replaced by
-explicitly named operations so overlap and ordering cannot be confused.
+`SourceSpan::resolve_with` is retained for source tests; production consumers use `byte_range`.
+Callers compare resolved byte ranges after confirming source identity. Spans from different sources do
+not overlap.
 
 ### Line and column conversion
 
@@ -702,26 +565,27 @@ whether the path stays inside one build context:
 
 ### Dense path table
 
-The baseline representation is a parent-linked path trie:
+The current representation is a parent-linked path trie:
 
 ```rust
 #[repr(C)]
-#[derive(Clone, Copy)]
-struct PathNode {
-    parent_raw: u32,
-    component: StringId,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PathNode {
+    pub(super) parent: Option<PathId>,
+    pub(super) component: StringId,
 }
 
+#[derive(Clone, Debug)]
 pub struct PathInternerBuilder {
-    nodes: Vec<PathNode>,
-    depths: Vec<u32>,
+    table: PathTable,
+    lookup_layers: Vec<Arc<FxHashMap<(PathId, StringId), PathId>>>,
     lookup: FxHashMap<(PathId, StringId), PathId>,
 }
 ```
 
 Rules:
 
-- `PathId(1)` is the root path.
+- `PathId::ROOT` is the root path.
 - the root node's component field is not interpreted
 - every non-root node names one parent and one component
 - interning `(parent, component)` returns the existing child or appends one node
@@ -731,8 +595,8 @@ Rules:
 - prefix checks walk ancestors or use depth-guided traversal
 - no path operation clones a component vector
 
-A structure-of-arrays variant may be selected after profiling, but it must preserve one compact ID
-and one canonical node per unique path prefix.
+Path nodes currently use eight-byte array-of-structures `PathNode` rows. Revisit a structure-of-arrays
+layout only if profiling identifies path traversal as a hotspot.
 
 ### Parallel path interning
 
@@ -751,13 +615,6 @@ Normal compilation does not put a lock around one mutable global path interner.
 
 Source logical paths known at Stage 0 are interned before source IDs are assigned.
 
-### Migration rule
-
-`InternedPath` may exist only as a temporary migration adapter inside one not-yet-migrated slice. It
-must not remain in durable source spans, tokens, diagnostics, type definitions or public interfaces at
-plan completion. No compatibility wrapper may preserve `InternedPath(Vec<StringId>)` as a second
-canonical path representation.
-
 ## Compact source-owned tokens
 
 ### Common token shape
@@ -765,14 +622,14 @@ canonical path representation.
 ```rust
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TokenTag(u16);
+pub(crate) struct TokenTag(u16);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TokenShape {
-    tag: TokenTag,
-    flags: u16,
-    data: u32,
+    pub(crate) tag: TokenTag,
+    pub(crate) flags: u16,
+    pub(crate) data: u32,
 }
 ```
 
@@ -791,136 +648,100 @@ Payload policy:
 
 ```rust
 pub struct SourceTokens {
-    source: SourceId,
-    shapes: Box<[TokenShape]>,
-    spans: Box<[LocalSpan]>,
-    numeric_literals: NumericLiteralStore,
-    path_syntax: PathSyntaxTable,
-    token_stats: TokenStats,
+    pub(super) source: SourceId,
+    pub(super) shapes: Box<[TokenShape]>,
+    pub(super) spans: Box<[LocalSpan]>,
+    pub(super) numeric_literals: NumericLiteralStore,
+    pub(super) path_syntax: Option<Arc<PathSyntaxTable>>,
+    pub(super) sequence_store: TokenSequenceStore,
+    pub(super) token_stats: TokenStats,
 }
 ```
 
 `shapes.len() == spans.len()` is a hard invariant. A token index addresses both arrays.
 
-During construction, vectors may be used with measured capacities. Freezing converts them to boxed
-slices or another immutable dense owner. An array-of-structs experiment may place shape and local
-span together, but only if it materially outperforms the split representation and still preserves the
-8-byte/4-byte contracts.
+The builder emits the separate shape and span arrays in one pass. Freezing stores them as immutable
+boxed slices. The current split representation retains the 8-byte `TokenShape` and 4-byte
+`LocalSpan` independently.
 
-**Slice 3A layout selection (2026-09-14):** the canonical production layout remains the split
-SoA `Vec`/`Box<[TokenShape]>` plus `Vec`/`Box<[LocalSpan]>` shown above. A short-lived Rust `-O`
-probe (not a second benchmark runner; no permanent probe added) compared it against compact AoS
-`TokenRecord { shape: TokenShape, span: LocalSpan }` at the required 12-byte layout with
-N=41,331 representative tokens (`TokenShape` 8 bytes, `LocalSpan` 4 bytes, AoS record 12 bytes;
-both layouts held 495,972 capacity bytes). The probe used a parser-cursor-shaped loop with
-current shape/span reads, adjacent peek checks and advance-style indexing, plus conditional flag
-reads to exercise cache-sensitive access patterns. Five independent invocations showed SoA faster
-in every parser-cursor mode: flags=false SoA ~5.681-5.804 ms vs AoS ~6.158-6.513 ms; flags=true
-SoA ~6.692-6.884 ms vs AoS ~8.161-8.515 ms. A repeated checked range/length validation loop ran
-12,399,300 checks per layout with SoA ~1.881-1.938 ms and AoS ~1.928-1.948 ms, with zero
-failures. This is a parser/cache/validation proxy rather than a full production parser benchmark;
-later Phase 3 benchmark evidence still owns end-to-end parser, retention and timing checks. AoS
-showed no repeatable material improvement at equal retained capacity, so the SoA baseline is
-preserved per the benchmark-selectable rule above.
+`SourceTokens` is the immutable source-owned token model. The tokenizer schema in
+`src/compiler_frontend/tokenizer/schema.rs` owns explicit `TokenTag` values, payload kinds, flags
+and classification facts. `TokenShape` is eight bytes and `DiagnosticToken` is a separate
+eight-byte projection over the same taxonomy.
 
-**Slice 3B taxonomy (2026-09-14, completed in 3H):** `src/compiler_frontend/tokenizer/schema.rs`
-owns the sole `token_schema!` row authority for the explicit token vocabulary, descriptor payload
-kinds, allowed flags and classification facts. It supplies the checked 8-byte `TokenShape` and
-schema-owned classification/precedence accessors. Every production and test parser consumer reads
-`TokenTag`, `TokenRef` and typed payload facts; no wide token enum or compatibility taxonomy remains.
-`DiagnosticToken` remains a separate 8-byte projection over the same `TokenTag` and descriptor
-payload facts. Dynamic values are extracted only at that projection boundary. Exact source-word
-spellings live in `moth-lexical`'s `words.rs`; `keywords.rs` maps them to `TokenTag`, and the typed
-cold stores retain dynamic spellings.
+`SourceTokens` stores boxed `TokenShape` and `LocalSpan` arrays, a `NumericLiteralStore`, an
+optional shared `PathSyntaxTable`, a source-local `TokenSequenceStore` and token statistics.
+`TokenIndex`, half-open `TokenRange`, `TokenSequenceId`, borrowed `TokenCursor` and `TokenRef`
+provide checked views. Retained headers, declarations, templates and generic bodies keep ranges or
+sequence handles instead of cloned token vectors.
 
-**Slice 3C cold stores (2026-09-14, completed in 3H):** `NumericLiteralStore` in
-`src/compiler_frontend/numeric_text/store.rs` retains numeric lexical records outside the fixed
-token word and reuses the shared `moth-lexical` grammar. Its one-based `NumericLiteralId` and the
-existing source-owned `PathSyntaxTable`'s one-based `PathSyntaxId` reject zero, out-of-range and
-foreign ownership at checked boundaries. The canonical path tag carries only that dense handle.
-Symbols, strings, booleans and scalar characters use validated direct `TokenShape` payloads.
-Numeric/path stores remap at their owner boundary, freeze at ordinary prepared-source publication,
-and persistent generic capture validates donor path handles against the source-owned path table
-without copying a per-generic path or numeric subset. Numeric payloads carry donor `StringId`s until
-the requester boundary translates them by spelling.
+`NumericLiteralStore` in `src/compiler_frontend/numeric_text/store.rs` retains lossless numeric
+spelling and lexical facts until the receiving type is known. `PathSyntaxTable` in
+`src/compiler_frontend/paths/path_syntax.rs` stores authored path roots and local spans. Both are
+typed cold stores owned with source tokens; neither widens the common token shape.
 
-**Slice 3D storage and cursor ownership (2026-09-14, completed in 3H):** `SourceTokens` is the one
-canonical immutable SoA owner for a source: boxed `TokenShape`/`LocalSpan` arrays, a typed numeric
-side-store, the source-owned `PathSyntaxTable` and the segmented sequence store. `TokenIndex(u32)`,
-checked half-open `TokenRange`, borrowed `TokenCursor` and copyable `TokenRef` expose bounded views
-without cloning cold payloads. Headers, declarations, templates and generic bodies retain ranges or
-sequence IDs, never token vectors. Cursor boundaries, stable EOF/peek, nested ranges, publication
-attachment and malformed cold-store rejection are covered by focused tokenizer tests.
-
-**3H final ownership boundary (2026-09-20):** `Header` retains `TokenRange` bodies and optional
-`TokenSequenceId` start syntax over the canonical owner. `SourceTokenOwner` carries only the
-canonical `Arc<SourceTokens>` and owns its final source-local sequence registration; source logical
-and OS paths resolve through their existing source/donor owners. `StableBodyOwner` retains one
-canonical source owner per generic body, while `SharedDonorIdentity` shares one frozen declaring
-string table per domain. Foreign donor path/string tables are explicit typed provenance; the parser
-borrows the donor range and translates only consumed payloads through `TokenPayloadOrigin`, so no
-rebased token window, copied numeric/path store or parser compatibility vector is retained or built.
-
-**3H-R3a construction ownership (2026-09-18):** the tokenizer's `SourceTokensBuilder` packs shapes,
-spans and typed cold-store handles in the lexing pass, so the canonical owner is never derived from
-a token vector. The resulting-length preflight rejects `u32::MAX + 1` before mutating builder
-arrays, statistics or staged numeric state and maps through the typed capacity diagnostic. The
-lexer and test source helper use this same forward construction owner.
-
+The `SourceTokensBuilder` constructs shapes, spans and typed payloads during lexing. It validates
+the final token count before mutation, then freezes one canonical owner. Token ranges and cold-store
+handles are checked against that source owner before publication or use.
 
 ### Token references and ranges
 
 ```rust
 #[repr(transparent)]
-pub struct TokenIndex(u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TokenIndex(pub(super) u32);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TokenRange {
-    source: SourceId,
-    start: TokenIndex,
-    end: TokenIndex,
+    pub(super) source: SourceId,
+    pub(super) start: TokenIndex,
+    pub(super) end: TokenIndex,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct TokenRef<'a> {
-    tokens: &'a SourceTokens,
-    index: TokenIndex,
+    pub(super) tokens: &'a SourceTokens,
+    pub(super) index: TokenIndex,
 }
 ```
 
 - ranges are half-open
 - `TokenRef` borrows a canonical token; parser APIs do not clone complete tokens
 - declaration shells, dependency clause shells and retained syntax store `TokenRange` or typed range wrappers
-- no retained syntax structure owns `Vec<Token>`
+- no retained syntax structure owns a cloned token vector
 - a range is valid only with the `SourceTokens` for its `SourceId`
 - bounds violations in trusted internal records are compiler bugs
 - malformed user source produces diagnostics before an invalid range can be constructed
 
 ### Path syntax table
 
-One source-owned `PathSyntaxTable` — evolved in place from the implementation's file-owned
-`PathSyntaxTable` — owns every authored path in a source. A path token carries the canonical
-`TokenTag` plus one dense `PathSyntaxId` handle instead of an expanded per-component payload.
+One source-owned `PathSyntaxTable` owns each authored path in the source. Path tokens carry the
+canonical `TokenTag` plus one dense `PathSyntaxId` handle.
 Dependency selections are owned by retained dependency clauses, not by this path table.
 
 ```rust
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PathSyntaxId(u32);
 
+#[derive(Clone, Debug, Default)]
 pub struct PathSyntaxTable {
     paths: Vec<PathSyntax>,
+    owner_source: Option<SourceId>,
+    frozen: bool,
 }
 
-#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PathSyntax {
-    root: PathId,
-    span: LocalSpan,
+    pub root: PathId,
+    pub span: LocalSpan,
 }
 ```
 
 Rules:
 
-- `PathSyntaxId(0)` means no path row. It is an absent marker, never a valid identity.
+- The test-only `PathSyntaxId::NONE` marker is zero and means no path row; it is never a valid
+  identity.
 - one authored path exists exactly once as one `PathSyntax` row
 - a path token carries the canonical `TokenTag` for the path token family plus one dense
   `PathSyntaxId` in its shape data; that tag-plus-handle vocabulary is the only path-token
@@ -1009,38 +830,42 @@ Projection rules:
 - a diagnostic must remain renderable after the source token side store is dropped or independently
   frozen
 
-The global token redesign is preferred over maintaining a second wide diagnostic token enum. The
-projection remains necessary because source-token and diagnostic retention policies are different.
+The separate projection reflects diagnostic retention needs: frozen diagnostics remain renderable
+after the source-token owner and its cold stores are released.
 
 ## Compact diagnostic architecture
 
-### Two-stage model
+### Drafts, compaction and frozen report views
 
-Diagnostics have one local construction model and one durable storage model:
+Diagnostics flow through one local draft model and one compact report model:
 
 ```text
-compiler stage
--> typed DiagnosticDraft
+compiler producer
+-> DiagnosticDraft
 -> DiagnosticBag
--> identity remap and diagnostic compaction
--> DiagnosticStore
--> DiagnosticId + FrozenDiagnosticStore
+-> owning-boundary capture and canonical merge
+-> DiagnosticRecord plus typed side stores in DiagnosticStore
+-> DiagnosticReport / DiagnosticReportSet
+-> DiagnosticView plus family-specific typed facts
 -> terminal, terse, dev-server and tooling renderers
 ```
 
-`DiagnosticDraft` is move-only and travels through local `Result` paths as a plain value. Rare
-draft data may use one heap allocation because only the exceptional case pays for it.
+Producers construct typed `DiagnosticDraft` values and `DiagnosticBag` accumulates those drafts during stage-local work. Owning boundaries capture type-display facts and required identity owners before canonical merge. Freeze builds each report's compact `DiagnosticStore` and `TypeDisplaySnapshot`; `DiagnosticView` decodes stored facts through the family schema for rendering.
+
+Foreign-site references are report-owned frozen identity-context references indexed by
+`ForeignSiteRecord`. Producers create typed drafts; freezing writes the compact store and typed
+side stores exposed through read-only `DiagnosticView`s.
 
 `DiagnosticRecord` is the durable fixed record stored densely in `DiagnosticStore`.
 
 ```rust
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct DiagnosticRecord {
-    primary: SourceSpan,          // 8 bytes
-    code_and_flags: u32,          // 4 bytes
-    facts: [u32; 4],              // 16 bytes
-    extra: DiagnosticExtraId,     // 4 bytes
+#[derive(Debug)]
+pub(super) struct DiagnosticRecord {
+    pub(super) code: DiagnosticCode,              // 2 bytes
+    pub(super) severity: SeverityOverride,        // 1 byte
+    pub(super) primary: Option<SourceSpan>,       // 8 bytes; None when absent
+    pub(super) facts: [u32; FACT_WORDS],           // 16 bytes; four words
+    pub(super) extra: Option<DiagnosticExtraId>,  // 4 bytes
 }
 ```
 
@@ -1049,9 +874,8 @@ The common record is exactly 32 bytes. New diagnostic families must fit this sha
 ### Diagnostic identity and flags
 
 ```rust
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DiagnosticCode(NonZeroU16);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DiagnosticCode(NonZeroU16);
 ```
 
 `DiagnosticCode` is an explicit internal numeric identity. It is assigned in the diagnostic schema
@@ -1063,22 +887,9 @@ The Moth language's runtime `Error.code` is a separate `U32` value with default
 code, or the Rust MON `MonErrorCode` enum, and its width or default never drives
 diagnostic storage or rendering.
 
-`code_and_flags` uses this fixed layout:
-
-```text
-bits  0..15   DiagnosticCode
-bits 16..17   severity override
-bits 18..31   reserved, must be zero
-```
-
-Severity override values:
-
-```text
-00  use descriptor default
-01  Error
-10  Warning
-11  Note
-```
+`DiagnosticRecord` stores `code` and `severity` as separate fields. `SeverityOverride::Default` uses
+the family descriptor's severity; non-default `Error`, `Warning` and `Note` variants are test-only.
+The field widths sum to 31 bytes; one padding byte gives the fixed 32-byte record.
 
 A diagnostic does not store category or default severity redundantly.
 
@@ -1118,25 +929,34 @@ TypeMismatch:
   fact 2 = TypeMismatchContext
   fact 3 = unused/zero
 
-GenericInferenceConflict:
-  fact 0 = parameter name StringId
-  fact 1 = existing TypeDisplayId
-  fact 2 = replacement TypeDisplayId
-  fact 3 = packed subject + generic parameter ID
-  extra  = optional previous-evidence secondary label
+InvalidGenericInstantiation (ConflictingInference):
+  fact 0 = InvalidGenericInstantiationCode reason
+  fact 1 = GenericInferenceSubject
+  fact 2 = existing TypeDisplayId
+  fact 3 = replacement TypeDisplayId
+  extra  = parameter name followed by the optional type name, as StringIds
 
 ```
 
 The schema tests validate that unused words and reserved bits are zero.
 
+A family whose reasons need different word layouts declares one family-local shape codec rather than
+widening the record. The codec writes the reason code into word 0 and reports, for each value, which
+words hold a type. The family row records the words that must hold a type and the words that may; a
+draft's pending type-slot marks must lie between the two.
+
 ### Diagnostic draft
 
 ```rust
 pub struct DiagnosticDraft {
-    record: DiagnosticRecord,
+    core: DraftCore,
     extra: Option<Box<DiagnosticExtraDraft>>,
 }
 ```
+
+`DraftCore` is `Copy`. It holds the family row, the span, the fact words, the pending type-slot marks,
+the fault flag and the severity override. `compact` writes the code, span, facts and severity into the
+stored record.
 
 The exact private representation may use another one-pointer rare-data owner, but it must remain no
 larger than 48 bytes on supported 64-bit targets.
@@ -1155,20 +975,22 @@ rare data that the schema explicitly places in a side store.
 ### Diagnostic IDs and store
 
 ```rust
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DiagnosticId(NonZeroU32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DiagnosticId(u32);
+```
 
-pub struct DiagnosticStore {
-    records: Vec<DiagnosticRecord>,
-    extras: Vec<DiagnosticExtraRecord>,
-    labels: Vec<SecondaryDiagnosticLabel>,
-    string_ids: Vec<StringId>,
-    path_ids: Vec<PathId>,
-    type_ids: Vec<TypeDisplayId>,
-    substitutions: Vec<GenericSubstitutionRecord>,
-    diagnostic_tokens: Vec<DiagnosticToken>,
-    // Additional typed cold stores declared by the schema.
+```rust
+#[derive(Debug)]
+pub(super) struct DiagnosticStore {
+    pub(super) records: Vec<DiagnosticRecord>,
+    pub(super) extras: Vec<DiagnosticExtraRecord>,
+    pub(super) labels: Vec<SecondaryDiagnosticLabel>,
+    pub(super) label_data: Vec<[u32; 2]>,
+    pub(super) string_ids: Vec<StringId>,
+    pub(super) substitutions: Vec<GenericSubstitutionRecord>,
+    pub(super) foreign_sites: Vec<ForeignSiteRecord>,
+    pub(super) limits: DiagnosticLimits,
+    pub(super) full: Option<DiagnosticCapacityResource>,
 }
 ```
 
@@ -1176,8 +998,7 @@ The exact list of typed cold stores evolves with the schema. Common rules do not
 
 - `DiagnosticId` indexes one dense record
 - record order is deterministic compiler production order after canonical worker merge
-- each auxiliary list uses a typed `start: u32, length: u32` range
-- extra data is immutable after store freeze
+- each auxiliary list uses a typed `start: u32, len: u32` range
 - no per-record `Vec`, `HashMap` or trait object is stored
 - no renderer mutates or enriches a diagnostic record
 
@@ -1185,7 +1006,7 @@ The exact list of typed cold stores evolves with the schema. Common rules do not
 
 Compact indexes have explicit limits. User-authored input that exceeds one is not a compiler bug.
 
-- The schema includes one no-extra `CompilerCapacityExceeded` diagnostic family with a compact
+- The schema includes the no-extra `COMPILER_CAPACITY_EXCEEDED` diagnostic family with a compact
   resource-kind fact.
 - Diagnostic store builders reserve logical room for one terminal capacity record.
 - Deltas merge in canonical order. On the first capacity failure, the builder keeps every already
@@ -1200,31 +1021,33 @@ Compact indexes have explicit limits. User-authored input that exceeds one is no
 - A capacity failure caused by a compiler-produced bounded data structure is a compiler bug only when
   the producing stage's documented invariant proves user input could not cause it.
 
-The exact external stable code is assigned through the diagnostic schema during implementation.
+The `COMPILER_CAPACITY_EXCEEDED` schema row currently assigns stable code `MOTH-SYNTAX-0037`.
 
 ### Extra-data indirection
 
 ```rust
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DiagnosticExtraId(u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DiagnosticExtraId(NonZeroU32);
 ```
 
-`0` means no extra data. Other values are one-based indexes.
+Records store it as `Option<DiagnosticExtraId>`, so `None` means no extra data. Other values are one-based indexes.
 
 The baseline extra record is:
 
 ```rust
-#[repr(C)]
-struct DiagnosticExtraRecord {
-    labels: LabelRange,     // start: u32, length: u32
-    data: ExtraDataRef,     // kind/flags plus one u32 index
+#[derive(Clone, Copy, Debug)]
+pub(super) struct DiagnosticExtraRecord {
+    pub(super) labels: DiagnosticListRange,         // start: u32, len: u32
+    pub(super) foreign_sites: DiagnosticListRange,  // start: u32, len: u32
+    pub(super) data: ExtraDataRef,                  // kind: u32, then a DiagnosticListRange
 }
 ```
 
-`ExtraDataRef::NONE` means the diagnostic has labels only. A diagnostic that needs both labels and a
-variable fact list uses one extra record that points to both. An unusual diagnostic does not force a
-second word into every common record.
+`ExtraDataKind::None` means the diagnostic has no data list. `ExtraDataKind::StringIds` names a run of
+the string-id arena. One extra record can point at its labels, foreign sites and string list together,
+so an unusual diagnostic does not force a second word into every common record.
+
+A foreign site is an 8-byte `ForeignSiteRecord`: a selector word (0 for the primary span, related-site index + 1 for a related site) and an index into the report-owned frozen identity-context references. The span stays in the record's primary field or in its related-site record, so the row never carries a span. Equal frozen identities share one entry.
 
 Before creating a new extra kind, the owner must check whether the diagnostic can carry a smaller,
 clearer semantic fact instead. Side storage is an escape hatch for genuinely variable or unusual
@@ -1233,33 +1056,35 @@ data, not permission to preserve bloated payloads unchanged.
 ### Primary and secondary labels
 
 The primary source span is `DiagnosticRecord::primary`. It is not duplicated as a label.
-A diagnostic with no related source site has no label allocation.
+A label may carry a source span, a message, both or neither. A diagnostic with no secondary labels
+has no label allocation.
 
 ```rust
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SecondaryDiagnosticLabel {
-    span: SourceSpan,
-    message_and_data: u32,
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SecondaryDiagnosticLabel {
+    pub(super) span: Option<SourceSpan>,
+    pub(super) packed: u32,
 }
 ```
 
-`message_and_data` uses:
+`packed` uses this layout:
 
 ```text
-bits  0..7    LabelMessageCode; 0 means no message
-bits  8..31   24-bit immediate value or one-based LabelDataId
+bits 24..31  LabelMessageCode; 0 is NONE, used only for a label with no message
+bits  0..23  zero-based row index into label_data when the code carries data; zero for codes without data
 ```
 
-The label schema decides whether the upper field is immediate or indexes typed label data.
-Examples include previous declaration, conflicting access, move site, generic instantiation site and
-immutable binding declaration.
+The label schema decides which codes carry data. Codes without data use a zero row index; codes with
+data interpret the low bits only as a zero-based `label_data` row index, never as an immediate value.
 
 A substitution list does not live inside the label-message enum. It uses the substitution arena and a
 label data reference.
 
-More than `2^24 - 1` label-data entries in one compilation is a typed diagnostic-capacity failure for
-user input, not integer wrapping.
+The compact store limits `label_data` to at most `2^24 - 1` rows. Exceeding that limit is a typed
+diagnostic-capacity failure for user input, not integer wrapping.
+
+A label with a span and no message is stored as code 0 (`NONE`) with zero data. It keeps its span, so
+its location still renders.
 
 ### Mixed-domain ownership
 
@@ -1268,67 +1093,59 @@ both `DiagnosticRecord::primary` and `SecondaryDiagnosticLabel::span`. A compact
 span without cold ownership data is interpreted only in that domain. Numeric
 source IDs or paths never infer a different owner.
 
-A rare primary or secondary site that genuinely belongs to another identity
-domain uses typed cold ownership data associated with that site. The cold data
-resolves the site through a compact, report-owned reference to the other
-`FrozenIdentityContext`; it must not widen the common record. An explicit
-`FrozenIdentityHandle` provides this ownership during migration. Phase 4 Slice 4B replaces it
-with the final typed cold-store encoding without widening 32-byte records or 12-byte labels.
+A rare primary or secondary site from another identity domain has typed cold
+ownership data in the same report. Its `ForeignSiteRecord` selects the primary
+or related site and indexes a report-owned reference to the other
+`FrozenIdentityContext`. The span remains in the common record or related-site
+record; equal contexts share one reference.
 
 The common `DiagnosticRecord` remains exactly 32 bytes and
 `SecondaryDiagnosticLabel` remains exactly 12 bytes. Neither common type carries
-an `Arc`, path object or pointer, or context pointer to implement this ownership.
-Foreign related-site ownership is separate from the report's default render
-ownership and must never change which normal context resolves the diagnostic's
-primary span.
+an `Arc`, path object or context pointer to implement this ownership. Foreign
+related-site ownership is separate from the report's default render ownership
+and must never change which normal context resolves the primary span.
 
-This subsection is the current authority for mixed-domain ownership. Any earlier
-R7 wording that describes portable coordinates or an optional explicit span is
-historical migration context only and does not override this contract.
+Cross-domain sites use explicit report-owned context references. Compact IDs never determine an
+owner by themselves.
 
 ### Diagnostic places
 
-`DiagnosticPlace` is one `u32`, not an enum widened by a path owner.
+`DiagnosticPlace` is the typed draft value:
 
-```text
-bits 30..31   place tag
-bits  0..29   compact value
+```rust
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiagnosticPlace {
+    Local(StringId),
+    Path(PathId),
+    Unknown,
+}
 ```
 
-Initial tags:
+`PlaceFact` encodes it in one `u32` fact word:
 
 ```text
-00  unknown
-01  local/rendered StringId-domain value
-10  PathId-domain value
-11  reserved for a future typed place table
+bits 30..31  place tag: 00 unknown, 01 local StringId, 10 PathId, 11 invalid
+bits  0..29  zero-based StringId or PathId index
 ```
 
-If an ID domain cannot fit 30 bits, the place uses the reserved tag and a side-table ID. It does not
-widen the fact word. The storage module owns construction and decoding.
+`OptPlaceFact` reserves an absent marker distinct from `DiagnosticPlace::Unknown`. Values that do
+not fit the 30-bit index field return `FactCapacityError`; the storage module owns construction,
+remapping and decoding.
 
 ### Variable lists
 
 Variable diagnostic lists use typed ranges into dense arenas:
 
 ```rust
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct DiagnosticListRange {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DiagnosticListRange {
     start: u32,
-    length: u32,
+    len: u32,
 }
-
-struct StringIdList(DiagnosticListRange);
-struct PathIdList(DiagnosticListRange);
-struct TypeDisplayIdList(DiagnosticListRange);
-struct SubstitutionList(DiagnosticListRange);
 ```
 
-Typed wrappers prevent a renderer from interpreting one arena as another.
-
-Lists currently embedded in reason enums or payload variants—known fields, available variants,
-missing variants, generic parameters, candidates and substitutions—must migrate to these stores.
+`DiagnosticListRange` is the shared range shape; the owning arena determines the element type. The
+current store has no per-arena list-wrapper types.
 
 ## Single diagnostic schema authority
 
@@ -1352,9 +1169,9 @@ The schema owns:
 - type-display rewrite markers
 - test/example registration
 
-Conceptually:
+Illustrative schema DSL only; this is not a Rust declaration or a literal current schema row:
 
-```rust
+```text
 diagnostic_schema! {
     TypeMismatch {
         code: 17,
@@ -1392,6 +1209,11 @@ The schema generates or validates:
 Direct construction of `DiagnosticRecord`, raw fact indexing and direct renderer matches on storage
 bits are prohibited outside the diagnostic storage/schema modules.
 
+Compaction treats a secondary label whose role the family row does not declare as a compiler bug and
+panics, naming the family and the role. Four roles are universal and need no declaration: `NONE` for a
+message-less label, and the three generic-instantiation roles, which the generic-function machinery
+appends to any diagnostic.
+
 A procedural generator remains deferred unless the declarative schema becomes demonstrably
 unmanageable. “More convenient” is not sufficient evidence.
 
@@ -1404,9 +1226,8 @@ can be dropped, the diagnostic compaction boundary captures only the transitive 
 render referenced types.
 
 ```rust
-#[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TypeDisplayId(NonZeroU32);
+pub(crate) struct TypeDisplayId(NonZeroU32);
 ```
 
 ### Display store
@@ -1414,17 +1235,21 @@ pub struct TypeDisplayId(NonZeroU32);
 The baseline compact record is:
 
 ```rust
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct DiagnosticTypeRecord {
-    tag: u16,
-    flags: u16,
-    data_0: u32,
-    data_1: u32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DiagnosticTypeRecord {
+    pub(super) tag: DiagnosticTypeTag,
+    pub(super) flags: u16,
+    pub(super) data_0: u32,
+    pub(super) data_1: u32,
 }
 ```
 
 Typed side ranges supply variable arguments and choice-variant summaries.
+
+The store and its record layout live in `diagnostic_types/type_display_snapshot.rs`, and the builder
+lives in `diagnostic_types/type_display_snapshot_builder.rs`. One formatter in
+`datatypes/display.rs` renders spellings for both the live and snapshot paths, so user-visible
+text stays identical.
 
 The store must represent every current user-visible type spelling:
 
@@ -1453,15 +1278,17 @@ For each diagnostic draft produced with a module-local `TypeEnvironment`:
 1. Inspect the schema and collect every fact marked as a source `TypeId`.
 2. Reserve a `TypeDisplayId` for each newly visited type before recursing, so recursive display graphs
    cannot loop.
-3. Copy only display-relevant facts into `DiagnosticTypeStoreBuilder`.
+3. Copy only display-relevant facts into `TypeDisplaySnapshotBuilder`.
 4. Recursively intern referenced child types and typed lists.
 5. Rewrite the draft fact from `TypeId` to `TypeDisplayId`.
 6. Validate that every type-marked fact was rewritten.
 7. Freeze the type display store before rendering.
 8. Release the complete `TypeEnvironment` when no semantic artefact owner still needs it.
 
-The store deduplicates equivalent display records inside one compilation context. It does not claim
-cross-build type identity.
+The builder memoizes by source `TypeId` inside one compilation context, so each type is encoded
+once and recursive graphs terminate. It does not merge distinct `TypeId`s that share a spelling,
+such as two generic parameters both named `T`, because each `TypeId` keeps its own identity. It
+does not claim cross-build type identity.
 
 A renderer receiving an unknown `TypeDisplayId` or an unrewritten source `TypeId` is observing a
 compiler invariant violation and invokes `compiler_bug!`. It does not fall back to printing an
@@ -1469,19 +1296,14 @@ internal numeric ID.
 
 ### Rendering equivalence
 
-Before full `TypeEnvironment` retention is deleted, tests must compare the old and new rendering for
-every supported type shape and for representative nested combinations. The new store must preserve
-user-visible spelling unless an explicitly authorized diagnostics-improvement slice changes it.
+Rendering-equivalence tests must compare live and snapshot formatting for every supported type shape and representative nested combinations. The snapshot store preserves user-visible spelling unless a diagnostics change explicitly authorises different wording.
 
-The compact typed-expression foundation can release expression stores after copying their diagnostic
-facts into the existing report boundary. It does not by itself deliver this snapshot architecture
-or authorise dropping a type environment still needed by a current report. That final retention
-change belongs to the diagnostic-layout migration and its complete type-lifetime proof.
+The module-local `TypeEnvironment` can be released once semantic artefact owners no longer need it.
+Frozen report views render rewritten type facts through `TypeDisplayId`s.
 
 ## Frozen render context and cloning policy
 
-A diagnostic report owns its diagnostic and type-display stores and shares one lookup-only identity
-context. See `Compilation identity context` for the exact split.
+A diagnostic report owns its compact `DiagnosticStore` and `TypeDisplaySnapshot` and shares one lookup-only frozen identity context. `DiagnosticView` borrows those stores to decode family facts. See `Compilation identity context` for the exact split.
 
 A graph-level `DiagnosticReportSet` may carry several module/package reports when they belong to
 independent identity contexts. It does not concatenate raw IDs without preserving their context owner.
@@ -1519,8 +1341,8 @@ The prepared schema records exact receiver contracts and retains each explicit
 width's range/precision limits. It stores no semantic numeric profile and has
 no `Schema::with_profile` selection.
 Its explicit targets are `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`,
-`F16`, `F32` and `F64`, alongside the separate `Byte` and exact `Dec0` through
-`Dec256` contracts.
+`F16`, `F32` and `F64`, alongside the `Byte` octet shape and the `SchemaType::Decimal { scale }`
+contract with validated scales from 0 through 256.
 `SchemaType::Integer` is a MON receiver contract, not the removed Moth source
 `Int`; lossless `Integer` and `Decimal` values remain owned MON data, not source
 type aliases. Shared `moth-lexical` materialises directly to the selected
@@ -1592,7 +1414,7 @@ numeric authority and reject non-finite source values and conversion results,
 emitting `-0.0` for negative zero and `0` for positive zero while decoding
 preserves the sign bit.
 
-Materialisation for an explicit fixed-width receiver, `Byte` or `DecN` uses
+Materialisation for an explicit fixed-width receiver, `Byte` or `SchemaType::Decimal { scale }` uses
 that schema's exact receiving limits and the shared `moth-lexical` policies.
 There is no profile-dependent `Int`/`Uint`/`Float` variant or
 `Schema::with_profile`; `SchemaType::Integer` remains a MON contract rather than
@@ -1666,12 +1488,11 @@ key. Messages render only at the caller's diagnostic boundary.
 propagation. Its owned code, detail and value path remain usable after input
 release. Source excerpts still require the original input for its byte span.
 
-This projection stays beside, not inside, the compiler failure architecture. It
-does not create a `DiagnosticRecord`, side store, `InfrastructureFailure` or
-`compiler_bug!` site, does not start the later compact-diagnostics migration
-and adds no competing global error taxonomy. Encoding and decoding return the
-first structured `MonError` with its stable reason, original input byte range
-when decoding, and field or element path where available.
+This public projection stays beside the compiler failure architecture. It does not create a
+`DiagnosticRecord`, side store, `InfrastructureFailure` or `compiler_bug!` site, and adds no
+competing compiler error taxonomy. Encoding and decoding return the first structured `MonError`
+with its stable reason, original input byte range when decoding, and field or element path where
+available.
 
 ### What this handoff does not use or change
 
@@ -1718,66 +1539,43 @@ Properties:
 Expected environmental and host failures use a separate typed result:
 
 ```rust
-pub enum InfrastructureContext {
-    Identity {
-        identity: Arc<FrozenIdentityContext>,
-        source: Option<SourceSpan>,
-    },
-    Filesystem(FileSystemContext),
-}
-
 pub struct InfrastructureFailure {
-    kind: InfrastructureFailureKind,
-    stage: InfrastructureStage,
-    context: InfrastructureContext,
-    message: Box<str>,
-    details: Box<[InfrastructureDetail]>,
+    pub(crate) kind: InfrastructureFailureKind,
+    pub(crate) stage: CompilerStage,
+    pub(crate) host_path: Option<Box<Path>>,
+    pub(crate) message: Box<str>,
+    pub(crate) details: Box<[InfrastructureDetail]>,
 }
 ```
 
-`InfrastructureContext` encodes exactly one context shape. `Identity` is required for every
-retained `SourceSpan`, `PathId` or `StringId`, and its frozen context is shared with the owning
-report or source identity. `source` is optional because an identity-context failure may retain a
-path or string ID without an authored source span. `Filesystem` is the ordinary pre-source,
-non-source, host and tool owner of paths and OS/tool error facts; add another context variant only
-if the Phase 5 inventory proves a context class that these two variants cannot represent.
+`InfrastructureFailureKind` distinguishes internal, HIR transformation, LIR transformation, Wasm
+generation, filesystem and development-server failures. `CompilerStage` records the owning
+compiler or host stage, and `InfrastructureDetail` retains only typed primary suggestions and
+output-rejection reasons.
 
-An identity-context failure never also carries filesystem context, and a filesystem-context failure
-never carries a compact compiler ID.
-
-An operational failure carries exactly one context shape, never both:
-
-```text
-identity context    — the failure retains SourceSpan/PathId/StringId facts and shares the
-                      matching frozen identity context, so those compact IDs stay resolvable
-                      exactly like diagnostic spans
-filesystem context  — a pre-source or non-source failure carries ordinary filesystem context
-                      (owned paths, OS/tool error facts) and carries no compact compiler ID
-```
+An infrastructure failure retains no source span or compact compiler identity. `host_path` is
+ordinary owned host-path context, and a missing path is valid for internal or host failures. No
+source identity context or cause-to-source pairing is needed.
 
 Examples:
 
-- source or config file cannot be opened (filesystem context)
-- output cannot be written (filesystem context)
-- permission is denied (filesystem context)
-- a dev-server port cannot bind (filesystem/host context)
-- file watching fails (filesystem/host context)
-- a backend tool or registered provider fails (filesystem/host/tool context)
-- target runtime resources are unavailable (filesystem/host context)
-- a source-scoped operational failure attached to authored bytes (identity context with the
-  exact `SourceSpan`)
+- source or config file cannot be opened (filesystem path and read suggestion)
+- output cannot be written (filesystem path and output-rejection reason where applicable)
+- permission is denied (filesystem path and OS detail in the message)
+- a dev-server port cannot bind (host failure)
+- file watching fails (host failure)
+- a backend tool or registered provider fails (host/tool failure)
+- target runtime resources are unavailable (host failure)
 - an invalid host path cannot be represented by the compiler's source identity policy
-  (filesystem context)
+  (filesystem path or a pathless infrastructure failure)
 
 Properties:
 
 - recoverable by an owning CLI/tooling boundary where retry or a clear exit is possible
 - not stored in `DiagnosticRecord`
-- no conversion to an `InfrastructureError` diagnostic payload
+- no conversion to a diagnostic payload
 - typed deterministic details instead of a string-keyed `HashMap`
-- may have no source span
-- a retained `SourceSpan`, `PathId` or `StringId` is never detached from its matching frozen
-  identity context, and that context is shared, never deep-cloned for one failure
+- carries no source span, `SourceId`, `PathId` or `StringId`
 - can be rendered in terminal, terse and dev-server forms through a separate infrastructure
   renderer
 - never widened to include arbitrary subsystem objects
@@ -1790,26 +1588,26 @@ A proven compiler invariant violation uses a non-recoverable panic produced by `
 
 ```rust
 #[track_caller]
-pub fn raise_compiler_bug(
+#[cold]
+pub(crate) fn raise_compiler_bug(
     stage: CompilerStage,
-    source: Option<SourceSpan>,
+    source: Option<CompilerBugSource>,
     message: fmt::Arguments<'_>,
 ) -> !;
 ```
 
 The panic payload is a structured `CompilerBugReport` containing:
 
-- compiler stage
-- optional Moth source span
-- Rust caller file, line and column from `#[track_caller]`
-- compiler version and commit identity where available
-- a precise invariant message
-- a clear request to report the compiler bug
+- `stage: CompilerStage`
+- `location: &'static Location<'static>` for the Rust caller's file, line and column
+- `version: &'static str`
+- `message: Box<str>`
+- `source: Option<CompilerBugSource>`
 
-The report must be self-contained before the worker's compiler state is discarded: when a bug
-carries a source span, the raising site resolves bounded source/display facts (logical display
-path, byte/line/column range, bounded excerpt) into the payload before the discard, so the report
-stays useful after unwind and never reads suspect worker tables.
+`CompilerBugSource` owns `logical_display_path`, `byte_range`, `start_line`, `start_column`,
+`end_line`, `end_column` and a bounded `excerpt`. `CompilerBugSource::from_span` resolves those
+facts while the frozen identity context is available. The report retains no `SourceSpan` and
+does not consult compiler tables after unwind; the renderer adds the fixed report request and URL.
 
 Valid panic examples:
 
@@ -1834,57 +1632,69 @@ Compiler bug panics should become rarer as invariants are moved earlier and test
 signal that continuing the owning compilation would be untrustworthy, not a substitute for typed
 validation.
 
-### Result boundary
+### Owning result boundary
 
-Conceptually:
+Owning compilation boundaries use one three-lane result. User diagnostics and infrastructure
+failures remain distinct, and compiler bugs still panic:
 
 ```rust
-pub type InfrastructureResult<T> = Result<T, InfrastructureFailure>;
+pub type CompilationResult<T> = Result<CompilationOutcome<T>, InfrastructureErrors>;
 
-pub enum ModuleCompilationOutcome {
-    Success(CompiledModuleArtifact),
-    Diagnosed(ModuleDiagnosticReport),
+pub enum CompilationOutcome<T> {
+    Success {
+        value: T,
+        warnings: Option<DiagnosticReportSet>,
+    },
+    Diagnosed(DiagnosticReportSet),
 }
-
-pub fn compile_module(...) -> InfrastructureResult<ModuleCompilationOutcome>;
 ```
 
-Compiler bugs are not another `Result` variant. They panic.
+`Success` owns a completed value and warnings frozen by the command/report owner after the
+project `SourceDatabase` has reached its last use. The warning set is `None` when empty. Inner
+success boundaries return `warnings: None` and stage successful batches in the single
+command-owned `BoundaryAccumulator`; they do not freeze or clone source databases early.
+`build_project` returns an intermediate `BuildResult` retaining the project source database and
+staged warning owner until output writing is complete. `BuildResult::finish_output` consumes that
+intermediate state: success freezes the warnings once and releases the database, while a late
+output failure discards staged warnings and freezes the output diagnostic against the retained
+source. `check` and Boracle freeze at their own report boundary; the dev-server build owner waits
+until output and site-configuration checks finish. Output-cleanup warnings remain plain
+`OutputWriteSummary` data and are rendered separately by the build CLI and dev-server success
+owners.
 
-### Current `CompilerError` migration
+`Diagnosed` owns only the frozen reports that explain the user failure. The outer `Err` owns the
+aggregate of every infrastructure cause; when infrastructure failure and user diagnostics meet at
+an owning boundary, infrastructure wins and the diagnostic set is discarded. A diagnosed or
+infrastructure-failed result never carries unrelated successful warnings. Compiler bugs are not a
+`Result` variant.
 
-The implementation keeps expected operational failures and proven internal failures in the typed
-outer `CompilerError` lane while user-caused failures use plain `CompilerDiagnostic` values. This
-transitional carrier does not implement the separate `InfrastructureFailure` result, `compiler_bug!`
-panic boundary or tooling host isolation. The data-layout programme still owns that migration under
-`Lane 2`'s context contract and `Lane 3`'s self-contained bug facts.
+The compiler may retain successful independent graph branches while diagnosed providers block
+only their dependants. The owning frontend boundary turns the completed graph into `Success` or
+`Diagnosed`; it does not stop independent work early or expose a partially linkable project.
 
-`CompilerMessages` keeps one optional boxed `InfrastructureErrors` beside the plain diagnostic
-stream. Its primary cause and ordered additional causes retain each original message, `ErrorType`,
-optional host path, source provenance and metadata without concatenation or field merging.
-Appending an aggregate flattens its causes in production order and keeps the first cause primary.
-This cold allocation never boxes the high-volume user diagnostic lane or widens its common records.
+### Current diagnostic and failure transport
 
-Cause-indexed ranges pair retained source facts with explicit `Source(Arc<SourceDatabase>)` or
-`Frozen(Arc<FrozenIdentityContext>)` owners, independently of diagnostic ranges. Append shifts cause
-ranges with their causes. Fallback source attachment fills only unpaired causes, never replaces a
-package owner and never rebinds frozen facts through a mutable identity table. A bare compact ID or
-coincident path cannot establish source ownership.
+Stage-local code prepares typed `DiagnosticDraft` values and `PreparedDiagnosticBatch` objects.
+Inner boundaries stage successful warnings in the command-owned warning store; the command/report
+owner freezes reports into `DiagnosticReportSet` after all source-database use and maps the result
+to `CompilationOutcome`. Expected operational failures and uncertain internal failures use the
+outer `InfrastructureErrors` lane, whose ordered primary and additional causes preserve production
+order. Appending an aggregate flattens causes and keeps the first cause primary without merging
+their fields.
 
-`freeze_source_contexts` moves source and string ownership rather than deep-cloning tables. It
-validates domains and acquires every required source before moving identity data, restoring source
-pairings if acquisition fails. If a later freeze step fails, the vessel still retains all diagnostic
-and cause owners. Terminal handoffs append the freeze failure and return the original
-`CompilerMessages`, preserving prior diagnostics, causes and context rather than replacing them.
+`BoundaryAccumulator` retains source databases and frozen identities for prepared diagnostic
+reports and staged successful warnings. Infrastructure causes need no source owner, source-context
+range or identity reconciliation, and the memory probe does not count cause-source owners.
 
 #### Current failure presentation
 
 One owner under `compiler_messages/render/infrastructure.rs` derives presentation exhaustively from
-`ErrorType`. `Compiler`, `HirTransformation` and `Backend(LirTransformation)` or
-`Backend(WasmGeneration)` identify compiler/build-system defects. `File` and `DevServer` identify
-operational failures. Classification follows the cause, not the subsystem, stored flags or message
-text. Adding stage or host context preserves the original class. Authored configuration and target
-capability mistakes remain typed diagnostics, not either introduction.
+`InfrastructureFailureKind`. `Internal`, `HirTransformation`, `LirTransformation` and
+`WasmGeneration` identify compiler/build-system defects. `Filesystem` and `DevelopmentServer`
+identify operational failures. Classification follows the cause, not the subsystem or message text.
+Every failure carries a typed `CompilerStage` and every view renders a `Stage: <stage name>`
+guidance line. Authored configuration and target capability mistakes remain typed diagnostics,
+not either introduction.
 
 The shared compiler-defect introduction precedes the unchanged original detail:
 
@@ -1907,79 +1717,86 @@ Details:
 ```
 
 All three views use that shared classification, introduction and guidance policy. Rendering leaves
-stored messages unchanged, retains actionable host paths, OS/process details and stage/guidance facts
-and performs no network lookup or repository scan. A third-party operation failure alone supplies no
-evidence of a Moth defect. Renderers never invent source frames from unpaired compact IDs.
+stored messages unchanged, retains actionable host paths and OS/process details, renders typed
+primary suggestions, and performs no network lookup or repository scan. A third-party operation
+failure alone supplies no evidence of a Moth defect. Infrastructure failures have no source frames
+or cause-to-source pairing.
 
 | View | Contract |
 |---|---|
-| Terminal | Show every cause in order, with separately labelled additional causes and a neutral filesystem heading for `File`. |
+| Terminal | Show every cause in order, with separately labelled additional causes and a neutral filesystem heading for `Filesystem`. |
 | Dev-server HTML | Keep all causes in one infrastructure card with `data-diagnostic-code="MOTH-INFRA-0001"`. Escape all error-derived text and use the fixed clickable report URL above for compiler defects. |
 | Terse | Emit one `E\|MOTH-INFRA-0001\|path\|\|message` record with exactly five fields. Label and classify every cause in order. The path field belongs only to the primary cause, with additional paths inside their cause sections. Sanitisation removes delimiter pipes and physical newlines. Include the fixed report URL once per record containing a compiler defect. |
 
-One cause receives one introduction. Multiple causes still represent one aborted compilation and one
-infrastructure event, never extra user diagnostics. Preserve failure status, normal error/warning
-display order and diagnostic counts. Any infrastructure failure suppresses the benchmark
-diagnostic-count record.
+An infrastructure result represents one aborted compilation: it returns the ordered aggregate and
+discards coexisting diagnostics. A diagnosed result carries only its error reports; successful
+warnings are rendered only from `Success::warnings`, never beside a failed result. Command failure
+status remains non-zero, and successful warning counts and presentation remain available to hosts.
 
-#### Remaining migration
+#### Lane classification
 
-Every current `CompilerError` construction site must be audited and assigned to one lane before the
-type is deleted:
+Every failure site belongs to exactly one lane:
 
-- user-caused state becomes a diagnostic schema entry
-- expected operational state becomes `InfrastructureFailure`
-- a proven invariant becomes `compiler_bug!`
+- user-caused state is a diagnostic schema entry
+- expected operational state, and internal state not yet proven impossible, is `InfrastructureFailure`
+- a proven invariant is `compiler_bug!`, citing the guard that makes it unreachable from any authored, layout, provider or builder input
 
-No broad automatic conversion is allowed. The audit records the old site, chosen lane and reason.
-`CompilerError`, `ErrorType` and metadata maps are deleted only after the inventory reaches zero;
-the `DiagnosticPayload::InfrastructureError` bridge has already been removed by the Phase 1
-diagnostic boundary.
+There is no automatic conversion between lanes. Promoting an `InfrastructureFailure` to `compiler_bug!` requires the guard proof; a user-reachable path becomes a diagnostic with an integration case. Infrastructure data never enters the compact diagnostic model.
 
 ## Tooling host isolation
 
-A compiler bug is non-recoverable for the owning compilation, but a long-lived host may remain alive
-if compiler work is isolated correctly.
+A compiler bug is non-recoverable for its owning compilation, but a long-lived host may remain alive
+when each request runs in fresh, isolated worker state.
 
 ### CLI
 
-The normal CLI installs the structured compiler-bug panic hook. A compiler bug prints the report and
-terminates the process. The CLI does not convert the panic into a successful or ordinary diagnosed
-build.
+The CLI's top-level `build` and `check` boundaries, plus the feature-gated Boracle command boundary,
+catch compiler-bug unwinds, render the structured report once and exit with distinct compiler-bug
+status 2. They never turn a compiler bug into a successful or ordinary diagnosed build.
+
+A `test_compiler_bug` Cargo feature exposes a deliberate structured-panic trigger only to the
+opt-in CLI subprocess lane; ordinary builds contain no trigger, and there is no CLI or environment
+switch. Subprocess tests cover diagnosed and infrastructure outcomes, check/build compiler-bug status
+2, unknown payload delegation without repeating the prior hook's output, and Boracle's feature-gated
+compiler-bug exit. The integration runner uses its per-case worker boundary and returns only frozen
+reports and strings, never a `BuildResult`.
 
 ### Dev server and future LSP
 
-Each build or analysis request runs in a worker that uniquely owns its mutable compilation context.
-The host owns only immutable inputs and receives a completed success, diagnosis or infrastructure
-failure after the worker finishes.
+Each build request creates one fresh worker on the calling thread. Its owned immutable request
+contains an absolute entry path, flags, an owned `BuildConfigInputSet`, and the resolved output root
+and write policy. The worker owns the fresh `ProjectBuilder`, providers and all mutable compiler,
+source and diagnostic state. It returns only after coherent finalization: success with frozen
+warnings, a diagnosed result with frozen reports, an infrastructure result, or a compiler-bug report.
+An unknown panic payload becomes a generic compiler-bug report. No unfinished build result or
+diagnostic/warning accumulator crosses back to the host.
 
-A compiled program returning `Error` from `start` is not a compiler diagnosis, infrastructure failure or compiler bug. The dev host may present that invocation-local outcome without changing global build success, poisoning shared compiler state or giving other entries a compile-error page. The report protocol lives in `docs/build-system-design.md` > `Development entry-error reports`.
+The dev host catches unwind only around the fresh worker request. It drops the entire worker after a
+failure; the next request always creates a fresh one. No compiler or output writer runs while
+host-state locks are held. After successful compilation and output finalization, the worker writes
+outputs directly under the resolved policy, without a staging directory. The host snapshots served
+artifact bytes outside the state lock, then briefly locks to publish the completed generation with
+its matching metadata and snapshot. A diagnosed, infrastructure, compiler-bug, output-write or
+snapshot failure publishes a failure state/page while retaining the last known-good served
+artifacts, even if a failed output write partially changed files in the output directory. The
+watcher remains active and later builds use fresh workers. A poisoned host-state lock is a host bug,
+not state to recover.
 
-At the worker boundary:
+This owned request and result boundary can be adopted by a second long-lived host without compiler
+API changes. Restart/backoff and cancellation remain future host policy, not additional compiler
+failure lanes.
 
-- the host may catch unwind solely to identify a compiler bug and keep the outer service alive
-- the failed worker's complete mutable state is discarded
-- no partially mutated compiler context is reused
-- no compiler panic may occur while holding shared dev-server/LSP state locks
-- host state is updated only after the worker has joined
-- unknown panic payloads are rendered as generic compiler bugs and the worker is discarded
-- operational failures continue through `InfrastructureFailure`, not panic catching
-
-The existing poisoned-lock recovery pattern is removed once the compiler no longer mutates shared
-host state during a build. Recovering and continuing with potentially inconsistent compiler-owned
-state is prohibited.
+A compiled program returning `Error` from `start` is not a compiler diagnosis, infrastructure failure
+or compiler bug. The dev host may present that invocation-local outcome without changing global build
+success, poisoning shared compiler state or giving other entries a compile-error page. The report
+protocol lives in `docs/build-system-design.md` > `Development entry-error reports`.
 
 ### Panic strategy
 
-Thread/ownership isolation requires unwinding. Until compilation runs in an isolated child process:
-
-- release and profiling configurations used by the CLI/dev server/LSP must use `panic = "unwind"`
-- tests cover the worker boundary and state discard
-- `panic = "abort"` is not used for a host that promises to survive compiler bugs
-
-A process-isolated compiler worker is deliberately deferred. If implemented later, the child may use
-`panic = "abort"` because the host discards the process. That is a host architecture change and must
-not alter the three failure lanes.
+Long-lived hosts use unwind behavior so they can catch a structured `CompilerBugReport` at the
+owning worker boundary and discard that worker's state. The CLI and development server do not
+recover poisoned compiler state. Process-isolated workers remain deferred, so current hosts do not
+depend on child-process abort behavior.
 
 ## Deterministic parallel construction
 
@@ -2007,118 +1824,48 @@ is cheap.
 
 ## Performance evidence and acceptance
 
-### Evidence owner
+The compiler's frontend instrumentation and benchmark tooling own memory measurements. The
+`data_layout_memory_probe` feature records source-token owners, typed-store bytes and capacities,
+transient construction buffers, remap tables and source-owner live/peak bytes. Summarize relevant
+results in `benchmarks/frontend-optimization-results.md`; keep raw allocator logs, profiler captures
+and per-run data uncommitted.
 
-This architecture uses the existing frontend instrumentation and benchmark tooling. New counters and
-reports belong under those owners rather than being scattered through source, token or diagnostic
-modules.
+Before considering a representation change, compare the current representation and candidate with
+the same toolchain and corpus. Record:
 
-Evidence lives in the existing indexed report:
-
-```text
-benchmarks/frontend-optimization-results.md
-```
-
-The implementation plan adds one indexed top-level section there per material phase. It does not
-create a second optimisation report or a second benchmark runner.
-
-Raw allocator logs, profiler captures and per-run data remain uncommitted.
-
-The Phase 3 ledger extends this owner under the `data_layout_memory_probe` feature in
-`src/compiler_frontend/instrumentation/memory_ledger.rs`. It reports distinct live
-`SourceTokens` owners and shape/span, numeric/path/sequence storage bytes and capacities; cumulative
-and peak transient construction buffers; requester remap tables; distinct donor string/path tables;
-and generic source-owner live/peak bytes. Owner drop hooks retire live keys without retaining
-compiler-owned `Arc` handles, and the command-scoped reset/warm-up keeps ledger bookkeeping outside
-allocator deltas. Reports mark bounded-map overflow as incomplete rather than presenting an
-under-count as complete evidence. Clean success may retain no frozen report context; warning and
-diagnosed outcomes retain exactly the identity tables needed to render their records.
-
-### Required baseline measurements
-
-Before changing representation, record with the exact CI toolchain:
-
-- `size_of` and alignment for every hard-layout type and current predecessor
-- total sources and source bytes
-- total tokens and current token bytes
-- pre-migration `TokenKind` size and path-token payload shape (the baseline predecessor, not the
-  final `TokenTag`/`TokenShape` model)
-- total source-location instances where measurable
-- current diagnostic, payload, label and reason sizes
-- diagnostic counts, secondary-label counts and variable-list counts
-- span start and length histograms
-- path count, unique path count, path syntax row count, dependency-selection count, component count
-  and clone/remap pressure
-- string-table full clones
+- size and alignment for every affected record
+- source count and retained source bytes
+- token count and retained token bytes
+- span start and length distributions
+- path and syntax counts, clone/remap pressure and string-table clones
+- diagnostic, payload, label, reason and variable-list sizes
 - full `TypeEnvironment` values retained solely for diagnostics
 - peak retained frontend bytes or a repeatable allocation proxy
 - compile/check wall time for representative success-heavy and diagnostic-heavy workloads
 
-A counting allocator may be added behind a benchmark-only feature. Normal compiler builds must not
-pay for it.
+Use representative workloads covering docs build/check, the focused frontend suite, path-heavy and
+token-heavy projects, short and long template spans, generic/type-heavy sources, warning-heavy
+success, diagnostic-heavy malformed input, long-line Unicode/CRLF text, and sources beyond each
+candidate inline-start threshold. Diagnostic stress measurements supplement normal correctness
+tests; they do not own stable diagnostic codes, spans or output.
 
-### Representative workloads
+Run five independent benchmark invocations and compare medians. Use focused profiles when results
+are ambiguous. A median wall-time regression greater than 5% in docs, focused frontend or a targeted
+workload blocks the change unless an explicitly accepted tradeoff is documented. Reject or revert a
+measured optimization that adds substantial complexity without a repeatable memory or throughput
+gain. Counter movement and layout reduction alone are insufficient; source, span and token changes
+must reduce retained frontend memory on representative projects, while diagnostic changes must
+reduce failure-path retention without boxing the common diagnostic.
 
-The corpus must include:
-
-- docs project release build/check
-- existing focused frontend benchmark suite
-- path-heavy multi-file project
-- token-heavy large source
-- template-heavy source with short and long spans
-- generic/type-heavy source
-- warning-heavy successful build
-- diagnostic-heavy malformed source through a dedicated diagnostic benchmark harness
-- long-line, Unicode and CRLF source
-- sources larger than each candidate inline-start threshold
-
-Diagnostic stress benchmarks are performance evidence, not correctness owners. Stable diagnostic
-codes, spans and output remain owned by normal integration and unit tests.
-
-### Repetition and regression rules
-
-- run five independent benchmark invocations and compare medians
-- use focused profiles when a result is ambiguous
-- a median wall-time regression greater than 5% in docs, focused frontend or a targeted workload is a
-  blocker unless the user explicitly accepts a documented tradeoff
-- a measured optimisation that adds substantial complexity but does not produce a repeatable memory
-  or throughput gain is rejected or reverted
-- counter movement alone is not a win
-- layout-size reduction is necessary evidence but not sufficient evidence for an optional complex
-  encoding
-- source/span/token phases must demonstrate lower retained frontend memory on representative projects
-- diagnostic phases must demonstrate lower failure-path retention and remove the Clippy large-error
-  condition without boxing the common diagnostic
-
-No speculative percentage memory target is required beyond the hard layout contracts. The report
-must still demonstrate that the overall compiler actually retains less memory.
-
+No speculative percentage target replaces hard layout contracts, but the evidence must show a
+material benefit for the affected owner.
 ## Validation and anti-drift tests
 
 ### Layout tests
 
-Every width below is asserted beside the type it constrains, by the slice that introduces that
-type: a compile-time `const _: () = assert!(…)` in the module that owns the packing, or a size
-assertion in that module's own test file. A single shared layout module was rejected during
-implementation because it puts the assertion a file away from the layout it protects. The required
-set is:
-
-```rust
-assert_eq!(size_of::<SourceId>(), 4);
-assert_eq!(size_of::<LocalSpan>(), 4);
-assert_eq!(size_of::<Option<LocalSpan>>(), 4);
-assert_eq!(size_of::<SourceSpan>(), 8);
-assert_eq!(size_of::<Option<SourceSpan>>(), 8);
-assert_eq!(size_of::<PathId>(), 4);
-assert_eq!(size_of::<Option<PathId>>(), 4);
-assert_eq!(size_of::<TokenShape>(), 8);
-assert_eq!(size_of::<DiagnosticToken>(), 8);
-assert_eq!(size_of::<SecondaryDiagnosticLabel>(), 12);
-assert_eq!(size_of::<DiagnosticRecord>(), 32);
-assert!(size_of::<DiagnosticDraft>() <= 48);
-```
-
-The transition retains `size_of::<CompilerDiagnostic>() <= 128` until the old type is removed.
+The `Hard representation invariants` table names every asserted record size and its owning source
+module or test. Keep each compile-time or unit-test assertion beside the type it constrains; do not
+centralize layout assertions away from their owners.
 
 ### Span property tests
 
@@ -2181,13 +1928,9 @@ Tests distinguish:
 
 ### Full gates
 
-Every code-bearing accepted slice runs the focused tests for its owner, formatting where Rust changed,
-the required benchmark check and the repository's full `just validate` gate. The gate's Rust unit
-suite uses the memory-bounded `just validate-unit-tests` recipe; integration and performance lanes
-remain on their normal commands so their critical behaviour is still exercised. If a validation host
-cannot safely run the aggregate recipe, run the same required lanes sequentially and record the
-exact memory and thread settings. Each phase also performs a manual architecture and style-guide
-review.
+Run the repository's documented validation lanes for code changes. Representation changes also
+require focused owner tests, layout/property coverage, formatting and repeatable memory and timing
+evidence. Keep the runnable command and resource guidance in the developer validation policy.
 
 ## Extension rules
 
@@ -2229,152 +1972,199 @@ must not create a diagnostic payload or panic.
 A new `compiler_bug!` site must name the proven invariant and the stage that promised it. A focused
 invariant test should demonstrate the check where practical. “Unexpected input” is not sufficient.
 
-## Deliberately deferred work
+## Deferred capabilities
 
-These items are compatible with the architecture but not part of the initial implementation unless a
-phase's explicit stop/go gate accepts them:
+These capabilities are outside the current architecture. The optional memory-layout reviews remain
+deferred because final-corpus evidence did not meet their entry conditions. Reconsider an item only
+when its stated evidence exists.
 
-- process-isolated compiler workers
-- persistent serialization and remapping of `SourceId`, `PathId`, diagnostic IDs and type-display IDs
-- procedural-macro or build-script diagnostic schema generation
-- terminator-match span encoding, deferred undone at slice 1C2 with its acceptance gates unevaluated
-- token records smaller than 8 bytes
-- global conversion of all `StringId`, `TypeId` and unrelated compiler IDs to non-zero or packed forms
-- memory mapping or compression of retained source snapshots
-- persistent/incremental source databases and line-index caches
-- broad LSP protocol implementation
-- global diagnostic deduplication across independent compilation contexts
-- cross-build diagnostic/type-display caches
-- further path-node compression beyond the true-interner design
-- additional cold-store packing without measured retained-memory pressure
-- unrelated user-facing diagnostic wording and suggestion improvements
+| Capability | Re-entry criterion |
+|---|---|
+| Process-isolated compiler workers | A separate reliability design is warranted by evidence that owned thread workers cannot meet crash-isolation, cancellation or untrusted-input requirements. |
+| Persistent `SourceId`, `PathId`, token, diagnostic and type-display identities | An artifact format defines canonical identities and remapping; process-local IDs are never serialized directly. |
+| Procedural-macro or build-script diagnostic schema generation | The current declarative schema becomes demonstrably unmanageable, and generation preserves exhaustive compile-time checks without disproportionate build complexity. |
+| Terminator-match span encoding | A candidate is accepted only if decoding returns an exact range without scanning source bytes or tokens; it depends only on an immutable retained match table, not parser or tokenizer state; malformed and unclosed source has a deterministic exact fallback; strings, escapes, comments, templates and nested balanced modes require no duplicate lexical rules; source ordering, overlap checks and LSP conversion remain constant-time after at most one table lookup; the terminator match table plus any fallback spans consumes at least 10% less retained memory than the exact overflow-table design on the measured corpus; median compile time and diagnostic rendering time do not regress by more than 2%; and the implementation is simpler or equally auditable at every consumer boundary. Failure of any condition rejects the experiment. A durable span must never store an instruction that asks a renderer to reparse source. |
+| Token records smaller than 8 bytes | Profiles show `TokenShape` is a common-memory hotspot and full-store measurements show a net benefit after indirection and access costs. |
+| Broad conversion of `StringId`, `TypeId` and other compiler IDs | Each proposed ID domain has a formal bound and measured material retained-memory pressure, with deterministic merge/remap behavior preserved. |
+| Snapshot compression or memory mapping | Retained source bytes are a measured top memory owner, and a separate approved design defines the platform, ownership and lifetime policy and demonstrates a net benefit. |
+| Persistent/incremental source databases, token reuse and line-index caches | Source-hash ownership and incremental invalidation are specified, and representative workloads show repeatable savings. |
+| Full LSP protocol implementation | A dedicated tooling design defines protocol scope, request scheduling, cancellation and diagnostic ownership over source snapshots, owned workers and frozen reports. |
+| Diagnostic deduplication across independent compilation contexts | Repeated frozen reports are a material cost and stable identity scope, equality and invalidation are defined. |
+| Cross-build diagnostic and type-display caches | Reuse across builds is measured as material, with stable content keys and invalidation rules. |
+| Path-node compression or AoS/SoA layout changes | Representative traversal profiles identify path-node layout as a bottleneck, and end-to-end measurements include merge and remap costs. |
+| Extended-span deduplication | Repeated retained overflow ranges are common enough to offset lookup and storage overhead. The current corpus retains 355 extended rows (2,840 bytes, 0.054% of spans), which does not justify the extra index. |
+| Hot/cold `SourceRecord` split | Profiles show cold fields materially inflate hot source access, and a split improves retained bytes or access cost without adding lifetime or ownership complexity that outweighs the gain. |
+| Token cold-store packing | A named token cold store has formal capacity bounds, and representative aggregate retained-memory measurements show that packing materially reduces total retained memory after indexing and access costs. |
+| Diagnostic extra/list packing | A specific extra or list store is a material retained-memory owner, and measured savings exceed indexing/access costs while common diagnostics remain allocation-free. |
+| Other path, token or diagnostic cold-store packing | A named store is a material retained-memory owner in a representative profile; measured aggregate savings exceed indexing, indirection and construction costs. |
+| Unrelated diagnostic wording and suggestion changes | A scoped diagnostics improvement defines the semantic behavior, expected output and owning tests before implementation. |
 
-Rejected optional experiments must be recorded with their evidence and re-entry condition rather than
-left as vague future work.
+## Current implementation map
 
-## Documentation and policy synchronization
-
-Implementation of this design requires synchronized changes to:
-
-- `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes, including the `Rust-only MON service` boundary owned with this document's `MON data handoff`
-- `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
-  worker boundaries
-- `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; keep
-  diagnosed failures plain and do not recommend boxing or lint suppression at local `Result` boundaries
-- `docs/src/developer-docs/style-guide/testing.mtf` — layout/property/failure-lane ownership
-- `docs/src/developer-docs/style-guide/validation.mtf` — updated manual architecture audit
-- `docs/src/docs/progress/@page.moth` — current implementation status during and after migration
-- `docs/roadmap/roadmap.md` — sequencing and measured deferrals
-- `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` — dependency and post-layout resume
-  capsule
-- `index.md` — final module/file map
-
-Generated documentation under `docs/release/**` is rebuilt, never edited directly.
-
-## Final implementation map
-
-Exact subfile names may be refined during implementation, but ownership should converge on this
-shape:
+The following paths are the current owners:
 
 ```text
 src/compiler_frontend/source/
     mod.rs
     id.rs
+    record.rs
+    registration.rs
+    database.rs
     span.rs
     span_encoding.rs
-    database.rs
     line_index.rs
-    provenance.rs
+    frozen_identity.rs
+    test_support.rs
     tests/
 
 src/compiler_frontend/symbols/path_interner/
     mod.rs
     id.rs
     builder.rs
+    fork.rs
     frozen.rs
-    delta.rs
     remap.rs
-    tests/
+    test_exhaustion.rs
+    tests.rs
 
 src/compiler_frontend/tokenizer/
-    tokens/
+    mod.rs
+    schema.rs
+    tokens.rs
+    storage.rs
+    cursor.rs
+    stream.rs
+    lexer.rs
+    line_scanning.rs
+    newline_handling.rs
+    numeric.rs
+    text_modes.rs
+    tests/
+
+src/compiler_frontend/numeric_text/
+    mod.rs
+    parse.rs
+    token.rs
+    store.rs
+    tests/
+
+src/compiler_frontend/paths/
+    mod.rs
+    compile_time_paths.rs
+    path_syntax.rs
+    path_resolution.rs
+    path_normalization.rs
+    dependency_resolution.rs
+    module_roots.rs
+    file_references.rs
+    resource_identity.rs
+    module_resources.rs
+    const_paths/
         mod.rs
-        tag.rs
-        shape.rs
-        store.rs
-        cursor.rs
-        ranges.rs
-        numeric_store.rs
-        path_store.rs
-        tests/
+        components.rs
+    tests/
 
 src/compiler_frontend/compiler_messages/
+    mod.rs
+    compiler_errors.rs
+    compiler_bug.rs
+    compiler_stage.rs
+    compiler_dev_logging.rs
+    diagnostic_bag.rs
+    diagnostic_descriptor.rs
+    diagnostic_identity.rs
+    diagnostic_severity.rs
+    diagnostic_token.rs
+    display_messages.rs
+    prepared_batch.rs
+    trait_keyword_diagnostics.rs
+    tests/
     diagnostics/
         mod.rs
-        code.rs
-        schema.rs
-        draft.rs
-        record.rs
-        facts.rs
-        labels.rs
-        extras.rs
-        store.rs
+        boundary_accumulator.rs
         compaction.rs
-        token.rs
+        diagnostic_string_builder.rs
+        draft.rs
+        facts.rs
+        extras.rs
+        foreign.rs
+        freeze.rs
+        labels.rs
+        prepared.rs
+        reasons.rs
+        reason_keys.rs
+        record.rs
+        registry.rs
+        report.rs
+        resource.rs
+        schema.rs
+        store.rs
+        test_support.rs
+        view.rs
+        families/
         tests/
     diagnostic_types/
         mod.rs
         id.rs
-        record.rs
-        builder.rs
-        render.rs
+        type_display_snapshot.rs
+        type_display_snapshot_builder.rs
         tests/
-    infrastructure/
-        mod.rs
-        failure.rs
-        render.rs
-        tests/
-    compiler_bug/
-        mod.rs
-        report.rs
-        hook.rs
-        tests/
-    report.rs
     render/
+        mod.rs
+        borrow.rs
+        calls.rs
+        context.rs
+        control_flow.rs
+        declarations.rs
+        dev_server.rs
+        import_config.rs
+        infrastructure.rs
+        paths.rs
+        payload.rs
+        suggestions.rs
+        syntax.rs
+        templates.rs
+        terminal.rs
+        terse.rs
+        tests/
 
-src/compiler_frontend/context/
+src/compiler_frontend/instrumentation/
     mod.rs
-    builder.rs
-    frozen.rs
-    worker_delta.rs
-    tests/
+    ast_counters.rs
+    frontend_counters.rs
+    memory_ledger.rs
+    tests.rs
+
+src/bin/data_layout_memory_probe.rs
+
+crates/moth-mon/src/
+    lib.rs
+    reader.rs
+    writer.rs
+    schema.rs
+    numeric.rs
+    model.rs
+    map_keys.rs
+    budget.rs
+    error.rs
 ```
 
-The MON handoff moved out of this module map into `crates/moth-mon/`. Its
-reader owns the caller-borrowed input cursor, `Span` byte ranges, retained
-numeric text handling, immutable prepared schema and owned `Value` results,
-reporting through the public `MonError` projection. It owns no source database,
-identity table, token store, diagnostic store or frozen context.
+`SourceDatabase` owns source records, snapshots and line indexes. `SourceTokens` owns immutable
+shape/span arrays and typed source-local stores. Path interning owns canonical `PathId` identities;
+authored path syntax remains in each source's `PathSyntaxTable`. Core pipeline modules orchestrate
+these owners, while codecs, schemas, capacity rules and memory accounting stay in their respective
+submodules.
 
-Core pipeline and `mod.rs` files remain orchestration maps. Bit codecs, capacity formulas, schema
-internals and benchmark-only accounting do not accumulate in broad pipeline files.
+The MON service borrows caller input only while parsing and returns owned values through its public
+error projection. It owns no compiler source database, identity table, token store, diagnostic store
+or frozen context.
 
-## Completion definition
+## Current architecture summary
 
-This architecture is implemented only when:
-
-- every hard layout assertion passes on supported targets
-- source spans are exact compact byte ranges across the compiler
-- retained source text and line indexes render all diagnostics
-- `InternedPath` is no longer a durable compiler identity
-- retained syntax uses source-owned compact tokens and ranges
-- the 32-byte diagnostic store replaces the wide payload model
-- complete type environments are no longer retained solely for diagnostics
-- frozen contexts replace deep-cloned render tables
-- every former `CompilerError` site has one explicit failure lane
-- only proven invariant bugs panic
-- long-lived tooling isolates compilation state and no longer recovers poisoned compiler state
-- CI validates the compact plain diagnostic boundary without local boxing or lint suppression
-- representative memory measurements improve and timing stays within accepted bounds
-- the authority documents, progress matrix, roadmap and codebase index describe the final owners
-- no compatibility adapter preserves the old source-location, token, diagnostic or error path
+- Exact half-open UTF-8 spans use the asserted 22-bit start/index and 10-bit length encoding.
+- `TokenShape` is 8 bytes; `SourceTokens` stores shapes and `LocalSpan`s in separate dense arrays.
+- `DiagnosticRecord` is 32 bytes, and schema-approved typed side stores own unusual diagnostic data.
+- User mistakes produce diagnosed outcomes; operational failures use `InfrastructureFailure`;
+  proven compiler invariant violations use the structured compiler-bug path.
+- Owned workers isolate mutable compilation state. Source snapshots and frozen diagnostic reports
+  retain the identity context needed by their consumers without sharing live compiler state.

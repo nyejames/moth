@@ -7,11 +7,10 @@
 //!      facade, direct wall clocks, obsolete macro and metric names, unguarded
 //!      timer-only fields, and no-op timer closure wrappers, because a disabled
 //!      frontend timer expansion must be the production expression itself.
-//! WHY:  the plan's primary invariant is that a compiler built without
-//!       `timers` performs no timer-system runtime work. Source-level erasure
-//!       tests prove macro semantics; this gate proves the compiled artifact
-//!       contains none of the timer-only strings that a live implementation
-//!       would retain.
+//! WHY: the primary invariant is that a compiler built without `timers` performs no timer-system
+//!      runtime work. Source-level erasure tests prove macro semantics; this gate proves the
+//!      compiled artifact contains none of the timer-only strings that a live implementation
+//!      would retain.
 //!
 //! The rules defined here are applied by `source_audit`, which owns the single
 //! walk of the tree and reports typed findings. This module owns what the rules
@@ -300,14 +299,15 @@ fn has_unguarded_timer_only_field(content: &str) -> bool {
 /// Return whether direct `Instant` use belongs to an explicitly non-timer
 /// wall-clock owner. These clocks exist for user-facing elapsed messages,
 /// integration-test reporting, subprocess deadlines, cross-thread test
-/// deadlines, or the in-process benchmark harness; they do not feed the timing
-/// collector or its schema.
+/// deadlines, the in-process benchmark harness or the memory-probe ledger;
+/// they do not feed the timing collector or its schema.
 fn is_allowed_wall_clock_source(relative: &str) -> bool {
     matches!(
         relative,
         "src/benchmarking/frontend.rs"
             | "src/benchmarking/span_census.rs"
             | "src/bin/data_layout_memory_probe.rs"
+            | "src/compiler_frontend/instrumentation/memory_ledger.rs"
             | "src/compiler_tests/integration_test_runner/assertions/node_harness.rs"
             | "src/compiler_tests/integration_test_runner/runner.rs"
             | "src/projects/build_command.rs"

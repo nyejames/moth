@@ -1,6 +1,7 @@
 //! Borrowed token references and bounded contiguous or segmented cursors.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntax, PathSyntaxId};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
@@ -132,7 +133,7 @@ impl<'a> TokenRef<'a> {
     pub fn is_eof(self) -> bool {
         self.shape().tag() == TokenTag::EOF
     }
-    /// Validate the payload referenced by this canonical shape without materialising a legacy
+    /// Validate the payload referenced by this canonical shape without constructing another
     /// token value. Payload failures stay on the infrastructure lane for parser scanners that
     /// otherwise need only the stable tag.
     pub(crate) fn validate_payload(self) -> Result<(), TokenViewError> {
@@ -221,7 +222,7 @@ impl<'a> TokenCursor<'a> {
     /// Return the parser-facing position while retaining raw source positions in `position`.
     ///
     /// Contiguous cursors use absolute source indexes inside their active range. Segmented
-    /// cursors expose a dense compatibility position that skips omitted source gaps.
+    /// cursors expose a dense logical position that skips omitted source gaps.
     pub(crate) fn parser_position(self) -> usize {
         match self.bounds {
             TokenCursorBounds::Contiguous(_) => self.next.index(),
@@ -279,14 +280,16 @@ impl<'a> TokenCursor<'a> {
         &mut self,
         start: usize,
         end: usize,
-    ) -> Result<(usize, usize), CompilerError> {
+    ) -> Result<(usize, usize), InfrastructureFailure> {
         if start > end {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::Tokenization,
                 "token cursor parser window is inverted",
             ));
         }
         if start < self.window_start || end > self.window_end {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::Tokenization,
                 "token cursor parser window would widen its parent view",
             ));
         }
@@ -327,19 +330,19 @@ impl<'a> TokenCursor<'a> {
         Self::new(tokens, TokenRange::try_new_for(tokens, start, end)?)
     }
 
-    /// Construct a segmented cursor at a checked compatibility-stream position.
+    /// Construct a segmented cursor at a checked logical position.
     ///
-    /// A sequence's compatibility position counts materialised tokens, not source indexes; this
+    /// A sequence's logical position counts materialised tokens, not source indexes; this
     /// preserves omitted source gaps while still allowing a parser handoff at any token boundary.
     fn from_sequence_position(
         view: TokenSequenceView<'a>,
-        compatibility_position: usize,
+        logical_position: usize,
         logical_length: usize,
     ) -> Result<Self, TokenSequenceError> {
         let ranges = view.tokens.sequence_store.ranges(view.id)?;
-        if compatibility_position > logical_length {
+        if logical_position > logical_length {
             return Err(TokenSequenceError::OutOfRange {
-                raw: u32::try_from(compatibility_position).unwrap_or(u32::MAX),
+                raw: u32::try_from(logical_position).unwrap_or(u32::MAX),
                 len: logical_length,
             });
         }
@@ -351,8 +354,8 @@ impl<'a> TokenCursor<'a> {
             let segment_end = logical_start
                 .checked_add(segment_len)
                 .ok_or(TokenSequenceError::Capacity)?;
-            if compatibility_position < segment_end {
-                let offset = compatibility_position
+            if logical_position < segment_end {
+                let offset = logical_position
                     .checked_sub(logical_start)
                     .ok_or(TokenSequenceError::Capacity)?;
                 let offset = u32::try_from(offset).map_err(|_| TokenSequenceError::Capacity)?;
@@ -368,7 +371,7 @@ impl<'a> TokenCursor<'a> {
                     bounds: TokenCursorBounds::Segmented(view),
                     segment_index,
                     next,
-                    logical_position: compatibility_position,
+                    logical_position,
                     logical_length,
                     segment_start_position: logical_start,
                     previous_segment_index,
@@ -498,7 +501,7 @@ impl<'a> TokenCursor<'a> {
             return None;
         }
         let TokenCursorBounds::Segmented(view) = self.bounds else {
-            let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
+            let previous = TokenIndex::from_raw(self.next.raw().checked_sub(1)?);
             if previous < self.range().start() {
                 return None;
             }
@@ -510,12 +513,12 @@ impl<'a> TokenCursor<'a> {
         if let Some(range) = self.current_range()
             && self.next > range.start()
         {
-            let previous = TokenIndex::try_from_raw(self.next.raw().checked_sub(1)?)?;
+            let previous = TokenIndex::from_raw(self.next.raw().checked_sub(1)?);
             return self.tokens.token(previous).ok();
         }
         let previous_index = self.previous_segment_index?;
         let previous_range = view.range_at(previous_index).ok()?;
-        let previous = TokenIndex::try_from_raw(previous_range.end().raw().checked_sub(1)?)?;
+        let previous = TokenIndex::from_raw(previous_range.end().raw().checked_sub(1)?);
         self.tokens.token(previous).ok()
     }
     /// Move a segmented cursor to a dense parser-facing position.

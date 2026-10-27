@@ -14,10 +14,15 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
-    PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     SourceBuildConfigContract, build_input_type_name,
@@ -228,8 +233,8 @@ pub(super) enum EffectiveProjectFieldKind {
 /// applied by project-config validation. Declaration-owned input records remain private.
 pub(super) fn effective_project_fields(
     config: &Config,
-    string_table: &mut StringTable,
-) -> Result<Vec<EffectiveProjectField>, CompilerError> {
+    string_table: &StringTable,
+) -> Result<Vec<EffectiveProjectField>, InfrastructureFailure> {
     if !config.project_config_loaded {
         return Ok(Vec::new());
     }
@@ -237,12 +242,15 @@ pub(super) fn effective_project_fields(
     let mut fields = Vec::new();
     let mut seen_names = FxHashSet::default();
     for dependency in &config.project_field_config_dependencies {
-        let field = effective_project_field_from_dependency(dependency, string_table)?;
+        let field = effective_project_field_from_dependency(dependency, string_table);
         if !seen_names.insert(field.name.clone()) {
-            return Err(CompilerError::compiler_error(format!(
-                "project field '{}' has more than one folded dependency handoff",
-                field.name
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "project field '{}' has more than one folded dependency handoff",
+                    field.name
+                ),
+            ));
         }
         fields.push(field);
     }
@@ -250,7 +258,7 @@ pub(super) fn effective_project_fields(
     let add_fixed = |fields: &mut Vec<EffectiveProjectField>,
                      seen_names: &mut FxHashSet<String>,
                      field: EffectiveProjectField|
-     -> Result<(), CompilerError> {
+     -> Result<(), InfrastructureFailure> {
         if seen_names.insert(field.name.clone()) {
             fields.push(field);
             Ok(())
@@ -273,7 +281,8 @@ pub(super) fn effective_project_fields(
     )?;
 
     let entry_root = config.entry_root.to_str().ok_or_else(|| {
-        CompilerError::file_error(
+        InfrastructureFailure::filesystem(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             &config.entry_root,
             "configured entry root is not valid UTF-8",
         )
@@ -339,9 +348,7 @@ pub(super) fn effective_project_fields(
             .ok()
             .and_then(|limit| FixedScalarValue::signed(FixedScalar::I32, limit))
             .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "configured template loop limit cannot be represented as a build I32",
-                )
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "configured template loop limit cannot be represented as a build I32")
             })?;
         add_fixed(
             &mut fields,
@@ -372,11 +379,11 @@ pub(super) fn effective_project_fields(
 fn effective_project_field_from_dependency(
     dependency: &crate::compiler_frontend::build_config::FoldedConfigProjectFieldDependency,
     string_table: &StringTable,
-) -> Result<EffectiveProjectField, CompilerError> {
+) -> EffectiveProjectField {
     let field_name = string_table.resolve(dependency.field_name).to_owned();
     let fingerprint =
         project_metadata_fingerprint(&field_name, &dependency.type_identity, &dependency.value);
-    Ok(EffectiveProjectField {
+    EffectiveProjectField {
         name: field_name,
         type_identity: dependency.type_identity.clone(),
         value: dependency.value.clone(),
@@ -385,7 +392,7 @@ fn effective_project_field_from_dependency(
         kind: EffectiveProjectFieldKind::InputDependent {
             input_names: dependency.input_names.clone(),
         },
-    })
+    }
 }
 
 fn effective_input_contract_field(
@@ -418,7 +425,7 @@ fn effective_fixed_project_field(
     required: bool,
     primitive_value: Option<PrimitiveBuildValue>,
     span: Option<SourceSpan>,
-) -> Result<EffectiveProjectField, CompilerError> {
+) -> Result<EffectiveProjectField, InfrastructureFailure> {
     let build_name = BuildInputName::new(name).expect("compiler-owned project field name is valid");
     let value = public_folded_value_for_build_input(build_input_type, primitive_value.as_ref())?;
     let fingerprint = build_config_fingerprint(name, build_input_type, primitive_value.as_ref());
@@ -534,8 +541,7 @@ pub(super) fn input_contract_facts(
 pub(super) fn build_project_globals_interface(
     config: &Config,
     fields: &[EffectiveProjectField],
-    _string_table: &StringTable,
-) -> Result<Option<ProjectGlobalsInterface>, CompilerError> {
+) -> Result<Option<ProjectGlobalsInterface>, InfrastructureFailure> {
     if !config.project_config_loaded {
         return Ok(None);
     }
@@ -673,22 +679,28 @@ fn canonical_type_identity_for_build_input(value_type: BuildInputType) -> Canoni
 fn public_folded_value_for_build_input(
     value_type: BuildInputType,
     value: Option<&PrimitiveBuildValue>,
-) -> Result<PublicFoldedValue, CompilerError> {
+) -> Result<PublicFoldedValue, InfrastructureFailure> {
     let Some(value) = value else {
         if value_type.is_optional() {
             return Ok(PublicFoldedValue::OptionNone);
         }
-        return Err(CompilerError::compiler_error(format!(
-            "required project-global field has no folded value for {}",
-            build_input_type_name(value_type)
-        )));
+        return Err(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            format!(
+                "required project-global field has no folded value for {}",
+                build_input_type_name(value_type)
+            ),
+        ));
     };
     if !value_type.accepts_primitive(value.primitive_type()) {
-        return Err(CompilerError::compiler_error(format!(
-            "project-global field value type {} does not satisfy {}",
-            value.primitive_type().name(),
-            build_input_type_name(value_type)
-        )));
+        return Err(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            format!(
+                "project-global field value type {} does not satisfy {}",
+                value.primitive_type().name(),
+                build_input_type_name(value_type)
+            ),
+        ));
     }
     let folded = match value {
         PrimitiveBuildValue::String(value) => {
@@ -773,28 +785,24 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
 
 /// Map one compiler-owned barrier failure onto the typed premerge config diagnostic lane.
 ///
-/// WHAT: converts a [`BuildConfigResolutionError`] into a [`PremergeFailure`] without
-///       constructing the final `CompilerMessages` vessel. User-facing failures move the
-///       boundary string table into a [`PremergeDiagnosticBatch`]; the declaration-owned config
-///       handoff invariant stays a typed infrastructure error.
+/// WHAT: converts a [`BuildConfigResolutionError`] into a [`PreparedFailure`] without
+///       constructing the final frozen report. User-facing failures capture a prepared batch at
+///       this owning boundary; the declaration-owned config handoff invariant is a compiler bug.
 /// WHY: configuration resolution is a Stage 0 boundary operation whose failures must travel
-///      typed until the final merge boundary owns the single vessel conversion. Moving the
-///      table keeps every interned diagnostic id valid without cloning.
+///      through the typed prepared lane until final source pairing and report freeze.
 pub(super) fn build_config_resolution_failure(
     error: BuildConfigResolutionError,
     fallback_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> PremergeFailure {
+) -> PreparedFailure {
     if matches!(
         &error,
         BuildConfigResolutionError::DirectProjectProviderMissing { .. }
     ) {
-        return PremergeFailure::Infrastructure(
-            CompilerError::compiler_error(format!(
-                "grouped-project build-config value for '{}' was not retained by config folding",
-                error.name().as_str()
-            ))
-            .into(),
+        crate::compiler_bug!(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            "grouped-project build-config value for '{}' was not retained by config folding",
+            error.name().as_str()
         );
     }
     if let BuildConfigResolutionError::NumericLiteralOutOfRange {
@@ -806,11 +814,12 @@ pub(super) fn build_config_resolution_failure(
     {
         // A supplied value outside its contract's exact scalar reports the existing number-literal
         // reason. A command value has no source span, so it keeps its argument position.
-        let literal = string_table.intern(&text);
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        let literal = diagnostic_strings.intern(&text);
         let diagnostic = match value_location {
             Some(BuildConfigValueLocation::Command(location)) => {
-                let key = string_table.intern(contract.name().as_str());
-                CompilerDiagnostic::invalid_config_reason(
+                let key = diagnostic_strings.intern(contract.name().as_str());
+                project_config::invalid_config_reason(
                     Some(key),
                     InvalidConfigReason::ConfigInputOutOfRange {
                         literal,
@@ -821,25 +830,29 @@ pub(super) fn build_config_resolution_failure(
                 )
             }
             Some(BuildConfigValueLocation::Source(span)) => {
-                CompilerDiagnostic::invalid_number_literal(literal, reason, Some(span))
+                token_lexical::invalid_number_literal(literal, reason, Some(span))
             }
-            None => CompilerDiagnostic::invalid_number_literal(literal, reason, contract.span()),
+            None => token_lexical::invalid_number_literal(literal, reason, contract.span()),
         };
-        return PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-            diagnostic,
-            std::mem::take(string_table),
+        return PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
+            string_table.take_for_handoff(),
+            None,
+            None,
         ));
     }
-    let key = string_table.intern(error.name().as_str());
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let key = diagnostic_strings.intern(error.name().as_str());
     let provided_argument_index = match error.value_location() {
         Some(BuildConfigValueLocation::Command(location)) => Some(location.argument_index()),
         _ => None,
     };
     let diagnostic = if let Some((first, conflicting)) = error.conflict_facts() {
-        let first_description = string_table.get_or_intern(describe_build_config_contract(first));
+        let first_description =
+            diagnostic_strings.get_or_intern(describe_build_config_contract(first));
         let conflicting_description =
-            string_table.get_or_intern(describe_build_config_contract(conflicting));
-        CompilerDiagnostic::invalid_config_reason(
+            diagnostic_strings.get_or_intern(describe_build_config_contract(conflicting));
+        project_config::invalid_config_reason(
             Some(key),
             InvalidConfigReason::ConfigContractConflict {
                 first: first_description,
@@ -847,10 +860,7 @@ pub(super) fn build_config_resolution_failure(
             },
             conflicting.span(),
         )
-        .with_labels(vec![DiagnosticLabel::secondary(
-            first.span(),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        )])
+        .with_label(first.span(), Some(LabelDraftMessage::PreviousDeclaration))
     } else if let Some(contract) = error.contract_fact() {
         let provided = match &error {
             BuildConfigResolutionError::DefaultTypeMismatch { provided, .. }
@@ -858,21 +868,11 @@ pub(super) fn build_config_resolution_failure(
             _ => None,
         };
         if let Some(provided) = provided {
-            let provided_name = string_table.intern(provided.name());
+            let provided_name = diagnostic_strings.intern(provided.name());
             let expected_name =
-                string_table.get_or_intern(build_input_type_name(contract.value_type()));
+                diagnostic_strings.get_or_intern(build_input_type_name(contract.value_type()));
             let primary_span = contract.span();
-            let mut labels = Vec::new();
-            if let Some(BuildConfigValueLocation::Source(span)) = error.value_location() {
-                let mut related = DiagnosticLabel::secondary(Some(*span), None);
-                // The default value lives at the contract's own authored span, so only that
-                // alias may reuse the contract span. Command values stay spanless.
-                if Some(*span) == primary_span {
-                    related.span = primary_span;
-                }
-                labels.push(related);
-            }
-            CompilerDiagnostic::invalid_config_reason(
+            let mut diagnostic = project_config::invalid_config_reason(
                 Some(key),
                 InvalidConfigReason::ConfigInputTypeMismatch {
                     provided: provided_name,
@@ -880,8 +880,18 @@ pub(super) fn build_config_resolution_failure(
                     provided_argument_index,
                 },
                 primary_span,
-            )
-            .with_labels(labels)
+            );
+            if let Some(BuildConfigValueLocation::Source(span)) = error.value_location() {
+                // The default value lives at the contract's own authored span, so only that
+                // alias may reuse the contract span. Command values stay spanless.
+                let label_span = if Some(*span) == primary_span {
+                    primary_span
+                } else {
+                    Some(*span)
+                };
+                diagnostic = diagnostic.with_label(label_span, None);
+            }
+            diagnostic
         } else {
             let primary_span = if matches!(
                 &error,
@@ -891,14 +901,14 @@ pub(super) fn build_config_resolution_failure(
             } else {
                 None
             };
-            CompilerDiagnostic::invalid_config_reason(
+            project_config::invalid_config_reason(
                 Some(key),
                 InvalidConfigReason::MissingConfigInput,
                 primary_span,
             )
         }
     } else {
-        CompilerDiagnostic::invalid_config_reason(
+        project_config::invalid_config_reason(
             Some(key),
             InvalidConfigReason::UnknownBuildConfigInput {
                 key,
@@ -908,11 +918,13 @@ pub(super) fn build_config_resolution_failure(
         )
     };
 
-    // Move the boundary table into the batch; every failure path here terminates the
+    // Move the boundary table into the prepared batch; every failure path here terminates
     // resolution, so no clone is needed to carry the diagnostic ids.
-    PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-        diagnostic,
-        std::mem::take(string_table),
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table.take_for_handoff(),
+        None,
+        None,
     ))
 }
 pub(super) fn resolve_boundary_build_config(
@@ -923,7 +935,7 @@ pub(super) fn resolve_boundary_build_config(
     builder_globals: &BuilderConfigGlobalSet,
     fallback_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<ResolvedBuildConfigMap, PremergeFailure> {
+) -> Result<ResolvedBuildConfigMap, PreparedFailure> {
     resolve_build_config_values(
         source_facts,
         fixed_project_facts,

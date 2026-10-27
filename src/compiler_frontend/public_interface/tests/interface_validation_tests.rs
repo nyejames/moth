@@ -227,7 +227,7 @@ fn rejects_export_binding_without_declaration() {
     )
     .expect_err("a successful interface cannot publish a dangling binding");
 
-    assert!(error.msg.contains("reachable declaration origin"));
+    assert!(error.message.contains("reachable declaration origin"));
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn rejects_binding_export_owned_by_another_module() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("binding export 'sine' belongs to module"),
         "unexpected publication error: {:?}",
         error
@@ -281,7 +281,7 @@ fn rejects_nonempty_unresolved_binding_target_before_publication() {
         .validate_binding_targets(&ExternalPackageRegistry::new())
         .expect_err("a nonempty but unresolved binding identity must not publish");
 
-    assert!(error.msg.contains("unresolved canonical target"));
+    assert!(error.message.contains("unresolved canonical target"));
 }
 
 #[test]
@@ -306,7 +306,7 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
         .validate_binding_targets(&ExternalPackageRegistry::new())
         .expect_err("a category mismatch in a trusted provider interface must fail admission");
 
-    assert!(error.msg.contains("unresolved canonical target"));
+    assert!(error.message.contains("unresolved canonical target"));
 }
 
 #[test]
@@ -363,7 +363,7 @@ fn rejects_nested_external_type_from_same_path_but_different_package_origin() {
         .validate_binding_targets(&registry)
         .expect_err("package origin must participate in nested opaque type identity");
 
-    assert!(error.msg.contains("unresolved canonical external type"));
+    assert!(error.message.contains("unresolved canonical external type"));
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn rejects_declaration_category_mismatch() {
     )
     .expect_err("semantic category drift must fail publication");
 
-    assert!(error.msg.contains("disagrees with semantic category"));
+    assert!(error.message.contains("disagrees with semantic category"));
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn rejects_direct_private_nominal_before_interface_closure() {
     )
     .expect_err("artefact-private nominals cannot enter provider closure");
 
-    assert!(error.msg.contains("artefact-private type identity"));
+    assert!(error.message.contains("artefact-private type identity"));
 }
 
 #[test]
@@ -533,7 +533,7 @@ fn rejects_nested_private_generic_instance_before_publication() {
         .validate_for_publication()
         .expect_err("nested artefact-private instances cannot publish");
 
-    assert!(error.msg.contains("artefact-private type identity"));
+    assert!(error.message.contains("artefact-private type identity"));
 }
 
 #[test]
@@ -548,7 +548,7 @@ fn rejects_missing_concrete_free_function_summary() {
     )
     .expect_err("each concrete callable needs exactly one summary");
 
-    assert!(error.msg.contains("missing concrete call summary"));
+    assert!(error.message.contains("missing concrete call summary"));
 }
 
 #[test]
@@ -572,7 +572,7 @@ fn rejects_concrete_summary_for_generic_template() {
     )
     .expect_err("generic base declarations cannot carry concrete summaries");
 
-    assert!(error.msg.contains("unexpected concrete call summary"));
+    assert!(error.message.contains("unexpected concrete call summary"));
 }
 
 #[test]
@@ -606,7 +606,7 @@ fn rejects_missing_concrete_receiver_summary() {
     )
     .expect_err("receiver surfaces require their concrete summary closure");
 
-    assert!(error.msg.contains("missing concrete call summary"));
+    assert!(error.message.contains("missing concrete call summary"));
 }
 
 #[test]
@@ -799,7 +799,7 @@ fn rejects_reusable_evidence_with_unknown_target() {
         .validate_for_publication()
         .expect_err("evidence cannot name a target absent from the interface closure");
 
-    assert!(error.msg.contains("missing target declaration"));
+    assert!(error.message.contains("missing target declaration"));
 }
 
 #[test]
@@ -814,7 +814,7 @@ fn rejects_reusable_evidence_with_unknown_source_trait() {
         .validate_for_publication()
         .expect_err("source evidence cannot name a trait absent from the closure");
 
-    assert!(error.msg.contains("missing source trait declaration"));
+    assert!(error.message.contains("missing source trait declaration"));
 }
 
 #[test]
@@ -830,7 +830,7 @@ fn rejects_reusable_evidence_mapping_owned_by_another_trait() {
         .validate_for_publication()
         .expect_err("a requirement mapping must belong to the evidence trait");
 
-    assert!(error.msg.contains("owned by another trait"));
+    assert!(error.message.contains("owned by another trait"));
 }
 
 #[test]
@@ -843,14 +843,14 @@ fn rejects_duplicate_and_missing_reusable_evidence_requirements() {
     let error = duplicate
         .validate_for_publication()
         .expect_err("one requirement cannot be mapped twice");
-    assert!(error.msg.contains("more than once"));
+    assert!(error.message.contains("more than once"));
 
     let mut missing = evidence_interface(&["display", "identifier"]);
     missing.reusable_evidence[0].requirement_mappings.pop();
     let error = missing
         .validate_for_publication()
         .expect_err("each authored requirement needs one mapping");
-    assert!(error.msg.contains("maps 1 requirement"));
+    assert!(error.message.contains("maps 1 requirement"));
 }
 
 #[test]
@@ -864,7 +864,7 @@ fn rejects_malformed_local_evidence_before_closure() {
     let error = interface
         .validate_closure_input()
         .expect_err("local evidence joins only local declarations, so it is judged now");
-    assert!(error.msg.contains("maps 1 requirement"));
+    assert!(error.message.contains("maps 1 requirement"));
 }
 
 #[test]
@@ -882,7 +882,7 @@ fn rejects_malformed_core_trait_evidence_before_closure() {
     let error = interface
         .validate_closure_input()
         .expect_err("core-trait evidence has no provider declaration to wait for");
-    assert!(error.msg.contains("maps 0 requirement"));
+    assert!(error.message.contains("maps 0 requirement"));
 }
 
 #[test]
@@ -904,7 +904,7 @@ fn defers_evidence_joining_provider_trait_until_closure_supplies_it() {
     let error = interface
         .validate_for_publication()
         .expect_err("closure supplies the trait, so the empty mapping is judged then");
-    assert!(error.msg.contains("maps 0 requirement"));
+    assert!(error.message.contains("maps 0 requirement"));
 }
 
 #[test]
@@ -955,7 +955,7 @@ fn rejects_reusable_evidence_method_on_another_receiver() {
         .validate_for_publication()
         .expect_err("a method attached to another receiver cannot satisfy evidence");
 
-    assert!(error.msg.contains("not attached to target"));
+    assert!(error.message.contains("not attached to target"));
 }
 
 #[test]
@@ -986,7 +986,7 @@ fn rejects_reusable_evidence_mapped_to_differently_named_method() {
         .validate_for_publication()
         .expect_err("a differently named method cannot satisfy a requirement by shape alone");
 
-    assert!(error.msg.contains("differently named method"));
+    assert!(error.message.contains("differently named method"));
 }
 
 #[test]
@@ -1009,5 +1009,5 @@ fn rejects_reusable_evidence_with_incompatible_method_shape() {
         .validate_for_publication()
         .expect_err("the mapped method receiver shape must match the evidence target");
 
-    assert!(error.msg.contains("incompatible receiver method"));
+    assert!(error.message.contains("incompatible receiver method"));
 }

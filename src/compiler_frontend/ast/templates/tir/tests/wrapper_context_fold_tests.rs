@@ -8,6 +8,8 @@
 //! WHY: wrapper context is a TIR view dimension and must not require a second
 //! store or a structural fallback.
 use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValueStore};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView,
@@ -52,7 +54,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -801,14 +803,18 @@ fn prepared_fold_fixture_result(
         None,
     )?;
     if let TemplatePreparationOutcome::Runtime(reason) = preparation.outcome {
-        return Err(CompilerError::compiler_error(format!(
-            "supported wrapper fixture unexpectedly requires runtime: {:?}",
-            reason
-        ))
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "supported wrapper fixture unexpectedly requires runtime: {:?}",
+                reason
+            ),
+        )
         .into());
     }
     if let TemplatePreparationOutcome::SlotInsertHelper = preparation.outcome {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "supported wrapper fixture unexpectedly produced a helper.",
         )
         .into());
@@ -917,8 +923,8 @@ fn expect_single_render_child(body: &OwnedRuntimeTemplateBody) -> &OwnedRuntimeT
 
 /// Resolves only the text fast path used by these fold assertions.
 ///
-/// WHAT: keeps legacy text assertions readable after emissions become structural values.
-/// WHY: a structural value must never be flattened merely to inspect a test result.
+/// WHAT: reads text-only emissions for fold assertions without flattening structural values.
+/// WHY: structural values should be inspected through their shape, not converted for convenience.
 fn emission_text(value: ConstStringValue, string_table: &StringTable) -> String {
     match value {
         ConstStringValue::Text(text) => string_table.resolve(text).to_owned(),
@@ -1772,15 +1778,14 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
         None,
     ) {
         Err(error) => error,
-        Ok(prepared) => panic!("cyclic wrapper contexts must be CompilerError, got {prepared:?}"),
+        Ok(prepared) => {
+            panic!("cyclic wrapper contexts must be InfrastructureFailure, got {prepared:?}")
+        }
     };
     let TemplateError::Infrastructure(error) = error else {
         panic!("cyclic wrapper contexts must stay on the infrastructure lane, got {error:?}");
     };
-    assert_eq!(
-        error.primary.error_type,
-        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
-    );
+    assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
 }
 
 // ---------------------------------------------------------------------------

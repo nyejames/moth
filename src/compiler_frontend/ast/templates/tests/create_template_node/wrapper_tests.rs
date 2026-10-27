@@ -44,9 +44,7 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     let source_path = file_tokens.source_path;
     let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(shared_store);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -111,9 +109,7 @@ fn docs_style_table_and_data_declarations(
     let header_row_path = header_row_file_tokens.source_path;
     let header_row_context = new_constant_context(header_row_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let canonical_owner = header_row_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = header_row_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -143,9 +139,7 @@ fn docs_style_table_and_data_declarations(
     let table_path = table_file_tokens.source_path;
     let table_context = new_constant_context(table_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let canonical_owner = table_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = table_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -175,9 +169,7 @@ fn docs_style_table_and_data_declarations(
     let data_path = data_file_tokens.source_path;
     let data_context = new_constant_context(data_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let canonical_owner = data_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = data_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -251,9 +243,7 @@ fn child_wrapper_composition_marks_template_tir_reference_composed() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");

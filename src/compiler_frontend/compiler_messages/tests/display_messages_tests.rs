@@ -1,6 +1,7 @@
 //! Guidance and portable path presentation contracts.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerErrorMetadataKey};
+use crate::compiler_frontend::compiler_errors::{InfrastructureDetail, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::format_error_guidance_lines;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, relative_display_path_from_root, special_file_name_from_path,
@@ -11,54 +12,30 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::Path;
 
 #[test]
-fn guidance_lines_include_compiler_stage_and_suggestions_when_present() {
-    let mut error = CompilerError::compiler_error("bad compiler state");
-    error.new_metadata_entry(
-        CompilerErrorMetadataKey::CompilationStage,
-        String::from("Expression Parsing"),
-    );
-    error.new_metadata_entry(
-        CompilerErrorMetadataKey::PrimarySuggestion,
-        String::from("Do the thing"),
-    );
-    error.new_metadata_entry(
-        CompilerErrorMetadataKey::AlternativeSuggestion,
-        String::from("Try another thing"),
-    );
-    error.new_metadata_entry(
-        CompilerErrorMetadataKey::SuggestedInsertion,
-        String::from("->"),
-    );
-    error.new_metadata_entry(
-        CompilerErrorMetadataKey::SuggestedLocation,
-        String::from("after token X"),
-    );
+fn guidance_lines_name_the_stage_then_each_rendered_detail() {
+    let error =
+        InfrastructureFailure::internal(CompilerStage::AstConstruction, "bad compiler state")
+            .with_detail(InfrastructureDetail::PrimarySuggestion(
+                "Do the thing".into(),
+            ))
+            .with_detail(InfrastructureDetail::OutputRejectionReason(
+                "kept for diagnostics only".into(),
+            ));
 
-    let lines = format_error_guidance_lines(&error);
-
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("Stage: Expression Parsing"))
-    );
-    assert!(lines.iter().any(|line| line == "Do the thing"));
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("Alternative: Try another thing"))
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("Suggested insertion: '->' after token X"))
+    assert_eq!(
+        format_error_guidance_lines(&error),
+        ["Stage: AST construction", "Do the thing"]
     );
 }
 
 #[test]
-fn guidance_lines_are_empty_when_metadata_is_missing() {
-    let error = CompilerError::compiler_error("bad compiler state");
-    let lines = format_error_guidance_lines(&error);
-    assert!(lines.is_empty());
+fn guidance_lines_name_the_stage_without_details() {
+    let error =
+        InfrastructureFailure::internal(CompilerStage::BorrowChecking, "bad compiler state");
+    assert_eq!(
+        format_error_guidance_lines(&error),
+        ["Stage: Borrow checking"]
+    );
 }
 
 #[test]
@@ -98,36 +75,6 @@ fn support_root_renderer_suggests_containing_package_directory() {
     assert_eq!(
         support_root_import_suggestion(path, context),
         " Bind the support package `@tools/helpers` instead of the root file."
-    );
-}
-
-#[test]
-fn guidance_lines_include_replacement_and_location_variants() {
-    let mut replacement_error =
-        CompilerError::file_error(Path::new("output/page.html"), "could not write output");
-    replacement_error.new_metadata_entry(
-        CompilerErrorMetadataKey::SuggestedReplacement,
-        String::from("let value = 1"),
-    );
-
-    let mut location_error = CompilerError::compiler_error("invalid retained state");
-    location_error.new_metadata_entry(
-        CompilerErrorMetadataKey::SuggestedLocation,
-        String::from("before the closing ')'"),
-    );
-
-    let replacement_lines = format_error_guidance_lines(&replacement_error);
-    let location_lines = format_error_guidance_lines(&location_error);
-
-    assert!(
-        replacement_lines
-            .iter()
-            .any(|line| line.contains("Suggested replacement: let value = 1"))
-    );
-    assert!(
-        location_lines
-            .iter()
-            .any(|line| line.contains("Suggested location: before the closing ')'"))
     );
 }
 

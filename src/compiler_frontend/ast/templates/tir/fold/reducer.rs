@@ -37,10 +37,10 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReferen
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -69,7 +69,7 @@ use super::wrappers::{
 /// fold path remain correctly ignored.
 pub(super) fn reject_slot_insert_template(kind: &TemplateType) -> Result<(), TemplateError> {
     if matches!(kind, TemplateType::SlotInsert(_)) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "Invalid template content reached string folding: unresolved slot insertions cannot be rendered directly.",
         )
         .into());
@@ -290,7 +290,7 @@ impl FoldOutputState {
             return Ok(());
         }
         let pieces_to_append = pieces_to_append.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR const-template projection lost structured pieces while appending folded output.",
             )
         })?;
@@ -427,18 +427,22 @@ pub(crate) fn fold_prepared_template(
     if prepared.identity != view.identity()
         || !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
     {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR fold preparation root/phase/context identity does not match the supplied view.",
         )
         .into());
     }
 
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
-        return Err(CompilerError::compiler_error(format!(
-            "fold_prepared_template: root {} at phase {} has not reached Composed",
-            view.root_ref(),
-            view.phase()
-        ))
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "fold_prepared_template: root {} at phase {} has not reached Composed",
+                view.root_ref(),
+                view.phase()
+            ),
+        )
         .into());
     }
 
@@ -456,7 +460,8 @@ pub(crate) fn fold_prepared_const_template_pattern(
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<FoldedConstTemplatePattern, TemplateError> {
     if prepared.identity != view.identity() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR const-template projection preparation identity does not match the supplied view.",
         )
         .into());
@@ -465,7 +470,8 @@ pub(crate) fn fold_prepared_const_template_pattern(
     match prepared.outcome {
         TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::SlotInsertHelper => {}
         TemplatePreparationOutcome::Runtime(_) => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR const-template projection received a runtime preparation.",
             )
             .into());
@@ -473,7 +479,7 @@ pub(crate) fn fold_prepared_const_template_pattern(
     }
 
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "fold_prepared_const_template_pattern: root {} at phase {} has not reached Composed",
             view.root_ref(),
             view.phase()
@@ -487,7 +493,8 @@ pub(crate) fn fold_prepared_const_template_pattern(
         return Err(diagnostic.into());
     }
     let pieces = result.projection_pieces.ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "TIR const-template projection completed without structured output pieces.",
         )
     })?;
@@ -576,7 +583,7 @@ fn fold_tir_template_with_view(
     }
 
     if template.runtime_slot_plan.is_some() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR fold: a runtime slot plan reached the fold reducer without a foldable preparation proof.",
         )
         .into());
@@ -764,7 +771,7 @@ pub(super) fn fold_tir_node_into_buffer(
             }
 
             if insertion.is_aggregate() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR fold: malformed aggregate wrapper subtree contains a slot.",
                 )
                 .into());
@@ -794,7 +801,7 @@ pub(super) fn fold_tir_node_into_buffer(
             Ok(())
         }
 
-        TemplateIrNodeKind::InsertContribution { .. } => Err(CompilerError::compiler_error(
+        TemplateIrNodeKind::InsertContribution { .. } => Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "Insert contribution reached TIR folding without being consumed by slot composition.",
         )
         .into()),
@@ -821,7 +828,7 @@ pub(super) fn fold_tir_node_into_buffer(
             aggregate_wrapper,
         } => {
             if insertion.is_aggregate() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR fold: malformed aggregate wrapper subtree contains a loop.",
                 )
                 .into());
@@ -847,7 +854,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 Ok(())
             }
             FoldInsertion::None | FoldInsertion::Slot { .. } => Err(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR fold: AggregateOutput marker reached a fold site outside a loop aggregate wrapper.",
                 )
                 .into(),
@@ -856,7 +863,7 @@ pub(super) fn fold_tir_node_into_buffer(
 
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Err(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR fold: runtime slot nodes cannot enter the constant-fold reducer.",
             )
             .into(),
@@ -864,7 +871,7 @@ pub(super) fn fold_tir_node_into_buffer(
 
         // A retained position is unfinished compiler scratch: body-root numeric completion
         // installs its value before any template is folded.
-        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR fold: a retained numeric intake position cannot enter the constant-fold reducer.",
         )
         .into()),
@@ -979,11 +986,10 @@ fn fold_tir_dynamic_expression(
                 output_state.refusal = Some(reason);
                 return Ok(());
             }
-            Err(ConstantFoldError::Diagnostic(diagnostic))
-                if !diagnostic.is_compiler_capacity_exceeded() =>
-            {
-                resolved
-            }
+            Err(
+                ConstantFoldError::Diagnostic(diagnostic)
+                | ConstantFoldError::NumericFailure(diagnostic),
+            ) if diagnostic.code() != "MOTH-SYNTAX-0037" => resolved,
             Err(error) => return Err(error.into()),
         }
     };
@@ -998,7 +1004,7 @@ fn fold_tir_dynamic_expression(
             output_state.emitted_output = true;
             Ok(())
         }
-        None => Err(CompilerDiagnostic::invalid_template_structure(
+        None => Err(templates::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
             expression_span,
         )
@@ -1026,7 +1032,8 @@ fn structural_string_pieces<'constants>(
             Some(ConstValuePayload::Coerced(inner)) => {
                 let inner = *inner;
                 let metadata = constants.metadata(inner).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR fold: coerced string constant is missing const metadata.",
                     )
                 })?;
@@ -1054,10 +1061,13 @@ fn nested_template_kind<'store>(
         .get_template(tir_reference.root)
         .map(|template_ir| &template_ir.kind)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR fold: nested template kind for {} was not found in the module store.",
-                tir_reference.root
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR fold: nested template kind for {} was not found in the module store.",
+                    tir_reference.root
+                ),
+            )
             .into()
         })
 }
@@ -1125,7 +1135,7 @@ fn fold_child_template_with_insertion(
     reject_slot_insert_template(&child_template.kind)?;
 
     if child_template.runtime_slot_plan.is_some() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR insertion fold: a runtime child slot plan reached the fold reducer without a foldable preparation proof.",
         )
         .into());
@@ -1167,10 +1177,13 @@ fn fold_template_reference(
             }
             FoldTemplateReference::Nested(reference) => {
                 if !reference.phase.is_at_least(TemplateTirPhase::Composed) {
-                    return Err(CompilerError::compiler_error(format!(
-                        "TIR fold: nested template {} at phase {} has not reached Composed.",
-                        reference.root, reference.phase
-                    ))
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "TIR fold: nested template {} at phase {} has not reached Composed.",
+                            reference.root, reference.phase
+                        ),
+                    )
                     .into());
                 }
 
@@ -1254,23 +1267,32 @@ pub(super) fn build_emission_from_buffer(
 //  Internal diagnostics
 // -------------------------
 
-fn missing_template_diagnostic(template_id: TemplateIrId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR fold referenced template {} that is not present in the store.",
-        template_id
-    ))
+fn missing_template_diagnostic(template_id: TemplateIrId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR fold referenced template {} that is not present in the store.",
+            template_id
+        ),
+    )
 }
 
-pub(super) fn missing_node_diagnostic(node_id: TemplateIrNodeId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR fold referenced node {} that is not present in the store.",
-        node_id
-    ))
+pub(super) fn missing_node_diagnostic(node_id: TemplateIrNodeId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR fold referenced node {} that is not present in the store.",
+            node_id
+        ),
+    )
 }
 
-fn missing_wrapper_set_diagnostic(wrapper_set_id: TemplateWrapperSetId) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "TIR fold referenced wrapper set {} that is not present in the store.",
-        wrapper_set_id
-    ))
+fn missing_wrapper_set_diagnostic(wrapper_set_id: TemplateWrapperSetId) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "TIR fold referenced wrapper set {} that is not present in the store.",
+            wrapper_set_id
+        ),
+    )
 }

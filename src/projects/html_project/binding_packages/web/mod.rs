@@ -38,8 +38,7 @@ const WEB_BINDING_PACKAGES: [WebBindingPackage; 2] = [
         source: include_str!("canvas/canvas.js"),
         asset_path: "canvas/canvas.js",
     },
-    // WebGL2. Registered with no public symbols until its first accepted API slice lands. See its
-    // README for the binding prerequisites that gate that slice.
+    // WebGL2. Registered with no public symbols. See its README for the binding prerequisites.
     WebBindingPackage {
         package_path: "@web/graphics",
         source: include_str!("graphics/graphics.js"),

@@ -6,8 +6,13 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CapacityResource, DiagnosticPayload,
+    AstCapacityResource, CapacityResource, DiagnosticBag,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -37,13 +42,19 @@ fn compact_const_value_extent_checks_preserve_capacity_resource_and_span() {
     );
     for (prefix, offset) in [(max, 1), (usize::MAX, 1)] {
         let diagnostic = checked_const_value_index(prefix, offset, span).unwrap_err();
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact.first().expect("the diagnostic is retained");
+        let facts = diagnostic
+            .family_view::<CompilerCapacityExceededView>()
+            .expect("the diagnostic is a capacity failure");
+        assert_eq!(
+            facts.resource,
+            CapacityResource::Ast(AstCapacityResource::ConstValues)
+        );
         assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompilerCapacityExceeded {
-                resource: CapacityResource::Ast(AstCapacityResource::ConstValues),
-            }
+            diagnostic.primary_site(),
+            SiteRef::Local(actual) if Some(actual) == span
         ));
-        assert_eq!(diagnostic.primary_span, span);
     }
 }
 
@@ -60,10 +71,13 @@ fn resource_id(table: &mut ModuleResourceTable, relative: &str) -> ResourceId {
 
 fn visit_string(store: &ConstValueStore, id: ConstValueId) -> ConstStringValue {
     store
-        .fold_value(id, &mut |_, value| -> Result<_, CompilerError> {
+        .fold_value(id, &mut |_, value| -> Result<_, InfrastructureFailure> {
             match value {
                 ConstValueVisit::String(value) => Ok(value.clone()),
-                _ => Err(CompilerError::compiler_error("Expected string payload.")),
+                _ => Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Expected string payload.",
+                )),
             }
         })
         .expect("string visitor")
@@ -239,7 +253,7 @@ fn record_fields_keep_authored_order() {
         vec![alpha, beta]
     );
     store
-        .fold_value(root, &mut |_, visit| -> Result<(), CompilerError> {
+        .fold_value(root, &mut |_, visit| -> Result<(), InfrastructureFailure> {
             if let ConstValueVisit::Record(fields) = visit {
                 assert_eq!(
                     fields.iter().map(|field| *field.name).collect::<Vec<_>>(),
@@ -300,10 +314,13 @@ fn fixed_scalar_values_round_trip_with_exact_bits_and_type() {
         );
         assert_eq!(store.metadata(id).expect("metadata").type_id, type_id);
         let visited = store
-            .fold_value(id, &mut |_, visit| -> Result<_, CompilerError> {
+            .fold_value(id, &mut |_, visit| -> Result<_, InfrastructureFailure> {
                 match visit {
                     ConstValueVisit::FixedScalar(value) => Ok(value),
-                    _ => Err(CompilerError::compiler_error("Expected fixed scalar.")),
+                    _ => Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
+                        "Expected fixed scalar.",
+                    )),
                 }
             })
             .expect("scalar visitor");
@@ -543,7 +560,13 @@ fn ingest_view_reads_a_deep_expression_chain_without_recursion() {
                 .ingest_view(
                     builder.view(expression).expect("bound root"),
                     &TypeEnvironment::default(),
-                    &mut |_| Err(CompilerError::compiler_error("templates are absent").into()),
+                    &mut |_| {
+                        Err(InfrastructureFailure::internal(
+                            CompilerStage::ConstantEvaluation,
+                            "templates are absent",
+                        )
+                        .into())
+                    },
                 )
                 .expect("deep collection ingests");
             assert_collection_chain_leaf(&store, id, DEEP_CHAIN_DEPTH);
@@ -576,7 +599,7 @@ fn fold_value_traverses_a_deep_chain_without_recursion() {
             let root_depth = store
                 .fold_value(
                     chain,
-                    &mut |metadata, visit| -> Result<usize, CompilerError> {
+                    &mut |metadata, visit| -> Result<usize, InfrastructureFailure> {
                         let depth = match visit {
                             ConstValueVisit::Bool(true) => 0,
                             ConstValueVisit::Collection(mut children) => {
@@ -626,24 +649,27 @@ fn fold_value_revisits_each_repeated_child_edge_independently() {
     let mut leaf_visits = 0;
     let mut callback_order = Vec::new();
     let mapped = store
-        .fold_value(root, &mut |_, visit| -> Result<Mapped, CompilerError> {
-            match visit {
-                ConstValueVisit::Bool(true) => {
-                    leaf_visits += 1;
-                    callback_order.push("leaf");
-                    Ok(Mapped(format!("leaf{leaf_visits}")))
+        .fold_value(
+            root,
+            &mut |_, visit| -> Result<Mapped, InfrastructureFailure> {
+                match visit {
+                    ConstValueVisit::Bool(true) => {
+                        leaf_visits += 1;
+                        callback_order.push("leaf");
+                        Ok(Mapped(format!("leaf{leaf_visits}")))
+                    }
+                    ConstValueVisit::Collection(children) => {
+                        callback_order.push("collection");
+                        let children = children
+                            .into_iter()
+                            .map(|child| child.0)
+                            .collect::<Vec<_>>();
+                        Ok(Mapped(format!("[{}]", children.join(","))))
+                    }
+                    _ => panic!("only collections and their shared leaf are visited"),
                 }
-                ConstValueVisit::Collection(children) => {
-                    callback_order.push("collection");
-                    let children = children
-                        .into_iter()
-                        .map(|child| child.0)
-                        .collect::<Vec<_>>();
-                    Ok(Mapped(format!("[{}]", children.join(","))))
-                }
-                _ => panic!("only collections and their shared leaf are visited"),
-            }
-        })
+            },
+        )
         .expect("repeated edge visitor");
     assert_eq!(mapped.0, "[[leaf1],[leaf2]]");
     assert_eq!(
@@ -686,30 +712,33 @@ fn fold_value_maps_mixed_composites_in_postorder() {
     let root = insert(ConstValuePayload::Collection(vec![prefix, choice, empty]));
     let mut callback_order = Vec::new();
     let mapped = store
-        .fold_value(root, &mut |_, visit| -> Result<String, CompilerError> {
-            let (kind, mapped) = match visit {
-                ConstValueVisit::Char(character) => ("char", character.to_string()),
-                ConstValueVisit::Range { start, end } => ("range", format!("({start}..{end})")),
-                ConstValueVisit::Coerced(child) => ("coerced", format!("cast{child}")),
-                ConstValueVisit::OptionSome(child) => ("optional", format!("some({child})")),
-                ConstValueVisit::Choice {
-                    nominal_path: visited_path,
-                    tag,
-                    fields,
-                } => {
-                    assert_eq!(*visited_path, nominal_path);
-                    assert_eq!(fields.len(), 1);
-                    let child = fields.into_iter().next().expect("choice field").value;
-                    ("choice", format!("choice{tag}({child})"))
-                }
-                ConstValueVisit::Collection(children) => {
-                    ("collection", format!("[{}]", children.join(",")))
-                }
-                _ => panic!("unexpected mixed graph payload"),
-            };
-            callback_order.push(kind);
-            Ok(mapped)
-        })
+        .fold_value(
+            root,
+            &mut |_, visit| -> Result<String, InfrastructureFailure> {
+                let (kind, mapped) = match visit {
+                    ConstValueVisit::Char(character) => ("char", character.to_string()),
+                    ConstValueVisit::Range { start, end } => ("range", format!("({start}..{end})")),
+                    ConstValueVisit::Coerced(child) => ("coerced", format!("cast{child}")),
+                    ConstValueVisit::OptionSome(child) => ("optional", format!("some({child})")),
+                    ConstValueVisit::Choice {
+                        nominal_path: visited_path,
+                        tag,
+                        fields,
+                    } => {
+                        assert_eq!(*visited_path, nominal_path);
+                        assert_eq!(fields.len(), 1);
+                        let child = fields.into_iter().next().expect("choice field").value;
+                        ("choice", format!("choice{tag}({child})"))
+                    }
+                    ConstValueVisit::Collection(children) => {
+                        ("collection", format!("[{}]", children.join(",")))
+                    }
+                    _ => panic!("unexpected mixed graph payload"),
+                };
+                callback_order.push(kind);
+                Ok(mapped)
+            },
+        )
         .expect("mixed visitor");
     assert_eq!(mapped, "[p,choice3(some(cast(a..z))),[]]");
     assert_eq!(
@@ -736,8 +765,8 @@ fn fold_value_callback_failure_precedes_later_field_lookup() {
         Invariant,
     }
 
-    impl From<CompilerError> for VisitFailure {
-        fn from(_error: CompilerError) -> Self {
+    impl From<InfrastructureFailure> for VisitFailure {
+        fn from(_error: InfrastructureFailure) -> Self {
             Self::Invariant
         }
     }

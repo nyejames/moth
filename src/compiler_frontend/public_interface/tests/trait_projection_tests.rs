@@ -23,6 +23,7 @@ use super::test_support::{
     empty_fields, module_origin, nominal_origins_map, path, register_struct, struct_origin,
     this_type, trait_binding, trait_origin, trait_origins_map, trait_root,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
@@ -37,7 +38,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -111,7 +112,7 @@ fn build_traits(
     env: &TypeEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<PublicTraitSemantics>, CompilerError> {
+) -> Result<Vec<PublicTraitSemantics>, InfrastructureFailure> {
     build_traits_with_facts(
         trait_roots,
         bindings,
@@ -137,7 +138,7 @@ fn build_traits_with_facts(
     env: &TypeEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<PublicTraitSemantics>, CompilerError> {
+) -> Result<Vec<PublicTraitSemantics>, InfrastructureFailure> {
     let registry = ExternalPackageRegistry::new();
     let mut projection = DirectTraitProjection::new(DirectTraitProjectionInput {
         trait_roots,
@@ -162,10 +163,13 @@ fn build_traits_with_facts(
     if !leftover_traits.is_empty() {
         let mut names: Vec<String> = leftover_traits.into_iter().map(String::from).collect();
         names.sort();
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft trait projection: the trait root '{}' has no matching export binding; every direct trait root must join exactly one binding",
-            names.join(", ")
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft trait projection: the trait root '{}' has no matching export binding; every direct trait root must join exactly one binding",
+                names.join(", ")
+            ),
+        ));
     }
     Ok(semantics)
 }
@@ -542,7 +546,7 @@ fn rejects_requirement_receiver_this_type_mismatch() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(
         message.contains("does not equal the owning trait this_type"),
         "expected a receiver this_type mismatch diagnostic, got: {message}"
@@ -658,7 +662,7 @@ fn rejects_trait_binding_without_matching_root() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(message.contains("no matching trait root"));
 }
 
@@ -689,7 +693,7 @@ fn rejects_duplicate_trait_roots_sharing_a_name() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(message.contains("two trait roots share the public name"));
 }
 
@@ -718,7 +722,7 @@ fn rejects_trait_root_without_matching_binding() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(message.contains("has no matching export binding"));
 }
 
@@ -753,7 +757,7 @@ fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(message.contains("disagrees with its root resolved origin"));
 }
 
@@ -779,7 +783,7 @@ fn rejects_trait_root_without_retained_source_trait_origin() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(message.contains("no retained public source-trait origin"));
 }
 
@@ -814,7 +818,7 @@ fn rejects_trait_root_with_builtin_this_type() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(
         message.contains("not a GenericParameter"),
         "expected a malformed this_type diagnostic, got: {message}"
@@ -849,7 +853,7 @@ fn rejects_trait_root_with_wrong_name_generic_parameter() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = result.unwrap_err().message.clone();
     assert!(
         message.contains("not \"This\""),
         "expected a wrong-name this_type diagnostic, got: {message}"
@@ -1091,7 +1095,7 @@ fn rejects_duplicate_canonical_incompatibility_identity() {
 
     let message = result
         .expect_err("a duplicate canonical incompatibility identity must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("a duplicate must not enter the public trait surface"),
         "expected a duplicate-identity rejection, got: {message}"
@@ -1106,7 +1110,7 @@ fn rejects_incompatibility_without_retained_source_fact() {
     let this_id = this_type(&mut env, &mut string_table);
 
     // The incompatible TraitId has no entry in the trait-source-fact table, so the projection
-    // cannot classify it and fails through a CompilerError.
+    // cannot classify it and fails through an InfrastructureFailure.
     let root = trait_root_with_incompatibilities(
         "Alpha",
         this_id,
@@ -1134,7 +1138,7 @@ fn rejects_incompatibility_without_retained_source_fact() {
 
     let message = result
         .expect_err("a missing trait source fact must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("has no retained trait source fact"),
         "expected a missing-source-fact rejection, got: {message}"
@@ -1184,7 +1188,7 @@ fn rejects_incompatibility_source_without_public_source_trait_origin() {
 
     let message = result
         .expect_err("a missing public source-trait origin must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("no retained public source-trait origin"),
         "expected a missing-origin rejection, got: {message}"
@@ -1200,7 +1204,7 @@ fn rejects_internal_self_incompatibility_relation() {
 
     // The direct public trait Alpha carries an incompatibility that resolves to itself. An
     // authored self-relation is rejected earlier by a user-facing diagnostic, so reaching
-    // this point means inconsistent resolved metadata and must fail through a CompilerError.
+    // this point means inconsistent resolved metadata and must fail through an InfrastructureFailure.
     let alpha_path = path("Alpha", &mut string_table, &mut path_fork);
     let mut trait_source_facts = FxHashMap::default();
     trait_source_facts.insert(TraitId(0), ResolvedTraitSourceFact::Source(alpha_path));
@@ -1232,7 +1236,7 @@ fn rejects_internal_self_incompatibility_relation() {
 
     let message = result
         .expect_err("an internal self-relation must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("resolves to itself"),
         "expected a self-relation rejection, got: {message}"

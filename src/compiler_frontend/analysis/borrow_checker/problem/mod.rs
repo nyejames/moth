@@ -99,7 +99,7 @@ impl BorrowProblem {
     /// Validate every cross-reference before publishing the immutable problem.
     pub(crate) fn new(
         parts: BorrowProblemParts,
-    ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Self, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
         let problem = Self {
             bindings: parts.bindings.into_boxed_slice(),
             control_flow: ControlFlow::new(parts.blocks, parts.edges, parts.entry, parts.exits),
@@ -118,7 +118,7 @@ impl BorrowProblem {
     /// Re-run the atomic invariant check at a consumer boundary.
     pub(crate) fn validate(
         &self,
-    ) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<(), crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
         validation::validate(self)
     }
 

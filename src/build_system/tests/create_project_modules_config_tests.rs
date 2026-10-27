@@ -1,5 +1,50 @@
+use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
+fn assert_project_config_identity(
+    result: CompilationResult<()>,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) -> CompilationResult<()> {
+    let reports = diagnosed_reports(&result);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == expected_code && view.reason_key() == expected_reason_key
+            }),
+        "expected {expected_code} ({expected_reason_key:?}), got {result:?}",
+    );
+    result
+}
+
+fn first_project_config_string(result: &CompilationResult<()>, index: usize) -> String {
+    let (report, diagnostic) = diagnosed_reports(result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("project config failure should contain an error diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("project config diagnostic should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidConfigValueShape);
+    let value = *diagnostic
+        .string_ids()
+        .get(index)
+        .expect("project config diagnostic should retain its ordered string facts");
+    DiagnosticRenderContext::for_report(report)
+        .string_table
+        .resolve(value)
+        .to_owned()
+}
 #[test]
 fn parses_config_constant_declarations() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -53,12 +98,18 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
         ),
     ];
 
-    for (label, source, diagnosed) in cases {
+    for (label, config_source, diagnosed) in cases {
         let _temp = tempfile::tempdir().expect("should create temporary project");
         let root = _temp.path().to_path_buf();
         fs::create_dir(root.join("src")).expect("should create the source directory");
         let config_path = root.join(settings::CONFIG_FILE_NAME);
-        fs::write(&config_path, source).expect("should write config");
+        let long_output_folder = format!("src/{}", "x".repeat(1100));
+        let source = if diagnosed {
+            config_source.replace("src/out", &long_output_folder)
+        } else {
+            config_source.to_owned()
+        };
+        fs::write(&config_path, &source).expect("should write config");
 
         let mut config = Config::new(root);
         let style_directives = test_style_directives();
@@ -74,55 +125,58 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
         };
         let mut string_table = StringTable::new();
         let _path_fork = PathInternerFork::empty();
-        let mut source_files = SourceDatabase::empty();
+        let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
 
         let result = compile_project_config_file(
             &mut config,
             &config_path,
             &services,
-            &mut source_files,
+            &mut source_builder,
             &mut string_table,
         );
-        if diagnosed {
-            let messages = result.expect_err("invalid output settings should diagnose");
-            assert!(
-                messages.error_diagnostics().any(|diagnostic| {
-                    matches!(
-                        &diagnostic.payload,
-                        DiagnosticPayload::InvalidConfig {
-                            reason: InvalidConfigReason::InvalidOutputFolder {
-                                reason: InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
-                                ..
-                            },
-                            ..
-                        }
-                    )
-                }),
-                "{label} config should retain its typed output diagnostic",
+        let source_database = if diagnosed {
+            let failure = project_config_failure_result(
+                result.expect_err("invalid output settings should diagnose"),
+                source_builder.take(),
+                &string_table,
             );
+            let failure = assert_project_config_identity(
+                failure,
+                "MOTH-CONFIG-0001",
+                Some("invalid_config.invalid_output_folder.inside_or_equal_to_entry_root"),
+            );
+            assert_primary_span_text(&failure, &config_path, &format!("\"{long_output_folder}\""));
+            None
         } else {
-            result.expect("valid config should compile and apply");
+            assert!(result.is_ok(), "valid config should compile and apply");
+            let mut source_builder = source_builder
+                .take()
+                .expect("successful config should retain its source builder");
+            source_builder
+                .assemble_finalized_tables()
+                .expect("config span table should assemble");
+            Some(
+                source_builder
+                    .finish()
+                    .expect("config source builder should satisfy lifecycle invariants"),
+            )
+        };
+
+        if let Some(source_database) = source_database {
+            let canonical_config_path =
+                fs::canonicalize(&config_path).expect("config path should canonicalize");
+            let config_file_id = source_database
+                .get_by_canonical_path(&canonical_config_path)
+                .expect("compiled config should have a registered source slot")
+                .id;
+            assert!(
+                source_database.retained_text(config_file_id).is_some(),
+                "{label} config should retain the compiled snapshot",
+            );
+            let range = SourceSpan::new(config_file_id, LocalSpan::source_start())
+                .byte_range(&source_database);
+            assert_eq!((range.start(), range.end()), (0, 0));
         }
-
-        let canonical_config_path =
-            fs::canonicalize(&config_path).expect("config path should canonicalize");
-        let config_file_id = source_files
-            .get_by_canonical_path(&canonical_config_path)
-            .expect("compiled config should have a registered source slot")
-            .id;
-        assert!(
-            source_files.retained_text(config_file_id).is_some(),
-            "{label} config should retain the compiled snapshot",
-        );
-
-        let installation_error = source_files
-            .install_extended_spans(config_file_id, ExtendedSpanBuilder::default().freeze())
-            .expect_err("the config span table should already be installed");
-        assert_eq!(
-            installation_error.error_type,
-            ErrorType::Compiler,
-            "{label} config should reject a second span-table installation",
-        );
     }
 }
 
@@ -149,9 +203,9 @@ fn persists_direct_project_config_resolution_records_in_live_config() {
 
 #[test]
 fn loads_canonical_config_file_from_project_root() {
-    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
-    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
-    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test.
+    // The timing collector is process-global, so an unguarded compile can inherit an active
+    // session's boundary/module IDs. Hold the shared instrumentation lock to keep this compile out
+    // of exact-snapshot timing tests.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -192,32 +246,38 @@ fn loads_canonical_config_file_from_project_root() {
     };
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
 
     let validated_output_settings = load_project_config(
         &mut config,
         &services,
+        &mut source_builder,
         &mut string_table,
-        Some(&mut source_files),
     )
-    .expect("canonical config should load");
+    .unwrap_or_else(|_| panic!("canonical config should load"));
 
     assert_eq!(config.config_file_path(), root.join("config.moth"));
     assert_eq!(config.entry_root, PathBuf::from("src"));
 
-    let mut project_source_files = Some(Arc::new(source_files));
-    let frontend = compile_project_frontend_with_inputs(
+    let mut project_source_files = None;
+    let mut warning_owner =
+        crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
+    let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
         &mut config,
         crate::build_system::BuildProfile::Dev,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
+        &mut source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
-    )
-    .expect("directory frontend should extend the config source database");
+    ));
+    assert!(
+        source_builder.is_none(),
+        "frontend should consume the shared source owner",
+    );
 
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
@@ -255,7 +315,8 @@ fn loads_canonical_config_file_from_project_root() {
         "alpha should retain the provider candidate resolved for its own source",
     );
 
-    let project_source_files = project_source_files
+    let project_source_files = frontend
+        .project_source_database
         .as_ref()
         .expect("directory frontend should retain the project source database");
     let canonical_config = fs::canonicalize(root.join(settings::CONFIG_FILE_NAME))
@@ -363,24 +424,23 @@ fn directory_projects_require_config_moth() {
     };
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
 
-    let messages = load_project_config(
-        &mut config,
-        &services,
-        &mut string_table,
-        Some(&mut source_files),
-    )
-    .expect_err("a directory project without config.moth must fail");
-    assert!(
-        messages.diagnostics().any(|diagnostic| matches!(
-            diagnostic.payload,
-            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::MissingConfigFile,
-                ..
-            }
-        )),
-        "expected MissingConfigFile, got {messages:?}"
+    let failure = project_config_failure_result(
+        load_project_config(
+            &mut config,
+            &services,
+            &mut source_builder,
+            &mut string_table,
+        )
+        .expect_err("a directory project without config.moth must fail"),
+        source_builder.take(),
+        &string_table,
+    );
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.missing_config_file"),
     );
 }
 
@@ -440,20 +500,11 @@ fn rejects_unknown_config_key() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::MissingProjectRecord,
-                ..
-            }
-        ),
-        "a helper-only config.moth still requires a project record, got: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.missing_project_record"),
     );
 }
 
@@ -475,29 +526,22 @@ fn rejects_section_output_inside_or_equal_to_entry_root() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages =
-        parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives)
-            .expect_err("output inside entry root should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    let DiagnosticPayload::InvalidConfig {
-        reason:
-            InvalidConfigReason::InvalidOutputFolder {
-                reason: InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
-                ..
-            },
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!(
-            "expected InsideOrEqualToEntryRoot diagnostic, got: {:?}",
-            diagnostic.payload
-        );
-    };
-
-    // The output roots resolve from the grouped section now, so the diagnostic underlines the
+    let failure =
+        parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives);
+    let boundary = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.invalid_output_folder.inside_or_equal_to_entry_root"),
+    );
     assert!(
-        diagnostic.primary_span.is_some(),
+        diagnosed_reports(&boundary)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| matches!(
+                view.primary_site(),
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                    _
+                )
+            )),
         "the output-folder diagnostic should retain its authored span"
     );
 }
@@ -507,7 +551,7 @@ fn rejects_config_plain_and_mutable_bindings() {
     // Both `=` and `~=` produce the same `PlainBindingUnsupported` reason. The canonical
     // `config_plain_project_rejected` and `config_mutable_key_rejected` cases cover the
     // user-visible rejection; this unit retains the typed reason for both binding modes.
-    for (operator, label) in [("=", "plain"), ("~=", "mutable")] {
+    for (operator, _label) in [("=", "plain"), ("~=", "mutable")] {
         let _temp1 = tempfile::tempdir().expect("should create temp dir");
         let root = _temp1.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create root dir");
@@ -518,20 +562,11 @@ fn rejects_config_plain_and_mutable_bindings() {
 
         let mut config = Config::new(root.clone());
         let style_directives = test_style_directives();
-        let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-            .expect_err("config should reject binding");
-
-        let diagnostic = first_error_diagnostic(&messages);
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::PlainBindingUnsupported,
-                    ..
-                }
-            ),
-            "unexpected diagnostic payload for {label} binding: {:?}",
-            diagnostic.payload
+        let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+        let _ = assert_project_config_identity(
+            failure,
+            "MOTH-CONFIG-0001",
+            Some("invalid_config.plain_binding_unsupported"),
         );
 
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -573,20 +608,11 @@ fn rejects_config_function_declarations() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::FunctionUnsupported,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.function_unsupported"),
     );
 }
 
@@ -611,7 +637,7 @@ fn rejects_config_named_support_type_declarations() {
         ),
     ];
 
-    for (case_name, source) in cases {
+    for (_case_name, source) in cases {
         let _temp2 = tempfile::tempdir().expect("should create temp dir");
         let root = _temp2.path().to_path_buf();
         fs::create_dir_all(&root).expect("should create root dir");
@@ -621,20 +647,11 @@ fn rejects_config_named_support_type_declarations() {
 
         let mut config = Config::new(root.clone());
         let style_directives = test_style_directives();
-        let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-            .expect_err("named support types should be rejected");
-
-        let diagnostic = first_error_diagnostic(&messages);
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::NamedTypeUnsupported,
-                    ..
-                }
-            ),
-            "unexpected diagnostic payload for {case_name}: {:?}",
-            diagnostic.payload
+        let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+        let _ = assert_project_config_identity(
+            failure,
+            "MOTH-CONFIG-0001",
+            Some("invalid_config.named_type_unsupported"),
         );
 
         fs::remove_dir_all(&root).expect("should remove temp root");
@@ -652,20 +669,11 @@ fn rejects_config_standalone_template() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::StandaloneTemplateUnsupported,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.standalone_template_unsupported"),
     );
 }
 
@@ -680,20 +688,11 @@ fn rejects_config_const_page_fragment() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::StandaloneTemplateUnsupported,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.standalone_template_unsupported"),
     );
 }
 
@@ -711,20 +710,11 @@ fn rejects_project_local_config_dependency_even_when_module_root_exists() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidDependencyClause {
-                reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-SYNTAX-0019",
+        Some("invalid_dependency_clause.dependency_clause_not_allowed"),
     );
 }
 
@@ -751,25 +741,16 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test_with_packages(
+    let failure = parse_project_config_for_test_with_packages(
         &mut config,
         &config_path,
         &style_directives,
         &frontend_surface,
-    )
-    .expect_err("config dependency should fail before source-package discovery");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidDependencyClause {
-                reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    );
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-SYNTAX-0019",
+        Some("invalid_dependency_clause.dependency_clause_not_allowed"),
     );
 }
 
@@ -885,32 +866,33 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let messages = match discover_modules_for_test_messages(&config, &resolver, &style_directives) {
-        Ok(_) => panic!("malformed dependency path should fail discovery"),
-        Err(messages) => messages,
-    };
+    let result = discover_modules_for_test_messages(&config, &resolver, &style_directives);
 
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    let diagnostics = diagnosed_reports(&result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
+    let (_, diagnostic) = diagnostics[0];
     assert!(
-        diagnostic.primary_span.is_some(),
+        !matches!(
+            diagnostic.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+        ),
         "the malformed dependency diagnostic should retain its authored span"
     );
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidPath {
-                path_kind: PathKind::EmptyComponent
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let facts = diagnostic
+        .family_view::<InvalidPathView>()
+        .expect("malformed dependency diagnostic should retain typed path facts");
+    assert_eq!(
+        facts.path_kind,
+        PathKind::EmptyComponent,
+        "unexpected invalid path fact: {:?}",
+        facts.path_kind
     );
 }
 
 #[test]
-fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages() {
+fn config_dependency_parse_failure_keeps_precise_location() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -919,26 +901,26 @@ fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages()
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
-    assert!(
-        diagnostic.primary_span.is_some(),
-        "the config dependency diagnostic should retain its authored span"
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let boundary = assert_project_config_identity(
+        failure,
+        "MOTH-SYNTAX-0019",
+        Some("invalid_dependency_clause.dependency_clause_not_allowed"),
     );
+    let errors = diagnosed_reports(&boundary)
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
     assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidDependencyClause {
-                reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+        diagnosed_reports(&boundary)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| matches!(
+                view.primary_site(),
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                    _
+                )
+            )),
+        "the config dependency diagnostic should retain its authored span"
     );
 }
 
@@ -1003,15 +985,8 @@ fn rejects_config_unresolved_local_reference() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(&diagnostic.payload, DiagnosticPayload::UnknownName { .. }),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
-    );
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(failure, "MOTH-RULE-0034", None);
 }
 
 #[test]
@@ -1025,20 +1000,11 @@ fn rejects_config_non_compile_time_constant_value() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason: CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-RULE-0053",
+        Some("compile_time_evaluation_error.non_constant_reference_in_constant"),
     );
 }
 
@@ -1057,22 +1023,13 @@ fn rejects_duplicate_plain_config_bindings_before_config_validation() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
     // The frontend catches duplicate start-body declarations as assignments to immutable variables
     // before config validation runs.
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidAssignmentTarget {
-                reason: InvalidAssignmentTargetReason::ImmutableBinding,
-                ..
-            }
-        ),
-        "expected immutable-assignment diagnostic for duplicate private keys, got: {:?}",
-        diagnostic.payload
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.immutable_binding"),
     );
 }
 
@@ -1108,24 +1065,18 @@ fn rejects_config_runtime_call_in_value() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-
-    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0087");
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidValueReceiver {
-                receiver: ValueReceiverContext::Declaration,
-                target_count: 1,
-                produced_count: 0,
-            }
-        ),
-        "expected invalid declaration receiver diagnostic for runtime call, got: {:?}",
-        diagnostic.payload
-    );
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let boundary = assert_project_config_identity(failure, "MOTH-RULE-0087", None);
+    let (_, diagnostic) = diagnosed_reports(&boundary)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("runtime config call should produce an error diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidValueReceiverView>()
+        .expect("invalid value receiver should retain typed counts");
+    assert_eq!(facts.receiver, ValueReceiverContext::Declaration);
+    assert_eq!(facts.target_count, 1);
+    assert_eq!(facts.produced_count, 0);
 }
 
 // ── Config value shape enforcement tests ──────────────────────────────────────
@@ -1167,18 +1118,13 @@ fn rejects_core_string_key_with_bool_value() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let reason = first_invalid_config_reason(&messages);
-    let InvalidConfigReason::InvalidConfigValueShape { expected } = reason else {
-        panic!("expected invalid config value shape, got {reason:?}");
-    };
-    assert_eq!(
-        messages.string_table.resolve(*expected),
-        "a string value",
-        "string-key shape mismatch must report the expected string shape"
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let boundary = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.invalid_config_value_shape"),
     );
+    assert_eq!(first_project_config_string(&boundary, 0), "a string value");
 }
 
 #[test]
@@ -1196,19 +1142,14 @@ fn rejects_backend_bool_key_with_string_value() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages =
-        parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives)
-            .expect_err("config should fail");
-
-    let reason = first_invalid_config_reason(&messages);
-    let InvalidConfigReason::InvalidConfigValueShape { expected } = reason else {
-        panic!("expected invalid config value shape, got {reason:?}");
-    };
-    assert_eq!(
-        messages.string_table.resolve(*expected),
-        "a boolean value",
-        "backend bool-key shape mismatch must report the expected bool shape"
+    let failure =
+        parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives);
+    let boundary = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.invalid_config_value_shape"),
     );
+    assert_eq!(first_project_config_string(&boundary, 0), "a boolean value");
 }
 
 #[test]
@@ -1251,20 +1192,11 @@ fn detects_duplicate_top_level_config_constants() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages = parse_project_config_for_test(&mut config, &config_path, &style_directives)
-        .expect_err("config should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::DuplicateKey,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
+    let _ = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.duplicate_key"),
     );
 }
 
@@ -1291,25 +1223,22 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let messages =
-        parse_project_config_for_test(&mut config, &non_canonical_config_path, &style_directives)
-            .expect_err("duplicate authored config key should fail");
-
-    let diagnostic = first_error_diagnostic(&messages);
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::DuplicateKey,
-                ..
-            }
-        ),
-        "expected authored duplicate key diagnostic, got: {:?}",
-        diagnostic.payload
+    let failure =
+        parse_project_config_for_test(&mut config, &non_canonical_config_path, &style_directives);
+    let boundary = assert_project_config_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.duplicate_key"),
     );
-
     assert!(
-        diagnostic.primary_span.is_some(),
+        diagnosed_reports(&boundary)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| matches!(
+                view.primary_site(),
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                    _
+                )
+            )),
         "the duplicate-key diagnostic should retain its authored span"
     );
 }
@@ -1454,12 +1383,10 @@ fn entry_root_requires_at_least_one_root_entry_file() {
     .expect("config should parse");
 
     let resolver = configured_resolver(&config);
-    let Err(messages) = discover_modules_for_test(&config, &resolver, &style_directives) else {
-        panic!("entry root without @*.moth entries should fail");
-    };
+    let result = discover_modules_for_test(&config, &resolver, &style_directives);
 
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::NoRootModuleEntries { .. }
-    ));
+    assert_eq!(
+        first_invalid_config(&result).reason,
+        InvalidConfigCode::NoRootModuleEntries
+    );
 }

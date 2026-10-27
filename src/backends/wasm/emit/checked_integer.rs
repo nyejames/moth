@@ -9,14 +9,15 @@
 //!      destination directly because operands are read before the result `local.set`.
 
 use crate::backends::wasm::emit::instructions::{
-    LirBodyEmitContext, ensure_local_abi, local_index, wasm_generation_error,
+    LirBodyEmitContext, ensure_local_abi, local_index,
 };
 use crate::backends::wasm::lir::instructions::{
     IntegerCheckMode, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
     WasmIntegerPowerScratch, WasmIntegerScratch, WasmNumericOperationOperands,
 };
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use wasm_encoder::{BlockType, Function, Instruction};
 
@@ -30,7 +31,7 @@ pub(super) fn emit_checked_integer_operation(
     function: &mut Function,
     operation: &WasmCheckedIntegerOperation,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let WasmCheckedIntegerOperation {
         dst: destination,
         operator,
@@ -70,7 +71,7 @@ pub(super) fn emit_checked_integer_operation(
             (Some(*left), Some(*right))
         }
         _ => {
-            return Err(wasm_generation_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm checked integer operation has an invalid operand shape for {operator:?}"
             )));
         }
@@ -81,12 +82,12 @@ pub(super) fn emit_checked_integer_operation(
         // native arithmetic reads its operands before the destination `local.set`, so a proven
         // statement keeps its alias-safe write directly.
         if *check_mode == IntegerCheckMode::Runtime {
-            return Err(wasm_generation_error(
+            return Err(InfrastructureFailure::wasm_generation(
                 "Wasm checked integer destination aliases a source operand".to_owned(),
             ));
         }
         if *operator == NumericOperator::Power {
-            return Err(wasm_generation_error(
+            return Err(InfrastructureFailure::wasm_generation(
                 "Wasm proven-safe integer operation cannot target Power".to_owned(),
             ));
         }
@@ -108,12 +109,12 @@ pub(super) fn emit_checked_integer_operation(
             Some(*scratch)
         }
         (true, None) => {
-            return Err(wasm_generation_error(
+            return Err(InfrastructureFailure::wasm_generation(
                 "Wasm 32-bit multiply or power is missing its I64 product scratch".to_owned(),
             ));
         }
         (false, Some(_)) => {
-            return Err(wasm_generation_error(
+            return Err(InfrastructureFailure::wasm_generation(
                 "Wasm integer operation has unexpected product scratch".to_owned(),
             ));
         }
@@ -125,29 +126,27 @@ pub(super) fn emit_checked_integer_operation(
             || left == Some(product_scratch)
             || right == Some(product_scratch))
     {
-        return Err(wasm_generation_error(
+        return Err(InfrastructureFailure::wasm_generation(
             "Wasm integer product scratch aliases another operation local".to_owned(),
         ));
     }
 
     let power_scratch = match (*operator, power_scratch) {
         (NumericOperator::Power, Some(scratch)) => Some(*scratch),
-        (NumericOperator::Power, None) => {
-            return Err(wasm_generation_error(
-                "Wasm integer power is missing its loop scratch locals".to_owned(),
-            ));
-        }
-        (_, Some(_)) => {
-            return Err(wasm_generation_error(
-                "Wasm non-power operation has unexpected scratch locals".to_owned(),
-            ));
-        }
+        (NumericOperator::Power, None) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer power is missing its loop scratch locals"
+        ),
+        (_, Some(_)) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm non-power operation has unexpected scratch locals"
+        ),
         (_, None) => None,
     };
 
     if let Some(scratch) = power_scratch {
         if *check_mode != IntegerCheckMode::Runtime {
-            return Err(wasm_generation_error(
+            return Err(InfrastructureFailure::wasm_generation(
                 "Wasm proven-safe integer operation cannot be Power".to_owned(),
             ));
         }
@@ -156,7 +155,7 @@ pub(super) fn emit_checked_integer_operation(
         let (left_operand, right_operand) = match (left, right) {
             (Some(left_operand), Some(right_operand)) => (left_operand, right_operand),
             _ => {
-                return Err(wasm_generation_error(
+                return Err(InfrastructureFailure::wasm_generation(
                     "Wasm integer power has an invalid operand shape".to_owned(),
                 ));
             }
@@ -171,7 +170,7 @@ pub(super) fn emit_checked_integer_operation(
             || product_scratch == Some(scratch.factor)
             || product_scratch == Some(scratch.exponent)
         {
-            return Err(wasm_generation_error(
+            return Err(InfrastructureFailure::wasm_generation(
                 "Wasm integer power scratch locals alias another operation local".to_owned(),
             ));
         }
@@ -195,7 +194,7 @@ pub(super) fn emit_checked_integer_operation(
                 Some(right),
             ) => (Some(left), Some(right)),
             _ => {
-                return Err(wasm_generation_error(format!(
+                return Err(InfrastructureFailure::wasm_generation(format!(
                     "Wasm proven-safe integer operation has an unsupported shape for {operator:?}"
                 )));
             }
@@ -217,7 +216,10 @@ pub(super) fn emit_checked_integer_operation(
                 function.instruction(&Instruction::LocalSet(local_index(*destination, context)?));
                 Ok(())
             }
-            _ => unreachable!("operand shape was validated above"),
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "proven-safe integer emit already validated Negate as unary and Add/Subtract/Multiply/IntegerDivide/Remainder as binary"
+            ),
         };
     }
 
@@ -255,7 +257,7 @@ pub(super) fn emit_checked_integer_operation(
             *scratch,
             context,
         ),
-        _ => Err(wasm_generation_error(format!(
+        _ => Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm checked integer operation has inconsistent scratch locals for {operator:?}"
         ))),
     }
@@ -268,7 +270,7 @@ fn emit_checked_add(
     right: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     emit_native_integer_binary(function, left, right, kind, NumericOperator::Add, context)?;
     function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
 
@@ -317,7 +319,7 @@ fn emit_checked_subtract(
     right: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     emit_native_integer_binary(
         function,
         left,
@@ -365,9 +367,9 @@ fn emit_checked_negation(
     operand: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some((minimum, _)) = signed_bounds(kind) else {
-        return Err(wasm_generation_error(
+        return Err(InfrastructureFailure::wasm_generation(
             "Wasm checked negation requires a signed integer domain".to_owned(),
         ));
     };
@@ -391,9 +393,9 @@ fn emit_proven_safe_negation(
     operand: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if signed_bounds(kind).is_none() {
-        return Err(wasm_generation_error(
+        return Err(InfrastructureFailure::wasm_generation(
             "Wasm proven-safe negation requires a signed integer domain".to_owned(),
         ));
     }
@@ -412,7 +414,7 @@ fn emit_checked_division(
     right: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     emit_local_is_zero(function, right, kind, context)?;
     emit_unreachable_if_true(function);
 
@@ -442,7 +444,7 @@ fn emit_checked_remainder(
     right: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     emit_local_is_zero(function, right, kind, context)?;
     emit_unreachable_if_true(function);
     emit_native_integer_binary(
@@ -465,12 +467,13 @@ fn emit_checked_power(
     kind: WasmIntegerOperationKind,
     scratch: WasmIntegerScratch,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let product_scratch = scratch.product;
     let Some(WasmIntegerPowerScratch { factor, exponent }) = scratch.power else {
-        return Err(wasm_generation_error(
-            "Wasm integer power is missing its loop scratch locals".to_owned(),
-        ));
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer power is missing its loop scratch locals"
+        )
     };
 
     if is_signed(kind) {
@@ -543,18 +546,21 @@ fn emit_checked_multiply_into(
     kind: WasmIntegerOperationKind,
     product_scratch: Option<WasmLirLocalId>,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match kind {
         WasmIntegerOperationKind::Signed32 | WasmIntegerOperationKind::Unsigned32 => {
             let product_scratch = product_scratch.ok_or_else(|| {
-                wasm_generation_error(
+                InfrastructureFailure::wasm_generation(
                     "Wasm 32-bit multiply is missing its I64 product scratch".to_owned(),
                 )
             })?;
             let extend = match kind {
                 WasmIntegerOperationKind::Signed32 => &Instruction::I64ExtendI32S,
                 WasmIntegerOperationKind::Unsigned32 => &Instruction::I64ExtendI32U,
-                _ => unreachable!(),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "32-bit multiply arm is entered only for Signed32 or Unsigned32 at emit_checked_multiply_into"
+                ),
             };
             function.instruction(&Instruction::LocalGet(local_index(left, context)?));
             function.instruction(extend);
@@ -592,7 +598,10 @@ fn emit_checked_multiply_into(
                     function.instruction(&Instruction::I64GtU);
                     emit_unreachable_if_true(function);
                 }
-                _ => unreachable!(),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "32-bit multiply arm is entered only for Signed32 or Unsigned32 at emit_checked_multiply_into"
+                ),
             }
 
             function.instruction(&Instruction::LocalGet(local_index(
@@ -605,9 +614,10 @@ fn emit_checked_multiply_into(
         }
         WasmIntegerOperationKind::Signed64 | WasmIntegerOperationKind::Unsigned64 => {
             if product_scratch.is_some() {
-                return Err(wasm_generation_error(
-                    "Wasm 64-bit multiply has unexpected product scratch".to_owned(),
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Wasm 64-bit multiply has unexpected product scratch"
+                );
             }
             emit_64_bit_multiply_overflow_check(function, left, right, kind, context)?;
             emit_native_integer_binary(
@@ -630,7 +640,7 @@ fn emit_64_bit_multiply_overflow_check(
     right: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match kind {
         WasmIntegerOperationKind::Signed64 => {
             emit_signed_multiply_overflow_check(function, left, right, context)
@@ -648,7 +658,7 @@ fn emit_64_bit_multiply_overflow_check(
             function.instruction(&Instruction::End);
             Ok(())
         }
-        _ => Err(wasm_generation_error(
+        _ => Err(InfrastructureFailure::wasm_generation(
             "Wasm widened multiply check requires a 64-bit integer domain".to_owned(),
         )),
     }
@@ -659,7 +669,7 @@ fn emit_signed_multiply_overflow_check(
     left: WasmLirLocalId,
     right: WasmLirLocalId,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let kind = WasmIntegerOperationKind::Signed64;
     let minimum = i64::MIN;
     let maximum = i64::MAX;
@@ -728,7 +738,7 @@ fn emit_signed_bound_failure(
     denominator: WasmLirLocalId,
     relation: SignedRelation,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(compared, context)?));
     function.instruction(&Instruction::I64Const(numerator));
     function.instruction(&Instruction::LocalGet(local_index(denominator, context)?));
@@ -744,7 +754,7 @@ fn emit_signed_local_relation(
     kind: WasmIntegerOperationKind,
     relation: SignedRelation,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(local, context)?));
     emit_integer_constant(function, kind, 0);
     emit_signed_relation_opcode(function, kind, relation);
@@ -757,13 +767,16 @@ fn emit_unsigned_less_than(
     right: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(left, context)?));
     function.instruction(&Instruction::LocalGet(local_index(right, context)?));
     function.instruction(match kind {
         WasmIntegerOperationKind::Unsigned32 => &Instruction::I32LtU,
         WasmIntegerOperationKind::Unsigned64 => &Instruction::I64LtU,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "emit_unsigned_less_than is only called for Unsigned32 or Unsigned64 from emit_checked_subtract"
+        ),
     });
     Ok(())
 }
@@ -778,7 +791,10 @@ fn emit_signed_relation_opcode(
         (WasmAbiType::I32, SignedRelation::GreaterThan) => &Instruction::I32GtS,
         (WasmAbiType::I64, SignedRelation::LessThan) => &Instruction::I64LtS,
         (WasmAbiType::I64, SignedRelation::GreaterThan) => &Instruction::I64GtS,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer operation carriers are only I32 or I64"
+        ),
     });
 }
 
@@ -788,13 +804,16 @@ fn emit_local_equals_constant(
     kind: WasmIntegerOperationKind,
     value: i64,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(local, context)?));
     emit_integer_constant(function, kind, value);
     function.instruction(match kind.carrier() {
         WasmAbiType::I32 => &Instruction::I32Eq,
         WasmAbiType::I64 => &Instruction::I64Eq,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer operation carriers are only I32 or I64"
+        ),
     });
     Ok(())
 }
@@ -804,12 +823,15 @@ fn emit_local_is_zero(
     local: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(local, context)?));
     function.instruction(match kind.carrier() {
         WasmAbiType::I32 => &Instruction::I32Eqz,
         WasmAbiType::I64 => &Instruction::I64Eqz,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer operation carriers are only I32 or I64"
+        ),
     });
     Ok(())
 }
@@ -819,19 +841,25 @@ fn emit_local_is_odd(
     local: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(local, context)?));
     emit_integer_constant(function, kind, 1);
     function.instruction(match kind.carrier() {
         WasmAbiType::I32 => &Instruction::I32And,
         WasmAbiType::I64 => &Instruction::I64And,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer operation carriers are only I32 or I64"
+        ),
     });
     emit_integer_constant(function, kind, 0);
     function.instruction(match kind.carrier() {
         WasmAbiType::I32 => &Instruction::I32Ne,
         WasmAbiType::I64 => &Instruction::I64Ne,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer operation carriers are only I32 or I64"
+        ),
     });
     Ok(())
 }
@@ -841,13 +869,16 @@ fn emit_shift_exponent_right(
     exponent: WasmLirLocalId,
     kind: WasmIntegerOperationKind,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(exponent, context)?));
     emit_integer_constant(function, kind, 1);
     function.instruction(match kind.carrier() {
         WasmAbiType::I32 => &Instruction::I32ShrU,
         WasmAbiType::I64 => &Instruction::I64ShrU,
-        _ => unreachable!(),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer operation carriers are only I32 or I64"
+        ),
     });
     function.instruction(&Instruction::LocalSet(local_index(exponent, context)?));
     Ok(())
@@ -860,7 +891,7 @@ fn emit_native_integer_binary(
     kind: WasmIntegerOperationKind,
     operator: NumericOperator,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(left, context)?));
     function.instruction(&Instruction::LocalGet(local_index(right, context)?));
     function.instruction(integer_opcode(kind, operator)?);
@@ -870,7 +901,7 @@ fn emit_native_integer_binary(
 fn integer_opcode(
     kind: WasmIntegerOperationKind,
     operator: NumericOperator,
-) -> Result<&'static Instruction<'static>, CompilerError> {
+) -> Result<&'static Instruction<'static>, InfrastructureFailure> {
     let opcode = match (kind, operator) {
         (WasmIntegerOperationKind::Signed32, NumericOperator::Add) => &Instruction::I32Add,
         (WasmIntegerOperationKind::Unsigned32, NumericOperator::Add) => &Instruction::I32Add,
@@ -901,7 +932,7 @@ fn integer_opcode(
         (WasmIntegerOperationKind::Signed64, NumericOperator::Remainder) => &Instruction::I64RemS,
         (WasmIntegerOperationKind::Unsigned64, NumericOperator::Remainder) => &Instruction::I64RemU,
         (_, operator) => {
-            return Err(wasm_generation_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm checked integer opcode does not support {operator:?}"
             )));
         }
@@ -914,7 +945,10 @@ fn emit_integer_constant(function: &mut Function, kind: WasmIntegerOperationKind
         WasmAbiType::I32 => function.instruction(&Instruction::I32Const(value as i32)),
         WasmAbiType::I64 => function.instruction(&Instruction::I64Const(value)),
         WasmAbiType::F32 | WasmAbiType::F64 | WasmAbiType::Handle | WasmAbiType::Void => {
-            unreachable!()
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Wasm integer operation carriers are only I32 or I64"
+            )
         }
     };
 }

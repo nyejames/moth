@@ -246,21 +246,19 @@ fn child_contexts_preserve_callable_identity_independently_of_scope_kind() {
         });
         context.enclosing_callable = Some(Rc::clone(&contract));
         context.expected_result_type_ids = vec![builtin_type_ids::BOOL];
-        let branch =
-            context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
-        let loop_context =
-            branch.new_child_control_flow(ContextKind::Loop, &mut string_table, &mut path_fork);
-        let catch = loop_context.new_child_control_flow(
-            ContextKind::CatchHandler,
-            &mut string_table,
-            &mut path_fork,
-        );
+        let branch = context
+            .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+            .expect("test path table should intern a child scope");
+        let loop_context = branch
+            .new_child_control_flow(ContextKind::Loop, &mut string_table, &mut path_fork)
+            .expect("test path table should intern a child scope");
+        let catch = loop_context
+            .new_child_control_flow(ContextKind::CatchHandler, &mut string_table, &mut path_fork)
+            .expect("test path table should intern a child scope");
         let expression = catch.new_child_expression(vec![builtin_type_ids::BOOL]);
-        let mut value_block = expression.new_child_control_flow(
-            ContextKind::Branch,
-            &mut string_table,
-            &mut path_fork,
-        );
+        let mut value_block = expression
+            .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+            .expect("test path table should intern a child scope");
         value_block.active_value_target = Some(ActiveValueProductionTarget::known(
             vec![builtin_type_ids::BOOL],
             ValueReceiverKind::Declaration,
@@ -345,15 +343,17 @@ fn new_child_control_flow_increments_loop_depth_for_loop_kind() {
     );
     assert_eq!(context.loop_depth, 0);
 
-    let loop_context =
-        context.new_child_control_flow(ContextKind::Loop, &mut string_table, &mut path_fork);
+    let loop_context = context
+        .new_child_control_flow(ContextKind::Loop, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     assert_eq!(
         loop_context.loop_depth, 1,
         "entering a Loop scope must increment loop_depth"
     );
 
-    let branch_context =
-        loop_context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let branch_context = loop_context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     assert_eq!(
         branch_context.loop_depth, 1,
         "entering a Branch scope must not change loop_depth"
@@ -444,8 +444,9 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
         &path_fork,
     );
 
-    let child =
-        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let child = context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     assert!(
         child.get_reference(&name).is_some(),
         "child frame must resolve names declared in the parent frame"
@@ -477,8 +478,9 @@ fn child_frame_declaration_is_not_visible_to_parent() {
         0,
     );
 
-    let mut child =
-        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let mut child = context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     let name = string_table.intern("child_var");
     let variable_path = path_fork
         .try_intern_components(&[name])
@@ -620,8 +622,9 @@ fn no_shadowing_across_ancestor_frames() {
         &path_fork,
     );
 
-    let child =
-        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let child = context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     assert!(
         child.has_visible_declaration(&name),
         "ancestor declaration must be visible to child so redeclaration can be rejected"
@@ -655,8 +658,9 @@ fn new_child_control_flow_inherits_visibility_gate() {
     gate.insert(gated_path.to_owned());
     context = context.with_visible_declarations(Arc::new(gate));
 
-    let child =
-        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let child = context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     assert!(
         child
             .visible_declaration_ids
@@ -706,8 +710,9 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         config_qualifier: None,
     };
 
-    let mut child =
-        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let mut child = context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     child.add_var(declaration, None, &path_fork);
 
     assert!(
@@ -855,8 +860,9 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
         &path_fork,
     );
 
-    let mut child =
-        context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+    let mut child = context
+        .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
+        .expect("test path table should intern a child scope");
     let child_name = string_table.intern("child_var");
     let child_path = path_fork
         .try_intern_components(&[child_name])

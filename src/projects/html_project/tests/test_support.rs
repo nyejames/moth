@@ -2,8 +2,8 @@
 //!
 //! WHAT: centralises the small HIR/module fixtures and artifact helpers used across the
 //!       HTML builder tests.
-//! WHY: the refactor split tests by module responsibility, so common scaffolding should
-//!      live in one place instead of being redefined in every test file.
+//! WHY: tests are split by module responsibility, so common scaffolding lives in one place
+//!      instead of being redefined in every test file.
 
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
@@ -75,7 +75,7 @@ pub(crate) fn create_test_hir_module() -> HirModule {
 /// Wrap the base HIR fixture in the build-system `Module` shape used by the HTML builder.
 ///
 /// WHAT: binds the test module's names into the caller-owned shared string table.
-/// WHY: HTML builder tests now need the same one-table diagnostic model as production builds.
+/// WHY: HTML builder tests share the production one-table diagnostic model.
 pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut StringTable) -> Module {
     let mut path_fork = PathInternerFork::empty();
     let mut hir_module = create_test_hir_module();
@@ -105,7 +105,6 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
-            warnings: vec![],
             const_top_level_fragments: vec![],
             // Most builder fixtures represent active page roots. API-only modules opt into the
             // explicit default when a test needs to verify artifact filtering.

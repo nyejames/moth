@@ -20,7 +20,7 @@ pub enum ProfileFilterMode {
     Terse,
     /// Human + agent investigation: top 20 functions, top 8 cases.
     Normal,
-    /// Pre-refactor investigation: top 50 functions, all cases, includes edges.
+    /// Deep investigation: top 50 functions, all cases, includes edges.
     Deep,
     /// Artifact generation only: raw profile and observations, no hotspot parsing.
     RawIndex,

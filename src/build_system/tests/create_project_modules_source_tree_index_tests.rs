@@ -1,4 +1,73 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+
+fn diagnosed_reports(
+    failure: PreparedFailure,
+) -> crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    let PreparedFailure::Diagnosed(batch) = failure else {
+        panic!("expected diagnosed source-tree reports, got {failure:?}");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("source-tree diagnostics should freeze")
+}
+
+fn first_invalid_config(
+    reports: &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet,
+) -> (&DiagnosticReport, DiagnosticView<'_>) {
+    let (report, diagnostic) = reports
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error)
+        .next()
+        .expect("source-tree failure should retain its diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("source-tree failure should retain typed config facts");
+    (report, diagnostic)
+}
+
+fn assert_source_file_folder_collision(failure: PreparedFailure) {
+    let boundary = diagnosed_reports(failure);
+    let (_, diagnostic) = first_invalid_config(&boundary);
+    assert_eq!(
+        diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("config failure should retain typed facts")
+            .reason,
+        InvalidConfigCode::SourceFileFolderCollision
+    );
+}
+
+fn assert_multiple_module_roots(failure: PreparedFailure, expected_directory: &Path) {
+    let boundary = diagnosed_reports(failure);
+    let (report, diagnostic) = first_invalid_config(&boundary);
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config failure should retain typed facts");
+    assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
+
+    let strings = diagnostic.string_ids();
+    assert_eq!(
+        strings.len(),
+        3,
+        "directory plus two candidates should be retained"
+    );
+    assert_eq!(
+        report.context().strings().resolve(strings[0]),
+        expected_directory.display().to_string()
+    );
+}
+
 #[test]
 fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -35,12 +104,14 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
-    let validated_output_settings =
+    let validated_output_settings = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
         crate::build_system::project_config::validate_directory_output_settings(
             &config,
-            &mut string_table,
+            &mut diagnostic_strings,
         )
-        .expect("configured output folders should validate");
+    }
+    .expect("configured output folders should validate");
 
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root.clone(),
@@ -196,12 +267,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         &mut string_table,
     )
     .expect_err("non-skipped bst/folder collision should be rejected");
-    let messages = failure.into_messages(&string_table);
-
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourceFileFolderCollision { .. }
-    ));
+    assert_source_file_folder_collision(failure);
 }
 
 #[test]
@@ -267,12 +333,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
         &mut string_table,
     )
     .expect_err("single-file normal module roots should reject real dependency-name collisions");
-    let messages = failure.into_messages(&string_table);
-
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourceFileFolderCollision { .. }
-    ));
+    assert_source_file_folder_collision(failure);
 }
 
 #[test]
@@ -302,19 +363,5 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         &mut string_table,
     )
     .expect_err("a module directory may contain only one normal module root");
-    let messages = failure.into_messages(&string_table);
-
-    let reason = first_invalid_config_reason(&messages);
-    let InvalidConfigReason::MultipleModuleRootFiles {
-        directory,
-        candidates,
-    } = reason
-    else {
-        panic!("expected duplicate module root diagnostic, got {reason:?}");
-    };
-    assert_eq!(
-        messages.string_table.resolve(*directory),
-        fs::canonicalize(&entry_root).unwrap().display().to_string()
-    );
-    assert_eq!(candidates.len(), 2);
+    assert_multiple_module_roots(failure, &fs::canonicalize(&entry_root).unwrap());
 }

@@ -150,13 +150,10 @@ impl<'a> BorrowChecker<'a> {
         let mut initial_state = BorrowState::new_uninitialized(layout.local_count());
         for param in &function.params {
             let Some(param_index) = layout.index_of(*param) else {
-                return Err(self.diagnostics.internal_error(
-                    format!(
-                        "Borrow checker could not map parameter '{}' into function state layout",
-                        self.diagnostics.local_name(*param)
-                    ),
-                    self.diagnostics.function_error_span(function.id),
-                ));
+                return Err(self.diagnostics.internal_error(format!(
+                    "Borrow checker could not map parameter '{}' into function state layout",
+                    self.diagnostics.local_name(*param)
+                )));
             };
 
             initial_state.initialize_parameter(param_index);
@@ -363,10 +360,9 @@ impl<'a> BorrowChecker<'a> {
             }
         }
 
-        Err(self.diagnostics.internal_error(
-            "Borrow checker could not stabilize local mutation summaries",
-            self.diagnostics.module_error_span(),
-        ))
+        Err(self
+            .diagnostics
+            .internal_error("Borrow checker could not stabilize local mutation summaries"))
     }
 
     fn record_advisory_drop_sites(
@@ -496,14 +492,11 @@ impl<'a> BorrowChecker<'a> {
         function_id: FunctionId,
     ) -> Result<&crate::compiler_frontend::hir::blocks::HirBlock, BorrowCheckError> {
         let Some(index) = self.block_index_by_id.get(&block_id).copied() else {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Borrow checker could not resolve block '{}' while analyzing function '{}'",
-                    block_id,
-                    self.diagnostics.function_name(function_id)
-                ),
-                self.diagnostics.function_error_span(function_id),
-            ));
+            return Err(self.diagnostics.internal_error(format!(
+                "Borrow checker could not resolve block '{}' while analyzing function '{}'",
+                block_id,
+                self.diagnostics.function_name(function_id)
+            )));
         };
 
         Ok(&self.module.blocks[index])
@@ -540,7 +533,6 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not map jump argument local '{}' into function state layout",
                             self.diagnostics.local_name(argument.source)
                         ),
-                        self.diagnostics.function_error_span(function_id),
                     ));
                 };
 
@@ -576,7 +568,6 @@ impl<'a> BorrowChecker<'a> {
                             successor,
                             self.diagnostics.local_name(argument.destination)
                         ),
-                        self.diagnostics.function_error_span(function_id),
                     ));
                 }
                 let Some(destination_index) = layout.index_of(argument.destination) else {
@@ -585,7 +576,6 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not map jump destination local '{}' into function state layout",
                             self.diagnostics.local_name(argument.destination)
                         ),
-                        self.diagnostics.function_error_span(function_id),
                     ));
                 };
 

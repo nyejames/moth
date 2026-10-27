@@ -4,7 +4,7 @@
 //! WHY: keeping one parser avoids drift between builder validation and dev-server runtime behavior.
 
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::projects::settings::{Config, ProjectConfigError};
 
 /// Canonical page URL style used for directory-backed HTML routes.
@@ -42,7 +42,7 @@ impl Default for HtmlSiteConfig {
 /// WHY: site configuration must be explicit and strict so all runtime/build tooling stays aligned.
 pub fn parse_html_site_config(
     config: &Config,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<HtmlSiteConfig, ProjectConfigError> {
     let origin = parse_origin(config, string_table)?;
     let page_url_style = parse_page_url_style(config, string_table)?;
@@ -57,7 +57,7 @@ pub fn parse_html_site_config(
 
 fn parse_origin(
     config: &Config,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<String, ProjectConfigError> {
     let Some(raw_value) = config.html_section.origin.as_deref() else {
         return Ok(String::from("/"));
@@ -71,7 +71,7 @@ fn parse_origin(
 fn validate_origin(
     config: &Config,
     origin: &str,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<(), ProjectConfigError> {
     if origin.is_empty() {
         return Err(config_empty_error(config, "origin", string_table));
@@ -122,7 +122,7 @@ fn validate_origin(
 
 fn parse_page_url_style(
     config: &Config,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> Result<PageUrlStyle, ProjectConfigError> {
     let Some(raw_value) = config.html_section.page_url_style.as_deref() else {
         return Ok(PageUrlStyle::TrailingSlash);
@@ -145,7 +145,7 @@ fn parse_page_url_style(
 fn config_empty_error(
     config: &Config,
     key: &str,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     config
         .config_diagnostic(key, InvalidConfigReason::EmptyProjectSetting, string_table)
@@ -153,13 +153,13 @@ fn config_empty_error(
 }
 
 /// WHAT: creates typed config diagnostics with precise authored spans when available.
-/// WHY: project setting parsers should keep user-facing config errors out of `CompilerError`.
+/// WHY: project setting parsers should keep user-facing config errors out of `InfrastructureFailure`.
 fn config_value_error(
     config: &Config,
     key: &str,
     value: &str,
     expected: &str,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     let value = string_table.intern(value);
     let expected = string_table.intern(expected);

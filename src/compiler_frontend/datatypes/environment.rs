@@ -13,7 +13,8 @@
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, builtin_key_for_canonical_builtin,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
@@ -112,7 +113,6 @@ pub struct TypeEnvironment {
     // Generic parameter list storage (indexed by GenericParameterListId.0).
     generic_parameter_lists: Vec<GenericParameterList>,
 
-    // Generic parameter -> TypeId lookup.
     generic_parameter_ids: FxHashMap<GenericParameterId, TypeId>,
 
     // Direct index from generic parameter ID to its declaration-site trait bounds.
@@ -123,7 +123,6 @@ pub struct TypeEnvironment {
     // while `trait_bounds_for_generic_parameter` reads the parameter owner's bounds.
     trait_bounds_by_generic_parameter_id: FxHashMap<GenericParameterId, Vec<TraitId>>,
 
-    // Path -> NominalTypeId lookup.
     nominal_by_path: FxHashMap<PathId, NominalTypeId>,
 
     // ID counters.
@@ -409,16 +408,12 @@ impl TypeEnvironment {
     //  Maintenance
     // -----------------
 
-    /// Remaps all interned string handles so this environment can be used with a merged table.
+    /// Remaps all interned string handles while reusing remapped snapshots.
     ///
     /// WHAT: updates nominal paths, field names, variant names, generic parameter names,
     /// function parameter names, and cached generic instance views.
-    /// WHY: module compilation uses local `StringTable`s and later merges them into the build
-    /// table; every frontend payload that stores `StringId`s must be rewritten at that boundary.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.remap_string_ids_with_cache(remap, &mut TypeEnvironmentRemapCache::default());
-    }
-
+    /// WHY: module compilation merges local `StringTable`s into the build table and shares
+    /// inherited snapshots across related environments.
     pub(crate) fn remap_string_ids_with_cache(
         &mut self,
         remap: &StringIdRemap,
@@ -768,7 +763,8 @@ impl TypeEnvironment {
             | TypeDefinition::Choice(..)
             | TypeDefinition::External(..)
             | TypeDefinition::GenericParameter(..)
-            | TypeDefinition::AnonymousConstRecordMarker => unreachable!(
+            | TypeDefinition::AnonymousConstRecordMarker => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
                 "non-substitutable type definitions return before building a substitution source"
             ),
         };
@@ -862,7 +858,6 @@ impl TypeEnvironment {
         base: NominalTypeId,
         arguments: &[TypeId],
     ) {
-        // Struct: compute substituted fields.
         let struct_def = self.struct_definition(base).cloned();
         if let Some(struct_def) = struct_def {
             if let Some(param_list_id) = struct_def.generic_parameters
@@ -882,7 +877,6 @@ impl TypeEnvironment {
             return;
         }
 
-        // Choice: compute substituted variants.
         let choice_def = self.choice_definition(base).cloned();
         if let Some(choice_def) = choice_def
             && let Some(param_list_id) = choice_def.generic_parameters
@@ -1145,8 +1139,8 @@ impl TypeEnvironment {
 
     /// Updates the fields of an already-registered struct definition.
     ///
-    /// WHAT: replaces the field list for a struct that was previously registered
-    /// with identity and generic metadata only.
+    /// WHAT: replaces the field list for a struct registered with only its identity and generic
+    /// metadata.
     /// WHY: early nominal registration must make recursive and generic names visible
     /// before AST field shells are fully resolved; this method writes the final
     /// canonical member definitions in-place once semantic `TypeId`s are known.
@@ -1311,12 +1305,13 @@ impl TypeEnvironment {
         &mut self,
         path: PathId,
         type_id: TypeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let nominal_id = match self.get(type_id) {
             Some(TypeDefinition::Struct(definition)) => definition.id,
             Some(TypeDefinition::Choice(definition)) => definition.id,
             _ => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Nominal path alias target is not a registered struct or choice",
                 ));
             }
@@ -1325,7 +1320,8 @@ impl TypeEnvironment {
         if let Some(existing) = self.nominal_id_for_path(&path)
             && existing != nominal_id
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Nominal path alias collides with a different registered nominal type",
             ));
         }
@@ -1349,22 +1345,28 @@ impl TypeEnvironment {
         &mut self,
         identity: CanonicalTypeIdentity,
         type_id: TypeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let Some(existing_type_id) = self.type_id_for_canonical_identity(&identity)
             && existing_type_id != type_id
         {
-            return Err(CompilerError::compiler_error(format!(
-                "Canonical type identity {identity:?} was assigned to both TypeId({}) and TypeId({})",
-                existing_type_id.0, type_id.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Canonical type identity {identity:?} was assigned to both TypeId({}) and TypeId({})",
+                    existing_type_id.0, type_id.0
+                ),
+            ));
         }
         if let Some(existing_identity) = self.canonical_identity_for_type_id(type_id)
             && existing_identity != &identity
         {
-            return Err(CompilerError::compiler_error(format!(
-                "TypeId({}) was assigned conflicting canonical identities {existing_identity:?} and {identity:?}",
-                type_id.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TypeId({}) was assigned conflicting canonical identities {existing_identity:?} and {identity:?}",
+                    type_id.0
+                ),
+            ));
         }
 
         self.canonical_type_ids.insert(identity.clone(), type_id);

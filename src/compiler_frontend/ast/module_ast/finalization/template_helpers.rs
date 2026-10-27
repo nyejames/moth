@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
     prepare_tir_view,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -43,7 +44,7 @@ pub(super) fn finalize_template_value(
     let reference = &template.tir_reference;
 
     if !reference.phase.is_at_least(TemplateTirPhase::Composed) {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
             "AST finalization template folding requires Composed-or-later TIR, but root {} is at phase {}.",
             reference.root, reference.phase
         ))

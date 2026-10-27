@@ -3,8 +3,8 @@
 //! WHAT: verifies that `AstFinalizer` collects const facts correctly for
 //!       explicit module constants, private top-level declarations, and
 //!       body-local declarations.
-//! WHY: fact collection is the bridge between the resolver (Phase 1) and
-//!      later config/HIR consumers (Phases 3–5); it must be tested directly.
+//! WHY: fact collection connects resolver output to later config and HIR consumers;
+//!      it must be tested directly.
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::const_values::facts::{

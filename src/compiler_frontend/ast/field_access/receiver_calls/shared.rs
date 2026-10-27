@@ -19,7 +19,9 @@ use crate::compiler_frontend::ast::statements::functions::{
     FunctionParameter, FunctionSignature, ParameterContract, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, token_lexical,
+};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -53,7 +55,7 @@ pub(super) fn receiver_result_type_ids_for_call(
             success_return_type_ids.as_slice(),
             type_interner.environment(),
         );
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
             Some(token_stream.current_span()),
         )
@@ -162,7 +164,7 @@ pub(super) fn signature_from_trait_requirement(
     receiver_type_id: TypeId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> FunctionSignature {
+) -> Result<FunctionSignature, ExpressionParseError> {
     let receiver_mutable = requirement_receiver_is_mutable(requirement);
     let receiver_mode = if receiver_mutable {
         ValueMode::MutableReference
@@ -172,7 +174,7 @@ pub(super) fn signature_from_trait_requirement(
     let mut parameters = Vec::with_capacity(requirement.parameters.len() + 1);
     let receiver_name = path_fork
         .try_intern_child(*method_path, string_table.intern("__trait_bound_receiver"))
-        .expect("path table exhausted while interning synthetic trait receiver");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
     parameters.push(declaration_for_trait_bound_parameter(
         receiver_name,
         receiver_type_id,
@@ -219,8 +221,8 @@ pub(super) fn signature_from_trait_requirement(
         })
         .collect();
 
-    FunctionSignature {
+    Ok(FunctionSignature {
         parameters,
         returns,
-    }
+    })
 }

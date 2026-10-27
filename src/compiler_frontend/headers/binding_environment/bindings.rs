@@ -7,8 +7,9 @@
 //! MUST NOT: parse executable bodies, fold constants, or perform AST semantic validation.
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
@@ -288,7 +289,7 @@ pub(crate) struct FileVisibility {
 /// WHAT: collects one `FileVisibility` per parsed source file.
 /// WHY: dependency sorting and AST need stable per-file visibility without rebuilding binding
 /// semantics in later stages.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct HeaderBindingEnvironment {
     /// One shared visibility package per source file.
     ///
@@ -325,7 +326,7 @@ pub(crate) struct HeaderBindingEnvironment {
     /// summary payload per alias or receiver method.
     pub(crate) imported_call_summaries_by_origin: FxHashMap<OriginFunctionId, PublicCallSummary>,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, ImportedFunctionContract>,
-    pub(crate) warnings: Vec<CompilerDiagnostic>,
+    pub(crate) warnings: DiagnosticBag,
 }
 
 #[derive(Clone, Debug)]
@@ -352,9 +353,9 @@ impl HeaderBindingEnvironment {
     pub(crate) fn visibility_for(
         &self,
         source_file: &PathId,
-    ) -> Result<&Arc<FileVisibility>, CompilerError> {
+    ) -> Result<&Arc<FileVisibility>, InfrastructureFailure> {
         self.file_visibility_by_source.get(source_file).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "Missing visibility entry for source file. This is a compiler bug: header parsing did not produce a visibility map for '{source_file:?}'."
             ))
         })

@@ -26,7 +26,8 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeId, materialise_known_shape,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, TypeDefinition,
 };
@@ -119,7 +120,7 @@ pub(crate) fn complete_deferred_generic_nominal_call<
     // Arguments complete before the session services are borrowed: both take the session mutably.
     let mut completed_arguments = Vec::with_capacity(arguments.len());
     for argument in arguments {
-        let argument = choose_slot_destination(argument, &constructor, &seed, &mut *session)?;
+        let argument = choose_slot_destination(argument, &constructor, &seed, &mut *session);
         let argument = choose_retained_argument_destination(argument, &mut *session)?;
         completed_arguments.push(session.complete_call_argument(argument)?);
     }
@@ -165,19 +166,20 @@ pub(crate) fn complete_deferred_generic_nominal_call<
             route_future_input,
         } => {
             let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a retained generic choice constructor's selected variant was not a payload variant",
                 )
                 .into());
             };
             if payload_field_views.len() != fields.len() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a retained generic choice constructor's payload views changed before completion",
                 )
                 .into());
             }
             if route_future_input == Some(true) && fields.is_empty() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained generic route constructor lost its future-input payload field",
                 )
                 .into());
@@ -273,7 +275,8 @@ fn bind_instance_edges<'env, S: DeferredExpressionCompletion<'env> + ?Sized>(
         KnownShape::Numeric(_)
         | KnownShape::Collection { .. }
         | KnownShape::Map { .. }
-        | KnownShape::Optional { .. } => Err(CompilerError::compiler_error(
+        | KnownShape::Optional { .. } => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained constructor's result must be a declared substitution or concrete instance",
         )
         .into()),
@@ -296,19 +299,22 @@ fn bind_concrete_instance_arguments<'env, S: DeferredExpressionCompletion<'env> 
     let services = session.session_services();
     let environment = services.type_interner.environment();
     let Some(TypeDefinition::GenericInstance(instance)) = environment.get(instance_type_id) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a concrete retained constructor result must be a generic instance",
         )
         .into());
     };
     let Some(parameters) = environment.canonical_parameters_for_nominal(nominal_path) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained constructor's canonical parameters were missing",
         )
         .into());
     };
     if parameters.len() != instance.arguments.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a concrete retained constructor's arguments did not match its parameters",
         )
         .into());
@@ -331,10 +337,10 @@ fn choose_slot_destination<'env, S: DeferredExpressionCompletion<'env> + ?Sized>
     constructor: &GenericNominalConstructor,
     seed: &GenericNominalConstructorSeed,
     session: &mut S,
-) -> Result<DeferredCallArgument, ExpressionParseError> {
+) -> DeferredCallArgument {
     let (shape, mut expression) = match argument {
         DeferredCallArgument::Retained { shape, expression } => (shape, expression),
-        other => return Ok(other),
+        other => return other,
     };
 
     let declared = shape
@@ -351,5 +357,5 @@ fn choose_slot_destination<'env, S: DeferredExpressionCompletion<'env> + ?Sized>
         }
     }
 
-    Ok(DeferredCallArgument::Retained { shape, expression })
+    DeferredCallArgument::Retained { shape, expression }
 }

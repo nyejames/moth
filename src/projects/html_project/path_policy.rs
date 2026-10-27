@@ -4,10 +4,13 @@
 //! WHY: the HTML project builder should focus on artifact orchestration, not filesystem policy.
 
 use crate::build_system::create_project_modules::resolve_project_entry_root;
-use crate::build_system::utils::file_error_messages;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::diagnostics::missing_homepage_messages;
+use crate::build_system::utils::file_error;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::projects::html_project::diagnostics::{
+    capture_html_diagnostic, missing_homepage_diagnostic,
+};
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,13 +25,9 @@ impl HtmlEntryPathPlan {
     ///
     /// WHY: canonical entry-root resolution needs to happen once so page output logic and
     /// homepage validation operate on the same normalized paths.
-    pub(crate) fn from_config(
-        config: &Config,
-        string_table: &StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    pub(crate) fn from_config(config: &Config) -> Result<Self, InfrastructureFailure> {
         let is_directory_build = config.entry_dir.is_dir();
-        let resolved_entry_root =
-            resolve_canonical_entry_root(config, is_directory_build, string_table)?;
+        let resolved_entry_root = resolve_canonical_entry_root(config, is_directory_build)?;
 
         Ok(Self {
             resolved_entry_root,
@@ -55,10 +54,10 @@ impl HtmlEntryPathPlan {
     pub(crate) fn require_homepage_if_directory_build(
         &self,
         has_directory_homepage: bool,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> Result<(), PreparedFailure> {
         if self.is_directory_build && !has_directory_homepage {
-            return Err(missing_homepage_error(
+            return Err(missing_homepage_failure(
                 self.resolved_entry_root.as_deref(),
                 string_table,
             ));
@@ -74,32 +73,35 @@ impl HtmlEntryPathPlan {
 fn resolve_canonical_entry_root(
     config: &Config,
     is_directory_build: bool,
-    string_table: &StringTable,
-) -> Result<Option<PathBuf>, CompilerMessages> {
+) -> Result<Option<PathBuf>, InfrastructureFailure> {
     if !is_directory_build {
         return Ok(None);
     }
 
     let entry_root_path = resolve_project_entry_root(config);
     let canonical = fs::canonicalize(&entry_root_path).map_err(|error| {
-        file_error_messages(
+        file_error(
             &config.entry_dir,
             format!(
                 "Failed to resolve configured HTML entry root '{}': {error}",
                 entry_root_path.display()
             ),
-            string_table,
         )
     })?;
 
     Ok(Some(canonical))
 }
 
-fn missing_homepage_error(
+fn missing_homepage_failure(
     resolved_entry_root: Option<&Path>,
-    string_table: &mut StringTable,
-) -> CompilerMessages {
+    string_table: &mut DiagnosticStringBuilder,
+) -> PreparedFailure {
     let entry_root = resolved_entry_root.unwrap_or_else(|| Path::new("."));
 
-    missing_homepage_messages(entry_root, string_table)
+    capture_html_diagnostic(
+        missing_homepage_diagnostic(entry_root, string_table),
+        string_table.strings(),
+        None,
+        || None,
+    )
 }

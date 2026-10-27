@@ -943,9 +943,9 @@ The origin relation layer maps these to `UnknownCallResult`, `MissingLocalSummar
 argument origins collected at its owning call. An empty argument state remains unknown with
 `MissingLocalSummary`.
 
-An empty `AliasParams` list is malformed normalized input and raises `CompilerError`. It must not
+An empty `AliasParams` list is malformed normalized input and raises `InfrastructureFailure`. It must not
 be published as a fresh independent result. The solver also keeps impossible post-flow states on
-the `CompilerError` lane rather than changing their meaning into a user-facing borrow diagnostic.
+the `InfrastructureFailure` lane rather than changing their meaning into a user-facing borrow diagnostic.
 
 ### Multiple returns
 

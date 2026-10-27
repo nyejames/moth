@@ -1,5 +1,5 @@
 -- Cross-file constant dependency resolved by header sorting.
--- AST no longer needs its own constant topo-sort.
+-- The AST does not run its own constant topo-sort.
 
 @helper b
 

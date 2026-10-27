@@ -10,7 +10,7 @@ use super::{FoldedValueMaterialiser, materialize_public_folded_value};
 use crate::compiler_frontend::ast::ast_nodes::DeclarationShell;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::{
@@ -20,7 +20,8 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -144,7 +145,7 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
         &mut self,
         origin: &StableResourceOriginId,
         span: Option<SourceSpan>,
-    ) -> Result<ResourceId, CompilerError> {
+    ) -> Result<ResourceId, InfrastructureFailure> {
         Ok(self.module_resources.intern_origin(origin.clone(), span))
     }
 
@@ -152,15 +153,17 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
         &mut self,
         identity: &CanonicalTypeIdentity,
         _string_table: &mut StringTable,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, ConstValueStoreError> {
         match identity {
             CanonicalTypeIdentity::Builtin(builtin) => {
                 // The `Error` builtin is seeded by real module compilation, which this fixture
                 // never runs, so there is no consumer-local handle to return.
                 intern_canonical_builtin(*builtin, &mut self.type_environment).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "record projection test materialiser has no consumer-local Error builtin",
                     )
+                    .into()
                 })
             }
 
@@ -169,9 +172,11 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
                 Ok(self.type_environment.anonymous_const_record_type())
             }
 
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "record projection test materialiser interns builtin and marker types only",
-            )),
+            )
+            .into()),
         }
     }
 

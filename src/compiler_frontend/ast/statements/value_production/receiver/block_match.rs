@@ -33,9 +33,8 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -86,12 +85,11 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         classification,
         path_fork,
     }) {
-        Some(Ok(ClassifiedSinglePredicateHeader::Predicate(header))) => *header,
-        Some(Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(seed))) => {
+        Ok(ClassifiedSinglePredicateHeader::Predicate(header)) => *header,
+        Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(seed)) => {
             return SinglePredicateParseOutcome::OrdinarySubject(seed);
         }
-        Some(Err(error)) => return SinglePredicateParseOutcome::Decided(Err(error)),
-        None => return SinglePredicateParseOutcome::Absent,
+        Err(error) => return SinglePredicateParseOutcome::Decided(Err(error)),
     };
 
     token_stream.skip_newlines();
@@ -100,7 +98,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         || token_stream.current_tag() != TokenTag::COLON
     {
         return SinglePredicateParseOutcome::Decided(Err(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             )

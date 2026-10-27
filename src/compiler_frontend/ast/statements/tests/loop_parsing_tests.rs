@@ -12,16 +12,22 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionOperationView, ExpressionView,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
-    ReservedNameOwner, TypeMismatchContext,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::{InvalidRangeOperandView, InvalidValueReceiverView},
+    names_declarations::ReservedNameCollisionView,
+    types_borrows_targets::TypeMismatchView,
 };
-use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::compiler_messages::{
+    InvalidRangeOperandReason, RangeOperandKind, ReservedNameOwner, TypeMismatchContext,
+    ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -30,28 +36,32 @@ use std::sync::Arc;
 #[test]
 fn rejects_non_single_loop_sources_and_range_operands() {
     let producers = "pair || -> I32, I32:\nreturn 1, 2\n;\nempty ||:\nreturn\n;\n";
-    for (header, produced_count) in [
-        ("pair()", 2),
-        ("empty()", 0),
-        ("pair() |item|", 2),
-        ("empty() |item|", 0),
-        ("0 to pair()", 2),
-        ("0 to empty()", 0),
-        ("pair() to 5", 2),
-        ("empty() to 5", 0),
-        ("0 to 5 by pair()", 2),
-        ("0 to 5 by empty()", 0),
+    for (header, receiver, produced_count) in [
+        ("pair()", ValueReceiverContext::General, 2),
+        ("empty()", ValueReceiverContext::General, 0),
+        ("pair() |item|", ValueReceiverContext::General, 2),
+        ("empty() |item|", ValueReceiverContext::General, 0),
+        ("0 to pair()", ValueReceiverContext::OperatorOperand, 2),
+        ("0 to empty()", ValueReceiverContext::OperatorOperand, 0),
+        ("pair() to 5", ValueReceiverContext::OperatorOperand, 2),
+        ("empty() to 5", ValueReceiverContext::OperatorOperand, 0),
+        ("0 to 5 by pair()", ValueReceiverContext::OperatorOperand, 2),
+        (
+            "0 to 5 by empty()",
+            ValueReceiverContext::OperatorOperand,
+            0,
+        ),
     ] {
         let source = format!("{producers}loop {header}:\n;\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidValueReceiver {
-                target_count: 1,
-                produced_count: actual,
-                ..
-            } if *actual == produced_count
-        ));
+        let failure = parse_single_file_ast_diagnostic(&source);
+        assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+        let diagnostic = first_ast_error_view(&failure);
+        let receiver_facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the first error is an invalid value receiver");
+        assert_eq!(receiver_facts.receiver, receiver, "{source}");
+        assert_eq!(receiver_facts.target_count, 1, "{source}");
+        assert_eq!(receiver_facts.produced_count, produced_count, "{source}");
     }
 }
 
@@ -125,8 +135,13 @@ fn parse_loop_fixture(loop_body_source: &str) -> (Ast, PathInternerFork, StringT
     parse_single_file_ast(&loop_fixture_source(loop_body_source))
 }
 
-fn parse_loop_fixture_diagnostic(loop_body_source: &str) -> DiagnosticPayload {
-    parse_single_file_ast_diagnostic(&loop_fixture_source(loop_body_source)).payload
+fn assert_loop_fixture_diagnostic(
+    loop_body_source: &str,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) {
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(loop_body_source));
+    assert_ast_diagnostic(&failure, expected_code, expected_reason_key);
 }
 
 fn loop_function_body<'a>(
@@ -381,7 +396,7 @@ fn omitted_range_zero_keeps_endpoint_type_before_step_promotion() {
         Some(value)
             if value.scalar() == FixedScalar::U16 && value.as_u64() == Some(0)
     ));
-    // D15: the `U16` endpoint and `I8` step mix selects the smallest signed type that contains
+    // The `U16` endpoint and `I8` step mix selects the smallest signed type that contains
     // both complete ranges, so the counter domain is `I32` without a minimum-width floor.
     assert_eq!(
         bindings.item.as_ref().map(|binding| binding.type_id),
@@ -413,42 +428,45 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
 
 #[test]
 fn rejects_byte_range_operand() {
-    let payload = parse_loop_fixture_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(
         "end Byte = 1\nloop 0 to end |value|:\n    io.line([: [value]])\n;",
-    );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidRangeOperand {
-            operand: RangeOperandKind::End,
-            reason: InvalidRangeOperandReason::NotNumeric,
-            ..
-        }
     ));
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0059",
+        Some("invalid_range_operand.not_numeric"),
+    );
+    let operand = diagnostic
+        .family_view::<InvalidRangeOperandView>()
+        .expect("the first error is an invalid range operand");
+    assert_eq!(operand.operand, RangeOperandKind::End);
+    assert_eq!(operand.reason, InvalidRangeOperandReason::NotNumeric);
 }
 
-/// Parse one range header that must fail on domain selection, returning the blamed role, reason
-/// and authored source text under the primary span.
-fn range_domain_failure(
-    loop_body_source: &str,
-) -> (RangeOperandKind, InvalidRangeOperandReason, String) {
+/// Parse one range header that must fail on domain selection, returning the blamed role and
+/// authored source text under the primary span.
+fn range_domain_failure(loop_body_source: &str) -> (RangeOperandKind, String) {
     let source = loop_fixture_source(loop_body_source);
-    let diagnostic = parse_single_file_ast_diagnostic(&source);
-    let DiagnosticPayload::InvalidRangeOperand {
-        operand, reason, ..
-    } = diagnostic.payload
-    else {
-        panic!(
-            "expected an invalid range operand, found {:?}",
-            diagnostic.payload
-        );
-    };
-    let range = diagnostic
-        .primary_span
+    let failure = parse_single_file_ast_diagnostic(&source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0059",
+        Some("invalid_range_operand.incompatible_domain"),
+    );
+    let operand_facts = diagnostic
+        .family_view::<InvalidRangeOperandView>()
+        .expect("the first error is an invalid range operand");
+    assert_eq!(
+        operand_facts.reason,
+        InvalidRangeOperandReason::IncompatibleDomain
+    );
+    let range = ast_error_primary_span(diagnostic)
         .expect("range operand diagnostics carry the operand span")
         .resolve_with(ExtendedSpanBuilder::new().resolver_for(SourceId::COMPILATION_ROOT));
-    let blamed = source[range.start() as usize..range.end() as usize].to_owned();
-    (operand, reason, blamed)
+    (
+        operand_facts.operand,
+        source[range.start() as usize..range.end() as usize].to_owned(),
+    )
 }
 
 #[test]
@@ -465,15 +483,9 @@ fn range_step_that_breaks_compatible_bounds_is_blamed_on_the_step() {
          loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
     );
 
-    for result in [u64_bounds_i64_step, i64_bounds_u64_step] {
-        assert_eq!(
-            result,
-            (
-                RangeOperandKind::Step,
-                InvalidRangeOperandReason::IncompatibleDomain,
-                "step".to_owned()
-            )
-        );
+    for (operand, blamed) in [u64_bounds_i64_step, i64_bounds_u64_step] {
+        assert_eq!(operand, RangeOperandKind::Step);
+        assert_eq!(blamed, "step");
     }
 }
 
@@ -488,21 +500,15 @@ fn incompatible_range_bounds_are_blamed_on_the_bounds() {
          loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
     );
 
-    for result in [unstepped, stepped] {
-        assert_eq!(
-            result,
-            (
-                RangeOperandKind::End,
-                InvalidRangeOperandReason::IncompatibleDomain,
-                "hi".to_owned()
-            )
-        );
+    for (operand, blamed) in [unstepped, stepped] {
+        assert_eq!(operand, RangeOperandKind::End);
+        assert_eq!(blamed, "hi");
     }
 }
 
 #[test]
 fn float_step_selects_wider_precision_for_mixed_float_bounds_in_either_order() {
-    // D15: fixed integers and binary floats require an explicit conversion to mix, so a range
+    // Fixed integers and binary floats require an explicit conversion to mix, so a range
     // header combines operands within one family. A float step therefore selects the wider
     // *float* precision when the bounds already use mixed float precisions, and the selected
     // counter domain does not depend on the bounds' authored order.
@@ -528,34 +534,33 @@ fn float_step_selects_wider_precision_for_mixed_float_bounds_in_either_order() {
 fn rejects_binary_float_step_for_integer_bounds_without_conversion() {
     // The header's operands must share one family, so an integer bound set cannot take a
     // binary-float step without an explicit conversion and the incompatible step is blamed.
-    let payload = parse_loop_fixture_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(
         "lo I32 = 0\nhi I32 = 3\nstep F32 = 0.5\n\
          loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
-    );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidRangeOperand {
-            operand: RangeOperandKind::Step,
-            reason: InvalidRangeOperandReason::IncompatibleDomain,
-            ..
-        }
     ));
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0059",
+        Some("invalid_range_operand.incompatible_domain"),
+    );
+    let operand = diagnostic
+        .family_view::<InvalidRangeOperandView>()
+        .expect("the first error is an invalid range operand");
+    assert_eq!(operand.operand, RangeOperandKind::Step);
+    assert_eq!(
+        operand.reason,
+        InvalidRangeOperandReason::IncompatibleDomain
+    );
 }
 
 #[test]
 fn rejects_fixed_float_range_without_by() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "first_bound F16 = 0.5\nend F32 = 1.0\n\
          loop first_bound to end |value|:\n    io.line([: [value]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.float_range_missing_step"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::FloatRangeMissingStep,
-        }
-    ));
 }
 
 // --------------------------
@@ -645,14 +650,11 @@ fn collection_index_binding_has_i32_type() {
 
 #[test]
 fn rejects_old_in_loop_syntax_with_migration_error() {
-    let payload = parse_loop_fixture_diagnostic("loop i in 0 to 3:\n    io.line([: [i]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::RemovedInSyntax,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop i in 0 to 3:\n    io.line([: [i]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.removed_in_syntax"),
+    );
 }
 
 // --------------------------
@@ -661,67 +663,47 @@ fn rejects_old_in_loop_syntax_with_migration_error() {
 
 #[test]
 fn rejects_collection_loop_with_bare_single_binding() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items item:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.bare_single_binding"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareSingleBinding,
-        }
-    ));
 }
 
 #[test]
 fn rejects_collection_loop_with_bare_dual_bindings() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items item, index:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.bare_dual_binding"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareDualBinding,
-        }
-    ));
 }
 
 #[test]
 fn rejects_range_loop_with_bare_single_binding() {
-    let payload = parse_loop_fixture_diagnostic("loop 0 to 10 i:\n    io.line([: [i]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareSingleBinding,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop 0 to 10 i:\n    io.line([: [i]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.bare_single_binding"),
+    );
 }
 
 #[test]
 fn rejects_range_loop_with_bare_dual_bindings() {
-    let payload = parse_loop_fixture_diagnostic("loop 0 to 10 i, index:\n    io.line([: [i]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareDualBinding,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop 0 to 10 i, index:\n    io.line([: [i]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.bare_dual_binding"),
+    );
 }
 
 #[test]
 fn rejects_string_literal_as_range_binding() {
-    let payload =
-        parse_loop_fixture_diagnostic("loop 0 to 10 |\"item\"|:\n    io.line([: [\"value\"]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BindingMustBeSymbol,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop 0 to 10 |\"item\"|:\n    io.line([: [\"value\"]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.binding_must_be_symbol"),
+    );
 }
 
 // --------------------------
@@ -762,86 +744,62 @@ fn parses_range_loop_without_bindings() {
 
 #[test]
 fn rejects_empty_loop_binding_list() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items ||:\n    io.line([: [items]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.empty_binding_list"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::EmptyBindingList,
-        }
-    ));
 }
 
 #[test]
 fn rejects_more_than_two_loop_bindings() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items |a, b, c|:\n    io.line([: [a]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.too_many_bindings"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::TooManyBindings,
-        }
-    ));
 }
 
 #[test]
 fn rejects_duplicate_loop_binding_names() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items |item, item|:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.duplicate_binding_name"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::DuplicateBindingName,
-        }
-    ));
 }
 
 #[test]
 fn rejects_loop_binding_shadowing_existing_name() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nitem = 0\nloop items |item|:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.binding_already_declared"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BindingAlreadyDeclared,
-        }
-    ));
 }
 
 #[test]
 fn rejects_loop_binding_shadowing_visible_source_declaration() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "source_value || -> I32:\n    return 1\n;\nloop 0 to 2 |source_value|:\n;\n",
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BindingAlreadyDeclared,
-        }
-    ));
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.binding_already_declared"),
+    );
 }
 
 #[test]
 fn rejects_keyword_shadow_loop_binding_names() {
-    let payload = parse_loop_fixture_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(
         "items = {1, 2, 3}\nloop items |_if|:\n    io.line([: [items]])\n;",
-    );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::Keyword,
-            ..
-        }
     ));
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let collision = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the first error is a reserved-name collision");
+    assert_eq!(collision.reserved_by, ReservedNameOwner::Keyword);
 }
 
 // --------------------------
@@ -850,28 +808,23 @@ fn rejects_keyword_shadow_loop_binding_names() {
 
 #[test]
 fn rejects_collection_loop_on_non_collection_expression() {
-    let payload =
-        parse_loop_fixture_diagnostic("value = 3\nloop value |item|:\n    io.line([: [item]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::CollectionSourceNotCollection { .. },
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "value = 3\nloop value |item|:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.collection_source_not_collection"),
+    );
 }
 
 #[test]
 fn rejects_non_boolean_conditional_loop_condition() {
-    let payload = parse_loop_fixture_diagnostic("loop 1 + 2:\n    io.line([: [1]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::Condition,
-            ..
-        }
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(
+        "loop 1 + 2:\n    io.line([: [1]])\n;",
     ));
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::Condition);
 }
 
 // --------------------------
@@ -962,38 +915,29 @@ fn rejects_explicit_start_range_loop_ampersand_without_end_bound() {
 
 #[test]
 fn rejects_range_loop_by_without_step() {
-    let payload = parse_loop_fixture_diagnostic("loop 0 to 10 by |i|:\n    io.line([: [i]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::MissingRangeStep,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop 0 to 10 by |i|:\n    io.line([: [i]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.missing_range_step"),
+    );
 }
 
 #[test]
 fn rejects_zero_step_literal() {
-    let payload = parse_loop_fixture_diagnostic("loop 0 to 10 by 0 |i|:\n    io.line([: [i]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::ZeroRangeStep,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop 0 to 10 by 0 |i|:\n    io.line([: [i]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.zero_range_step"),
+    );
 }
 
 #[test]
 fn rejects_float_range_without_by() {
-    let payload = parse_loop_fixture_diagnostic("loop 0.0 to 1.0 |t|:\n    io.line([: [t]])\n;");
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::FloatRangeMissingStep,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        "loop 0.0 to 1.0 |t|:\n    io.line([: [t]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.float_range_missing_step"),
+    );
 }
 
 // --------------------------
@@ -1002,67 +946,51 @@ fn rejects_float_range_without_by() {
 
 #[test]
 fn rejects_missing_comma_between_bare_dual_bindings() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items item index:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.bare_dual_binding"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareDualBinding,
-        }
-    ));
 }
 
 #[test]
 fn rejects_missing_closing_pipe_in_loop_bindings() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items |item:\n    io.line([: [item]])\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.missing_closing_pipe"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::MissingClosingPipe,
-        }
-    ));
 }
 
 #[test]
 fn rejects_range_loop_with_bare_binding_after_complex_step_expression() {
-    let payload = parse_loop_fixture_diagnostic(
+    assert_loop_fixture_diagnostic(
         "limit = 8\nstep = 2\nsum ~= 0\nloop 0 to limit by step i:\n    sum = sum + i\n;",
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.bare_single_binding"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareSingleBinding,
-        }
-    ));
 }
 
 #[test]
 fn operator_tail_does_not_trigger_bare_loop_binding_diagnostic() {
-    let payload =
-        parse_loop_fixture_diagnostic("a = 1\nb = 2\nloop a + b value:\n    io.line([: [1]])\n;");
-
-    assert!(!matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::BareSingleBinding
-                | InvalidLoopHeaderReason::BareDualBinding,
-        }
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(
+        "a = 1\nb = 2\nloop a + b value:\n    io.line([: [1]])\n;",
     ));
+    let diagnostic = first_ast_error_view(&failure);
+    assert!(
+        !(diagnostic.descriptor().code == "MOTH-SYNTAX-0029"
+            && matches!(
+                diagnostic.reason_key(),
+                Some("invalid_loop_header.bare_single_binding")
+                    | Some("invalid_loop_header.bare_dual_binding")
+            ))
+    );
 }
 
 fn assert_missing_range_end_bound(source: &str) {
-    let payload = parse_loop_fixture_diagnostic(source);
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidLoopHeader {
-            reason: InvalidLoopHeaderReason::MissingRangeEndBound,
-        }
-    ));
+    assert_loop_fixture_diagnostic(
+        source,
+        "MOTH-SYNTAX-0029",
+        Some("invalid_loop_header.missing_range_end_bound"),
+    );
 }

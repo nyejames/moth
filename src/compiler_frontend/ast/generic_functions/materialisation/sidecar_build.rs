@@ -4,7 +4,10 @@ use super::super::{GenericFunctionInstantiationRequest, GenericFunctionTemplate}
 use super::artefact_emit::ModuleMaterialisationContext;
 use super::nominal_blueprints::intern_generated_canonical_type;
 use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
-use super::stable_types::{GeneratedValueMaterialisationServices, MaterialisationNominalSource};
+use super::stable_types::{
+    GeneratedValueMaterialisationServices, MaterialisationNominalSource,
+    const_store_error_into_prepared_failure,
+};
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::generic_bounds::{BoundEvidenceSelection, evidence_for_type};
@@ -21,9 +24,10 @@ use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_cor
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
@@ -65,7 +69,9 @@ impl ModuleMaterialisationCapture {
         &self.generic_function_templates_by_path
     }
 
-    pub(super) fn rebuild_generic_template_identity_index(&mut self) -> Result<(), CompilerError> {
+    pub(super) fn rebuild_generic_template_identity_index(
+        &mut self,
+    ) -> Result<(), InfrastructureFailure> {
         self.generic_template_paths_by_identity =
             Self::generic_template_identity_index(&self.generic_function_templates_by_path)?;
         Ok(())
@@ -73,7 +79,7 @@ impl ModuleMaterialisationCapture {
 
     pub(super) fn generic_template_identity_index(
         templates: &FxHashMap<PathId, GenericFunctionTemplate>,
-    ) -> Result<FxHashMap<GeneratedDeclarationIdentity, PathId>, CompilerError> {
+    ) -> Result<FxHashMap<GeneratedDeclarationIdentity, PathId>, InfrastructureFailure> {
         let mut paths_by_identity = FxHashMap::default();
         for (path, template) in templates {
             if template.body_tokens.is_none() {
@@ -83,9 +89,12 @@ impl ModuleMaterialisationCapture {
                 continue;
             };
             if let Some(previous_path) = paths_by_identity.insert(identity.clone(), *path) {
-                return Err(CompilerError::compiler_error(format!(
-                    "Generic template identity {identity:?} is retained at both {previous_path:?} and {path:?}",
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    format!(
+                        "Generic template identity {identity:?} is retained at both {previous_path:?} and {path:?}",
+                    ),
+                ));
             }
         }
         Ok(paths_by_identity)
@@ -101,16 +110,14 @@ impl ModuleMaterialisationPreparation {
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<MaterialisedGenericAst, CompilerMessages> {
+    ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let (declaring_context, template_index) = self
             .declaring_context_for_identity(identity.declaration())
             .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Generated request has no retained declaring-module generic template",
-                    ),
-                    &self.string_table,
-                )
+                PreparedFailure::from(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Generated request has no retained declaring-module generic template",
+                ))
             })?;
         declaring_context.materialise_ast_at(
             template_index,
@@ -152,7 +159,7 @@ pub(super) fn emit_materialised_sidecar<PrimarySource>(
     primary_source: &PrimarySource,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<MaterialisedSidecarOutcome, CompilerMessages>
+) -> Result<MaterialisedSidecarOutcome, PreparedFailure>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -175,7 +182,13 @@ where
             string_table,
             path_fork,
         )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        .map_err(|error| {
+            const_store_error_into_prepared_failure(
+                error,
+                string_table,
+                Some(&environment.type_environment),
+            )
+        })?;
         materialised_type_arguments.push(type_id);
     }
     // Canonical reconstruction issues new definition paths, so keep the requester's own spellings
@@ -195,7 +208,7 @@ where
         environment
             .type_environment
             .register_nominal_path_alias(binding.local_path, type_id)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
     }
     let mut value_services = GeneratedValueMaterialisationServices {
         external_registry: phase_context.external_package_registry.as_ref(),
@@ -205,12 +218,10 @@ where
                 .file_value_resolution
                 .as_ref()
                 .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Generated evidence has no file-value services",
-                        ),
-                        string_table,
-                    )
+                    PreparedFailure::from(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
+                        "Generated evidence has no file-value services",
+                    ))
                 })?
                 .module_resources,
         ),
@@ -226,12 +237,7 @@ where
         string_table,
         path_fork,
         &mut value_services,
-    )
-    .map_err(|errors| {
-        let mut messages = CompilerMessages::empty(string_table.clone());
-        messages.append_infrastructure_errors(errors);
-        messages
-    })?;
+    )?;
 
     let request = GenericFunctionInstantiationRequest::generated(
         identity.declaration(),
@@ -241,7 +247,14 @@ where
         string_table,
         requester_call_span,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    .map_err(|diagnostic| {
+        PreparedFailure::capture_diagnosed(
+            DiagnosticBag::from(diagnostic),
+            string_table.clone(),
+            Some(&environment.type_environment),
+            None,
+        )
+    })?;
     let instance_path = request.instance_path;
     #[cfg(feature = "timers")]
     let timing_context = phase_context.timing_context;
@@ -280,13 +293,13 @@ where
     if let Some(context) = &mut build_result.materialisation_context {
         context
             .inherit_stable_context(declaring_context)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
         context
             .inherit_nominal_blueprints(primary_source)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
         context
             .inherit_nominal_blueprints(requester_context)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
         context.inherit_requester_declaring_contexts(requester_context);
     }
 
@@ -331,7 +344,7 @@ fn install_generated_request_evidence<PrimarySource>(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     services: &mut super::stable_types::GeneratedValueMaterialisationServices<'_>,
-) -> Result<(), Box<InfrastructureErrors>>
+) -> Result<(), PreparedFailure>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -371,14 +384,23 @@ where
         // discovered through a reinstated template's bounds is interned on first use. A repeat for
         // another receiver reuses the interned target, the installed trait and the installed row.
         let generated_target_type_id = if install_row {
-            Some(intern_generated_canonical_type(
-                evidence_identity.target_type_identity(),
-                &mut environment.type_environment,
-                external_registry,
-                &nominal_source,
-                string_table,
-                path_fork,
-            )?)
+            Some(
+                intern_generated_canonical_type(
+                    evidence_identity.target_type_identity(),
+                    &mut environment.type_environment,
+                    external_registry,
+                    &nominal_source,
+                    string_table,
+                    path_fork,
+                )
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        string_table,
+                        Some(&environment.type_environment),
+                    )
+                })?,
+            )
         } else {
             None
         };
@@ -386,7 +408,8 @@ where
             .trait_environment
             .id_for_canonical_identity(evidence_identity.trait_identity())
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated evidence trait is absent from the requester context",
                 )
             })?;
@@ -408,7 +431,8 @@ where
                 .trait_environment
                 .id_for_canonical_identity(evidence_identity.trait_identity())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated reinstated evidence trait is missing from the generated context",
                     )
                 })?
@@ -431,7 +455,10 @@ where
                     .trait_evidence_environment
                     .get(evidence_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error("Generated requester evidence is missing")
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
+                            "Generated requester evidence is missing",
+                        )
                     })?,
             ),
             None => None,
@@ -447,7 +474,8 @@ where
                 &requester_context.trait_environment,
             )
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Generated request selected evidence absent from the requester context",
             )
             .into());
@@ -459,14 +487,22 @@ where
         let generated_trait_environment = Rc::clone(&environment.lookups.trait_environment);
         let generated_trait = generated_trait_environment
             .get(generated_trait_id)
-            .ok_or_else(|| CompilerError::compiler_error("Generated declaring trait is missing"))?;
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Generated declaring trait is missing",
+                )
+            })?;
         let requester_trait = if evidence_kind == TraitEvidenceKind::Canonical {
             Some(
                 requester_context
                     .trait_environment
                     .get(requester_trait_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error("Generated requester trait is missing")
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
+                            "Generated requester trait is missing",
+                        )
                     })?,
             )
         } else {
@@ -495,10 +531,16 @@ where
         };
         for generated_requirement in executable_requirements {
             let requester_trait = requester_trait.ok_or_else(|| {
-                CompilerError::compiler_error("Generated requester trait is missing")
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Generated requester trait is missing",
+                )
             })?;
             let requester_evidence = requester_evidence.ok_or_else(|| {
-                CompilerError::compiler_error("Generated requester evidence is missing")
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Generated requester evidence is missing",
+                )
             })?;
             let requester_requirement = requester_trait
                 .requirements
@@ -508,7 +550,8 @@ where
                         == string_table.resolve(generated_requirement.name)
                 })
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated evidence could not match a canonical trait requirement",
                     )
                 })?;
@@ -517,7 +560,8 @@ where
                 .iter()
                 .find(|mapping| mapping.requirement_id == requester_requirement.id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated evidence has no executable target for a trait requirement",
                     )
                 })?;
@@ -585,7 +629,8 @@ where
                     &source_contract.target,
                     super::stable_types::StableFunctionTarget::Generated(_)
                 ) {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated evidence method retained an invalid executable target",
                     )
                     .into());
@@ -602,7 +647,8 @@ where
                     )?,
                 ));
             } else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated evidence method has no frozen executable target",
                 )
                 .into());
@@ -615,7 +661,8 @@ where
             continue;
         }
         let Some(generated_target_type_id) = generated_target_type_id else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Generated evidence row was installed without an interned target type",
             )
             .into());
@@ -634,7 +681,8 @@ where
             declaration_span,
             requirements,
         };
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         match evidence_kind {
             TraitEvidenceKind::Canonical => Rc::make_mut(&mut lookups.trait_evidence_environment)
                 .insert_validated(generated_evidence),
@@ -659,13 +707,16 @@ fn generated_requester_template_contract(
     method_path: PathId,
     target: SourceFunctionTarget,
     environment: &AstModuleEnvironment,
-) -> Result<AstImportedFunctionContract, CompilerError> {
+) -> Result<AstImportedFunctionContract, InfrastructureFailure> {
     let template = environment
         .lookups
         .generic_function_templates_by_path
         .get(&method_path)
         .ok_or_else(|| {
-            CompilerError::compiler_error("Generated evidence template was not installed")
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Generated evidence template was not installed",
+            )
         })?;
     Ok(AstImportedFunctionContract {
         target,
@@ -692,7 +743,7 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
     nominal_source: &N,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), Box<InfrastructureErrors>> {
+) -> Result<(), PreparedFailure> {
     if environment
         .lookups
         .generic_function_templates_by_path
@@ -708,7 +759,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
                 .trait_environment
                 .id_for_canonical_identity(identity)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated requester template bound has no canonical requester trait",
                     )
                 })?;
@@ -739,14 +791,22 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
             nominal_source,
             string_table,
             path_fork,
-        )?;
+        )
+        .map_err(|error| {
+            const_store_error_into_prepared_failure(
+                error,
+                string_table,
+                Some(&environment.type_environment),
+            )
+        })?;
         let list_id = match environment.type_environment.get(receiver_type) {
             Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
             Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
             _ => None,
         }
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Generated requester generic receiver has no nominal parameter list",
             )
         })?;
@@ -754,12 +814,14 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
             .type_environment
             .generic_parameters(list_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated requester generic receiver parameter list is missing",
                 )
             })?;
         if parameters.parameters.len() != template.generic_parameters.len() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Generated requester generic receiver parameter count disagrees with its owner",
             )
             .into());
@@ -781,7 +843,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
                 &bounds_by_local,
             )
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated requester template contract disagrees with its parameter owner",
                 )
             })?;
@@ -809,7 +872,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
         let parameter_id = canonical_by_local
             .get(&TypeParameterId(slot as u32))
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated requester template registration omitted a parameter",
                 )
             })?;
@@ -817,7 +881,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
             .type_environment
             .type_id_for_generic_parameter(*parameter_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated requester template parameter has no type handle",
                 )
             })?;
@@ -850,7 +915,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
     } else {
         None
     };
-    let lookups = Rc::make_mut(&mut environment.lookups);
+    let lookups = Rc::get_mut(&mut environment.lookups)
+        .expect("AST environment lookups are uniquely owned before materialisation");
     Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
         method_path,
         crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature {
@@ -888,7 +954,7 @@ fn intern_generated_requester_type<N: MaterialisationNominalSource>(
     nominal_source: &N,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, PreparedFailure> {
     let canonical_identity = requester_context.stable_type_identity(type_id)?;
     intern_generated_canonical_type(
         &canonical_identity,
@@ -898,6 +964,9 @@ fn intern_generated_requester_type<N: MaterialisationNominalSource>(
         string_table,
         path_fork,
     )
+    .map_err(|error| {
+        const_store_error_into_prepared_failure(error, string_table, Some(type_environment))
+    })
 }
 
 pub(crate) fn bootstrap_call_summary_from_signature(
@@ -936,7 +1005,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
 fn requester_type_id_for_canonical_identity(
     identity: &CanonicalTypeIdentity,
     requester_context: &ModuleMaterialisationPreparation,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, InfrastructureFailure> {
     if let Some(type_id) = requester_context
         .type_environment
         .type_id_for_canonical_identity(identity)
@@ -945,10 +1014,12 @@ fn requester_type_id_for_canonical_identity(
     }
 
     match identity {
-        CanonicalTypeIdentity::SourceNominal(_) => Err(CompilerError::compiler_error(
+        CanonicalTypeIdentity::SourceNominal(_) => Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Generated source evidence target has no requester-local canonical type handle",
         )),
-        _ => Err(CompilerError::compiler_error(
+        _ => Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Generated evidence target has no requester-local canonical type handle",
         )),
     }
@@ -978,7 +1049,7 @@ fn discover_generated_requester_bound_evidence(
     materialised_type_arguments: &[TypeId],
     requester_context: &ModuleMaterialisationPreparation,
     environment: &AstModuleEnvironment,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match concrete_receiver {
         // Evidence discovered through a template already carries the exact receiver it was
         // selected for.
@@ -1030,7 +1101,7 @@ fn push_generated_template_bound_evidence(
     receiver: TypeId,
     requester_context: &ModuleMaterialisationPreparation,
     environment: &AstModuleEnvironment,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(installed_template) = environment
         .lookups
         .generic_function_templates_by_path
@@ -1078,7 +1149,8 @@ fn push_generated_template_bound_evidence(
                 .trait_environment
                 .id_for_canonical_identity(bound_identity)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated requester template bound has no canonical requester trait",
                     )
                 })?;
@@ -1116,7 +1188,8 @@ fn push_generated_template_bound_evidence(
                 .trait_environment
                 .canonical_identity_for_id(row.trait_id)
             else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generated requester bound evidence trait has no canonical identity",
                 ));
             };
@@ -1207,7 +1280,7 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
     nominal_source: &N,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<TraitId, CompilerError> {
+) -> Result<TraitId, PreparedFailure> {
     if let Some(trait_id) = environment
         .lookups
         .trait_environment
@@ -1220,7 +1293,8 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
         .trait_environment
         .get(requester_trait_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Generated requester template bound has no resolved trait",
             )
         })?;
@@ -1282,7 +1356,7 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
                     contract,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, PreparedFailure>>()?;
         let returns = requirement
             .returns
             .iter()
@@ -1303,7 +1377,7 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
                     span: returned.span,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, PreparedFailure>>()?;
         requirements.push(ResolvedTraitRequirement {
             id: next_requirement_id,
             name: requirement.name,
@@ -1325,12 +1399,15 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
         declaration_span: source.declaration_span,
         visibility: source.visibility.clone(),
     };
-    let lookups = Rc::make_mut(&mut environment.lookups);
+    let lookups = Rc::get_mut(&mut environment.lookups)
+        .expect("AST environment lookups are uniquely owned before materialisation");
     let trait_environment = Rc::make_mut(&mut lookups.trait_environment);
     if trait_environment.insert(definition).is_some() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Generated template bound trait path is already registered in the declaring context",
-        ));
+        )
+        .into());
     }
     trait_environment.register_canonical_identity(identity.clone(), trait_id)?;
     Ok(trait_id)
@@ -1357,7 +1434,7 @@ fn intern_generated_trait_requirement_slot<N: MaterialisationNominalSource>(
     nominal_source: &N,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, PreparedFailure> {
     if type_id == requester_this_type {
         return Ok(generated_this_type);
     }

@@ -20,9 +20,7 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -94,9 +92,8 @@ fn collect_text_node_spans(
 ///
 /// WHAT: walks the same-store TIR tree referenced by `template.tir_reference` and
 ///       gathers every interned string carried by a `Text` node.
-/// WHY: simple formatted templates are TIR-authoritative; render-plan
-///      assertions no longer observe formatter output for this shape, so the
-///      formatted body text is gathered from the TIR tree instead.
+/// WHY: simple formatted templates are TIR-authoritative, so expected body text
+///      comes from the TIR tree rather than formatter output.
 fn collect_formatted_body_text_from_tir(
     template: &Template,
     context: &ScopeContext,
@@ -151,9 +148,7 @@ fn markdown_formatter_produces_formatted_tir_output() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path.to_owned(), &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
