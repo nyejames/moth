@@ -29,11 +29,13 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Next; the compact diagnostic layout it waited for is delivered. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Next! the compact diagnostic layout it waited for is delivered. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.
 
 - [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compiler diagnostics improvements: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked only on five-run benchmark evidence (Slice 0); investigation before narrow success-path fix
+
+- [Synthetic entry function identity](./plans/synthetic-entry-function-identity-plan.md) - Queued: replace the named implicit `start` with a typed AST entry and HIR `FunctionId`, freeing `start` as an ordinary user name. Preserve module activation, config diagnostics and JS/Wasm ABI. Activate after diagnostic improvements.
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
 

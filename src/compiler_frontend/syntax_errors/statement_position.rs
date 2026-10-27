@@ -43,7 +43,7 @@ pub(crate) fn check_statement_common_mistake(
 
 /// Check if a symbol is a common mistaken keyword from another language.
 ///
-/// WHAT: `fn`, `function`, `def`, `let`, `var`, `const`, `match`, and `struct`
+/// WHAT: `function`, `def`, `let`, `var`, `const`, `match`, and `struct`
 /// are not Moth keywords, but newcomers often type them out of habit.
 ///
 /// Called from `parse_symbol_statement` before treating the symbol as a normal
@@ -57,7 +57,7 @@ pub(crate) fn check_mistaken_keyword_symbol(
     let location = token_stream.current_span();
 
     match name {
-        "fn" | "function" | "def" => Some(token_lexical::common_syntax_mistake(
+        "function" | "def" => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::FunctionKeyword { keyword: symbol_id },
             Some(location),
         )),
