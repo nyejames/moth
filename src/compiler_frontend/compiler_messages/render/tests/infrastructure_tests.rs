@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::display_messages::format_infrastructure_errors;
+use crate::compiler_frontend::compiler_messages::render::relative_display_path_from_root;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result;
@@ -192,6 +193,12 @@ fn every_cause_type_has_truthful_introduction_in_all_views() {
             "original cause detail"
         );
     }
+}
+
+#[test]
+fn path_equal_to_display_root_is_not_empty() {
+    let path = Path::new("working-directory");
+    assert_eq!(relative_display_path_from_root(path, path), ".");
 }
 
 #[test]
