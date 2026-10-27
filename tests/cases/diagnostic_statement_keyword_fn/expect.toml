@@ -1,4 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0031"]
+# fn is an ordinary identifier, so this malformed statement uses the normal grammar error.
+diagnostic_codes = ["MOTH-SYNTAX-0001"]
