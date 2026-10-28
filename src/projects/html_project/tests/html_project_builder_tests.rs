@@ -1205,9 +1205,12 @@ fn wasm_directory_build_preserves_nested_routes() {
 fn builder_rejects_invalid_origin_config() {
     let builder = HtmlProjectBuilder::new();
     let mut config = Config::new(PathBuf::from("."));
-    config
-        .builder_settings
-        .set_string(String::from("origin"), String::from("not-a-slash"), None);
+    config.builder_settings.set_string(
+        "html",
+        String::from("origin"),
+        String::from("not-a-slash"),
+        None,
+    );
 
     let result = build_with_test_modules(&builder, vec![PathBuf::from("@page.moth")], &config, &[]);
     let reports = expect_diagnosed(result, "invalid origin should fail diagnostically");

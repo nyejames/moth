@@ -93,13 +93,16 @@ fn parser_accepts_valid_overrides() {
     let mut config = Config::new(PathBuf::from("project"));
     config
         .builder_settings
-        .set_string("origin", String::from("/moth"), None);
+        .set_string("html", "origin", String::from("/moth"), None);
+    config.builder_settings.set_string(
+        "html",
+        "page_url_style",
+        String::from("no_trailing_slash"),
+        None,
+    );
     config
         .builder_settings
-        .set_string("page_url_style", String::from("no_trailing_slash"), None);
-    config
-        .builder_settings
-        .set_bool("redirect_index_html", false, None);
+        .set_bool("html", "redirect_index_html", false, None);
 
     let mut string_table = StringTable::new();
     let parsed =
@@ -117,19 +120,19 @@ fn parser_rejects_invalid_origin() {
     // No leading slash.
     config
         .builder_settings
-        .set_string("origin", String::from("moth"), None);
+        .set_string("html", "origin", String::from("moth"), None);
     assert_origin_value_rejection(&config, &mut string_table, "moth");
 
     // Trailing slash on a non-root prefix.
     config
         .builder_settings
-        .set_string("origin", String::from("/moth/"), None);
+        .set_string("html", "origin", String::from("/moth/"), None);
     assert_origin_value_rejection(&config, &mut string_table, "/moth/");
 
     // Empty origin is a separate empty-setting reason.
     config
         .builder_settings
-        .set_string("origin", String::new(), None);
+        .set_string("html", "origin", String::new(), None);
     let empty_error =
         parse_site_config(&config, &mut string_table).expect_err("empty origin should fail");
     let compact = invalid_config_diagnostics(empty_error);
@@ -151,7 +154,7 @@ fn parser_rejects_invalid_origin() {
     // Query or fragment characters are rejected as non-path content.
     config
         .builder_settings
-        .set_string("origin", String::from("/?x=1"), None);
+        .set_string("html", "origin", String::from("/?x=1"), None);
     assert_origin_value_rejection(&config, &mut string_table, "/?x=1");
 }
 
@@ -160,7 +163,7 @@ fn parser_rejects_invalid_page_url_style() {
     let mut config = Config::new(PathBuf::from("project"));
     config
         .builder_settings
-        .set_string("page_url_style", String::from("slashy"), None);
+        .set_string("html", "page_url_style", String::from("slashy"), None);
 
     let mut string_table = StringTable::new();
     let error =
@@ -202,9 +205,12 @@ fn parser_uses_precise_span_from_setting_spans() {
         SourceId::from_index(2),
         LocalSpan::exact(0, 7, &mut span_builder).expect("test span should fit"),
     );
-    config
-        .builder_settings
-        .set_string("origin", String::from("invalid"), Some(precise_span));
+    config.builder_settings.set_string(
+        "html",
+        "origin",
+        String::from("invalid"),
+        Some(precise_span),
+    );
 
     let error =
         parse_site_config(&config, &mut string_table).expect_err("invalid origin should fail");
@@ -217,7 +223,7 @@ fn parser_uses_no_span_when_setting_has_no_authored_source() {
     let mut config = Config::new(PathBuf::from("project"));
     config
         .builder_settings
-        .set_string("origin", String::from("invalid"), None);
+        .set_string("html", "origin", String::from("invalid"), None);
 
     let mut string_table = StringTable::new();
     let error =

@@ -7,7 +7,7 @@
 //! schemas, covering application to `Config`. Unregistered top-level names stay private
 //! helpers; a missing grouped `project` or required builder section is rejected. The grouped
 //! `html #= (...)` section path covers the same production dispatch against the HTML builder's
-//! closed section schema, generic name-keyed values consumed by its readers, the shared output
+//! closed section schema, section-keyed values consumed by its readers, the shared output
 //! roots that drive directory output resolution, and inactive-section behaviour.
 //! WHY: the schema walk and application invariants belong to the build-owned config boundary.
 
@@ -1096,24 +1096,33 @@ fn applies_grouped_html_section_to_generic_builder_settings() {
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
 
-    // The shared settings owner stores each validated field by its registered name.
-    assert_eq!(config.builder_settings.string("origin"), Some("/docs"));
+    // Values are keyed by their section and registered field name.
     assert_eq!(
-        config.builder_settings.string("page_url_style"),
+        config.builder_settings.string("html", "origin"),
+        Some("/docs")
+    );
+    assert_eq!(
+        config.builder_settings.string("html", "page_url_style"),
         Some("no_trailing_slash")
     );
     assert_eq!(
-        config.builder_settings.bool("redirect_index_html"),
+        config.builder_settings.bool("html", "redirect_index_html"),
         Some(false)
     );
-    assert_eq!(config.builder_settings.string("html_lang"), Some("en-GB"));
     assert_eq!(
-        config.builder_settings.bool("html_inject_core_css"),
+        config.builder_settings.string("html", "html_lang"),
+        Some("en-GB")
+    );
+    assert_eq!(
+        config.builder_settings.bool("html", "html_inject_core_css"),
         Some(false)
     );
-    assert_eq!(config.builder_settings.string("html_title_prefix"), None);
+    assert_eq!(
+        config.builder_settings.string("html", "html_title_prefix"),
+        None
+    );
 
-    // The same site-config reader consumes HTML and custom builder settings.
+    // The HTML reader consumes only its own section of the generic settings store.
     let site_config = {
         let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
         parse_html_site_config(&config, &mut diagnostic_strings)
@@ -1128,6 +1137,7 @@ fn applies_grouped_html_section_to_generic_builder_settings() {
     let diagnostic = {
         let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
         config.builder_config_diagnostic(
+            "html",
             "origin",
             InvalidConfigReason::EmptyProjectSetting,
             &mut diagnostic_strings,
@@ -1159,7 +1169,7 @@ fn rejects_unknown_field_in_closed_grouped_html_section() {
     assert_eq!(string_table.resolve(facts.string_ids[1]), "custom_key");
 
     // The rejected section applies nothing.
-    assert_eq!(config.builder_settings.string("origin"), None);
+    assert_eq!(config.builder_settings.string("html", "origin"), None);
 }
 
 #[test]
@@ -1180,7 +1190,7 @@ fn private_helpers_do_not_satisfy_required_html_section() {
         InvalidConfigCode::MissingActiveBuilderSection,
         "former top-level builder names are private helpers, got {errors:?}"
     );
-    assert_eq!(config.builder_settings.string("origin"), None);
+    assert_eq!(config.builder_settings.string("html", "origin"), None);
 }
 
 #[test]
@@ -1206,8 +1216,11 @@ fn skips_grouped_html_section_when_no_builder_registered_it() {
     );
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
-    assert_eq!(config.builder_settings.string("origin"), None);
-    assert_eq!(config.builder_settings.bool("redirect_index_html"), None);
+    assert_eq!(config.builder_settings.string("html", "origin"), None);
+    assert_eq!(
+        config.builder_settings.bool("html", "redirect_index_html"),
+        None
+    );
 }
 
 #[test]
@@ -1220,8 +1233,14 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
         &mut string_table,
     );
 
-    assert_eq!(config.builder_settings.string("origin"), Some("/docs"));
-    assert_eq!(config.builder_settings.string("html_lang"), Some("en-GB"));
+    assert_eq!(
+        config.builder_settings.string("html", "origin"),
+        Some("/docs")
+    );
+    assert_eq!(
+        config.builder_settings.string("html", "html_lang"),
+        Some("en-GB")
+    );
     assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
 }
 
@@ -1958,8 +1977,11 @@ fn builder_section_strings_and_bools_land_in_builder_settings() {
     );
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
-    assert_eq!(config.builder_settings.string("name"), Some("site"));
-    assert_eq!(config.builder_settings.bool("draft"), Some(true));
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(config.builder_settings.bool("lappet", "draft"), Some(true));
 }
 
 #[test]
@@ -1978,7 +2000,7 @@ fn builder_section_output_roots_land_in_output_roots_only() {
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
-    assert_eq!(config.builder_settings.string("dev_output"), None);
+    assert_eq!(config.builder_settings.string("lappet", "dev_output"), None);
 }
 
 #[test]
@@ -1990,7 +2012,10 @@ fn omitted_optional_builder_section_applies_its_schema_defaults() {
         validate_and_apply_with_surface(with_required_project(vec![]), &surface, &mut string_table);
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
-    assert_eq!(config.builder_settings.string("name"), Some("site"));
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
     assert_eq!(config.output_roots.dev_output.as_deref(), Some("dev"));
     assert_eq!(
         config.output_roots.release_output.as_deref(),
@@ -2059,11 +2084,18 @@ fn generic_builder_section_fields_leave_project_setting_spans_alone() {
     assert_eq!(config.version, None);
     assert_eq!(config.setting_span("name"), Some(project_name_span));
     assert_eq!(config.setting_span("version"), None);
-    assert_eq!(config.builder_settings.string("name"), Some("site"));
-    assert_eq!(config.builder_settings.string("version"), Some("1.2"));
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(
+        config.builder_settings.string("lappet", "version"),
+        Some("1.2")
+    );
     let builder_diagnostic = {
         let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
         config.builder_config_diagnostic(
+            "lappet",
             "name",
             InvalidConfigReason::EmptyProjectSetting,
             &mut diagnostic_strings,
@@ -2095,7 +2127,10 @@ fn generic_builder_section_defaults_leave_project_setting_spans_alone() {
     );
 
     assert_eq!(config.setting_span("name"), Some(project_name_span));
-    assert_eq!(config.builder_settings.string("name"), Some("site"));
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
 }
 
 #[test]
@@ -2114,12 +2149,24 @@ fn omitted_and_authored_empty_builder_sections_yield_the_same_values() {
     );
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
 
-    assert_eq!(omitted.builder_settings.string("name"), Some("site"));
-    assert_eq!(authored.builder_settings.string("name"), Some("site"));
-    assert_eq!(omitted.builder_settings.bool("draft"), Some(false));
-    assert_eq!(authored.builder_settings.bool("draft"), Some(false));
-    assert_eq!(omitted.builder_settings.string("version"), None);
-    assert_eq!(authored.builder_settings.string("version"), None);
+    assert_eq!(
+        omitted.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(
+        authored.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(
+        omitted.builder_settings.bool("lappet", "draft"),
+        Some(false)
+    );
+    assert_eq!(
+        authored.builder_settings.bool("lappet", "draft"),
+        Some(false)
+    );
+    assert_eq!(omitted.builder_settings.string("lappet", "version"), None);
+    assert_eq!(authored.builder_settings.string("lappet", "version"), None);
     assert_eq!(omitted.output_roots, authored.output_roots);
 }
 
@@ -2178,6 +2225,16 @@ fn several_builder_sections_with_one_output_root_owner_are_accepted() {
             ConfigSchemaField::string_with_default("alpha", "a"),
         )
         .expect("the owner section should accept its field");
+    for field in [
+        ConfigSchemaField::string("shared"),
+        ConfigSchemaField::string_with_default("shared_default", "owner-default"),
+        ConfigSchemaField::string("mixed"),
+        ConfigSchemaField::string("optional"),
+    ] {
+        owner
+            .register_field(owner_root, field)
+            .expect("owner field");
+    }
     register_output_root_fields(&mut owner, owner_root)
         .expect("the owner section should accept the output roots");
     owner
@@ -2199,6 +2256,16 @@ fn several_builder_sections_with_one_output_root_owner_are_accepted() {
             ConfigSchemaField::string_with_default("beta", "b"),
         )
         .expect("the plain section should accept its field");
+    for field in [
+        ConfigSchemaField::string("shared"),
+        ConfigSchemaField::string_with_default("shared_default", "plain-default"),
+        ConfigSchemaField::bool("mixed"),
+        ConfigSchemaField::optional("optional", ConfigFieldShape::String),
+    ] {
+        plain
+            .register_field(plain_root, field)
+            .expect("plain field");
+    }
     plain
         .validate_and_freeze()
         .expect("the plain section schema should freeze");
@@ -2255,14 +2322,115 @@ fn several_builder_sections_with_one_output_root_owner_are_accepted() {
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
-    assert_eq!(config.builder_settings.string("alpha"), Some("a"));
-    assert_eq!(config.builder_settings.string("beta"), Some("b"));
+    assert_eq!(config.builder_settings.string("owner", "alpha"), Some("a"));
+    assert_eq!(config.builder_settings.string("plain", "beta"), Some("b"));
     assert_eq!(
-        config.builder_settings.string(&runtime_field_name),
+        config
+            .builder_settings
+            .string(&runtime_section_name, &runtime_field_name),
         Some("runtime-authored")
     );
     assert_eq!(
-        config.builder_settings.string(&runtime_default_field_name),
+        config
+            .builder_settings
+            .string(&runtime_section_name, &runtime_default_field_name),
         Some("runtime-default")
+    );
+
+    let source_code = format!(
+        "missing #String? = none\n\
+         project #= (name = \"docs\", entry_root = \"src\")\n\
+         owner #= (shared = \"owner-value\", mixed = \"text\", optional = \"kept\")\n\
+         plain #= (shared = \"plain-value\", mixed = true, optional = missing)\n\
+         {runtime_section_name} #= ({runtime_field_name} = \"runtime-authored\")\n"
+    );
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
+            source_code: &source_code,
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    )
+    .result
+    .expect("authored sections should compile");
+    let mut authored = Config::new(PathBuf::from("project"));
+    apply_result(validate_and_apply_config_declarations(
+        &mut authored,
+        &compiled,
+        &surface.config_schemas,
+        &mut string_table,
+    ))
+    .expect("authored sections should apply");
+    assert_eq!(
+        authored.builder_settings.string("owner", "shared"),
+        Some("owner-value")
+    );
+    assert_eq!(
+        authored.builder_settings.string("plain", "shared"),
+        Some("plain-value")
+    );
+    assert_eq!(
+        authored.builder_settings.string("owner", "shared_default"),
+        Some("owner-default")
+    );
+    assert_eq!(
+        authored.builder_settings.string("plain", "shared_default"),
+        Some("plain-default")
+    );
+    assert_eq!(
+        authored.builder_settings.string("owner", "mixed"),
+        Some("text")
+    );
+    assert_eq!(authored.builder_settings.bool("plain", "mixed"), Some(true));
+    assert_eq!(
+        authored.builder_settings.string("owner", "optional"),
+        Some("kept")
+    );
+    assert_eq!(authored.builder_settings.string("plain", "optional"), None);
+    for section in ["owner", "plain"] {
+        let declaration = compiled
+            .declarations
+            .iter()
+            .find(|declaration| string_table.resolve(declaration.name) == section)
+            .expect("section declaration");
+        let expected = declaration.direct_field_spans[0];
+        assert!(expected.is_some(), "authored value has a span");
+        let mut strings = DiagnosticStringBuilder::new(&mut string_table);
+        let actual = authored
+            .builder_config_diagnostic(
+                section,
+                "shared",
+                InvalidConfigReason::EmptyProjectSetting,
+                &mut strings,
+            )
+            .primary_span();
+        assert_eq!(actual, expected);
+        let default_span = authored
+            .builder_config_diagnostic(
+                section,
+                "shared_default",
+                InvalidConfigReason::EmptyProjectSetting,
+                &mut strings,
+            )
+            .primary_span();
+        assert_eq!(default_span, None);
+    }
+    authored.builder_settings.clear("plain", "mixed");
+    assert_eq!(authored.builder_settings.bool("plain", "mixed"), None);
+    assert_eq!(
+        authored.builder_settings.string("owner", "mixed"),
+        Some("text")
     );
 }

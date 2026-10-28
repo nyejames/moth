@@ -530,7 +530,7 @@ fn apply_output_root_span(config: &mut Config, name: String, span: Option<Source
     }
 }
 
-/// Store one validated non-output-root field using its registered name.
+/// Store one validated non-output-root field under its section and registered name.
 fn apply_generic_builder_value(
     config: &mut Config,
     section_name: &str,
@@ -539,11 +539,17 @@ fn apply_generic_builder_value(
     span: Option<SourceSpan>,
 ) -> Result<(), InfrastructureFailure> {
     match value {
-        ValidatedConfigValue::String(text) => config.builder_settings.set_string(name, text, span),
-        ValidatedConfigValue::Bool(enabled) => {
-            config.builder_settings.set_bool(name, enabled, span)
+        ValidatedConfigValue::String(text) => {
+            config
+                .builder_settings
+                .set_string(section_name, name, text, span)
         }
-        ValidatedConfigValue::OptionNone => config.builder_settings.clear(&name),
+        ValidatedConfigValue::Bool(enabled) => {
+            config
+                .builder_settings
+                .set_bool(section_name, name, enabled, span)
+        }
+        ValidatedConfigValue::OptionNone => config.builder_settings.clear(section_name, &name),
         _ => {
             return Err(InfrastructureFailure::internal(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,

@@ -5,6 +5,9 @@
 //! WHY: builders provide both binding-backed package metadata and source-backed package roots;
 //!      the compiler needs both during different stages.
 
+use crate::build_system::output::{
+    DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
+};
 use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
@@ -80,14 +83,51 @@ impl BuilderSurface {
 
     /// Validates the complete surface after the selected builder finishes registering.
     ///
-    /// WHAT: checks config schemas, then rejects a source-backed package and a binding-backed
-    /// package whose paths are equal or nest inside one another.
-    /// WHY: the two registries are separate, so neither can see a cross-kind overlap that would
-    /// make dependency resolution ambiguous.
+    /// WHAT: checks project-section storage compatibility and output ownership, then rejects
+    /// overlapping source-backed and binding-backed package paths.
+    /// WHY: definition errors must fail before authored config or project source is compiled.
     pub(crate) fn validate(&self) -> Result<(), BuilderSurfaceValidationError> {
         self.config_schemas
             .validate()
             .map_err(BuilderSurfaceValidationError::Infrastructure)?;
+        let sections = self.config_schemas.project_sections();
+        ensure_single_output_root_owner(sections).map_err(|error| {
+            BuilderSurfaceValidationError::InvalidDefinition(error.message.into())
+        })?;
+        // The generic project-section store holds flattened optional strings and bools.
+        // Entry and compiler-owned project schemas have different consumers and stay recursive.
+        for section in sections {
+            let schema = &section.schema;
+            let root = schema.node(schema.root());
+            if root.unknown_fields == UnknownFieldPolicy::Preserve {
+                return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                    "Builder section '{}' cannot preserve unknown fields in the settings store.",
+                    section.name
+                )));
+            }
+            for field_id in root.field_ids() {
+                let field = schema.field(*field_id);
+                let is_output =
+                    matches!(field.name.as_ref(), DEV_OUTPUT_FIELD | RELEASE_OUTPUT_FIELD);
+                // Output roots have shared string storage, not optional generic settings.
+                let mut shape = &field.shape;
+                if !is_output {
+                    while let ConfigFieldShape::Optional(inner) = shape {
+                        shape = inner;
+                    }
+                }
+                if !matches!(shape, ConfigFieldShape::String)
+                    && (is_output || !matches!(shape, ConfigFieldShape::Bool))
+                {
+                    return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                        "Builder section '{}' field '{}' has an unstorable shape: {}.",
+                        section.name,
+                        field.name,
+                        field.shape.describe()
+                    )));
+                }
+            }
+        }
         let binding_paths = self
             .binding_packages
             .package_paths()

@@ -46,7 +46,7 @@ pub(crate) fn parse_html_document_config(
 
     Ok(HtmlDocumentConfig {
         lang: parse_required_string(
-            section.string("html_lang"),
+            section.string("html", "html_lang"),
             "html_lang",
             "en",
             true,
@@ -54,7 +54,7 @@ pub(crate) fn parse_html_document_config(
             string_table,
         )?,
         title_prefix: parse_required_string(
-            section.string("html_title_prefix"),
+            section.string("html", "html_title_prefix"),
             "html_title_prefix",
             "",
             false,
@@ -62,7 +62,7 @@ pub(crate) fn parse_html_document_config(
             string_table,
         )?,
         title_postfix: parse_required_string(
-            section.string("html_title_postfix"),
+            section.string("html", "html_title_postfix"),
             "html_title_postfix",
             "",
             false,
@@ -70,17 +70,19 @@ pub(crate) fn parse_html_document_config(
             string_table,
         )?,
         favicon: parse_optional_string(
-            section.string("html_favicon"),
+            section.string("html", "html_favicon"),
             "html_favicon",
             config,
             string_table,
         )?,
-        inject_charset: section.bool("html_inject_charset").unwrap_or(true),
-        inject_viewport: section.bool("html_inject_viewport").unwrap_or(true),
-        inject_color_scheme: section.bool("html_inject_color_scheme").unwrap_or(true),
-        inject_core_css: section.bool("html_inject_core_css").unwrap_or(true),
+        inject_charset: section.bool("html", "html_inject_charset").unwrap_or(true),
+        inject_viewport: section.bool("html", "html_inject_viewport").unwrap_or(true),
+        inject_color_scheme: section
+            .bool("html", "html_inject_color_scheme")
+            .unwrap_or(true),
+        inject_core_css: section.bool("html", "html_inject_core_css").unwrap_or(true),
         body_style: parse_required_string(
-            section.string("html_body_style"),
+            section.string("html", "html_body_style"),
             "html_body_style",
             "",
             false,
@@ -132,7 +134,12 @@ fn config_empty_error(
     string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     config
-        .builder_config_diagnostic(key, InvalidConfigReason::EmptyProjectSetting, string_table)
+        .builder_config_diagnostic(
+            "html",
+            key,
+            InvalidConfigReason::EmptyProjectSetting,
+            string_table,
+        )
         .into()
 }
 

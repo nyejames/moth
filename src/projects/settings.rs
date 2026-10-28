@@ -78,64 +78,89 @@ pub(crate) struct ProjectMetadataField {
     pub span: Option<SourceSpan>,
 }
 
-/// Values authored by the active builder's configuration section, keyed by field name.
-///
-/// WHAT: holds the string and bool values a builder section validated for fields that no typed
-/// `Config` field owns. A name holds at most one value, and a `none` value removes it.
-/// WHY: builders register their section fields at run time, so the compiler has no typed field
-/// for each one. A keyed store lets each builder read its own settings by the names it registered.
+/// Generic builder values are keyed by section and field, independently of project settings.
+/// A `none` value removes only the field in its own section.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BuilderSettings {
-    strings: BTreeMap<String, (String, Option<SourceSpan>)>,
-    bools: BTreeMap<String, (bool, Option<SourceSpan>)>,
+    strings: BTreeMap<String, BTreeMap<String, (String, Option<SourceSpan>)>>,
+    bools: BTreeMap<String, BTreeMap<String, (bool, Option<SourceSpan>)>>,
 }
 
 impl BuilderSettings {
-    /// Return the string value stored under a field name, if the section authored one.
-    pub fn string(&self, name: &str) -> Option<&str> {
-        self.strings.get(name).map(|(value, _)| value.as_str())
+    /// Return a string from the named builder section.
+    pub fn string(&self, section: &str, name: &str) -> Option<&str> {
+        self.strings
+            .get(section)?
+            .get(name)
+            .map(|(value, _)| value.as_str())
     }
 
-    /// Return the bool value stored under a field name, if the section authored one.
-    pub fn bool(&self, name: &str) -> Option<bool> {
-        self.bools.get(name).map(|(value, _)| *value)
+    /// Return a bool from the named builder section.
+    pub fn bool(&self, section: &str, name: &str) -> Option<bool> {
+        self.bools.get(section)?.get(name).map(|(value, _)| *value)
     }
 
-    /// Store a string value under a field name, replacing any bool value stored there.
+    /// Store a string, replacing any bool at the same section and field.
     pub(crate) fn set_string(
         &mut self,
+        section: &str,
         name: impl Into<String>,
         value: String,
         span: Option<SourceSpan>,
     ) {
         let name = name.into();
-        self.bools.remove(&name);
-        self.strings.insert(name, (value, span));
+        if let Some(fields) = self.bools.get_mut(section) {
+            fields.remove(&name);
+        }
+        if let Some(fields) = self.strings.get_mut(section) {
+            fields.insert(name, (value, span));
+        } else {
+            self.strings
+                .insert(section.to_owned(), BTreeMap::from([(name, (value, span))]));
+        }
     }
 
-    /// Store a bool value under a field name, replacing any string value stored there.
+    /// Store a bool, replacing any string at the same section and field.
     pub(crate) fn set_bool(
         &mut self,
+        section: &str,
         name: impl Into<String>,
         value: bool,
         span: Option<SourceSpan>,
     ) {
         let name = name.into();
-        self.strings.remove(&name);
-        self.bools.insert(name, (value, span));
+        if let Some(fields) = self.strings.get_mut(section) {
+            fields.remove(&name);
+        }
+        if let Some(fields) = self.bools.get_mut(section) {
+            fields.insert(name, (value, span));
+        } else {
+            self.bools
+                .insert(section.to_owned(), BTreeMap::from([(name, (value, span))]));
+        }
     }
 
-    /// Remove whichever value is stored under a field name.
-    pub(crate) fn clear(&mut self, name: &str) {
-        self.strings.remove(name);
-        self.bools.remove(name);
+    /// Remove a value only from the named builder section.
+    pub(crate) fn clear(&mut self, section: &str, name: &str) {
+        if let Some(fields) = self.strings.get_mut(section) {
+            fields.remove(name);
+        }
+        if let Some(fields) = self.bools.get_mut(section) {
+            fields.remove(name);
+        }
     }
 
-    fn setting_span(&self, name: &str) -> Option<SourceSpan> {
+    fn setting_span(&self, section: &str, name: &str) -> Option<SourceSpan> {
         self.strings
-            .get(name)
+            .get(section)
+            .and_then(|fields| fields.get(name))
             .and_then(|(_, span)| *span)
-            .or_else(|| self.bools.get(name).and_then(|(_, span)| *span))
+            .or_else(|| {
+                self.bools
+                    .get(section)
+                    .and_then(|fields| fields.get(name))
+                    .and_then(|(_, span)| *span)
+            })
     }
 }
 
@@ -161,7 +186,7 @@ pub struct Config {
 
     /// Output roots the active builder section authored, with `None` where it set none.
     pub(crate) output_roots: OutputRootSettings,
-    /// Builder section values for fields no typed `Config` field owns, keyed by field name.
+    /// Builder section values for fields no typed `Config` field owns, keyed by section and field.
     pub(crate) builder_settings: BuilderSettings,
 
     /// Additional open `project` fields retained for later `@project` publication.
@@ -208,7 +233,7 @@ impl Config {
     }
 
     /// Return the exact authored span for a project-level config key, if retained source provides
-    /// one. Builder section spans remain in their separate name-keyed store.
+    /// one. Builder section spans remain in their separate section-and-field-keyed store.
     pub(crate) fn setting_span(&self, key: &str) -> Option<SourceSpan> {
         self.setting_spans.get(key).copied()
     }
@@ -228,10 +253,10 @@ impl Config {
 
     /// Build a typed project-config diagnostic for a generic builder field.
     ///
-    /// Builder fields use a separate name-keyed span store from project-level config keys, which
-    /// may share the same field name.
+    /// Builder field spans are scoped by section, independently of project-level config keys.
     pub(crate) fn builder_config_diagnostic(
         &self,
+        section: &str,
         key: &str,
         reason: InvalidConfigReason,
         string_table: &mut DiagnosticStringBuilder,
@@ -240,7 +265,7 @@ impl Config {
         project_config::invalid_config_reason(
             Some(key_id),
             reason,
-            self.builder_settings.setting_span(key),
+            self.builder_settings.setting_span(section, key),
         )
     }
 

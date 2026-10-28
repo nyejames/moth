@@ -48,7 +48,7 @@ pub fn parse_html_site_config(
     let page_url_style = parse_page_url_style(config, string_table)?;
     let redirect_index_html = config
         .builder_settings
-        .bool("redirect_index_html")
+        .bool("html", "redirect_index_html")
         .unwrap_or(true);
 
     Ok(HtmlSiteConfig {
@@ -62,7 +62,7 @@ fn parse_origin(
     config: &Config,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<String, ProjectConfigError> {
-    let Some(raw_value) = config.builder_settings.string("origin") else {
+    let Some(raw_value) = config.builder_settings.string("html", "origin") else {
         return Ok(String::from("/"));
     };
 
@@ -127,7 +127,7 @@ fn parse_page_url_style(
     config: &Config,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<PageUrlStyle, ProjectConfigError> {
-    let Some(raw_value) = config.builder_settings.string("page_url_style") else {
+    let Some(raw_value) = config.builder_settings.string("html", "page_url_style") else {
         return Ok(PageUrlStyle::TrailingSlash);
     };
 
@@ -151,7 +151,12 @@ fn config_empty_error(
     string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     config
-        .builder_config_diagnostic(key, InvalidConfigReason::EmptyProjectSetting, string_table)
+        .builder_config_diagnostic(
+            "html",
+            key,
+            InvalidConfigReason::EmptyProjectSetting,
+            string_table,
+        )
         .into()
 }
 
@@ -168,6 +173,7 @@ fn config_value_error(
     let expected = string_table.intern(expected);
     config
         .builder_config_diagnostic(
+            "html",
             key,
             InvalidConfigReason::InvalidProjectSettingValue { value, expected },
             string_table,

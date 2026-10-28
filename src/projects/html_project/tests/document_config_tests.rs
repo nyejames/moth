@@ -64,31 +64,34 @@ fn parser_accepts_valid_overrides() {
     let mut config = project_config();
     config
         .builder_settings
-        .set_string("html_lang", String::from("en-GB"), None);
+        .set_string("html", "html_lang", String::from("en-GB"), None);
     config
         .builder_settings
-        .set_string("html_title_prefix", String::from("Docs | "), None);
+        .set_string("html", "html_title_prefix", String::from("Docs | "), None);
     config
         .builder_settings
-        .set_string("html_title_postfix", String::from(" | Moth"), None);
+        .set_string("html", "html_title_postfix", String::from(" | Moth"), None);
+    config.builder_settings.set_string(
+        "html",
+        "html_favicon",
+        String::from("/assets/favicon.ico"),
+        None,
+    );
     config
         .builder_settings
-        .set_string("html_favicon", String::from("/assets/favicon.ico"), None);
+        .set_bool("html", "html_inject_charset", false, None);
     config
         .builder_settings
-        .set_bool("html_inject_charset", false, None);
+        .set_bool("html", "html_inject_viewport", false, None);
     config
         .builder_settings
-        .set_bool("html_inject_viewport", false, None);
+        .set_bool("html", "html_inject_color_scheme", false, None);
     config
         .builder_settings
-        .set_bool("html_inject_color_scheme", false, None);
+        .set_bool("html", "html_inject_core_css", false, None);
     config
         .builder_settings
-        .set_bool("html_inject_core_css", false, None);
-    config
-        .builder_settings
-        .set_string("html_body_style", String::from("margin: 0;"), None);
+        .set_string("html", "html_body_style", String::from("margin: 0;"), None);
 
     let mut string_table = StringTable::new();
     let parsed = parse_html_document_config(&config, &mut string_table)
@@ -109,7 +112,7 @@ fn parser_rejects_empty_lang() {
     let mut config = project_config();
     config
         .builder_settings
-        .set_string("html_lang", String::new(), None);
+        .set_string("html", "html_lang", String::new(), None);
 
     let mut string_table = StringTable::new();
     let error =
@@ -135,7 +138,7 @@ fn parser_uses_precise_span_from_setting_spans() {
     );
     config
         .builder_settings
-        .set_string("html_lang", String::new(), Some(precise_span));
+        .set_string("html", "html_lang", String::new(), Some(precise_span));
 
     let error = parse_html_document_config(&config, &mut string_table)
         .expect_err("invalid lang should fail");
@@ -147,7 +150,7 @@ fn parser_falls_back_to_spanless_config_file() {
     let mut config = project_config();
     config
         .builder_settings
-        .set_string("html_lang", String::new(), None);
+        .set_string("html", "html_lang", String::new(), None);
 
     // Synthetic builder values have no authored source span.
 

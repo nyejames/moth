@@ -67,11 +67,11 @@ fn parses_config_constant_declarations() {
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.version, Some("1.2.3".to_owned()));
     assert_eq!(
-        config.builder_settings.string("page_url_style"),
+        config.builder_settings.string("html", "page_url_style"),
         Some("trailing_slash")
     );
     assert_eq!(
-        config.builder_settings.bool("redirect_index_html"),
+        config.builder_settings.bool("html", "redirect_index_html"),
         Some(true)
     );
     assert_eq!(
@@ -1102,11 +1102,11 @@ fn accepts_valid_bool_config_keys() {
         .expect("valid boolean config values should parse");
 
     assert_eq!(
-        config.builder_settings.bool("redirect_index_html"),
+        config.builder_settings.bool("html", "redirect_index_html"),
         Some(false)
     );
     assert_eq!(
-        config.builder_settings.bool("html_inject_core_css"),
+        config.builder_settings.bool("html", "html_inject_core_css"),
         Some(true)
     );
 }

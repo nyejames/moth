@@ -10,6 +10,10 @@ use super::super::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, NamedConfigSectionSchema,
     ProjectFieldConfigPolicy, UnknownFieldPolicy,
 };
+use crate::build_system::build::BackendBuilder;
+use crate::builder_surface::definition::BuilderSurfaceValidationError;
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
+use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
@@ -526,4 +530,141 @@ fn scalar_defaults_require_the_declared_exact_type() {
             "default {value:?} must match {declared:?} exactly"
         );
     }
+}
+
+fn surface_with_section(mut schema: ConfigSchema) -> BuilderSurface {
+    schema
+        .validate_and_freeze()
+        .expect("valid recursive schema");
+    let mut surface = BuilderSurface::with_mandatory_core();
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "builder".into(),
+            schema,
+            required: false,
+        });
+    surface
+}
+
+#[test]
+fn surface_rejects_unstorable_project_section_shapes() {
+    let mut record_schema = ConfigSchema::new("builder", UnknownFieldPolicy::Reject);
+    let nested = record_schema
+        .add_node("nested", UnknownFieldPolicy::Preserve)
+        .unwrap();
+    record_schema
+        .register_field(
+            record_schema.root(),
+            ConfigSchemaField::record("value", nested),
+        )
+        .unwrap();
+
+    let mut schemas = vec![record_schema];
+    for field in [
+        ConfigSchemaField::fixed_scalar("value", FixedScalar::I32),
+        ConfigSchemaField::fixed_scalar("value", FixedScalar::I32).default(
+            PublicFoldedValue::FixedScalar(FixedScalarValue::signed(FixedScalar::I32, 1).unwrap()),
+        ),
+        ConfigSchemaField::char("value"),
+        ConfigSchemaField::string_collection("value"),
+        ConfigSchemaField::optional("value", ConfigFieldShape::FixedScalar(FixedScalar::I32))
+            .default(PublicFoldedValue::OptionNone),
+        ConfigSchemaField::bool("dev_output"),
+        ConfigSchemaField::optional("release_output", ConfigFieldShape::String),
+    ] {
+        let mut schema = ConfigSchema::new("builder", UnknownFieldPolicy::Reject);
+        schema.register_field(schema.root(), field).unwrap();
+        schemas.push(schema);
+    }
+    schemas.push(ConfigSchema::new("builder", UnknownFieldPolicy::Preserve));
+
+    for schema in schemas {
+        let error = surface_with_section(schema)
+            .validate()
+            .expect_err("unsupported schema");
+        assert!(
+            matches!(error, BuilderSurfaceValidationError::InvalidDefinition(_)),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn surface_rejects_multiple_output_root_owners() {
+    let mut first = ConfigSchema::new("first", UnknownFieldPolicy::Reject);
+    first
+        .register_field(first.root(), ConfigSchemaField::string("dev_output"))
+        .unwrap();
+    let mut surface = surface_with_section(first);
+    let mut second = ConfigSchema::new("second", UnknownFieldPolicy::Reject);
+    second
+        .register_field(second.root(), ConfigSchemaField::string("release_output"))
+        .unwrap();
+    second.validate_and_freeze().unwrap();
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "other".into(),
+            schema: second,
+            required: false,
+        });
+    let error = surface.validate().expect_err("output roots have one owner");
+    assert!(
+        matches!(error, BuilderSurfaceValidationError::InvalidDefinition(_)),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn surface_accepts_storable_sections_and_rich_entry_schemas() {
+    let mut first = ConfigSchema::new("first", UnknownFieldPolicy::Reject);
+    first
+        .register_field(first.root(), ConfigSchemaField::string("dev_output"))
+        .unwrap();
+    first
+        .register_field(
+            first.root(),
+            ConfigSchemaField::optional(
+                "value",
+                ConfigFieldShape::Optional(Box::new(ConfigFieldShape::String)),
+            ),
+        )
+        .unwrap();
+    let mut surface = surface_with_section(first);
+    let mut second = ConfigSchema::new("second", UnknownFieldPolicy::Reject);
+    second
+        .register_field(second.root(), ConfigSchemaField::bool("value"))
+        .unwrap();
+    second
+        .register_field(
+            second.root(),
+            ConfigSchemaField::optional("enabled", ConfigFieldShape::Bool),
+        )
+        .unwrap();
+    second.validate_and_freeze().unwrap();
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "other".into(),
+            schema: second,
+            required: false,
+        });
+    let mut entry = ConfigSchema::new("entry", UnknownFieldPolicy::Preserve);
+    entry
+        .register_field(entry.root(), ConfigSchemaField::string_collection("values"))
+        .unwrap();
+    entry.validate_and_freeze().unwrap();
+    surface
+        .config_schemas
+        .register_entry_section(NamedConfigSectionSchema {
+            name: "entry".into(),
+            schema: entry,
+            required: false,
+        });
+    surface.validate().expect("supported section shapes");
+    HtmlProjectBuilder::new()
+        .frontend_surface()
+        .validate()
+        .expect("HTML surface remains valid");
 }

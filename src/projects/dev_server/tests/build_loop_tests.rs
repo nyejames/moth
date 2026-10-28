@@ -227,6 +227,7 @@ fn successful_build_with_warnings(build_result: BuildResult) -> CompilationOutco
 fn html_build_result_with_invalid_page_url_style() -> BuildResult {
     let mut build_result = html_build_result();
     build_result.config.builder_settings.set_string(
+        "html",
         "page_url_style",
         String::from("bad_style"),
         None,
@@ -647,6 +648,7 @@ fn invalid_site_config_failure_drops_success_warnings() {
 
     let mut build_result = html_build_result_with_warning();
     build_result.config.builder_settings.set_string(
+        "html",
         "page_url_style",
         String::from("bad_style"),
         None,
