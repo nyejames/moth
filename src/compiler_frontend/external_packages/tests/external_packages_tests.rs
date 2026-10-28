@@ -11,10 +11,10 @@ use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstEvalOp,
     ExternalConstantDef, ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue,
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias,
-    ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalReturnAlias,
-    ExternalReturnSlot, ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId,
-    ExternalSymbolPath, ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID,
-    TextConstEvalOp, external_success_returns,
+    ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError,
+    ExternalReturnAlias, ExternalReturnSlot, ExternalSignatureType, ExternalSymbolCategory,
+    ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
+    IO_INPUT_EXTERNAL_TYPE_ID, TextConstEvalOp, external_success_returns,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -180,13 +180,6 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
             name: "ProjectLocal origin",
             package_path: "@test/constant-eval",
             origin: PackageOrigin::ProjectLocal,
-            signature_change: SignatureChange::None,
-            accepted: false,
-        },
-        Scenario {
-            name: "Core-looking path with Builder origin",
-            package_path: "@core/fake",
-            origin: PackageOrigin::Builder,
             signature_change: SignatureChange::None,
             accepted: false,
         },
@@ -365,17 +358,180 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
     }
 }
 
+/// Unwraps a registry rejection that must be a Lappet-validated invalid definition.
+///
+/// WHAT: returns the diagnostic text carried by `ExternalRegistrationError::InvalidDefinition`.
+/// WHY: Lappet's own package path, signature slot, and symbol path rules must surface as
+/// diagnostics rather than compiler bugs; an infrastructure failure here fails the test.
+fn invalid_definition_message(error: ExternalRegistrationError) -> String {
+    match error {
+        ExternalRegistrationError::InvalidDefinition(message) => message,
+        ExternalRegistrationError::Infrastructure(failure) => {
+            panic!("expected an invalid definition, got an infrastructure failure: {failure:?}")
+        }
+    }
+}
+
+/// Unwraps a registry rejection that must be an infrastructure failure.
+///
+/// WHAT: returns the message of the `InfrastructureFailure` carried by
+/// `ExternalRegistrationError::Infrastructure`.
+/// WHY: collisions, occupied symbol slots, and identity reuse keep main's internal failure lane, so
+/// they must not surface as user-authored invalid definitions.
+fn infrastructure_message(error: ExternalRegistrationError) -> String {
+    match error {
+        ExternalRegistrationError::Infrastructure(failure) => failure.message().to_owned(),
+        ExternalRegistrationError::InvalidDefinition(message) => {
+            panic!("expected an infrastructure failure, got an invalid definition: {message}")
+        }
+    }
+}
+
 #[test]
 fn register_package_rejects_reserved_project_namespace() {
     let mut registry = ExternalPackageRegistry::new();
-    for path in ["@project", "@project/details", "project"] {
+    for path in ["@project", "@project/details"] {
         let error = registry
             .register_package(path, crate::builder_surface::PackageOrigin::Builder)
             .expect_err("binding packages must not claim the @project namespace");
+        let message = infrastructure_message(error);
         assert!(
-            error
-                .message
-                .contains("reserved for the @project project-globals interface")
+            message.contains("reserved for the @project project-globals interface"),
+            "{message}"
+        );
+    }
+
+    // Case-folded spellings fail Lappet's package path validation rather than the exact
+    // reservation, so they keep the user-facing invalid definition lane.
+    let error = registry
+        .register_package("@Project", crate::builder_surface::PackageOrigin::Builder)
+        .expect_err("case-folded @project must not claim the reserved namespace");
+    let message = invalid_definition_message(error);
+    assert!(
+        message.contains("reserved for the @project project-globals interface"),
+        "{message}"
+    );
+}
+
+#[test]
+fn register_package_reserves_core_namespace_for_core_origin() {
+    let mut registry = ExternalPackageRegistry::new();
+    for (path, origin) in [
+        ("@core/extra", PackageOrigin::Builder),
+        ("@core", PackageOrigin::ProjectLocal),
+        ("@Core/extra", PackageOrigin::Builder),
+    ] {
+        registry
+            .register_package(path, origin)
+            .expect_err(&format!("only Core origin may claim {path}"));
+    }
+    registry
+        .register_package("@core/extra", PackageOrigin::Core)
+        .expect("Core origin owns @core paths");
+}
+
+#[test]
+fn register_package_rejects_malformed_paths() {
+    let mut registry = ExternalPackageRegistry::new();
+    for path in ["@", "@game//ui", "@game/", "@game#ui", "game"] {
+        registry
+            .register_package(path, PackageOrigin::Builder)
+            .expect_err(&format!("malformed package path {path:?} must be rejected"));
+    }
+}
+
+#[test]
+fn register_package_rejects_duplicate_without_consuming_package_id() {
+    let mut registry = ExternalPackageRegistry::new();
+    let first = registry
+        .register_package("@test/atomic", PackageOrigin::Builder)
+        .expect("first package should register");
+    for path in ["@test/atomic", "@TEST/ATOMIC"] {
+        let duplicate = registry
+            .register_package(path, PackageOrigin::Builder)
+            .expect_err("an exact or case-only duplicate package path must be rejected");
+        assert!(matches!(
+            duplicate,
+            ExternalRegistrationError::Infrastructure(_)
+        ));
+    }
+    assert_eq!(registry.resolve_package_id("@test/atomic"), Some(first));
+    assert_eq!(registry.resolve_package_id("@TEST/ATOMIC"), None);
+
+    let next = registry
+        .register_package("@test/after", PackageOrigin::Builder)
+        .expect("a valid package after a rejected duplicate should register");
+    assert_eq!(next.0, first.0 + 1);
+}
+
+#[test]
+fn register_function_rejects_slots_without_a_moth_value() {
+    let shared = |language_type: ExternalSignatureType| ExternalParameter {
+        language_type,
+        access_kind: ExternalAccessKind::Shared,
+    };
+    let with_signature = |parameters: Vec<ExternalParameter>, returns: Vec<ExternalReturnSlot>| {
+        ExternalFunctionDef {
+            name: "invalid".to_owned(),
+            parameters,
+            returns,
+            error_return_type: None,
+            const_eval: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        }
+    };
+    let invalid_signatures = [
+        with_signature(
+            vec![shared(ExternalSignatureType::BuiltinError)],
+            Vec::new(),
+        ),
+        with_signature(vec![shared(ExternalAbiType::Void.into())], Vec::new()),
+        with_signature(
+            Vec::new(),
+            vec![ExternalReturnSlot::fresh(ExternalAbiType::Void)],
+        ),
+        with_signature(
+            Vec::new(),
+            vec![ExternalReturnSlot::fresh(ExternalAbiType::Handle)],
+        ),
+        with_signature(
+            Vec::new(),
+            vec![ExternalReturnSlot::fresh(
+                ExternalSignatureType::BuiltinError,
+            )],
+        ),
+        with_signature(
+            vec![shared(ExternalAbiType::Utf8Str.into())],
+            vec![ExternalReturnSlot::alias_args(
+                ExternalAbiType::Utf8Str,
+                vec![1],
+            )],
+        ),
+    ];
+
+    for function in invalid_signatures {
+        let mut registry = ExternalPackageRegistry::new();
+        let package_id = registry
+            .register_package("@test/signature", PackageOrigin::Builder)
+            .expect("test package should register");
+        let error = registry
+            .register_function_at_path(
+                package_id,
+                ExternalSymbolPath::from_components(vec!["invalid".to_owned()]),
+                ExternalFunctionId::Synthetic(0),
+                function.clone(),
+            )
+            .expect_err(&format!("signature should be rejected: {function:?}"));
+        let message = invalid_definition_message(error);
+        assert!(
+            message.contains("in package '@test/signature'"),
+            "{message}"
+        );
+        assert!(
+            registry
+                .resolve_package_function("@test/signature", "invalid")
+                .is_none(),
+            "a rejected registration must not publish a function"
         );
     }
 }
@@ -729,7 +885,7 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
         let data_type = (*data_type).clone();
         let value = *value;
         let path = ExternalSymbolPath::from_single(name);
-        registry
+        let error = registry
             .register_constant_at_path(
                 package_id,
                 path.clone(),
@@ -741,6 +897,8 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
                 },
             )
             .expect_err("a numeric payload must match its declared semantic type");
+        let message = infrastructure_message(error);
+        assert!(message.contains("declares semantic type"), "{message}");
 
         assert!(
             registry
@@ -1954,7 +2112,7 @@ fn duplicate_type_registration_remains_infrastructure_failure() {
         },
     );
     assert!(
-        second.is_err(),
+        matches!(second, Err(ExternalRegistrationError::Infrastructure(_))),
         "duplicate type registration at the same path must remain an InfrastructureFailure"
     );
 }
@@ -2001,7 +2159,7 @@ fn duplicate_external_type_id_at_distinct_path_is_rejected_and_preserves_origina
         },
     );
     assert!(
-        duplicate.is_err(),
+        matches!(duplicate, Err(ExternalRegistrationError::Infrastructure(_))),
         "reusing an ExternalTypeId at a second path must be an InfrastructureFailure"
     );
 
@@ -2062,7 +2220,7 @@ fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
         },
     );
     assert!(
-        duplicate.is_err(),
+        matches!(duplicate, Err(ExternalRegistrationError::Infrastructure(_))),
         "reusing an ExternalTypeId in a second package must be an InfrastructureFailure"
     );
 

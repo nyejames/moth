@@ -18,9 +18,10 @@ use moth::projects::{BoracleDump, BoracleExperiment, BoracleRuleSelection};
 use moth::projects::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
     BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError,
-    CompilationOutcome, CompilationResult, Flag, HtmlProjectBuilder, InfrastructureFailure,
-    ProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus, print_compilation_result,
-    print_diagnostic_reports, print_infrastructure_errors, print_terse_compilation_result,
+    BuilderSelection, CompilationOutcome, CompilationResult, Flag, HtmlProjectBuilder,
+    InfrastructureFailure, ProjectCommandCompletion, ProjectCommandStatus,
+    print_compilation_result, print_diagnostic_reports, print_infrastructure_errors,
+    print_terse_compilation_result,
 };
 use saying::say;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -351,7 +352,7 @@ pub fn start_cli() -> process::ExitCode {
                         say!("\nStarting dev server...");
                         let options = options.with_inputs(inputs);
                         match dev_server::run_dev_server(
-                            || ProjectBuilder::new(HtmlProjectBuilder::new()),
+                            || BuilderSelection::new(HtmlProjectBuilder::new()),
                             &path,
                             &flags,
                             options,
@@ -421,10 +422,10 @@ fn run_build_command(request: CliBuildRequest) -> CommandStatus {
             );
         };
         let (completion, report) = {
-            let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+            let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
             let mut report = None;
             let completion = run_build_service(
-                &project_builder,
+                &builder_selection,
                 entry_path,
                 &request.flags,
                 &request.build_config_inputs,
@@ -467,12 +468,12 @@ fn run_check_command(request: CliCheckRequest, terse: bool) -> CommandStatus {
             );
         };
         let (completion, report) = {
-            let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+            let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
             let mut report = None;
             let completion = run_check_service(
                 path,
                 &request.build_config_inputs,
-                &project_builder,
+                &builder_selection,
                 |final_report| report = Some(final_report),
             );
             (

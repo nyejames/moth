@@ -36,7 +36,7 @@ impl Default for HtmlSiteConfig {
     }
 }
 
-/// Parse and validate HTML site config keys from the typed html builder section.
+/// Parse and validate HTML site config keys from the generic builder settings.
 ///
 /// WHAT: resolves defaults plus optional overrides authored on the grouped `html` section.
 /// WHY: site configuration must be explicit and strict so all runtime/build tooling stays aligned.
@@ -46,7 +46,10 @@ pub fn parse_html_site_config(
 ) -> Result<HtmlSiteConfig, ProjectConfigError> {
     let origin = parse_origin(config, string_table)?;
     let page_url_style = parse_page_url_style(config, string_table)?;
-    let redirect_index_html = config.html_section.redirect_index_html.unwrap_or(true);
+    let redirect_index_html = config
+        .builder_settings
+        .bool("html", "redirect_index_html")
+        .unwrap_or(true);
 
     Ok(HtmlSiteConfig {
         origin,
@@ -59,7 +62,7 @@ fn parse_origin(
     config: &Config,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<String, ProjectConfigError> {
-    let Some(raw_value) = config.html_section.origin.as_deref() else {
+    let Some(raw_value) = config.builder_settings.string("html", "origin") else {
         return Ok(String::from("/"));
     };
 
@@ -124,7 +127,7 @@ fn parse_page_url_style(
     config: &Config,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<PageUrlStyle, ProjectConfigError> {
-    let Some(raw_value) = config.html_section.page_url_style.as_deref() else {
+    let Some(raw_value) = config.builder_settings.string("html", "page_url_style") else {
         return Ok(PageUrlStyle::TrailingSlash);
     };
 
@@ -148,7 +151,12 @@ fn config_empty_error(
     string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     config
-        .config_diagnostic(key, InvalidConfigReason::EmptyProjectSetting, string_table)
+        .builder_config_diagnostic(
+            "html",
+            key,
+            InvalidConfigReason::EmptyProjectSetting,
+            string_table,
+        )
         .into()
 }
 
@@ -164,7 +172,8 @@ fn config_value_error(
     let value = string_table.intern(value);
     let expected = string_table.intern(expected);
     config
-        .config_diagnostic(
+        .builder_config_diagnostic(
+            "html",
             key,
             InvalidConfigReason::InvalidProjectSettingValue { value, expected },
             string_table,

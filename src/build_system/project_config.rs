@@ -15,7 +15,7 @@ use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::create_project_modules::source_loading::{
     SourceReadError, registered_source_read_error, retained_source_error,
 };
-use crate::build_system::output::ValidatedDirectoryOutputSettings;
+use crate::build_system::output::{OutputRootSettings, ValidatedDirectoryOutputSettings};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
@@ -40,7 +40,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::Config;
+use crate::projects::settings::{BuilderSettings, Config};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -183,13 +183,14 @@ pub(crate) fn compile_project_config_file(
     config.project_field_config_dependencies.clear();
     config.extra_project_fields.clear();
     config.setting_spans.clear();
-    config.html_section = crate::projects::settings::HtmlSectionConfig::default();
     let source_builder = project_source_builder.as_mut().ok_or_else(|| {
         PreparedFailure::from(InfrastructureFailure::internal(
             crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             "project config source database is absent",
         ))
     })?;
+    config.output_roots = OutputRootSettings::default();
+    config.builder_settings = BuilderSettings::default();
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         PreparedFailure::from(InfrastructureFailure::filesystem(
             crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,

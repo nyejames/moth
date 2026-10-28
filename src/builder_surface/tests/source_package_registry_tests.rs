@@ -5,22 +5,31 @@ use crate::builder_surface::{
     PackageMetadata, PackageOrigin, ProvidedSourceRoot, SourcePackageRegistry,
 };
 
+fn register(registry: &mut SourcePackageRegistry, prefix: &str, root: &str, origin: PackageOrigin) {
+    registry
+        .register_filesystem_root(prefix, std::path::PathBuf::from(root), origin)
+        .expect("test source root should register");
+}
+
 #[test]
 fn iter_returns_roots_in_canonical_prefix_order() {
     let mut registry = SourcePackageRegistry::new();
-    registry.register_filesystem_root(
+    register(
+        &mut registry,
         "zeta",
-        std::path::PathBuf::from("/lib/zeta"),
+        "/lib/zeta",
         PackageOrigin::ProjectLocal,
     );
-    registry.register_filesystem_root(
+    register(
+        &mut registry,
         "alpha",
-        std::path::PathBuf::from("/lib/alpha"),
+        "/lib/alpha",
         PackageOrigin::ProjectLocal,
     );
-    registry.register_filesystem_root(
+    register(
+        &mut registry,
         "middle",
-        std::path::PathBuf::from("/lib/middle"),
+        "/lib/middle",
         PackageOrigin::ProjectLocal,
     );
 
@@ -32,83 +41,81 @@ fn iter_returns_roots_in_canonical_prefix_order() {
 }
 
 #[test]
-fn merge_reports_collisions_in_canonical_prefix_order() {
-    let mut builder = SourcePackageRegistry::new();
-    builder.register_filesystem_root(
-        "zeta",
-        std::path::PathBuf::from("/builder/zeta"),
-        PackageOrigin::Builder,
-    );
-    builder.register_filesystem_root(
-        "alpha",
-        std::path::PathBuf::from("/builder/alpha"),
-        PackageOrigin::Builder,
-    );
+fn register_filesystem_root_rejects_duplicate_prefix_without_replacing_root() {
+    let mut registry = SourcePackageRegistry::new();
+    register(&mut registry, "ui", "/builder/ui", PackageOrigin::Builder);
 
-    let mut project_local = SourcePackageRegistry::new();
-    project_local.register_filesystem_root(
-        "zeta",
-        std::path::PathBuf::from("/local/zeta"),
-        PackageOrigin::ProjectLocal,
-    );
-    project_local.register_filesystem_root(
-        "beta",
-        std::path::PathBuf::from("/local/beta"),
-        PackageOrigin::ProjectLocal,
-    );
-    project_local.register_filesystem_root(
-        "alpha",
-        std::path::PathBuf::from("/local/alpha"),
-        PackageOrigin::ProjectLocal,
-    );
+    registry
+        .register_filesystem_root(
+            "ui",
+            std::path::PathBuf::from("/other/ui"),
+            PackageOrigin::Builder,
+        )
+        .expect_err("a second root for one prefix must not replace the first");
 
-    let mut merged = builder.clone();
-    let collisions = merged
-        .merge(&project_local)
-        .expect_err("overlapping prefixes should collide");
-
-    assert_eq!(collisions, vec!["alpha", "zeta"]);
+    let root = registry.get_root("ui").expect("first root should remain");
+    assert!(
+        matches!(&root.root, ProvidedSourceRoot::Filesystem(path) if path == std::path::Path::new("/builder/ui"))
+    );
 }
 
 #[test]
-fn merge_adds_non_overlapping_roots_in_canonical_order() {
-    let mut builder = SourcePackageRegistry::new();
-    builder.register_filesystem_root(
-        "html",
-        std::path::PathBuf::from("/builder/html"),
-        PackageOrigin::Builder,
-    );
+fn register_filesystem_root_rejects_case_only_duplicate_prefix() {
+    let mut registry = SourcePackageRegistry::new();
+    register(&mut registry, "ui", "/builder/ui", PackageOrigin::Builder);
 
-    let mut project_local = SourcePackageRegistry::new();
-    project_local.register_filesystem_root(
-        "widgets",
-        std::path::PathBuf::from("/lib/widgets"),
-        PackageOrigin::ProjectLocal,
-    );
-    project_local.register_filesystem_root(
-        "alpha",
-        std::path::PathBuf::from("/lib/alpha"),
-        PackageOrigin::ProjectLocal,
-    );
+    registry
+        .register_filesystem_root(
+            "UI",
+            std::path::PathBuf::from("/other/ui"),
+            PackageOrigin::Builder,
+        )
+        .expect_err("case-only variants of a registered prefix must be rejected");
+    assert!(!registry.has_prefix("UI"));
+}
 
-    let mut merged = builder.clone();
-    merged
-        .merge(&project_local)
-        .expect("non-overlapping prefixes should merge cleanly");
-
-    let prefixes: Vec<&str> = merged
-        .iter()
-        .map(|root| root.package_prefix.as_str())
-        .collect();
-    assert_eq!(prefixes, vec!["alpha", "html", "widgets"]);
+#[test]
+fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
+    let mut registry = SourcePackageRegistry::new();
+    for prefix in [
+        "project",
+        "Project",
+        "project/x",
+        "core",
+        "CORE",
+        "core/ui",
+        "ui/x",
+        "",
+        "ui//x",
+        "ui#x",
+    ] {
+        registry
+            .register_filesystem_root(
+                prefix,
+                std::path::PathBuf::from("/builder/x"),
+                PackageOrigin::Builder,
+            )
+            .expect_err(&format!(
+                "reserved or malformed source prefix {prefix:?} must be rejected"
+            ));
+    }
+    registry
+        .register_filesystem_root(
+            "project",
+            std::path::PathBuf::from("/project/package"),
+            PackageOrigin::ProjectLocal,
+        )
+        .expect_err("project-local source packages cannot claim project globals");
+    assert_eq!(registry.iter().count(), 0);
 }
 
 #[test]
 fn get_root_and_has_prefix_locate_registered_root() {
     let mut registry = SourcePackageRegistry::new();
-    registry.register_filesystem_root(
+    register(
+        &mut registry,
         "html",
-        std::path::PathBuf::from("/builder/html"),
+        "/builder/html",
         PackageOrigin::Builder,
     );
 
@@ -124,14 +131,16 @@ fn get_root_and_has_prefix_locate_registered_root() {
 #[test]
 fn source_registry_always_constructs_moth_source_metadata() {
     let mut registry = SourcePackageRegistry::new();
-    registry.register_filesystem_root(
+    register(
+        &mut registry,
         "html",
-        std::path::PathBuf::from("/builder/html"),
+        "/builder/html",
         PackageOrigin::Builder,
     );
-    registry.register_filesystem_root(
+    register(
+        &mut registry,
         "widgets",
-        std::path::PathBuf::from("/lib/widgets"),
+        "/lib/widgets",
         PackageOrigin::ProjectLocal,
     );
 

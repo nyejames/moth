@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
     NON_EXHAUSTIVE_MATCH, UNREACHABLE_MATCH_ARM,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    self, INVALID_EXTERNAL_MODULE, InvalidExternalModuleCode, InvalidExternalModuleView,
     MISSING_IMPORT_TARGET, UNUSED_IMPORT,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
@@ -41,12 +42,13 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticSeverity, InvalidCollectionTypeReason, InvalidConfigReason,
-    InvalidDeclarationReason, InvalidMapTypeReason, InvalidMultiBindReason,
-    InvalidOutputFolderReason, InvalidTypeAnnotationReason, NonExhaustiveMatchReason,
-    TypeAnnotationContext, UnsupportedBackendFeatureReason,
+    InvalidDeclarationReason, InvalidExternalModuleReason, InvalidMapTypeReason,
+    InvalidMultiBindReason, InvalidOutputFolderReason, InvalidTypeAnnotationReason,
+    NonExhaustiveMatchReason, TypeAnnotationContext, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::collections::HashSet;
 
 #[test]
@@ -184,6 +186,74 @@ fn multi_bind_reason_keys_remain_stable() {
             *expected_key
         );
     }
+}
+
+#[test]
+fn invalid_external_module_reason_codec_and_key_are_stable() {
+    let detail = StringId::from_index(7);
+    let cases = [
+        (
+            InvalidExternalModuleReason::ReceiverMethod { moth_name: detail },
+            Some(detail),
+        ),
+        (
+            InvalidExternalModuleReason::ParserDiagnostic {
+                parser_detail: detail,
+            },
+            Some(detail),
+        ),
+        (
+            InvalidExternalModuleReason::NonUtf8Source {
+                utf8_detail: detail,
+            },
+            Some(detail),
+        ),
+        (
+            InvalidExternalModuleReason::PathContainsPackageSeparator,
+            None,
+        ),
+    ];
+
+    assert_eq!(INVALID_EXTERNAL_MODULE.word_count(), 3);
+    for (reason, expected_detail) in cases {
+        let code = InvalidExternalModuleCode::of(&reason);
+        let (split_code, detail) = InvalidExternalModuleCode::split(&reason);
+        assert_eq!(split_code, code);
+        assert_eq!(detail, expected_detail);
+        assert_eq!(code.to_reason(detail), Some(reason));
+    }
+
+    let expected_key = "invalid_external_module.path_contains_package_separator";
+    let path_reason = InvalidExternalModuleReason::PathContainsPackageSeparator;
+    let path_code = InvalidExternalModuleCode::of(&path_reason);
+    assert_eq!(path_reason.stable_reason_key(), expected_key);
+    assert_eq!(path_code.stable_reason_key(), expected_key);
+    assert_eq!(
+        InvalidExternalModuleCode::ReceiverMethod.to_reason(None),
+        None
+    );
+    assert_eq!(
+        InvalidExternalModuleCode::PathContainsPackageSeparator.to_reason(Some(detail)),
+        None
+    );
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(imports::invalid_external_module(
+            PathId::ROOT,
+            path_reason,
+            None,
+        )),
+        None,
+    );
+    let view = compact
+        .first()
+        .expect("path-separator external-module draft compacts");
+    assert_eq!(view.descriptor().code, "MOTH-IMPORT-0022");
+    assert_eq!(view.reason_key(), Some(expected_key));
+    let facts = view
+        .family_view::<InvalidExternalModuleView>()
+        .expect("external-module reason facts remain typed");
+    assert_eq!(facts.reason_code, path_code);
+    assert_eq!(facts.reason_detail, None);
 }
 
 #[test]

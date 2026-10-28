@@ -12,6 +12,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 /// Dense identifier of one schema node (a record surface) inside a [`ConfigSchema`].
@@ -45,7 +46,7 @@ pub enum ProjectFieldConfigPolicy {
 /// Schema-derived grouped-project input policy passed to compiler config folding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFieldConfigPolicies {
-    by_name: std::collections::BTreeMap<&'static str, ProjectFieldConfigPolicy>,
+    by_name: std::collections::BTreeMap<Cow<'static, str>, ProjectFieldConfigPolicy>,
     /// Policy applied to project record fields that are not declared by the schema.
     unknown_policy: ProjectFieldConfigPolicy,
 }
@@ -67,7 +68,11 @@ impl ProjectFieldConfigPolicies {
             .unwrap_or(self.unknown_policy)
     }
 
-    pub(crate) fn insert(&mut self, field_name: &'static str, policy: ProjectFieldConfigPolicy) {
+    pub(crate) fn insert(
+        &mut self,
+        field_name: Cow<'static, str>,
+        policy: ProjectFieldConfigPolicy,
+    ) {
         self.by_name.insert(field_name, policy);
     }
 }
@@ -96,7 +101,7 @@ pub enum ConfigFieldShape {
 /// One field declared by a schema node.
 #[derive(Clone, Debug)]
 pub struct ConfigSchemaField {
-    pub name: &'static str,
+    pub name: Cow<'static, str>,
     pub shape: ConfigFieldShape,
     /// Closed string domain: string values must belong to this fixed set when present.
     pub allowed_strings: Option<&'static [&'static str]>,
@@ -141,7 +146,7 @@ pub struct ConfigSchema {
 ///      fact rather than "the schema happens to contain fields".
 #[derive(Clone, Debug)]
 pub struct NamedConfigSectionSchema {
-    pub name: &'static str,
+    pub name: Cow<'static, str>,
     pub schema: ConfigSchema,
     pub required: bool,
 }
@@ -213,7 +218,7 @@ fn validate_section_registry(
     registry: &str,
     sections: &[NamedConfigSectionSchema],
 ) -> Result<(), InfrastructureFailure> {
-    let mut names = HashSet::new();
+    let mut names: HashSet<&str> = HashSet::new();
     for section in sections {
         if !section.schema.is_frozen() {
             return Err(InfrastructureFailure::internal(
@@ -232,7 +237,7 @@ fn validate_section_registry(
             ));
         }
 
-        if !names.insert(section.name) {
+        if !names.insert(section.name.as_ref()) {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
                 format!(
@@ -338,7 +343,7 @@ impl ConfigSchema {
         };
         for field_id in self.node(self.root).field_ids() {
             let field = self.field(*field_id);
-            policies.insert(field.name, field.config_policy);
+            policies.insert(field.name.clone(), field.config_policy);
         }
         policies
     }
@@ -352,7 +357,7 @@ impl ConfigSchema {
         }
 
         for node in &self.nodes {
-            let mut seen_names = HashSet::new();
+            let mut seen_names: HashSet<&str> = HashSet::new();
             for field_id in &node.fields {
                 if field_id.0 >= self.fields.len() {
                     return Err(InfrastructureFailure::internal(
@@ -365,7 +370,7 @@ impl ConfigSchema {
                 }
 
                 let field = &self.fields[field_id.0];
-                if !seen_names.insert(field.name) {
+                if !seen_names.insert(field.name.as_ref()) {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
@@ -418,7 +423,7 @@ fn validate_schema_field(
         ));
     }
 
-    validate_shape_node_references(&field.shape, schema.nodes.len(), field.name)?;
+    validate_shape_node_references(&field.shape, schema.nodes.len(), field.name.as_ref())?;
 
     if let Some(default) = &field.default
         && !default_matches_shape(schema, default, &field.shape, field.allowed_strings)
@@ -450,7 +455,7 @@ fn shape_accepts_closed_strings(shape: &ConfigFieldShape) -> bool {
 fn validate_shape_node_references(
     shape: &ConfigFieldShape,
     node_count: usize,
-    field_name: &'static str,
+    field_name: &str,
 ) -> Result<(), InfrastructureFailure> {
     match shape {
         ConfigFieldShape::Record(node_id) => {
@@ -573,31 +578,34 @@ fn string_in_closed_domain(text: &str, allowed_strings: Option<&'static [&'stati
 }
 
 impl ConfigSchemaField {
-    pub fn string(name: &'static str) -> Self {
+    pub fn string(name: impl Into<Cow<'static, str>>) -> Self {
         Self::leaf(name, ConfigFieldShape::String)
     }
 
-    pub fn fixed_scalar(name: &'static str, scalar: FixedScalar) -> Self {
+    pub fn fixed_scalar(name: impl Into<Cow<'static, str>>, scalar: FixedScalar) -> Self {
         Self::leaf(name, ConfigFieldShape::FixedScalar(scalar))
     }
 
-    pub fn bool(name: &'static str) -> Self {
+    pub fn bool(name: impl Into<Cow<'static, str>>) -> Self {
         Self::leaf(name, ConfigFieldShape::Bool)
     }
 
-    pub fn char(name: &'static str) -> Self {
+    pub fn char(name: impl Into<Cow<'static, str>>) -> Self {
         Self::leaf(name, ConfigFieldShape::Char)
     }
 
     /// A string field whose values must belong to one closed set of allowed strings.
-    pub fn closed_string(name: &'static str, allowed: &'static [&'static str]) -> Self {
+    pub fn closed_string(
+        name: impl Into<Cow<'static, str>>,
+        allowed: &'static [&'static str],
+    ) -> Self {
         let mut field = Self::leaf(name, ConfigFieldShape::String);
         field.allowed_strings = Some(allowed);
         field
     }
 
     /// A collection of strings. A scalar string is not promoted to a one-element collection.
-    pub fn string_collection(name: &'static str) -> Self {
+    pub fn string_collection(name: impl Into<Cow<'static, str>>) -> Self {
         Self::leaf(
             name,
             ConfigFieldShape::Collection(Box::new(ConfigFieldShape::String)),
@@ -605,17 +613,17 @@ impl ConfigSchemaField {
     }
 
     /// A collection whose elements validate against `element`.
-    pub fn collection(name: &'static str, element: ConfigFieldShape) -> Self {
+    pub fn collection(name: impl Into<Cow<'static, str>>, element: ConfigFieldShape) -> Self {
         Self::leaf(name, ConfigFieldShape::Collection(Box::new(element)))
     }
 
     /// A record-valued field whose contents validate against the referenced node.
-    pub fn record(name: &'static str, node: ConfigSchemaNodeId) -> Self {
+    pub fn record(name: impl Into<Cow<'static, str>>, node: ConfigSchemaNodeId) -> Self {
         Self::leaf(name, ConfigFieldShape::Record(node))
     }
 
     /// An optional field: `none` is accepted and present values validate against the inner shape.
-    pub fn optional(name: &'static str, inner: ConfigFieldShape) -> Self {
+    pub fn optional(name: impl Into<Cow<'static, str>>, inner: ConfigFieldShape) -> Self {
         Self::leaf(name, ConfigFieldShape::Optional(Box::new(inner)))
     }
 
@@ -637,15 +645,15 @@ impl ConfigSchemaField {
     }
 
     /// A string field whose default spelling applies when an authored record omits it.
-    pub fn string_with_default(name: &'static str, default: &'static str) -> Self {
+    pub fn string_with_default(name: impl Into<Cow<'static, str>>, default: &str) -> Self {
         Self::leaf(name, ConfigFieldShape::String).default(PublicFoldedValue::String(
             OwnedFoldedString::Text(default.to_owned()),
         ))
     }
 
-    fn leaf(name: &'static str, shape: ConfigFieldShape) -> Self {
+    fn leaf(name: impl Into<Cow<'static, str>>, shape: ConfigFieldShape) -> Self {
         Self {
-            name,
+            name: name.into(),
             shape,
             allowed_strings: None,
             required: false,

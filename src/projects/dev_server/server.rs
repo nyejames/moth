@@ -3,7 +3,7 @@
 //! WHAT: validates CLI input, runs the initial dev build, starts the watcher/build loop,
 //! and serves HTTP/SSE traffic for hot reload.
 
-use crate::build_system::build::ProjectBuilder;
+use crate::build_system::build::BuilderSelection;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{
@@ -30,7 +30,7 @@ pub(crate) struct DevRuntimePaths {
 }
 
 pub fn run_dev_server(
-    builder_factory: impl Fn() -> ProjectBuilder + Send + Sync + 'static,
+    builder_factory: impl Fn() -> BuilderSelection + Send + Sync + 'static,
     entry_path: &str,
     flags: &[Flag],
     options: DevServerOptions,
@@ -47,7 +47,7 @@ pub fn run_dev_server(
 }
 
 fn run_dev_server_with_messages(
-    builder_factory: impl Fn() -> ProjectBuilder + Send + Sync + 'static,
+    builder_factory: impl Fn() -> BuilderSelection + Send + Sync + 'static,
     entry_path: &str,
     flags: &[Flag],
     options: DevServerOptions,

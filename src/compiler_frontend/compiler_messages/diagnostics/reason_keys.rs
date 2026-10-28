@@ -336,6 +336,7 @@ define_stable_reason_keys! {
         &InvalidExternalModuleCode::ReceiverMethod => "invalid_external_module.receiver_method",
         &InvalidExternalModuleCode::ParserDiagnostic => "invalid_external_module.parser_diagnostic",
         &InvalidExternalModuleCode::NonUtf8Source => "invalid_external_module.non_utf8_source",
+        &InvalidExternalModuleCode::PathContainsPackageSeparator => "invalid_external_module.path_contains_package_separator",
     },
 
 

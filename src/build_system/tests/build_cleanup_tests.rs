@@ -8,7 +8,7 @@ use crate::build_system::build::{FileKind, OutputFile};
 use crate::build_system::output::manifest::{
     BuildManifest, ManifestReadResult, ManifestRecoveryReason,
 };
-use crate::build_system::output::{BuilderKind, OutputOwner, WriteMode, WriteOptions};
+use crate::build_system::output::{BuilderIdentity, OutputOwner, WriteMode, WriteOptions};
 use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
@@ -41,13 +41,13 @@ fn assert_output_owner_conflict<T>(failure: &CompilationResult<T>) {
 
 fn html_owner(profile: BuildProfile) -> OutputOwner {
     OutputOwner {
-        builder: BuilderKind::Html,
+        builder: BuilderIdentity::html(),
         profile,
     }
 }
 
 fn read_html_manifest(root: &Path) -> ManifestReadResult {
-    read_build_manifest(root, &html_cleanup_policy())
+    read_build_manifest(root, &BuilderIdentity::html(), &html_cleanup_policy())
 }
 
 fn valid_manifest(paths: Vec<PathBuf>, profile: BuildProfile) -> ManifestReadResult {
@@ -312,7 +312,7 @@ fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
     write_build_manifest(
         &output_root.join(BUILD_MANIFEST_FILENAME),
         &manifest_paths,
-        html_owner(BuildProfile::Dev),
+        &html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
     )
@@ -389,7 +389,7 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
     write_build_manifest(
         &output_root.join(BUILD_MANIFEST_FILENAME),
         &manifest_paths,
-        html_owner(BuildProfile::Dev),
+        &html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
     )
@@ -984,17 +984,100 @@ fn read_build_manifest_rejects_malformed_v4_metadata() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    // An explicit v4 owner with an unknown builder is foreign ownership, not ownerless recovery.
-    write_v4_manifest_text(&root, "unknown", "dev", ".html,.js,.wasm", &["index.html"]);
+    // An explicit v4 owner whose builder is not a valid identity is foreign ownership, not
+    // ownerless recovery.
+    write_v4_manifest_text(
+        &root,
+        "not a builder",
+        "dev",
+        ".html,.js,.wasm",
+        &["index.html"],
+    );
 
     assert_eq!(
         read_html_manifest(&root),
         ManifestReadResult::ForeignOwner {
             reason: ManifestRecoveryReason::InvalidMetadata,
-            builder: "unknown".to_string(),
+            builder: "not a builder".to_string(),
             profile: "dev".to_string(),
         }
     );
+}
+
+#[test]
+fn truncated_manifest_recovers_only_for_its_own_builder() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let project_dir = root.join("project");
+    let output_root = project_dir.join("dev");
+    fs::create_dir_all(&output_root).expect("should create output root");
+    fs::write(output_root.join("index.html"), "foreign output")
+        .expect("should write existing output");
+    let write_without_profile = |builder: &str| {
+        fs::write(
+            output_root.join(BUILD_MANIFEST_FILENAME),
+            format!("# moth-manifest v4\n# builder: {builder}\n"),
+        )
+        .expect("should write truncated manifest");
+    };
+
+    // Another builder's truncated manifest stays foreign, so the active builder never adopts it.
+    write_without_profile("game");
+    let ManifestReadResult::ForeignOwner {
+        reason, builder, ..
+    } = read_html_manifest(&output_root)
+    else {
+        panic!("a truncated manifest owned by another builder must remain foreign");
+    };
+    assert_eq!(reason, ManifestRecoveryReason::InvalidMetadata);
+    assert_eq!(builder, "game");
+
+    let previous_output = fs::read(output_root.join("index.html")).expect("output should exist");
+    let previous_manifest =
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
+    let project = html_project(
+        vec![OutputFile::new(
+            PathBuf::from("index.html"),
+            FileKind::Html(String::from("<html>Replacement</html>")),
+        )],
+        Some(PathBuf::from("index.html")),
+    );
+    let failure = write_project_outputs(
+        &project,
+        &always_write_options(output_root.clone(), Some(project_dir.clone())),
+    );
+    assert_output_owner_conflict(&failure);
+    assert_eq!(
+        fs::read(output_root.join("index.html")).expect("output should remain"),
+        previous_output
+    );
+    assert_eq!(
+        fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should remain"),
+        previous_manifest
+    );
+
+    write_without_profile("html");
+    assert_eq!(
+        read_html_manifest(&output_root),
+        ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::InvalidMetadata,
+        }
+    );
+}
+
+#[test]
+fn read_build_manifest_keeps_another_builders_declared_identity() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    // Custom builders declare their own identity, so a well-formed owner reads as that builder's
+    // manifest. Cleanup preparation then rejects it as a different owner before any write.
+    write_v4_manifest_text(&root, "game", "dev", ".html,.js,.wasm", &["index.html"]);
+
+    let ManifestReadResult::Valid(manifest) = read_html_manifest(&root) else {
+        panic!("a well-formed custom builder owner should read as a valid manifest");
+    };
+    assert_eq!(manifest.owner.builder.as_str(), "game");
 }
 
 fn assert_foreign_manifest_owner_fails_without_mutation(builder: &str, profile: &str) {
@@ -1154,7 +1237,7 @@ fn write_build_manifest_produces_sorted_output() {
     write_build_manifest(
         &root.join(BUILD_MANIFEST_FILENAME),
         &paths,
-        html_owner(BuildProfile::Dev),
+        &html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
     )
@@ -1191,7 +1274,7 @@ fn manifest_paths_round_trip_leading_and_interior_spaces() {
     write_build_manifest(
         &root.join(BUILD_MANIFEST_FILENAME),
         &paths,
-        html_owner(BuildProfile::Dev),
+        &html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
     )
@@ -1515,7 +1598,7 @@ fn builder_owner_conflict_fails_without_mutation() {
             output_root: output_root.clone(),
             project_root: Some(project_dir.clone()),
             owner: OutputOwner {
-                builder: BuilderKind::Test,
+                builder: BuilderIdentity::test(),
                 profile: BuildProfile::Dev,
             },
         }),
@@ -1561,8 +1644,8 @@ fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
     write_build_manifest(
         &root.join(BUILD_MANIFEST_FILENAME),
         &paths,
-        OutputOwner {
-            builder: BuilderKind::Test,
+        &OutputOwner {
+            builder: BuilderIdentity::test(),
             profile: BuildProfile::Dev,
         },
         &generic_policy,
@@ -1570,12 +1653,12 @@ fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
     )
     .expect("should write manifest");
 
-    let manifest = read_build_manifest(&root, &generic_policy);
+    let manifest = read_build_manifest(&root, &BuilderIdentity::test(), &generic_policy);
     assert_eq!(
         manifest,
         ManifestReadResult::Valid(BuildManifest {
             owner: OutputOwner {
-                builder: BuilderKind::Test,
+                builder: BuilderIdentity::test(),
                 profile: BuildProfile::Dev,
             },
             managed_extensions: [".html"].into_iter().map(String::from).collect(),
@@ -1597,7 +1680,7 @@ fn v3_manifest_enters_recoverable_mode() {
 
     let html_policy = CleanupPolicy::html();
     assert_eq!(
-        read_build_manifest(&root, &html_policy),
+        read_build_manifest(&root, &BuilderIdentity::html(), &html_policy),
         ManifestReadResult::Recoverable {
             reason: ManifestRecoveryReason::UnsupportedVersion,
         },

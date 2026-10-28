@@ -8,7 +8,7 @@ use super::{
     CheckOutcome, check_completion, execute_check, execute_check_messages_with_record_limit,
     run_check_command,
 };
-use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::build_system::build::{BuilderSelection, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// The builder every check test compiles under.
-fn test_project_builder() -> ProjectBuilder {
-    ProjectBuilder::new(HtmlProjectBuilder::new())
+fn test_project_builder() -> BuilderSelection {
+    BuilderSelection::new(HtmlProjectBuilder::new())
 }
 
 fn diagnostic_reports<T>(messages: &CompilationResult<T>) -> &DiagnosticReportSet {
@@ -601,7 +601,7 @@ fn diagnostic_identity_sequence<T>(
 
 #[test]
 fn check_and_build_frontends_produce_identical_diagnostics_and_check_writes_no_artifacts() {
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
 
     // --------------------------------------------
     //  Warning parity: success with frontend warnings
@@ -641,10 +641,12 @@ if value is:
         &builder,
         warning_root
             .to_str()
-            .expect("temp project path should be valid UTF-8 for this test"),
+            .expect("temp project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    ) {
+    )
+    .unwrap_or_else(|never| match never {})
+    {
         Ok(CompilationOutcome::Success { value, .. }) => value.finish_output(Ok(())),
         result => result,
     };
@@ -729,10 +731,11 @@ increment(count)
         &builder,
         error_root
             .to_str()
-            .expect("temp project path should be valid UTF-8 for this test"),
+            .expect("temp project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    );
+    )
+    .unwrap_or_else(|never| match never {});
     assert!(
         matches!(&build_error_outcome, Ok(CompilationOutcome::Diagnosed(_))),
         "error fixture should diagnose the build frontend"

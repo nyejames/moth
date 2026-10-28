@@ -1,11 +1,11 @@
 use super::*;
 use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
+use crate::build_system::create_project_modules::create_project_modules_tests::successful_compilation_value;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
@@ -76,16 +76,14 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         let style_directives = StyleDirectiveRegistry::built_ins();
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
-        frontend_surface.source_packages.register_filesystem_root(
-            "broken",
-            package_root,
-            PackageOrigin::Builder,
-        );
-        frontend_surface.source_packages.register_filesystem_root(
-            "warnpkg",
-            warning_package_root,
-            PackageOrigin::Builder,
-        );
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("broken", package_root, PackageOrigin::Builder)
+            .expect("broken test source root should register");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("warnpkg", warning_package_root, PackageOrigin::Builder)
+            .expect("warning test source root should register");
 
         let result = compile_project_frontend(
             &mut config,
@@ -172,11 +170,10 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "config_input",
-        package,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("config_input", package, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let result = compile_project_frontend_with_inputs(
         &mut config,
@@ -272,16 +269,14 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "first",
-        first_package,
-        PackageOrigin::Builder,
-    );
-    frontend_surface.source_packages.register_filesystem_root(
-        "second",
-        second_package,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("first", first_package, PackageOrigin::Builder)
+        .expect("test source root should register");
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("second", second_package, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let result = compile_project_frontend(
         &mut config,
@@ -358,16 +353,14 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let _path_fork = PathInternerFork::empty();
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
-        frontend_surface.source_packages.register_filesystem_root(
-            "broken",
-            package.clone(),
-            PackageOrigin::Builder,
-        );
-        frontend_surface.source_packages.register_filesystem_root(
-            "warning",
-            warning_package.clone(),
-            PackageOrigin::Builder,
-        );
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("broken", package.clone(), PackageOrigin::Builder)
+            .expect("broken test source root should register");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("warning", warning_package.clone(), PackageOrigin::Builder)
+            .expect("warning test source root should register");
 
         let result = compile_project_frontend(
             &mut config,
@@ -408,16 +401,14 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let config = Config::new(src.join("@page.moth"));
         let mut string_table = StringTable::new();
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
-        frontend_surface.source_packages.register_filesystem_root(
-            "broken",
-            package,
-            PackageOrigin::Builder,
-        );
-        frontend_surface.source_packages.register_filesystem_root(
-            "warning",
-            warning_package,
-            PackageOrigin::Builder,
-        );
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("broken", package, PackageOrigin::Builder)
+            .expect("the broken package should register once");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("warning", warning_package, PackageOrigin::Builder)
+            .expect("the warning package should register once");
         let result = crate::build_system::create_project_modules::compile_single_file_boracle(
             &config,
             &StyleDirectiveRegistry::built_ins(),
@@ -1396,11 +1387,10 @@ html #= ()\n",
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "pkg",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
     let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
@@ -1570,11 +1560,10 @@ export:
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "pkg",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
     let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
@@ -1964,17 +1953,17 @@ result = combine(Box(Label("payload")))
     }
 
     // Use the existing rendered-output owner rather than inspecting generated JS text.
-    let builder = ProjectBuilder::new(
-        crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new(),
-    );
-    let mut built =
-        super::super::create_project_modules_tests::successful_compilation_value(build_project(
+    let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
+    let mut built = successful_compilation_value(
+        build_project(
             &builder,
             root.to_str()
                 .expect("temporary project path should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
-        ));
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
     let rendered =
         crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
             &mut built,
@@ -2883,11 +2872,10 @@ fn source_package_warning_staged_by_frontend_outcome() {
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "warnpkg",
-        package,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("warnpkg", package, PackageOrigin::Builder)
+        .expect("test source root should register");
     let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
@@ -2943,6 +2931,7 @@ struct SuccessfulPackageWarningBuilder {
 }
 
 impl BackendBuilder for SuccessfulPackageWarningBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         _project_compilation: ProjectCompilation,
@@ -2950,7 +2939,7 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
         _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
         _context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, crate::build_system::build::BackendInvocationFailure<Self::Error>> {
         Ok(Project {
             output_files: Vec::new(),
             entry_page_rel: None,
@@ -2976,11 +2965,10 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         let mut surface = BuilderSurface::with_mandatory_core();
-        surface.source_packages.register_filesystem_root(
-            "pkg",
-            self.package_root.clone(),
-            PackageOrigin::Builder,
-        );
+        surface
+            .source_packages
+            .register_filesystem_root("pkg", self.package_root.clone(), PackageOrigin::Builder)
+            .expect("test source root should register");
         surface
     }
 }
@@ -3006,7 +2994,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
         .expect("should write project module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
-    let builder = ProjectBuilder::new(SuccessfulPackageWarningBuilder { package_root });
+    let builder = SuccessfulPackageWarningBuilder { package_root };
     let result = build_project(
         &builder,
         project_root
@@ -3014,7 +3002,8 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
             .expect("temporary project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    );
+    )
+    .unwrap_or_else(|never| match never {});
     let result = match result {
         Ok(CompilationOutcome::Success {
             value,
@@ -3087,11 +3076,10 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "pkg",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let result = compile_project_frontend_with_inputs(
         &mut config,

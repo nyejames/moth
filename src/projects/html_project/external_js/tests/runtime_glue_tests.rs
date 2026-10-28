@@ -233,7 +233,7 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
         create_registry_with_export("get_value", "getValue");
     let other_package_id = registry
         .register_package(
-            "test/other",
+            "@test/other",
             crate::builder_surface::PackageOrigin::ProjectLocal,
         )
         .expect("unrelated package should register");
@@ -1431,7 +1431,7 @@ fn create_registry_with_export(
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
         .register_package(
-            "test/pkg",
+            "@test/pkg",
             crate::builder_surface::PackageOrigin::ProjectLocal,
         )
         .unwrap();

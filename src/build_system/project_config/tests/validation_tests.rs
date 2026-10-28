@@ -7,9 +7,8 @@
 //! schemas, covering application to `Config`. Unregistered top-level names stay private
 //! helpers; a missing grouped `project` or required builder section is rejected. The grouped
 //! `html #= (...)` section path covers the same production dispatch against the HTML builder's
-//! closed section schema, its typed section storage that the builder's readers consume
-//! directly, the grouped output roots that drive directory output resolution, and the
-//! inactive-section behaviour when no builder registered the schema.
+//! closed section schema, section-keyed values consumed by its readers, the shared output
+//! roots that drive directory output resolution, and inactive-section behaviour.
 //! WHY: the schema walk and application invariants belong to the build-owned config boundary.
 
 use super::{
@@ -19,9 +18,10 @@ use super::{
     validate_value,
 };
 use crate::build_system::build::BackendBuilder;
+use crate::build_system::output::register_output_root_fields;
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::config_schema::{
-    ConfigFieldShape, ConfigSchema, ConfigSchemaField, UnknownFieldPolicy,
+    ConfigFieldShape, ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -34,7 +34,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
     CompactDiagnosticBagForTest, compact_bag_for_test,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticDraft};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason,
+};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue,
@@ -48,7 +50,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
-use crate::projects::settings::{Config, HtmlSectionConfig};
+use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::path::{Path, PathBuf};
 
@@ -110,9 +112,7 @@ fn grouped_project() -> (&'static str, PublicFoldedValue) {
     )
 }
 
-fn with_required_project(
-    rest: Vec<(&'static str, PublicFoldedValue)>,
-) -> Vec<(&'static str, PublicFoldedValue)> {
+fn with_required_project(rest: Vec<(&str, PublicFoldedValue)>) -> Vec<(&str, PublicFoldedValue)> {
     let mut declarations = vec![grouped_project()];
     declarations.extend(rest);
     declarations
@@ -698,14 +698,12 @@ fn validate_and_apply(
     validate_and_apply_with_surface(declarations, &surface, string_table)
 }
 
-/// Run the production entry point over hand-built folded declarations against one builder
-/// surface, so html-section cases can use the HTML builder's registered schemas.
-fn validate_and_apply_with_surface(
+/// Fold hand-built declarations into the compiled source shape the production entry point reads.
+fn folded_source(
     declarations: Vec<(&str, PublicFoldedValue)>,
-    surface: &BuilderSurface,
     string_table: &mut StringTable,
-) -> (Config, TestDiagnostics) {
-    let source = CompiledConfigSource {
+) -> CompiledConfigSource {
+    CompiledConfigSource {
         declarations: declarations
             .into_iter()
             .map(|(name, value)| FoldedConfigDeclaration {
@@ -719,7 +717,17 @@ fn validate_and_apply_with_surface(
             .collect(),
         resolution_records: Vec::new(),
         project_field_dependencies: Vec::new(),
-    };
+    }
+}
+
+/// Run the production entry point over hand-built folded declarations against one builder
+/// surface, so html-section cases can use the HTML builder's registered schemas.
+fn validate_and_apply_with_surface(
+    declarations: Vec<(&str, PublicFoldedValue)>,
+    surface: &BuilderSurface,
+    string_table: &mut StringTable,
+) -> (Config, TestDiagnostics) {
+    let source = folded_source(declarations, string_table);
     let mut config = Config::new(PathBuf::from("project"));
 
     match apply_result(validate_and_apply_config_declarations(
@@ -1067,7 +1075,7 @@ fn html_builder_surface() -> BuilderSurface {
 }
 
 #[test]
-fn applies_grouped_html_section_to_typed_storage() {
+fn applies_grouped_html_section_to_generic_builder_settings() {
     let mut string_table = StringTable::new();
     let surface = html_builder_surface();
 
@@ -1088,18 +1096,33 @@ fn applies_grouped_html_section_to_typed_storage() {
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
 
-    // The typed section result keeps every validated value; omitted fields stay `None`.
-    assert_eq!(config.html_section.origin.as_deref(), Some("/docs"));
+    // Values are keyed by their section and registered field name.
     assert_eq!(
-        config.html_section.page_url_style.as_deref(),
+        config.builder_settings.string("html", "origin"),
+        Some("/docs")
+    );
+    assert_eq!(
+        config.builder_settings.string("html", "page_url_style"),
         Some("no_trailing_slash")
     );
-    assert_eq!(config.html_section.redirect_index_html, Some(false));
-    assert_eq!(config.html_section.html_lang.as_deref(), Some("en-GB"));
-    assert_eq!(config.html_section.html_inject_core_css, Some(false));
-    assert_eq!(config.html_section.html_title_prefix, None);
+    assert_eq!(
+        config.builder_settings.bool("html", "redirect_index_html"),
+        Some(false)
+    );
+    assert_eq!(
+        config.builder_settings.string("html", "html_lang"),
+        Some("en-GB")
+    );
+    assert_eq!(
+        config.builder_settings.bool("html", "html_inject_core_css"),
+        Some(false)
+    );
+    assert_eq!(
+        config.builder_settings.string("html", "html_title_prefix"),
+        None
+    );
 
-    // The site-config reader consumes the typed section directly.
+    // The HTML reader consumes only its own section of the generic settings store.
     let site_config = {
         let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
         parse_html_site_config(&config, &mut diagnostic_strings)
@@ -1109,19 +1132,21 @@ fn applies_grouped_html_section_to_typed_storage() {
     assert_eq!(site_config.page_url_style, PageUrlStyle::NoTrailingSlash);
     assert!(!site_config.redirect_index_html);
 
-    // Synthetic declarations carry no authored spans, so validation must not fabricate them.
-    for field_name in [
-        "origin",
-        "page_url_style",
-        "redirect_index_html",
-        "html_lang",
-        "html_inject_core_css",
-    ] {
-        assert!(
-            config.setting_span(field_name).is_none(),
-            "field '{field_name}' should not fabricate a setting span"
-        );
-    }
+    // Synthetic declarations carry no authored spans, so their builder diagnostics have no
+    // primary source site.
+    let diagnostic = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        config.builder_config_diagnostic(
+            "html",
+            "origin",
+            InvalidConfigReason::EmptyProjectSetting,
+            &mut diagnostic_strings,
+        )
+    };
+    assert!(
+        diagnostic.primary_span().is_none(),
+        "synthetic builder settings must not fabricate a source location"
+    );
 }
 
 #[test]
@@ -1144,7 +1169,7 @@ fn rejects_unknown_field_in_closed_grouped_html_section() {
     assert_eq!(string_table.resolve(facts.string_ids[1]), "custom_key");
 
     // The rejected section applies nothing.
-    assert_eq!(config.html_section.origin, None);
+    assert_eq!(config.builder_settings.string("html", "origin"), None);
 }
 
 #[test]
@@ -1165,7 +1190,7 @@ fn private_helpers_do_not_satisfy_required_html_section() {
         InvalidConfigCode::MissingActiveBuilderSection,
         "former top-level builder names are private helpers, got {errors:?}"
     );
-    assert_eq!(config.html_section.origin, None);
+    assert_eq!(config.builder_settings.string("html", "origin"), None);
 }
 
 #[test]
@@ -1191,46 +1216,32 @@ fn skips_grouped_html_section_when_no_builder_registered_it() {
     );
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
-    assert_eq!(config.html_section, HtmlSectionConfig::default());
+    assert_eq!(config.builder_settings.string("html", "origin"), None);
+    assert_eq!(
+        config.builder_settings.bool("html", "redirect_index_html"),
+        None
+    );
 }
 
 #[test]
 fn applies_authored_grouped_html_section_from_compiled_config_source() {
     let mut string_table = StringTable::new();
     let surface = html_builder_surface();
-    let style_directives = StyleDirectiveRegistry::built_ins();
-
-    let compiled = compile_config_source(
-        ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
-            file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n\nhtml #= (\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n)\n",
-            style_directives: &style_directives,
-            binding_packages: &surface.binding_packages,
-            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
-            builder_config_globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
-            project_field_config_policies: surface
-                .config_schemas
-                .project()
-                .project_field_config_policies(),
-        },
+    let config = apply_authored_config(
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n\nhtml #= (\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n)\n",
+        &surface,
         &mut string_table,
-    )
-    .result
-    .expect("an authored html section should compile to folded declarations");
+    );
 
-    let mut config = Config::new(PathBuf::from("project"));
-    apply_result(validate_and_apply_config_declarations(
-        &mut config,
-        &compiled,
-        &surface.config_schemas,
-        &mut string_table,
-    ))
-    .expect("a grouped html section should validate and apply");
-
-    assert_eq!(config.html_section.origin.as_deref(), Some("/docs"));
-    assert_eq!(config.html_section.html_lang.as_deref(), Some("en-GB"));
-    assert_eq!(config.html_section.dev_output.as_deref(), Some("site/dev"));
+    assert_eq!(
+        config.builder_settings.string("html", "origin"),
+        Some("/docs")
+    );
+    assert_eq!(
+        config.builder_settings.string("html", "html_lang"),
+        Some("en-GB")
+    );
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
 }
 
 #[test]
@@ -1307,15 +1318,15 @@ fn grouped_html_section_omitted_output_fields_take_schema_defaults() {
     );
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
-    assert_eq!(config.html_section.dev_output.as_deref(), Some("dev"));
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some("dev"));
     assert_eq!(
-        config.html_section.release_output.as_deref(),
+        config.output_roots.release_output.as_deref(),
         Some("release")
     );
 }
 
 #[test]
-fn applies_custom_grouped_html_output_roots_to_typed_storage() {
+fn applies_custom_grouped_html_output_roots_to_output_roots() {
     let mut string_table = StringTable::new();
     let surface = html_builder_surface();
 
@@ -1332,9 +1343,9 @@ fn applies_custom_grouped_html_output_roots_to_typed_storage() {
     );
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
-    assert_eq!(config.html_section.dev_output.as_deref(), Some("site/dev"));
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
     assert_eq!(
-        config.html_section.release_output.as_deref(),
+        config.output_roots.release_output.as_deref(),
         Some("site/public")
     );
 }
@@ -1387,7 +1398,7 @@ fn rejects_parent_traversal_in_grouped_html_output_root() {
 
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     assert_eq!(
-        config.html_section.dev_output.as_deref(),
+        config.output_roots.dev_output.as_deref(),
         Some("../outside")
     );
 
@@ -1401,6 +1412,67 @@ fn rejects_parent_traversal_in_grouped_html_output_root() {
         InvalidConfigCode::InvalidOutputFolderParentDirectorySegmentWithFolder
     );
     assert_eq!(string_table.resolve(facts.string_ids[0]), "../outside");
+}
+
+#[test]
+fn rejects_empty_grouped_html_output_root() {
+    let mut string_table = StringTable::new();
+    let surface = html_builder_surface();
+
+    let (config, errors) = validate_and_apply_with_surface(
+        with_required_project(vec![("html", record(vec![("dev_output", text(""))]))]),
+        &surface,
+        &mut string_table,
+    );
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some(""));
+
+    let output_errors = validate_directory_output_settings(&config, &mut string_table)
+        .expect_err("an empty output root must be rejected");
+    let output_errors = test_diagnostics(output_errors);
+    assert_eq!(
+        first_invalid_facts(&output_errors).reason,
+        InvalidConfigCode::InvalidOutputFolderEmpty
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_grouped_html_output_root_symlink_outside_the_project() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = _temp.path().join("project");
+    let outside = _temp.path().join("outside");
+    std::fs::create_dir_all(&project_root).expect("should create project dir");
+    std::fs::create_dir_all(&outside).expect("should create outside dir");
+    symlink(&outside, project_root.join("linked-output"))
+        .expect("should create output-root symlink");
+
+    let mut string_table = StringTable::new();
+    let surface = html_builder_surface();
+    let (mut config, errors) = validate_and_apply_with_surface(
+        with_required_project(vec![(
+            "html",
+            record(vec![("dev_output", text("linked-output"))]),
+        )]),
+        &surface,
+        &mut string_table,
+    );
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    config.entry_dir = project_root;
+
+    let output_errors = validate_directory_output_settings(&config, &mut string_table)
+        .expect_err("an output-root symlink outside the project must fail");
+    let output_errors = test_diagnostics(output_errors);
+    let facts = first_invalid_facts(&output_errors);
+    assert_eq!(
+        facts.reason,
+        InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithFolder
+    );
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "linked-output");
 }
 
 #[test]
@@ -1811,4 +1883,554 @@ fn project_loop_limit_preserves_resource_bound_diagnostics() {
     );
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     assert_eq!(config.template_const_loop_iteration_limit, 1_000_000);
+}
+
+// -------------------------
+// Generic Builder Sections
+// -------------------------
+
+/// One folded boolean value.
+fn flag(value: bool) -> PublicFoldedValue {
+    PublicFoldedValue::Bool(value)
+}
+
+/// A surface with an optional `lappet` builder section that is not the HTML builder.
+fn surface_with_lappet_section() -> BuilderSurface {
+    let mut surface = BuilderSurface::with_mandatory_core();
+    let mut schema = ConfigSchema::new("lappet section", UnknownFieldPolicy::Reject);
+    let root = schema.root();
+    for field in [
+        ConfigSchemaField::string_with_default("name", "site"),
+        ConfigSchemaField::string("version"),
+        ConfigSchemaField::bool("draft").default(PublicFoldedValue::Bool(false)),
+    ] {
+        schema
+            .register_field(root, field)
+            .expect("the lappet section should accept its fields");
+    }
+    register_output_root_fields(&mut schema, root)
+        .expect("the lappet section should accept the output roots");
+    schema
+        .validate_and_freeze()
+        .expect("the lappet section schema should freeze");
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "lappet".into(),
+            schema,
+            required: false,
+        });
+    surface
+}
+
+/// Compile authored config source and apply it through the production entry point.
+fn apply_authored_config(
+    source_code: &str,
+    surface: &BuilderSurface,
+    string_table: &mut StringTable,
+) -> Config {
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
+            source_code,
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        string_table,
+    )
+    .result
+    .expect("authored config should compile to folded declarations");
+
+    let mut config = Config::new(PathBuf::from("project"));
+    apply_result(validate_and_apply_config_declarations(
+        &mut config,
+        &compiled,
+        &surface.config_schemas,
+        string_table,
+    ))
+    .expect("authored config should validate and apply");
+    config
+}
+
+#[test]
+fn builder_section_strings_and_bools_land_in_builder_settings() {
+    let mut string_table = StringTable::new();
+    let surface = surface_with_lappet_section();
+
+    let (config, errors) = validate_and_apply_with_surface(
+        with_required_project(vec![(
+            "lappet",
+            record(vec![("name", text("site")), ("draft", flag(true))]),
+        )]),
+        &surface,
+        &mut string_table,
+    );
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(config.builder_settings.bool("lappet", "draft"), Some(true));
+}
+
+#[test]
+fn builder_section_output_roots_land_in_output_roots_only() {
+    let mut string_table = StringTable::new();
+    let surface = surface_with_lappet_section();
+
+    let (config, errors) = validate_and_apply_with_surface(
+        with_required_project(vec![(
+            "lappet",
+            record(vec![("dev_output", text("site/dev"))]),
+        )]),
+        &surface,
+        &mut string_table,
+    );
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
+    assert_eq!(config.builder_settings.string("lappet", "dev_output"), None);
+}
+
+#[test]
+fn omitted_optional_builder_section_applies_its_schema_defaults() {
+    let mut string_table = StringTable::new();
+    let surface = surface_with_lappet_section();
+
+    let (config, errors) =
+        validate_and_apply_with_surface(with_required_project(vec![]), &surface, &mut string_table);
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some("dev"));
+    assert_eq!(
+        config.output_roots.release_output.as_deref(),
+        Some("release")
+    );
+}
+
+#[test]
+fn builder_section_shape_the_store_cannot_hold_is_a_compiler_error() {
+    let mut string_table = StringTable::new();
+    let mut surface = BuilderSurface::with_mandatory_core();
+    let mut schema = ConfigSchema::new("retry section", UnknownFieldPolicy::Reject);
+    let root = schema.root();
+    schema
+        .register_field(
+            root,
+            ConfigSchemaField::fixed_scalar("retries", FixedScalar::I32),
+        )
+        .expect("the retry section should accept its field");
+    schema
+        .validate_and_freeze()
+        .expect("the retry section schema should freeze");
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "retry".into(),
+            schema,
+            required: false,
+        });
+    let source = folded_source(
+        with_required_project(vec![("retry", record(vec![("retries", int(3))]))]),
+        &mut string_table,
+    );
+    let mut config = Config::new(PathBuf::from("project"));
+
+    let result = validate_and_apply_config_declarations(
+        &mut config,
+        &source,
+        &surface.config_schemas,
+        &mut string_table,
+    );
+
+    assert!(
+        matches!(result, Err(ConfigApplyError::Compiler(_))),
+        "a builder section field the generic store cannot hold should be a compiler error"
+    );
+}
+
+#[test]
+fn generic_builder_section_fields_leave_project_setting_spans_alone() {
+    let mut string_table = StringTable::new();
+    let surface = surface_with_lappet_section();
+    let project = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n";
+    let baseline = apply_authored_config(project, &surface, &mut string_table);
+    let project_name_span = baseline
+        .setting_span("name")
+        .expect("the project record should keep the authored span of its name");
+
+    let config = apply_authored_config(
+        &format!("{project}\nlappet #= (\n    name = \"site\",\n    version = \"1.2\",\n)\n"),
+        &surface,
+        &mut string_table,
+    );
+
+    assert_eq!(config.project_name, "docs");
+    assert_eq!(config.version, None);
+    assert_eq!(config.setting_span("name"), Some(project_name_span));
+    assert_eq!(config.setting_span("version"), None);
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(
+        config.builder_settings.string("lappet", "version"),
+        Some("1.2")
+    );
+    let builder_diagnostic = {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+        config.builder_config_diagnostic(
+            "lappet",
+            "name",
+            InvalidConfigReason::EmptyProjectSetting,
+            &mut diagnostic_strings,
+        )
+    };
+    let builder_name_span = builder_diagnostic
+        .primary_span()
+        .expect("an authored builder field should retain its span");
+    assert_ne!(
+        builder_name_span, project_name_span,
+        "a builder field named 'name' must not reuse the project field span"
+    );
+}
+
+#[test]
+fn generic_builder_section_defaults_leave_project_setting_spans_alone() {
+    let mut string_table = StringTable::new();
+    let surface = surface_with_lappet_section();
+    let project = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n";
+    let baseline = apply_authored_config(project, &surface, &mut string_table);
+    let project_name_span = baseline
+        .setting_span("name")
+        .expect("the project record should keep the authored span of its name");
+
+    let config = apply_authored_config(
+        &format!("{project}\nlappet #= (\n    version = \"1.2\",\n)\n"),
+        &surface,
+        &mut string_table,
+    );
+
+    assert_eq!(config.setting_span("name"), Some(project_name_span));
+    assert_eq!(
+        config.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+}
+
+#[test]
+fn omitted_and_authored_empty_builder_sections_yield_the_same_values() {
+    let mut string_table = StringTable::new();
+    let surface = surface_with_lappet_section();
+
+    let (omitted, errors) =
+        validate_and_apply_with_surface(with_required_project(vec![]), &surface, &mut string_table);
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+
+    let (authored, errors) = validate_and_apply_with_surface(
+        with_required_project(vec![("lappet", record(vec![]))]),
+        &surface,
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+
+    assert_eq!(
+        omitted.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(
+        authored.builder_settings.string("lappet", "name"),
+        Some("site")
+    );
+    assert_eq!(
+        omitted.builder_settings.bool("lappet", "draft"),
+        Some(false)
+    );
+    assert_eq!(
+        authored.builder_settings.bool("lappet", "draft"),
+        Some(false)
+    );
+    assert_eq!(omitted.builder_settings.string("lappet", "version"), None);
+    assert_eq!(authored.builder_settings.string("lappet", "version"), None);
+    assert_eq!(omitted.output_roots, authored.output_roots);
+}
+
+#[test]
+fn two_sections_that_own_the_output_roots_are_a_compiler_error() {
+    let mut string_table = StringTable::new();
+    let mut surface = BuilderSurface::with_mandatory_core();
+    for name in ["first", "second"] {
+        let mut schema = ConfigSchema::new("owner section", UnknownFieldPolicy::Reject);
+        let root = schema.root();
+        register_output_root_fields(&mut schema, root)
+            .expect("the section should accept the output roots");
+        schema
+            .validate_and_freeze()
+            .expect("the section schema should freeze");
+        surface
+            .config_schemas
+            .register_project_section(NamedConfigSectionSchema {
+                name: name.into(),
+                schema,
+                required: false,
+            });
+    }
+
+    let source = folded_source(with_required_project(vec![]), &mut string_table);
+    let mut config = Config::new(PathBuf::from("project"));
+
+    let result = validate_and_apply_config_declarations(
+        &mut config,
+        &source,
+        &surface.config_schemas,
+        &mut string_table,
+    );
+
+    assert!(
+        matches!(result, Err(ConfigApplyError::Compiler(_))),
+        "two sections that own the output roots should be a compiler error"
+    );
+    assert_eq!(config.output_roots.dev_output, None);
+    assert_eq!(config.output_roots.release_output, None);
+}
+
+#[test]
+fn several_builder_sections_with_one_output_root_owner_are_accepted() {
+    let mut string_table = StringTable::new();
+    let mut surface = BuilderSurface::with_mandatory_core();
+    let runtime_section_name = format!("builder_{}", 17);
+    let runtime_field_name = format!("setting_{}", 23);
+    let runtime_default_field_name = format!("default_{}", 29);
+
+    let mut owner = ConfigSchema::new("owner section", UnknownFieldPolicy::Reject);
+    let owner_root = owner.root();
+    owner
+        .register_field(
+            owner_root,
+            ConfigSchemaField::string_with_default("alpha", "a"),
+        )
+        .expect("the owner section should accept its field");
+    for field in [
+        ConfigSchemaField::string("shared"),
+        ConfigSchemaField::string_with_default("shared_default", "owner-default"),
+        ConfigSchemaField::string("mixed"),
+        ConfigSchemaField::string("optional"),
+    ] {
+        owner
+            .register_field(owner_root, field)
+            .expect("owner field");
+    }
+    register_output_root_fields(&mut owner, owner_root)
+        .expect("the owner section should accept the output roots");
+    owner
+        .validate_and_freeze()
+        .expect("the owner section schema should freeze");
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "owner".into(),
+            schema: owner,
+            required: false,
+        });
+
+    let mut plain = ConfigSchema::new("plain section", UnknownFieldPolicy::Reject);
+    let plain_root = plain.root();
+    plain
+        .register_field(
+            plain_root,
+            ConfigSchemaField::string_with_default("beta", "b"),
+        )
+        .expect("the plain section should accept its field");
+    for field in [
+        ConfigSchemaField::string("shared"),
+        ConfigSchemaField::string_with_default("shared_default", "plain-default"),
+        ConfigSchemaField::bool("mixed"),
+        ConfigSchemaField::optional("optional", ConfigFieldShape::String),
+    ] {
+        plain
+            .register_field(plain_root, field)
+            .expect("plain field");
+    }
+    plain
+        .validate_and_freeze()
+        .expect("the plain section schema should freeze");
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: "plain".into(),
+            schema: plain,
+            required: false,
+        });
+
+    let mut runtime = ConfigSchema::new("runtime section", UnknownFieldPolicy::Reject);
+    let runtime_root = runtime.root();
+    runtime
+        .register_field(
+            runtime_root,
+            ConfigSchemaField::string(runtime_field_name.clone()).required(),
+        )
+        .expect("runtime schema is under construction");
+    runtime
+        .register_field(
+            runtime_root,
+            ConfigSchemaField::string_with_default(
+                runtime_default_field_name.clone(),
+                "runtime-default",
+            ),
+        )
+        .expect("runtime schema is under construction");
+    runtime
+        .validate_and_freeze()
+        .expect("runtime section schema should freeze");
+    surface
+        .config_schemas
+        .register_project_section(NamedConfigSectionSchema {
+            name: runtime_section_name.clone().into(),
+            schema: runtime,
+            required: false,
+        });
+
+    let (config, errors) = validate_and_apply_with_surface(
+        with_required_project(vec![
+            ("owner", record(vec![("dev_output", text("site/dev"))])),
+            (
+                runtime_section_name.as_str(),
+                record(vec![(
+                    runtime_field_name.as_str(),
+                    text("runtime-authored"),
+                )]),
+            ),
+        ]),
+        &surface,
+        &mut string_table,
+    );
+
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.output_roots.dev_output.as_deref(), Some("site/dev"));
+    assert_eq!(config.builder_settings.string("owner", "alpha"), Some("a"));
+    assert_eq!(config.builder_settings.string("plain", "beta"), Some("b"));
+    assert_eq!(
+        config
+            .builder_settings
+            .string(&runtime_section_name, &runtime_field_name),
+        Some("runtime-authored")
+    );
+    assert_eq!(
+        config
+            .builder_settings
+            .string(&runtime_section_name, &runtime_default_field_name),
+        Some("runtime-default")
+    );
+
+    let source_code = format!(
+        "missing #String? = none\n\
+         project #= (name = \"docs\", entry_root = \"src\")\n\
+         owner #= (shared = \"owner-value\", mixed = \"text\", optional = \"kept\")\n\
+         plain #= (shared = \"plain-value\", mixed = true, optional = missing)\n\
+         {runtime_section_name} #= ({runtime_field_name} = \"runtime-authored\")\n"
+    );
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
+            source_code: &source_code,
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    )
+    .result
+    .expect("authored sections should compile");
+    let mut authored = Config::new(PathBuf::from("project"));
+    apply_result(validate_and_apply_config_declarations(
+        &mut authored,
+        &compiled,
+        &surface.config_schemas,
+        &mut string_table,
+    ))
+    .expect("authored sections should apply");
+    assert_eq!(
+        authored.builder_settings.string("owner", "shared"),
+        Some("owner-value")
+    );
+    assert_eq!(
+        authored.builder_settings.string("plain", "shared"),
+        Some("plain-value")
+    );
+    assert_eq!(
+        authored.builder_settings.string("owner", "shared_default"),
+        Some("owner-default")
+    );
+    assert_eq!(
+        authored.builder_settings.string("plain", "shared_default"),
+        Some("plain-default")
+    );
+    assert_eq!(
+        authored.builder_settings.string("owner", "mixed"),
+        Some("text")
+    );
+    assert_eq!(authored.builder_settings.bool("plain", "mixed"), Some(true));
+    assert_eq!(
+        authored.builder_settings.string("owner", "optional"),
+        Some("kept")
+    );
+    assert_eq!(authored.builder_settings.string("plain", "optional"), None);
+    for section in ["owner", "plain"] {
+        let declaration = compiled
+            .declarations
+            .iter()
+            .find(|declaration| string_table.resolve(declaration.name) == section)
+            .expect("section declaration");
+        let expected = declaration.direct_field_spans[0];
+        assert!(expected.is_some(), "authored value has a span");
+        let mut strings = DiagnosticStringBuilder::new(&mut string_table);
+        let actual = authored
+            .builder_config_diagnostic(
+                section,
+                "shared",
+                InvalidConfigReason::EmptyProjectSetting,
+                &mut strings,
+            )
+            .primary_span();
+        assert_eq!(actual, expected);
+        let default_span = authored
+            .builder_config_diagnostic(
+                section,
+                "shared_default",
+                InvalidConfigReason::EmptyProjectSetting,
+                &mut strings,
+            )
+            .primary_span();
+        assert_eq!(default_span, None);
+    }
+    authored.builder_settings.clear("plain", "mixed");
+    assert_eq!(authored.builder_settings.bool("plain", "mixed"), None);
+    assert_eq!(
+        authored.builder_settings.string("owner", "mixed"),
+        Some("text")
+    );
 }

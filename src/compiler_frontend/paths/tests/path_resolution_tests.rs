@@ -163,11 +163,9 @@ fn source_package_dependency_resolves_to_package_root() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
@@ -218,11 +216,9 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
@@ -461,7 +457,9 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root("html", package_root.clone(), PackageOrigin::Builder);
+    source_packages
+        .register_filesystem_root("html", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root,
@@ -506,11 +504,9 @@ fn package_scan_root_name_is_not_package_prefix() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
@@ -557,11 +553,9 @@ fn package_direct_child_is_package_prefix() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
@@ -654,11 +648,9 @@ fn source_package_prefix_wins_consistently() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
@@ -847,11 +839,9 @@ fn dependency_escape_package_root_rejected() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
-    source_packages.register_filesystem_root(
-        "helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),

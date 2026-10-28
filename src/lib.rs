@@ -62,9 +62,11 @@ mod compiler_tests {
 }
 pub mod benchmarking;
 pub mod build_system;
+pub mod builder;
 mod builder_surface;
 mod compiler_frontend;
 pub mod first_party_js;
+pub mod host;
 
 /// Deliberate, supported convenience re-export of `moth_mon`; this exposes the same API and Rust
 /// types directly, not a compatibility shim or second implementation.
@@ -108,7 +110,7 @@ pub mod projects {
     pub(crate) mod routing;
     pub mod settings;
 
-    pub use crate::build_system::build::ProjectBuilder;
+    pub use crate::build_system::build::BuilderSelection;
     pub use crate::compiler_frontend::Flag;
     pub use crate::compiler_frontend::build_config::{
         BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry,

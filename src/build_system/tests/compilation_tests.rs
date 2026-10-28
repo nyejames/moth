@@ -1355,11 +1355,14 @@ fn canonical_tail_retains_donor_only_package_identity() {
     let mut config = Config::new(project_directory.path().to_path_buf());
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut surface = BuilderSurface::with_mandatory_core();
-    surface.source_packages.register_filesystem_root(
-        "pkg",
-        donor_directory.path().to_path_buf(),
-        PackageOrigin::Builder,
-    );
+    surface
+        .source_packages
+        .register_filesystem_root(
+            "pkg",
+            donor_directory.path().to_path_buf(),
+            PackageOrigin::Builder,
+        )
+        .expect("donor source root should register");
     let mut project_source_files = None;
     let mut project_source_builder = None;
     let frontend = compile_project_frontend_with_inputs(
@@ -1852,11 +1855,10 @@ io.line(result)
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut builder_surface = BuilderSurface::with_mandatory_core();
-    builder_surface.source_packages.register_filesystem_root(
-        "warnpkg",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    builder_surface
+        .source_packages
+        .register_filesystem_root("warnpkg", package_root, PackageOrigin::Builder)
+        .expect("warning source root should register");
     let compiled_frontend = successful_compilation_value(
         crate::build_system::create_project_modules::compile_project_frontend(
             &mut config,

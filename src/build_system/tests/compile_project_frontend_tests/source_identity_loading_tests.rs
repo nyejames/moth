@@ -431,11 +431,10 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     let string_table = StringTable::new();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        PACKAGE_NAME,
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(PACKAGE_NAME, package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");

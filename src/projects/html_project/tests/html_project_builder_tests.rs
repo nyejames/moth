@@ -3,12 +3,12 @@
 use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{FileKind, Project, ProjectCompilation};
+use crate::build_system::build::{BackendInvocationFailure, FileKind, Project, ProjectCompilation};
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
     WriteOptions, write_project_outputs,
 };
 use crate::compiler_frontend::Flag;
@@ -49,8 +49,8 @@ use crate::projects::html_project::tests::test_support::{
     js_runtime_asset_import, non_js_runtime_asset_import,
 };
 use crate::projects::settings::Config;
+use std::convert::Infallible;
 use std::fs;
-use std::path::Path;
 
 fn attach_origin(
     registry: &mut ResourceInputRegistry,
@@ -98,7 +98,7 @@ impl HtmlProjectBuilder {
         build_profile: BuildProfile,
         flags: &[Flag],
         string_table: &mut StringTable,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Infallible>> {
         let root_string_table = std::mem::take(string_table);
         let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
         let result = {
@@ -142,9 +142,10 @@ fn build_with_test_modules(
             value,
             warnings: None,
         }),
-        Err(failure) => {
+        Err(BackendInvocationFailure::Prepared(failure)) => {
             freeze_prepared_failure(failure, &string_table).map(CompilationOutcome::Diagnosed)
         }
+        Err(BackendInvocationFailure::Builder(error)) => match error {},
     }
 }
 
@@ -551,7 +552,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
             output_root: output_root.clone(),
             project_root: None,
             owner: OutputOwner {
-                builder: BuilderKind::Html,
+                builder: BuilderIdentity::html(),
                 profile: BuildProfile::Dev,
             },
         }),
@@ -806,7 +807,7 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
             output_root: output_root.clone(),
             project_root: None,
             owner: OutputOwner {
-                builder: BuilderKind::Html,
+                builder: BuilderIdentity::html(),
                 profile: BuildProfile::Dev,
             },
         }),
@@ -1204,7 +1205,12 @@ fn wasm_directory_build_preserves_nested_routes() {
 fn builder_rejects_invalid_origin_config() {
     let builder = HtmlProjectBuilder::new();
     let mut config = Config::new(PathBuf::from("."));
-    config.html_section.origin = Some(String::from("not-a-slash"));
+    config.builder_settings.set_string(
+        "html",
+        String::from("origin"),
+        String::from("not-a-slash"),
+        None,
+    );
 
     let result = build_with_test_modules(&builder, vec![PathBuf::from("@page.moth")], &config, &[]);
     let reports = expect_diagnosed(result, "invalid origin should fail diagnostically");
@@ -1240,7 +1246,7 @@ fn html_builder_registers_closed_html_section_schema() {
     let html_names: Vec<&str> = html_root
         .field_ids()
         .iter()
-        .map(|field_id| html.field(*field_id).name)
+        .map(|field_id| html.field(*field_id).name.as_ref())
         .collect();
     assert!(
         html_names.contains(&"origin") && html_names.contains(&"page_url_style"),
@@ -1277,7 +1283,7 @@ fn html_builder_registers_closed_html_section_schema() {
         .node(project.root())
         .field_ids()
         .iter()
-        .map(|field_id| project.field(*field_id).name)
+        .map(|field_id| project.field(*field_id).name.as_ref())
         .collect();
     assert!(
         !project_names.contains(&"origin") && !project_names.contains(&"page_url_style"),

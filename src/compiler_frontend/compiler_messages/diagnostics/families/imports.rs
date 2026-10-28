@@ -56,6 +56,7 @@ unit_code! {
         ReceiverMethod = 1,
         ParserDiagnostic = 2,
         NonUtf8Source = 3,
+        PathContainsPackageSeparator = 4,
     }
 }
 
@@ -65,34 +66,44 @@ impl InvalidExternalModuleCode {
             InvalidExternalModuleReason::ReceiverMethod { .. } => Self::ReceiverMethod,
             InvalidExternalModuleReason::ParserDiagnostic { .. } => Self::ParserDiagnostic,
             InvalidExternalModuleReason::NonUtf8Source { .. } => Self::NonUtf8Source,
+            InvalidExternalModuleReason::PathContainsPackageSeparator => {
+                Self::PathContainsPackageSeparator
+            }
         }
     }
 
-    pub(crate) fn split(reason: &InvalidExternalModuleReason) -> (Self, StringId) {
+    pub(crate) fn split(reason: &InvalidExternalModuleReason) -> (Self, Option<StringId>) {
         match reason {
             InvalidExternalModuleReason::ReceiverMethod { moth_name } => {
-                (Self::ReceiverMethod, *moth_name)
+                (Self::ReceiverMethod, Some(*moth_name))
             }
             InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
-                (Self::ParserDiagnostic, *parser_detail)
+                (Self::ParserDiagnostic, Some(*parser_detail))
             }
             InvalidExternalModuleReason::NonUtf8Source { utf8_detail } => {
-                (Self::NonUtf8Source, *utf8_detail)
+                (Self::NonUtf8Source, Some(*utf8_detail))
+            }
+            InvalidExternalModuleReason::PathContainsPackageSeparator => {
+                (Self::PathContainsPackageSeparator, None)
             }
         }
     }
 
-    pub(crate) fn to_reason(self, detail: StringId) -> InvalidExternalModuleReason {
-        match self {
-            Self::ReceiverMethod => {
-                InvalidExternalModuleReason::ReceiverMethod { moth_name: detail }
+    pub(crate) fn to_reason(self, detail: Option<StringId>) -> Option<InvalidExternalModuleReason> {
+        match (self, detail) {
+            (Self::ReceiverMethod, Some(moth_name)) => {
+                Some(InvalidExternalModuleReason::ReceiverMethod { moth_name })
             }
-            Self::ParserDiagnostic => InvalidExternalModuleReason::ParserDiagnostic {
-                parser_detail: detail,
-            },
-            Self::NonUtf8Source => InvalidExternalModuleReason::NonUtf8Source {
-                utf8_detail: detail,
-            },
+            (Self::ParserDiagnostic, Some(parser_detail)) => {
+                Some(InvalidExternalModuleReason::ParserDiagnostic { parser_detail })
+            }
+            (Self::NonUtf8Source, Some(utf8_detail)) => {
+                Some(InvalidExternalModuleReason::NonUtf8Source { utf8_detail })
+            }
+            (Self::PathContainsPackageSeparator, None) => {
+                Some(InvalidExternalModuleReason::PathContainsPackageSeparator)
+            }
+            _ => None,
         }
     }
 }
@@ -403,7 +414,7 @@ pub(crate) fn invalid_import_path(
     })
 }
 
-/// Stores an invalid external-module reason code and its shared string fact.
+/// Stores an invalid external-module reason code and its optional string fact.
 pub(crate) fn invalid_external_module(
     path: PathId,
     reason: InvalidExternalModuleReason,
@@ -413,7 +424,7 @@ pub(crate) fn invalid_external_module(
     DiagnosticDraft::with_facts(&INVALID_EXTERNAL_MODULE, span, |cursor| {
         cursor.push::<PathFact>(&path)?;
         cursor.push::<UnitFact<InvalidExternalModuleCode>>(&reason_code)?;
-        cursor.push::<StringFact>(&detail)?;
+        cursor.push::<OptStringFact>(&detail)?;
         Ok(())
     })
 }
@@ -507,7 +518,7 @@ diagnostic_family! {
         facts: [
             path: PathFact,
             reason_code: UnitFact<InvalidExternalModuleCode>,
-            reason_detail: StringFact,
+            reason_detail: OptStringFact,
         ],
         labels: [],
         extra: None,

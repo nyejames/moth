@@ -7,7 +7,7 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, ProjectBuilder, bootstrap_project_build, finalize_project_assembly_failure,
+    BuildBootstrap, BuilderSelection, bootstrap_project_build, finalize_project_assembly_failure,
     finish_successful_project_warnings, validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::{
@@ -43,12 +43,12 @@ pub struct CheckCommandReport {
 pub fn run_check_command(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     present: impl FnOnce(CheckCommandReport),
 ) -> ProjectCommandCompletion {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
     let start = Instant::now();
-    let outcome = execute_check(path, build_config_inputs, project_builder);
+    let outcome = execute_check(path, build_config_inputs, builder_selection);
     let completion = check_completion(&outcome);
     let (error_count, warning_count) = diagnostic_counts(&outcome.messages);
 
@@ -144,22 +144,22 @@ fn check_completion(outcome: &CheckOutcome) -> ProjectCommandCompletion {
 fn execute_check(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
 ) -> CheckOutcome {
     CheckOutcome {
-        messages: execute_check_messages(path, build_config_inputs, project_builder),
+        messages: execute_check_messages(path, build_config_inputs, builder_selection),
     }
 }
 
 fn execute_check_messages(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
 ) -> CompilationResult<()> {
     execute_check_messages_with_warning_owner(
         path,
         build_config_inputs,
-        project_builder,
+        builder_selection,
         BoundaryAccumulator::with_root_string_table,
     )
 }
@@ -167,14 +167,17 @@ fn execute_check_messages(
 fn execute_check_messages_with_warning_owner(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     create_warning_owner: impl FnOnce(
         crate::compiler_frontend::symbols::string_interning::StringTable,
     ) -> BoundaryAccumulator,
 ) -> CompilationResult<()> {
     let valid_path = check_if_valid_path(normalize_entry_path(path))?;
-    let bootstrap = match bootstrap_project_build(project_builder, valid_path, build_config_inputs)
-    {
+    let bootstrap = match bootstrap_project_build(
+        builder_selection.backend.as_ref(),
+        valid_path,
+        build_config_inputs,
+    ) {
         Ok(bootstrap) => bootstrap,
         Err(failure) => {
             return failure
@@ -231,13 +234,13 @@ fn execute_check_messages_with_warning_owner(
 fn execute_check_messages_with_record_limit(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     records: usize,
 ) -> CompilationResult<()> {
     execute_check_messages_with_warning_owner(
         path,
         build_config_inputs,
-        project_builder,
+        builder_selection,
         |string_table| {
             let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
             warning_owner.set_record_limit_for_test(records);

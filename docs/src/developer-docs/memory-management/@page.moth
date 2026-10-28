@@ -110,6 +110,7 @@ page_head #= theme_head
     - @./retained-edge-counting (Retained Edge Counting): the narrow counted strategy for runtime-many persistent retained edges
     - @./ownership-and-drops (Affine ownership and drops): affine cleanup responsibility, the ownership ABI and conditional destruction
     - @./runtime-and-backend-lowering (Runtime and backend lowering): physical strategies and the collector-free release guarantee
+    - @./native-host-abi (Native host ABI): the physical Wasm32 boundary between compiled Moth and native Rust host code
 ]
 
 #[section, $md:

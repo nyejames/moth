@@ -145,6 +145,14 @@ impl ExternalImportProvider for JsExternalImportProvider {
                 request.source_span,
                 &mut diagnostic_strings,
             );
+            // Package paths reserve `#`, so diagnose the unregistrable logical path here.
+            if request.logical_source_path.as_str().contains('#') {
+                diagnostics.push(imports::invalid_external_module(
+                    js_source_path,
+                    InvalidExternalModuleReason::PathContainsPackageSeparator,
+                    request.source_span,
+                ));
+            }
 
             // Reject project-local JS imports that declare receiver-style signatures.
             // WHY: callable `@moth.sig` signatures must expose free functions rather than `this`
@@ -169,29 +177,31 @@ impl ExternalImportProvider for JsExternalImportProvider {
         }
 
         let package_path = js_provider_package_path(&request.logical_source_path);
-        let package_id = context
-            .package_registry
-            .register_package(
-                &package_path,
-                crate::builder_surface::PackageOrigin::ProjectLocal,
-            )
-            .map_err(PreparedFailure::from)?;
+        let package_id = match context.package_registry.register_package(
+            &package_path,
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        ) {
+            Ok(package_id) => package_id,
+            Err(error) => {
+                return Err(js_registration_failure(
+                    JsModuleRegistrationError::from(error),
+                    js_source_path,
+                    request.source_span,
+                    context,
+                ));
+            }
+        };
 
         let registered =
             match register_parsed_js_module(package_id, &parsed, context.package_registry) {
                 Ok(registered) => registered,
-                Err(JsModuleRegistrationError::Infrastructure(error)) => {
-                    return Err(error.into());
-                }
-                Err(JsModuleRegistrationError::ParserDiagnostic { parser_detail }) => {
-                    let parser_detail =
-                        DiagnosticStringBuilder::new(context.string_table).intern(&parser_detail);
-                    let diagnostic = imports::invalid_external_module(
+                Err(error) => {
+                    return Err(js_registration_failure(
+                        error,
                         js_source_path,
-                        InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
                         request.source_span,
-                    );
-                    return Err(context.capture_diagnostic_failure(DiagnosticBag::from(diagnostic)));
+                        context,
+                    ));
                 }
             };
 
@@ -212,6 +222,33 @@ impl ExternalImportProvider for JsExternalImportProvider {
             runtime_asset: Some(runtime_asset),
             required_runtime_imports,
         }))
+    }
+}
+
+/// Converts a JS module registration failure into the failure the frontend should report.
+///
+/// WHAT: registry invariant failures stay infrastructure failures, while rejected user declarations
+///       become `invalid_external_module` diagnostics anchored at the importing source.
+/// WHY: package-path and module-symbol registration reject the same user input, so one mapping keeps
+///      their diagnostic identity identical.
+fn js_registration_failure(
+    error: JsModuleRegistrationError,
+    js_source_path: PathId,
+    source_span: Option<SourceSpan>,
+    context: &mut ExternalImportProviderContext,
+) -> PreparedFailure {
+    match error {
+        JsModuleRegistrationError::Infrastructure(failure) => failure.into(),
+        JsModuleRegistrationError::ParserDiagnostic { parser_detail } => {
+            let parser_detail =
+                DiagnosticStringBuilder::new(context.string_table).intern(&parser_detail);
+            let diagnostic = imports::invalid_external_module(
+                js_source_path,
+                InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
+                source_span,
+            );
+            context.capture_diagnostic_failure(DiagnosticBag::from(diagnostic))
+        }
     }
 }
 

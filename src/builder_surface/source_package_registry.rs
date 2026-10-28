@@ -8,10 +8,35 @@
 //! package-prefix order at every Stage 0 and header boundary, with no need for
 //! downstream consumers to re-sort.
 
-use crate::builder_surface::package_metadata::{PackageMetadata, PackageOrigin};
+use crate::builder_surface::package_metadata::{
+    PackageMetadata, PackageOrigin, validate_package_path,
+};
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
+
+/// An invalid source package root registration.
+///
+/// `BuilderDefinition` translates this into its `InvalidDefinition` error lane.
+#[derive(Debug)]
+pub struct SourcePackageRegistryError {
+    pub(crate) msg: String,
+}
+
+impl SourcePackageRegistryError {
+    fn new(msg: impl Into<String>) -> Self {
+        Self { msg: msg.into() }
+    }
+}
+
+impl fmt::Display for SourcePackageRegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.msg)
+    }
+}
+
+impl std::error::Error for SourcePackageRegistryError {}
 
 /// Registry of source-backed package roots indexed by their package prefix.
 ///
@@ -28,13 +53,37 @@ impl SourcePackageRegistry {
     }
 
     /// Register a filesystem source-backed package root.
+    ///
+    /// Each prefix has one root. A second registration, including an ASCII case-only variant,
+    /// is rejected rather than replacing the first. The prefix follows the shared package-path
+    /// rule and is one component, because source resolution matches only the first component of
+    /// a dependency path.
     pub fn register_filesystem_root(
         &mut self,
         package_prefix: impl Into<String>,
         root: PathBuf,
         origin: PackageOrigin,
-    ) {
+    ) -> Result<(), SourcePackageRegistryError> {
         let prefix = package_prefix.into();
+        if let Err(reason) = validate_package_path(&prefix, origin) {
+            return Err(SourcePackageRegistryError::new(format!(
+                "Source package '@{prefix}' {reason}."
+            )));
+        }
+        if prefix.contains('/') {
+            return Err(SourcePackageRegistryError::new(format!(
+                "Source package '@{prefix}' must have exactly one component."
+            )));
+        }
+        if self
+            .roots
+            .keys()
+            .any(|existing| existing.eq_ignore_ascii_case(&prefix))
+        {
+            return Err(SourcePackageRegistryError::new(format!(
+                "Source package '@{prefix}' is already registered."
+            )));
+        }
         self.roots.insert(
             prefix.clone(),
             SourcePackageRoot {
@@ -43,6 +92,7 @@ impl SourcePackageRegistry {
                 metadata: PackageMetadata::source(origin),
             },
         );
+        Ok(())
     }
 
     /// Returns the root for a given package prefix, if any.
@@ -58,25 +108,6 @@ impl SourcePackageRegistry {
     /// Iterate over all registered roots.
     pub fn iter(&self) -> impl Iterator<Item = &SourcePackageRoot> {
         self.roots.values()
-    }
-
-    /// Merge another registry into this one, returning collision errors.
-    pub fn merge(&mut self, other: &SourcePackageRegistry) -> Result<(), Vec<String>> {
-        let mut collisions = Vec::new();
-        // The BTreeMap already iterates in canonical package-prefix order, so
-        // multi-collision diagnostics are reported deterministically.
-        for (prefix, root) in &other.roots {
-            if self.roots.contains_key(prefix) {
-                collisions.push(prefix.clone());
-            } else {
-                self.roots.insert(prefix.clone(), root.clone());
-            }
-        }
-        if collisions.is_empty() {
-            Ok(())
-        } else {
-            Err(collisions)
-        }
     }
 }
 

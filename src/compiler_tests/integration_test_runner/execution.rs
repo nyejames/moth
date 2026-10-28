@@ -6,7 +6,7 @@
 //!      compiler state into the runner.
 
 use super::{BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, TestCaseSpec};
-use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::build_system::build::{BuilderSelection, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -20,7 +20,7 @@ pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
 
 pub(crate) fn execute_test_case_with_completion_hook(
     case: &TestCaseSpec,
-    project_builder: ProjectBuilder,
+    builder_selection: BuilderSelection,
     after_worker_drop: impl FnOnce(),
 ) -> CaseExecutionResult {
     let case = case.clone();
@@ -38,7 +38,7 @@ pub(crate) fn execute_test_case_with_completion_hook(
             case,
             entry_path,
             build_config_inputs,
-            builder: project_builder,
+            builder: builder_selection,
         }
         .run()
     }));
@@ -64,7 +64,7 @@ struct CaseWorker {
     case: TestCaseSpec,
     entry_path: PathBuf,
     build_config_inputs: BuildConfigInputSet,
-    builder: ProjectBuilder,
+    builder: BuilderSelection,
 }
 
 impl CaseWorker {
@@ -86,11 +86,13 @@ impl CaseWorker {
         };
 
         let build_result = match build_project(
-            &self.builder,
+            self.builder.backend.as_ref(),
             entry_path,
             &self.case.flags,
             &self.build_config_inputs,
-        ) {
+        )
+        .unwrap_or_else(|never| match never {})
+        {
             Ok(CompilationOutcome::Success { value, .. }) => value.finish_output(Ok(())),
             result => result,
         };
@@ -183,8 +185,8 @@ fn failed_case_result(reason: String, failure_kind: FailureKind) -> CaseExecutio
     }
 }
 
-fn backend_builder_for_case(_backend_id: BackendId) -> ProjectBuilder {
+fn backend_builder_for_case(_backend_id: BackendId) -> BuilderSelection {
     // This backend-builder seam is explicit even though both current backends
     // route through the HTML builder, so future non-HTML backends can slot in cleanly.
-    ProjectBuilder::new(HtmlProjectBuilder::for_integration_tests())
+    BuilderSelection::new(HtmlProjectBuilder::for_integration_tests())
 }

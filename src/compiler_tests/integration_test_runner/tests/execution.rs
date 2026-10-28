@@ -19,8 +19,8 @@ use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
 use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::build_system::build::{
-    BackendBuilder, BuildResult, FileKind, Project, ProjectBuilder, ProjectCompilation,
-    build_project,
+    BackendBuilder, BackendInvocationFailure, BuildResult, BuilderSelection, FileKind, Project,
+    ProjectCompilation, build_project,
 };
 use crate::build_system::create_project_modules::{
     ProjectFrontendCompilation, compile_project_frontend,
@@ -29,6 +29,7 @@ use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -38,7 +39,6 @@ use crate::compiler_frontend::compiler_messages::render::{
     dev_server::render_compilation_result_html,
     terse::{self, format_terse_diagnostic_reports},
 };
-use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -119,6 +119,7 @@ impl Drop for PanickingBackendBuilder {
 }
 
 impl BackendBuilder for PanickingBackendBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         _project_compilation: ProjectCompilation,
@@ -126,7 +127,7 @@ impl BackendBuilder for PanickingBackendBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         unreachable!("frontend_surface panics before backend construction")
     }
 
@@ -167,12 +168,12 @@ fn execute_with_panicking_builder(
     let surface_reached = Arc::new(AtomicBool::new(false));
     let builder_dropped = Arc::new(AtomicBool::new(false));
     let after_drop_hook_observed_drop = Arc::new(AtomicBool::new(false));
-    let project_builder = ProjectBuilder::new(PanickingBackendBuilder {
+    let builder_selection = BuilderSelection::new(PanickingBackendBuilder {
         panic,
         surface_reached: Arc::clone(&surface_reached),
         dropped: Arc::clone(&builder_dropped),
     });
-    let result = execute_test_case_with_completion_hook(case, project_builder, {
+    let result = execute_test_case_with_completion_hook(case, builder_selection, {
         let builder_dropped = Arc::clone(&builder_dropped);
         let after_drop_hook_observed_drop = Arc::clone(&after_drop_hook_observed_drop);
         move || {
@@ -376,12 +377,15 @@ impl EntryFixture {
     }
 
     fn build_result(&self, flags: &[Flag]) -> CompilationResult<BuildResult> {
+        let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
         match build_project(
-            &ProjectBuilder::new(HtmlProjectBuilder::new()),
+            builder_selection.backend.as_ref(),
             self.entry.to_str().expect("fixture entry should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
-        ) {
+        )
+        .unwrap_or_else(|never| match never {})
+        {
             Ok(CompilationOutcome::Success { value, .. }) => value.finish_output(Ok(())),
             result => result,
         }
@@ -1020,14 +1024,15 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let result = build_project(
-                &ProjectBuilder::new(HtmlProjectBuilder::new()),
+                &HtmlProjectBuilder::new(),
                 fixture
                     .entry
                     .to_str()
                     .expect("fixture entry should be UTF-8"),
                 &[],
                 &BuildConfigInputSet::new(),
-            );
+            )
+            .unwrap_or_else(|never| match never {});
             let messages = expect_diagnosed(result);
             let diagnostics = messages
                 .iter_severity(DiagnosticSeverity::Error)
@@ -1087,14 +1092,15 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let result = build_project(
-                &ProjectBuilder::new(HtmlProjectBuilder::new()),
+                &HtmlProjectBuilder::new(),
                 fixture
                     .entry
                     .to_str()
                     .expect("fixture entry should be UTF-8"),
                 &[Flag::HtmlWasm],
                 &BuildConfigInputSet::new(),
-            );
+            )
+            .unwrap_or_else(|never| match never {});
             let messages = expect_diagnosed(result);
             let diagnostics = messages
                 .iter_severity(DiagnosticSeverity::Error)

@@ -7,8 +7,10 @@
 //! values against the builder surface's schema nodes without inspecting compiler AST internals.
 
 use crate::build_system::output::{
+    DEFAULT_DEV_OUTPUT, DEFAULT_RELEASE_OUTPUT, DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD,
     ValidatedDirectoryOutputSettings, ValidatedOutputFolder, canonical_output_root_for_identity,
-    classify_output_folder, output_path_identity, validate_output_folder_containment,
+    classify_output_folder, ensure_single_output_root_owner, output_path_identity,
+    validate_output_folder_containment,
 };
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, FoldedConfigDeclaration,
@@ -31,7 +33,7 @@ use crate::compiler_frontend::folded_value::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::projects::settings::{
-    Config, HtmlSectionConfig, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
+    Config, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
     TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
 };
 use moth_lexical::identifier::is_identifier;
@@ -74,7 +76,20 @@ pub(super) fn validate_and_apply_config_declarations(
 
     let mut errors = Vec::new();
     let mut saw_project_record = false;
-    let mut seen_sections = HashSet::new();
+    // WHY: the output roots have one value and one authored span for the whole project, so two
+    // sections that own them would replace each other instead of failing.
+    ensure_single_output_root_owner(config_schemas.project_sections())
+        .map_err(ConfigApplyError::Compiler)?;
+    let authored_sections: HashSet<&str> = config_schemas
+        .project_sections()
+        .iter()
+        .map(|section| section.name.as_ref())
+        .filter(|section_name| {
+            compiled_config.declarations.iter().any(|declaration| {
+                diagnostic_strings.strings().resolve(declaration.name) == *section_name
+            })
+        })
+        .collect();
 
     let project_field_indexes = SchemaFieldIndexes::build(config_schemas.project());
     let mut section_indexes = Vec::with_capacity(config_schemas.project_sections().len());
@@ -82,13 +97,24 @@ pub(super) fn validate_and_apply_config_declarations(
         section_indexes.push(SchemaFieldIndexes::build(&section.schema));
     }
 
-    for declaration in &compiled_config.declarations {
-        let key = diagnostic_strings
-            .strings()
-            .resolve(declaration.name)
-            .to_string();
+    for (section_index, section) in config_schemas.project_sections().iter().enumerate() {
+        if section.required || authored_sections.contains(section.name.as_ref()) {
+            continue;
+        }
 
-        if key == "project" {
+        if let Err(error) = apply_omitted_section_defaults(
+            config,
+            section,
+            &section_indexes[section_index],
+            diagnostic_strings,
+            &mut errors,
+        ) {
+            return Err(ConfigApplyError::Compiler(error));
+        }
+    }
+
+    for declaration in &compiled_config.declarations {
+        if diagnostic_strings.strings().resolve(declaration.name) == "project" {
             saw_project_record = true;
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 validate_and_apply_project_record(
@@ -115,9 +141,10 @@ pub(super) fn validate_and_apply_config_declarations(
             .project_sections()
             .iter()
             .enumerate()
-            .find(|(_, section)| section.name == key)
+            .find(|(_, section)| {
+                section.name.as_ref() == diagnostic_strings.strings().resolve(declaration.name)
+            })
         {
-            seen_sections.insert(section.name);
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 if let Err(error) = validate_and_apply_named_section(
                     config,
@@ -141,7 +168,7 @@ pub(super) fn validate_and_apply_config_declarations(
             continue;
         }
 
-        if is_retired_flat_config_key(&key) {
+        if is_retired_flat_config_key(diagnostic_strings.strings().resolve(declaration.name)) {
             errors.push(config_diagnostic(
                 Some(declaration.name),
                 InvalidConfigReason::UnknownKey {
@@ -166,11 +193,11 @@ pub(super) fn validate_and_apply_config_declarations(
     }
 
     for section in config_schemas.project_sections() {
-        if section.required && !seen_sections.contains(section.name) {
+        if section.required && !authored_sections.contains(section.name.as_ref()) {
             errors.push(config_diagnostic(
                 None,
                 InvalidConfigReason::MissingActiveBuilderSection {
-                    section: diagnostic_strings.intern(section.name),
+                    section: diagnostic_strings.intern(section.name.as_ref()),
                 },
                 None,
             ));
@@ -193,19 +220,19 @@ pub(super) fn validate_and_apply_config_declarations(
 /// WHAT: maps each node's declared field names to their dense schema field IDs.
 /// WHY: the recursive walk resolves field names by dense ID lookup without scanning the schema
 ///      vectors per field; the index is rebuilt once per validation operation.
-struct SchemaFieldIndexes {
-    by_node: Vec<HashMap<&'static str, ConfigSchemaFieldId>>,
+struct SchemaFieldIndexes<'a> {
+    by_node: Vec<HashMap<&'a str, ConfigSchemaFieldId>>,
 }
 
-impl SchemaFieldIndexes {
-    fn build(schema: &ConfigSchema) -> Self {
+impl<'a> SchemaFieldIndexes<'a> {
+    fn build(schema: &'a ConfigSchema) -> Self {
         let mut by_node = Vec::with_capacity(schema.nodes().len());
 
         for node in schema.nodes() {
             let mut index = HashMap::with_capacity(node.field_ids().len());
             for field_id in node.field_ids() {
                 index
-                    .entry(schema.field(*field_id).name)
+                    .entry(schema.field(*field_id).name.as_ref())
                     .or_insert(*field_id);
             }
             by_node.push(index);
@@ -228,7 +255,7 @@ fn validate_and_apply_project_record(
     config: &mut Config,
     declaration: &FoldedConfigDeclaration,
     project_schema: &ConfigSchema,
-    field_indexes: &SchemaFieldIndexes,
+    field_indexes: &SchemaFieldIndexes<'_>,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
     errors: &mut Vec<DiagnosticDraft>,
 ) {
@@ -370,7 +397,7 @@ fn validate_and_apply_named_section(
     config: &mut Config,
     declaration: &FoldedConfigDeclaration,
     section: &NamedConfigSectionSchema,
-    field_indexes: &SchemaFieldIndexes,
+    field_indexes: &SchemaFieldIndexes<'_>,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
     errors: &mut Vec<DiagnosticDraft>,
 ) -> Result<(), InfrastructureFailure> {
@@ -391,96 +418,146 @@ fn validate_and_apply_named_section(
         section.schema.root(),
         &declaration.value,
         Some(&declaration.direct_field_spans),
-    ) && section.name == "html"
-    {
-        apply_html_section_fields(config, fields)?;
+    ) {
+        apply_builder_section_fields(config, section.name.as_ref(), fields)?;
     }
 
     Ok(())
 }
 
-/// Apply the validated fields of one grouped html section record.
+/// Apply the schema defaults of one optional builder section that the project did not author.
 ///
-/// WHAT: routes each owned field through the html application path in authored order, so the
-///       last authored spelling of a field owns the stored value.
-/// WHY: the HTML builder's typed section is the only settings store for html keys.
-fn apply_html_section_fields(
+/// WHAT: validates the section's defaulted root fields and applies them only when every one of
+///       them is valid. A required section never reaches this path, because its absence is an
+///       error and its defaults are never applied.
+/// WHY: an absent optional section still gives its builder the defaults its schema declares, so
+///      output roots resolve for every builder that registers them.
+fn apply_omitted_section_defaults(
     config: &mut Config,
+    section: &NamedConfigSectionSchema,
+    field_indexes: &SchemaFieldIndexes<'_>,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    errors: &mut Vec<DiagnosticDraft>,
+) -> Result<(), InfrastructureFailure> {
+    let view = ConfigSchemaView {
+        schema: &section.schema,
+        field_indexes,
+    };
+    let mut diagnostics = ValueDiagnosticContext {
+        span: None,
+        string_table: diagnostic_strings,
+        errors,
+    };
+    let root = section.schema.node(section.schema.root());
+    let mut defaults = Vec::new();
+    let mut failed = false;
+
+    for field_id in root.field_ids() {
+        let field = section.schema.field(*field_id);
+
+        if let Some(default) = &field.default {
+            match validate_field_default(&view, &mut diagnostics, field, default) {
+                Some(validated_default) => defaults.push(validated_default),
+                None => failed = true,
+            }
+        }
+    }
+
+    if failed {
+        return Ok(());
+    }
+
+    apply_builder_section_fields(config, section.name.as_ref(), defaults)
+}
+
+/// Apply the validated fields of one builder section record in field order.
+///
+/// WHAT: routes each field through the builder section path, so the last authored spelling of a
+///       field owns the stored value.
+/// WHY: every builder section stores its values through the same rules, whichever builder
+///      registered it.
+fn apply_builder_section_fields(
+    config: &mut Config,
+    section_name: &str,
     fields: Vec<ValidatedRecordField>,
 ) -> Result<(), InfrastructureFailure> {
     for field in fields {
-        apply_html_section_field(config, field)?;
+        apply_builder_section_field(config, section_name, field)?;
     }
     Ok(())
 }
 
-/// Apply one validated html section field to the config.
+/// Apply one validated builder field to its shared settings owner.
 ///
-/// WHAT: stores each html builder field on the typed [`HtmlSectionConfig`] result. The HTML
-///       builder's readers consume that section directly.
-/// WHY: html values must not be stringified into a settings map. An unmatched validated field
-///       means the schema and typed storage drifted, which is a compiler bug.
-fn apply_html_section_field(
+/// Output roots stay in their project-wide owner. Other string and bool fields, including HTML
+/// fields, use the same schema-driven value store.
+fn apply_builder_section_field(
     config: &mut Config,
+    section_name: &str,
     field: ValidatedRecordField,
 ) -> Result<(), InfrastructureFailure> {
-    let name = field.name;
-    let field_span = field.span;
-    match (name.as_str(), field.value) {
-        ("origin", ValidatedConfigValue::String(text)) => {
-            config.html_section.origin = Some(text);
-        }
-        ("page_url_style", ValidatedConfigValue::String(text)) => {
-            config.html_section.page_url_style = Some(text);
-        }
-        ("redirect_index_html", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.redirect_index_html = Some(enabled);
-        }
-        ("html_lang", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_lang = Some(text);
-        }
-        ("html_title_prefix", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_title_prefix = Some(text);
-        }
-        ("html_title_postfix", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_title_postfix = Some(text);
-        }
-        ("html_favicon", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_favicon = Some(text);
-        }
-        ("html_inject_charset", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_charset = Some(enabled);
-        }
-        ("html_inject_viewport", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_viewport = Some(enabled);
-        }
-        ("html_inject_color_scheme", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_color_scheme = Some(enabled);
-        }
-        ("html_inject_core_css", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_core_css = Some(enabled);
-        }
-        ("html_body_style", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_body_style = Some(text);
-        }
-        ("dev_output", ValidatedConfigValue::String(text)) => {
-            config.html_section.dev_output = Some(text);
-        }
-        ("release_output", ValidatedConfigValue::String(text)) => {
-            config.html_section.release_output = Some(text);
-        }
-        (unknown, _) => {
-            return Err(InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-                format!("html section applied unknown validated field '{unknown}'"),
-            ));
-        }
+    let ValidatedRecordField { name, value, span } = field;
+
+    if name == DEV_OUTPUT_FIELD {
+        return match value {
+            ValidatedConfigValue::String(text) => {
+                config.output_roots.dev_output = Some(text);
+                apply_output_root_span(config, name, span);
+                Ok(())
+            }
+            other => apply_generic_builder_value(config, section_name, name, other, span),
+        };
+    }
+    if name == RELEASE_OUTPUT_FIELD {
+        return match value {
+            ValidatedConfigValue::String(text) => {
+                config.output_roots.release_output = Some(text);
+                apply_output_root_span(config, name, span);
+                Ok(())
+            }
+            other => apply_generic_builder_value(config, section_name, name, other, span),
+        };
     }
 
-    if let Some(span) = field_span {
+    apply_generic_builder_value(config, section_name, name, value, span)
+}
+
+fn apply_output_root_span(config: &mut Config, name: String, span: Option<SourceSpan>) {
+    if let Some(span) = span {
         config.setting_spans.insert(name, span);
     } else {
         config.setting_spans.remove(&name);
+    }
+}
+
+/// Store one validated non-output-root field under its section and registered name.
+fn apply_generic_builder_value(
+    config: &mut Config,
+    section_name: &str,
+    name: String,
+    value: ValidatedConfigValue,
+    span: Option<SourceSpan>,
+) -> Result<(), InfrastructureFailure> {
+    match value {
+        ValidatedConfigValue::String(text) => {
+            config
+                .builder_settings
+                .set_string(section_name, name, text, span)
+        }
+        ValidatedConfigValue::Bool(enabled) => {
+            config
+                .builder_settings
+                .set_bool(section_name, name, enabled, span)
+        }
+        ValidatedConfigValue::OptionNone => config.builder_settings.clear(section_name, &name),
+        _ => {
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "builder section '{section_name}' field '{name}' has an unstorable value shape"
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -494,9 +571,9 @@ fn apply_html_section_field(
 /// WHAT: bundles the schema and its transient field-name index.
 /// WHY: the recursive helpers read schema state through one shared view while the diagnostic
 /// lane stays separately mutable.
-struct ConfigSchemaView<'a> {
-    schema: &'a ConfigSchema,
-    field_indexes: &'a SchemaFieldIndexes,
+struct ConfigSchemaView<'schema, 'indexes> {
+    schema: &'schema ConfigSchema,
+    field_indexes: &'indexes SchemaFieldIndexes<'schema>,
 }
 
 /// Mutable diagnostic lane for one recursive value-validation walk.
@@ -578,7 +655,7 @@ fn push_spanned_shape_failure(
 /// directly and return [`ValueCheck::Reported`]. Schema defaults and generated values have no
 /// authored span.
 fn validate_value(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
@@ -593,7 +670,7 @@ fn validate_value(
 /// `field_span` is the authored field's retained span when the caller owns one; schema
 /// defaults and nested collection elements pass `None` so no diagnostic gains fake provenance.
 fn validate_value_with_span(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
@@ -653,7 +730,7 @@ fn validate_value_with_span(
 /// Collections report the element shape, or keep nested diagnostics already pushed by
 /// record-valued elements. A scalar is not promoted to a one-element collection.
 fn validate_collection(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     element_shape: &ConfigFieldShape,
@@ -691,7 +768,7 @@ fn validate_collection(
 
 /// Validate one record value against one schema node, field by field.
 fn validate_record_fields(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     node_id: ConfigSchemaNodeId,
     value: &PublicFoldedValue,
@@ -818,7 +895,7 @@ fn validate_record_fields(
                 None,
                 InvalidConfigReason::MissingRequiredRecordField {
                     record: record_name,
-                    field: diagnostics.string_table.intern(field.name),
+                    field: diagnostics.string_table.intern(field.name.as_ref()),
                 },
                 diagnostics.span,
             ));
@@ -826,30 +903,9 @@ fn validate_record_fields(
         }
 
         if let Some(default) = &field.default {
-            let field_key = diagnostics.string_table.intern(field.name);
-
-            match validate_value(
-                view,
-                diagnostics,
-                Some(field_key),
-                &field.shape,
-                field,
-                default,
-            ) {
-                ValueCheck::Valid(validated_default) => {
-                    validated_fields.push(ValidatedRecordField {
-                        name: field.name.to_string(),
-                        value: validated_default,
-                        span: None,
-                    });
-                }
-
-                ValueCheck::Mismatch => {
-                    failed = true;
-                    push_shape_failure(diagnostics, Some(field_key), &field.shape, field);
-                }
-
-                ValueCheck::Reported => failed = true,
+            match validate_field_default(view, diagnostics, field, default) {
+                Some(validated_default) => validated_fields.push(validated_default),
+                None => failed = true,
             }
         }
     }
@@ -860,6 +916,44 @@ fn validate_record_fields(
 
     ValueCheck::Valid(ValidatedConfigValue::Record(validated_fields))
 }
+
+/// Validate one schema default for a field that an authored record or section omitted.
+///
+/// WHAT: returns the validated field when the default matches its shape, and `None` after
+///       reporting the mismatch or the failure the validator already reported.
+/// WHY: authored records and omitted optional sections share this check, so each schema default
+///      is validated against its field shape in one place.
+fn validate_field_default(
+    view: &ConfigSchemaView<'_, '_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
+    field: &ConfigSchemaField,
+    default: &PublicFoldedValue,
+) -> Option<ValidatedRecordField> {
+    let field_key = diagnostics.string_table.intern(field.name.as_ref());
+
+    match validate_value(
+        view,
+        diagnostics,
+        Some(field_key),
+        &field.shape,
+        field,
+        default,
+    ) {
+        ValueCheck::Valid(value) => Some(ValidatedRecordField {
+            name: field.name.to_string(),
+            value,
+            span: None,
+        }),
+
+        ValueCheck::Mismatch => {
+            push_shape_failure(diagnostics, Some(field_key), &field.shape, field);
+            None
+        }
+
+        ValueCheck::Reported => None,
+    }
+}
+
 fn push_shape_failure(
     diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
@@ -1129,31 +1223,30 @@ struct EffectiveOutputSetting {
 
 /// Resolve the development and release output roots this config will actually use.
 ///
-/// WHAT: a validated grouped html section owns the output roots through its typed settings,
-/// with the section schema's defaults already applied for omitted fields; an absent section
-/// resolves through the same section defaults.
-/// WHY: dual-mode output resolution must validate the roots that will actually be written
-/// and point diagnostics at the authoring shape that provided each value.
+/// WHAT: each root is the value a builder section authored, or the output-root default when no
+///       section authored it. A builder without a section therefore resolves the same defaults.
+/// WHY: dual-mode output resolution must validate the roots that will actually be written and
+///      point diagnostics at the authoring shape that provided each value.
 fn effective_output_settings(config: &Config) -> (EffectiveOutputSetting, EffectiveOutputSetting) {
     let dev = EffectiveOutputSetting {
-        key: "dev_output",
+        key: DEV_OUTPUT_FIELD,
         folder: PathBuf::from(
             config
-                .html_section
+                .output_roots
                 .dev_output
                 .as_deref()
-                .unwrap_or(HtmlSectionConfig::DEFAULT_DEV_OUTPUT),
+                .unwrap_or(DEFAULT_DEV_OUTPUT),
         ),
     };
 
     let release = EffectiveOutputSetting {
-        key: "release_output",
+        key: RELEASE_OUTPUT_FIELD,
         folder: PathBuf::from(
             config
-                .html_section
+                .output_roots
                 .release_output
                 .as_deref()
-                .unwrap_or(HtmlSectionConfig::DEFAULT_RELEASE_OUTPUT),
+                .unwrap_or(DEFAULT_RELEASE_OUTPUT),
         ),
     };
 

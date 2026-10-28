@@ -13,6 +13,7 @@ use super::super::{
     BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, SummaryCounts, TestCaseSpec,
 };
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
+
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;

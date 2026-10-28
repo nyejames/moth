@@ -214,11 +214,13 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let mut source_packages = crate::builder_surface::SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        source_packages
+            .register_filesystem_root(
+                "pkg",
+                package_root,
+                crate::builder_surface::PackageOrigin::ProjectLocal,
+            )
+            .expect("test source root should register");
 
         let mut string_table = StringTable::new();
         let failure = super::source_package_discovery::build_source_package_boundary_indexes(
@@ -414,11 +416,13 @@ mod source_package_boundary_indexes_tests {
     }
 
     fn register_pkg(source_packages: &mut SourcePackageRegistry, package_root: &Path) {
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root.to_path_buf(),
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        source_packages
+            .register_filesystem_root(
+                "pkg",
+                package_root.to_path_buf(),
+                crate::builder_surface::PackageOrigin::ProjectLocal,
+            )
+            .expect("test source root should register");
     }
 
     fn assert_invalid_config_reason(failure: PreparedFailure, expected_reason: InvalidConfigCode) {
@@ -434,27 +438,6 @@ mod source_package_boundary_indexes_tests {
                 }),
             "expected the typed config failure {expected_reason:?}",
         );
-    }
-
-    #[test]
-    fn reserved_project_globals_package_prefix_is_rejected_before_indexing() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let package_root = root.join("project");
-        fs::create_dir_all(&package_root).expect("should create project package root");
-        fs::write(package_root.join("@home.moth"), "").expect("should write package root");
-
-        let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "project",
-            package_root,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
-
-        let mut string_table = StringTable::new();
-        let failure = build_indexes(&source_packages, &mut string_table)
-            .expect_err("project source-package prefix must remain reserved");
-        assert_invalid_config_reason(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
     }
 
     #[test]
@@ -638,16 +621,20 @@ mod source_package_boundary_indexes_tests {
         fs::write(beta_root.join("@mod.moth"), "").expect("should write beta root");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "alpha",
-            alpha_root.clone(),
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
-        source_packages.register_filesystem_root(
-            "beta",
-            beta_root.clone(),
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        source_packages
+            .register_filesystem_root(
+                "alpha",
+                alpha_root.clone(),
+                crate::builder_surface::PackageOrigin::ProjectLocal,
+            )
+            .expect("test source root should register");
+        source_packages
+            .register_filesystem_root(
+                "beta",
+                beta_root.clone(),
+                crate::builder_surface::PackageOrigin::ProjectLocal,
+            )
+            .expect("test source root should register");
 
         let mut string_table = StringTable::new();
         let indexes = build_indexes(&source_packages, &mut string_table)
@@ -798,11 +785,13 @@ mod non_utf8_package_boundary_candidate_tests {
             .expect("should write valid normal module root");
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
+        source_packages
+            .register_filesystem_root(
+                "pkg",
+                package_root,
+                crate::builder_surface::PackageOrigin::ProjectLocal,
+            )
+            .expect("test source root should register");
 
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)

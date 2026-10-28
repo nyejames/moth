@@ -5,7 +5,7 @@
 //! WHY: build pipeline ownership stays in the compiler/build crate while the CLI supplies only
 //!      terminal presentation at the report boundary.
 
-use crate::build_system::build::{BuildResult, ProjectBuilder, build_project};
+use crate::build_system::build::{BuildResult, BuilderSelection, build_project};
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
@@ -73,7 +73,7 @@ enum BuildOutputFailure {
 /// planning does not consult process-global current-directory state. Directory builds retain their
 /// validated project output plan.
 pub fn run_build_command(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -81,7 +81,7 @@ pub fn run_build_command(
     present: impl FnOnce(BuildCommandReport),
 ) -> ProjectCommandCompletion {
     run_build_command_with_output_plan(
-        project_builder,
+        builder_selection,
         entry_path,
         flags,
         build_config_inputs,
@@ -91,7 +91,7 @@ pub fn run_build_command(
 }
 
 fn run_build_command_with_output_plan(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -101,7 +101,7 @@ fn run_build_command_with_output_plan(
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let started = Instant::now();
     let outcome = build_command_outcome(
-        project_builder,
+        builder_selection,
         entry_path,
         flags,
         build_config_inputs,
@@ -122,13 +122,19 @@ fn run_build_command_with_output_plan(
 }
 
 fn build_command_outcome(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
 ) -> CompilationResult<BuildCommandSuccess> {
-    let build_result = match build_project(project_builder, entry_path, flags, build_config_inputs)?
+    let build_result = match build_project(
+        builder_selection.backend.as_ref(),
+        entry_path,
+        flags,
+        build_config_inputs,
+    )
+    .unwrap_or_else(|never| match never {})?
     {
         CompilationOutcome::Success { value, .. } => value,
         CompilationOutcome::Diagnosed(reports) => {
@@ -208,7 +214,7 @@ fn create_build_output_plan(
     Ok(OutputPlan::SingleFile(SingleFileOutputPlan {
         output_root: output_root.to_path_buf(),
         project_root: Some(project_root),
-        owner: build_result.output_owner,
+        owner: build_result.output_owner.clone(),
     }))
 }
 

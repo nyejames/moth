@@ -455,9 +455,17 @@ pub enum InvalidOutputFolderReason {
 /// A source file that is not valid UTF-8 carries the decoder's description of the invalid sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidExternalModuleReason {
-    ReceiverMethod { moth_name: StringId },
-    ParserDiagnostic { parser_detail: StringId },
-    NonUtf8Source { utf8_detail: StringId },
+    ReceiverMethod {
+        moth_name: StringId,
+    },
+    ParserDiagnostic {
+        parser_detail: StringId,
+    },
+    NonUtf8Source {
+        utf8_detail: StringId,
+    },
+    /// Package paths reserve `#`, so a logical source path containing it cannot be registered.
+    PathContainsPackageSeparator,
 }
 
 /// WHAT: structured reason for an invalid quoted-string escape.

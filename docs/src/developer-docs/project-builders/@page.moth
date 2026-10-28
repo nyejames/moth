@@ -16,8 +16,11 @@ page_head #= theme_head
     # Create a project builder in Rust
 
     A project builder connects Moth to an application environment. This guide
-    builds a small Wasm package builder, then explains source packages, Rust
-    bindings, configuration, directives and runtime output.
+    presents the accepted target design through a small Wasm package builder,
+    then explains source packages, Rust bindings, configuration, directives
+    and runtime output. See
+    @../../docs/progress/packages-and-builders (current SDK coverage)
+    for the delivered prototype.
 
     The compiler owns language semantics. Your builder owns its application
     contract and uses the public SDK to request validated compilation and

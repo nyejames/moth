@@ -4,16 +4,20 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::backend_build_context::BackendBuildContext;
-use crate::build_system::build::{BackendBuilder, FileKind, OutputFile, Project};
+use crate::build_system::build::{
+    BackendBuilder, BackendInvocationFailure, FileKind, OutputFile, Project,
+};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
-    WriteMode, WriteOptions, write_project_outputs as write_project_outputs_inner,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary,
+    SingleFileOutputPlan, WriteMode, WriteOptions,
+    write_project_outputs as write_project_outputs_inner,
 };
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    CompilationOutcome, CompilationResult,
+    CompilationOutcome, CompilationResult, InfrastructureFailure,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -24,7 +28,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
+    CompilerStage, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -272,7 +276,7 @@ fn test_output_plan(
         output_root,
         project_root,
         owner: OutputOwner {
-            builder: BuilderKind::Html,
+            builder: BuilderIdentity::html(),
             profile,
         },
     })
@@ -292,6 +296,52 @@ fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> Diagno
     names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, span)
 }
 
+struct LateFailureBuilder {
+    package_root: PathBuf,
+}
+
+impl BackendBuilder for LateFailureBuilder {
+    type Error = std::convert::Infallible;
+
+    fn build_backend(
+        &self,
+        _project_compilation: super::ProjectCompilation,
+        _config: &Config,
+        _build_profile: BuildProfile,
+        _flags: &[Flag],
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
+        Err(BackendInvocationFailure::Prepared(
+            InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                "injected late backend failure",
+            )
+            .into(),
+        ))
+    }
+
+    fn validate_project_config(
+        &self,
+        _config: &Config,
+        _strings: &mut DiagnosticStringBuilder<'_>,
+    ) -> Result<(), ProjectConfigError> {
+        Ok(())
+    }
+
+    fn frontend_surface(&self) -> BuilderSurface {
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface
+            .source_packages
+            .register_filesystem_root("warnpkg", self.package_root.clone(), PackageOrigin::Builder)
+            .expect("test source root should register");
+        surface
+    }
+
+    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
+        Vec::new()
+    }
+}
+
 struct ValidationTrackingBuilder {
     validated: std::sync::Arc<std::sync::atomic::AtomicBool>,
     built: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -303,6 +353,7 @@ struct EntryTrackingBuilder {
 }
 
 impl BackendBuilder for EntryTrackingBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         project_compilation: super::ProjectCompilation,
@@ -310,7 +361,7 @@ impl BackendBuilder for EntryTrackingBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         self.module_count.store(
             project_compilation.module_count(),
             std::sync::atomic::Ordering::SeqCst,
@@ -347,6 +398,7 @@ impl BackendBuilder for EntryTrackingBuilder {
 }
 
 impl BackendBuilder for ValidationTrackingBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         _project_compilation: super::ProjectCompilation,
@@ -354,7 +406,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         self.built.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Project {
             output_files: vec![],
@@ -387,6 +439,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
 struct FailingValidationBuilder;
 
 impl BackendBuilder for FailingValidationBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         _project_compilation: super::ProjectCompilation,
@@ -394,7 +447,7 @@ impl BackendBuilder for FailingValidationBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         panic!("should not call build_backend if validation fails");
     }
 
@@ -424,6 +477,7 @@ impl BackendBuilder for FailingValidationBuilder {
 struct NoDirectiveBuilder;
 
 impl BackendBuilder for NoDirectiveBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         _project_compilation: super::ProjectCompilation,
@@ -431,7 +485,7 @@ impl BackendBuilder for NoDirectiveBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         Ok(Project {
             output_files: vec![OutputFile::new(
                 PathBuf::from("index.html"),
@@ -464,6 +518,7 @@ impl BackendBuilder for NoDirectiveBuilder {
 struct MultiModuleDiagnosticBuilder;
 
 impl BackendBuilder for MultiModuleDiagnosticBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         project_compilation: super::ProjectCompilation,
@@ -471,7 +526,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure> {
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         project_compilation
             .modules()
             .find(|module| module.metadata.entry_point.ends_with("src/@page.moth"))
@@ -496,7 +551,9 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             || None,
         )
         .map_err(PreparedFailure::from)?;
-        Err(PreparedFailure::Diagnosed(batch))
+        Err(BackendInvocationFailure::Prepared(
+            PreparedFailure::Diagnosed(batch),
+        ))
     }
 
     fn validate_project_config(

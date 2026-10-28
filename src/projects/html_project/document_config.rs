@@ -1,7 +1,7 @@
 //! Typed HTML document-shell configuration parsing.
 //!
-//! WHAT: parses HTML-shell-specific `config.moth` settings from the typed html builder
-//!       section into a strict typed struct.
+//! WHAT: parses HTML-shell-specific `config.moth` settings from the generic builder settings
+//!       into a strict typed struct.
 //! WHY: keeping document policy separate from routing config avoids one oversized parser and
 //!      gives the HTML builder a single source of truth for shell defaults.
 
@@ -42,11 +42,11 @@ pub(crate) fn parse_html_document_config(
     config: &Config,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<HtmlDocumentConfig, ProjectConfigError> {
-    let section = &config.html_section;
+    let section = &config.builder_settings;
 
     Ok(HtmlDocumentConfig {
         lang: parse_required_string(
-            section.html_lang.as_deref(),
+            section.string("html", "html_lang"),
             "html_lang",
             "en",
             true,
@@ -54,7 +54,7 @@ pub(crate) fn parse_html_document_config(
             string_table,
         )?,
         title_prefix: parse_required_string(
-            section.html_title_prefix.as_deref(),
+            section.string("html", "html_title_prefix"),
             "html_title_prefix",
             "",
             false,
@@ -62,7 +62,7 @@ pub(crate) fn parse_html_document_config(
             string_table,
         )?,
         title_postfix: parse_required_string(
-            section.html_title_postfix.as_deref(),
+            section.string("html", "html_title_postfix"),
             "html_title_postfix",
             "",
             false,
@@ -70,17 +70,19 @@ pub(crate) fn parse_html_document_config(
             string_table,
         )?,
         favicon: parse_optional_string(
-            section.html_favicon.as_deref(),
+            section.string("html", "html_favicon"),
             "html_favicon",
             config,
             string_table,
         )?,
-        inject_charset: section.html_inject_charset.unwrap_or(true),
-        inject_viewport: section.html_inject_viewport.unwrap_or(true),
-        inject_color_scheme: section.html_inject_color_scheme.unwrap_or(true),
-        inject_core_css: section.html_inject_core_css.unwrap_or(true),
+        inject_charset: section.bool("html", "html_inject_charset").unwrap_or(true),
+        inject_viewport: section.bool("html", "html_inject_viewport").unwrap_or(true),
+        inject_color_scheme: section
+            .bool("html", "html_inject_color_scheme")
+            .unwrap_or(true),
+        inject_core_css: section.bool("html", "html_inject_core_css").unwrap_or(true),
         body_style: parse_required_string(
-            section.html_body_style.as_deref(),
+            section.string("html", "html_body_style"),
             "html_body_style",
             "",
             false,
@@ -132,7 +134,12 @@ fn config_empty_error(
     string_table: &mut DiagnosticStringBuilder,
 ) -> ProjectConfigError {
     config
-        .config_diagnostic(key, InvalidConfigReason::EmptyProjectSetting, string_table)
+        .builder_config_diagnostic(
+            "html",
+            key,
+            InvalidConfigReason::EmptyProjectSetting,
+            string_table,
+        )
         .into()
 }
 

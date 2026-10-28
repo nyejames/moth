@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, ProjectBuilder, bootstrap_project_build, finish_successful_project_warnings,
+    BuildBootstrap, BuilderSelection, bootstrap_project_build, finish_successful_project_warnings,
 };
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::build_system::create_project_modules::compiled_boundary::FrozenRenderRetentionMetrics;
@@ -626,7 +626,7 @@ fn run_frontend_benchmark_with_configured_warning_owner(
     // Reset at the benchmark command boundary, before bootstrap/config compilation. The
     // compilation module itself must not reset here because bootstrap owns measured preparation.
     crate::compiler_frontend::instrumentation::reset_memory_ledger();
-    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
     let requested_inputs = build_config_inputs_from_options(&options.build_config_inputs)?;
 
     let path = options.entry_path.to_str().ok_or_else(|| {
@@ -663,7 +663,11 @@ fn run_frontend_benchmark_with_configured_warning_owner(
         validated_directory_output_settings,
         mut project_source_builder,
         build_config_inputs,
-    } = match bootstrap_project_build(&project_builder, valid_path, &requested_inputs) {
+    } = match bootstrap_project_build(
+        builder_selection.backend.as_ref(),
+        valid_path,
+        &requested_inputs,
+    ) {
         Ok(bootstrap) => bootstrap,
         Err(failure) => {
             let messages = failure

@@ -6,7 +6,7 @@
 //! lifecycle and cleanup remain isolated behind one safety-first module.
 
 use crate::build_system::build_profile::BuildProfile;
-use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
+use crate::build_system::output::{BuilderIdentity, CleanupPolicy, OutputOwner};
 use crate::build_system::utils::{
     file_error, file_error_with_rejection_reason, should_skip_unchanged_write,
 };
@@ -70,7 +70,7 @@ pub(crate) struct OutputCleanupFinalization<'a> {
     pub(crate) manifest_destination: &'a Path,
     pub(crate) current_managed_artifact_paths: &'a HashSet<PathBuf>,
     pub(crate) current_explicit_directory_paths: &'a HashSet<PathBuf>,
-    pub(crate) owner: OutputOwner,
+    pub(crate) owner: &'a OutputOwner,
     pub(crate) cleanup_policy: &'a CleanupPolicy,
     pub(crate) write_mode: WriteMode,
 }
@@ -152,21 +152,21 @@ pub(crate) fn prepare_output_cleanup(
     output_root: &Path,
     project_root: Option<&Path>,
     entry_root: Option<&Path>,
-    owner: OutputOwner,
+    owner: &OutputOwner,
     setting_span: Option<SourceSpan>,
     cleanup_policy: &CleanupPolicy,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<PreparedOutputCleanup, PreparedFailure> {
     let manifest_read_result = if let Some(project_root) = project_root {
         validate_output_root_is_safe(output_root, project_root, entry_root)?;
-        let manifest_read_result = read_build_manifest(output_root, cleanup_policy);
+        let manifest_read_result = read_build_manifest(output_root, &owner.builder, cleanup_policy);
         let existing_owner = match &manifest_read_result {
             ManifestReadResult::Valid(manifest) => Some((
-                manifest.owner.builder.manifest_name(),
+                manifest.owner.builder.as_str(),
                 build_profile_manifest_name(manifest.owner.profile),
             )),
             ManifestReadResult::RecoverableWithOwner { owner, .. } => Some((
-                owner.builder.manifest_name(),
+                owner.builder.as_str(),
                 build_profile_manifest_name(owner.profile),
             )),
             ManifestReadResult::ForeignOwner {
@@ -184,7 +184,7 @@ pub(crate) fn prepare_output_cleanup(
             ManifestReadResult::Uninitialised | ManifestReadResult::Recoverable { .. } => None,
         };
         if let Some((existing_builder, existing_profile)) = existing_owner
-            && (existing_builder != owner.builder.manifest_name()
+            && (existing_builder != owner.builder.as_str()
                 || existing_profile != build_profile_manifest_name(owner.profile))
         {
             return Err(manifest_owner_conflict_failure(
@@ -403,15 +403,18 @@ pub(crate) fn validate_output_root_is_safe(
 //  Manifest Persistence
 // -------------------------
 
-/// Read the build manifest from the output root without comparing its owner to the active build.
+/// Read the build manifest and retain any owner its metadata identifies.
 ///
-/// Missing, unreadable, or metadata-invalid manifests enter recoverable state. Path lines are
-/// still revalidated individually so corrupt entries are skipped without broadening cleanup.
+/// Missing or unreadable manifests without an identifiable foreign builder enter recoverable
+/// state. In v4, incomplete profile metadata may recover ownerless only for the active builder.
+/// Path records are revalidated individually so corrupt entries cannot broaden cleanup.
 ///
 /// v4 manifests carry builder identity, profile and managed extensions. v3 manifests lack profile
-/// identity, so they enter recoverable state and the v4 format is written after a successful build.
+/// identity, so their declared builder recovers without stale cleanup only when it matches the
+/// active builder.
 pub(crate) fn read_build_manifest(
     output_root: &Path,
+    active_builder: &BuilderIdentity,
     active_policy: &CleanupPolicy,
 ) -> ManifestReadResult {
     let manifest_path = output_root.join(BUILD_MANIFEST_FILENAME);
@@ -458,15 +461,11 @@ pub(crate) fn read_build_manifest(
     }
 
     if first_line == BUILD_MANIFEST_HEADER_V4 {
-        return read_v4_build_manifest(manifest_lines, active_policy);
+        return read_v4_build_manifest(manifest_lines, active_builder, active_policy);
     }
 
     if first_line == BUILD_MANIFEST_HEADER_V3 {
-        // v3 manifests lack profile identity, so they enter recoverable state. The v4 format is
-        // written after a successful build upgrades the manifest.
-        return ManifestReadResult::Recoverable {
-            reason: ManifestRecoveryReason::UnsupportedVersion,
-        };
+        return read_v3_build_manifest(manifest_lines, active_builder);
     }
 
     let reason = if first_line.starts_with(BUILD_MANIFEST_HEADER_PREFIX) {
@@ -484,7 +483,7 @@ pub(crate) fn read_build_manifest(
 pub(crate) fn write_build_manifest(
     manifest_destination: &Path,
     current_paths: &HashSet<PathBuf>,
-    owner: OutputOwner,
+    owner: &OutputOwner,
     cleanup_policy: &CleanupPolicy,
     write_mode: WriteMode,
 ) -> Result<(), InfrastructureFailure> {
@@ -509,10 +508,7 @@ pub(crate) fn write_build_manifest(
 
     let mut manifest_lines = vec![
         String::from(BUILD_MANIFEST_HEADER_V4),
-        format!(
-            "{BUILD_MANIFEST_BUILDER_PREFIX}{}",
-            owner.builder.manifest_name()
-        ),
+        format!("{BUILD_MANIFEST_BUILDER_PREFIX}{}", owner.builder.as_str()),
         format!(
             "{BUILD_MANIFEST_PROFILE_PREFIX}{}",
             build_profile_manifest_name(owner.profile)
@@ -695,6 +691,7 @@ where
 
 fn read_v4_build_manifest<'a, I>(
     mut manifest_lines: I,
+    active_builder: &BuilderIdentity,
     active_policy: &CleanupPolicy,
 ) -> ManifestReadResult
 where
@@ -713,25 +710,30 @@ where
     let Some(raw_builder_kind) = builder_line.strip_prefix(BUILD_MANIFEST_BUILDER_PREFIX) else {
         return invalid_manifest_metadata();
     };
-    let manifest_builder_kind = BuilderKind::from_manifest_name(raw_builder_kind);
+    let manifest_builder_kind = BuilderIdentity::new(raw_builder_kind.trim());
 
     // 2. Parse build profile.
     let Some(profile_line) = manifest_lines.next() else {
         return manifest_owner_metadata_result(
-            manifest_builder_kind,
+            manifest_builder_kind.as_ref() == Some(active_builder),
+            ManifestRecoveryReason::InvalidMetadata,
             raw_builder_kind,
             "<missing>",
         );
     };
     let Ok(profile_line) = profile_line else {
-        return ManifestReadResult::Recoverable {
-            reason: ManifestRecoveryReason::Unreadable,
-        };
+        return manifest_owner_metadata_result(
+            manifest_builder_kind.as_ref() == Some(active_builder),
+            ManifestRecoveryReason::Unreadable,
+            raw_builder_kind,
+            "<unreadable>",
+        );
     };
     let profile_line = profile_line.trim_end_matches('\r');
     let Some(raw_profile) = profile_line.strip_prefix(BUILD_MANIFEST_PROFILE_PREFIX) else {
         return manifest_owner_metadata_result(
-            manifest_builder_kind,
+            manifest_builder_kind.as_ref() == Some(active_builder),
+            ManifestRecoveryReason::InvalidMetadata,
             raw_builder_kind,
             "<invalid>",
         );
@@ -794,6 +796,46 @@ where
     })
 }
 
+/// Parses the v3 builder identity while preserving recovery for its active builder.
+///
+/// v3 records no profile, so another declared builder remains foreign and cannot be adopted.
+fn read_v3_build_manifest<'a, I>(
+    mut manifest_lines: I,
+    active_builder: &BuilderIdentity,
+) -> ManifestReadResult
+where
+    I: Iterator<Item = Result<&'a str, ()>>,
+{
+    let Some(builder_line) = manifest_lines.next() else {
+        return ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::UnsupportedVersion,
+        };
+    };
+    let Ok(builder_line) = builder_line else {
+        return ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::Unreadable,
+        };
+    };
+    let builder_line = builder_line.trim_end_matches('\r');
+    let Some(raw_builder) = builder_line.strip_prefix(BUILD_MANIFEST_BUILDER_PREFIX) else {
+        return ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::UnsupportedVersion,
+        };
+    };
+    let builder = raw_builder.trim();
+    if builder == active_builder.as_str() {
+        return ManifestReadResult::Recoverable {
+            reason: ManifestRecoveryReason::UnsupportedVersion,
+        };
+    }
+
+    ManifestReadResult::ForeignOwner {
+        reason: ManifestRecoveryReason::UnsupportedVersion,
+        builder: builder.to_owned(),
+        profile: String::from("<missing>"),
+    }
+}
+
 fn invalid_manifest_metadata() -> ManifestReadResult {
     ManifestReadResult::Recoverable {
         reason: ManifestRecoveryReason::InvalidMetadata,
@@ -807,15 +849,20 @@ fn invalid_manifest_metadata_with_owner(owner: OutputOwner) -> ManifestReadResul
     }
 }
 
+/// Classifies a v4 manifest whose profile metadata cannot be parsed.
+///
+/// Only the active builder's own manifest may recover without an owner. Any other declared
+/// builder keeps its foreign ownership so the active builder cannot adopt the root.
 fn manifest_owner_metadata_result(
-    builder: Option<BuilderKind>,
+    is_active_builder: bool,
+    reason: ManifestRecoveryReason,
     raw_builder: &str,
     raw_profile: &str,
 ) -> ManifestReadResult {
-    match builder {
-        Some(_) => invalid_manifest_metadata(),
-        None => ManifestReadResult::ForeignOwner {
-            reason: ManifestRecoveryReason::InvalidMetadata,
+    match is_active_builder {
+        true => ManifestReadResult::Recoverable { reason },
+        false => ManifestReadResult::ForeignOwner {
+            reason,
             builder: raw_builder.trim().to_owned(),
             profile: raw_profile.to_owned(),
         },
@@ -852,7 +899,7 @@ fn manifest_owner_conflict_failure(
     output_root: &Path,
     existing_builder: &str,
     existing_profile: &str,
-    active_owner: OutputOwner,
+    active_owner: &OutputOwner,
     setting_span: Option<SourceSpan>,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> PreparedFailure {
@@ -860,7 +907,7 @@ fn manifest_owner_conflict_failure(
         output_root: diagnostic_strings.intern(&output_root.to_string_lossy()),
         existing_builder: diagnostic_strings.intern(existing_builder),
         existing_profile: diagnostic_strings.intern(existing_profile),
-        active_builder: diagnostic_strings.intern(active_owner.builder.manifest_name()),
+        active_builder: diagnostic_strings.intern(active_owner.builder.as_str()),
         active_profile: diagnostic_strings
             .intern(build_profile_manifest_name(active_owner.profile)),
     };

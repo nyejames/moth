@@ -22,7 +22,8 @@ use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs, resolve_project_entry_root,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings, ValidatedOutputPlan,
+    BuilderIdentity, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings,
+    ValidatedOutputPlan,
 };
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::build_system::project_config::{
@@ -76,6 +77,7 @@ use crate::projects::settings::{Config, ProjectConfigError};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -164,14 +166,6 @@ pub struct ProjectCompilation {
     source_packages: CompletedSourcePackageRegistry,
     entries: Vec<EntryAssembly>,
     /// Optional project package-facade assembly selected from the public package surface.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "reserved for the HTML project backend, which will consume this assembly"
-        )
-    )]
-    // retained for the HTML project backend; assembly still owns liveness
     package_assembly: Option<PackageAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
@@ -667,13 +661,6 @@ impl ProjectCompilation {
         std::mem::take(&mut self.resource_inputs)
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "reserved for the HTML project backend, which will consume this accessor"
-        )
-    )]
     pub(crate) fn package_assembly(&self) -> Option<&PackageAssembly> {
         self.package_assembly.as_ref()
     }
@@ -1535,28 +1522,31 @@ pub(crate) struct ProjectEntry<'a> {
 
 /// Unified build interface for all project types
 pub trait BackendBuilder {
+    /// The non-compiler failure owned by the client invoking this backend.
+    type Error;
+
     /// Identify the builder that owns manifests and generated output artifacts.
     #[cfg(not(test))]
-    fn builder_kind(&self) -> BuilderKind;
+    fn builder_identity(&self) -> BuilderIdentity;
 
     /// Unit-test builders use one synthetic owner so their fixtures cannot claim a production
     /// HTML manifest.
     #[cfg(test)]
-    fn builder_kind(&self) -> BuilderKind {
-        BuilderKind::Test
+    fn builder_identity(&self) -> BuilderIdentity {
+        BuilderIdentity::test()
     }
 
-    /// Build the project with the given configuration
+    /// Build the project with the given configuration.
     fn build_backend(
         &self,
         project_compilation: ProjectCompilation,
-        config: &Config, // Persistent settings across the whole project
+        config: &Config,
         build_profile: BuildProfile,
-        flags: &[Flag], // Settings only relevant for this build
+        flags: &[Flag],
         context: &mut BackendBuildContext<'_>,
-    ) -> Result<Project, PreparedFailure>;
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>>;
 
-    /// Validate the project configuration
+    /// Validate the project configuration.
     fn validate_project_config(
         &self,
         config: &Config,
@@ -1572,24 +1562,40 @@ pub trait BackendBuilder {
 
     /// Builder-provided surface.
     ///
-    /// WHAT: returns the complete builder surface this builder exposes, including
-    /// external platform packages (e.g. `@core/math`) and source-backed package roots
-    /// (e.g. `@html`).
-    /// WHY: backends own the runtime and package surface, so they must declare
-    /// everything the compiler frontend is allowed to see and resolve.
+    /// WHAT: returns the complete builder surface this builder exposes, including external
+    /// platform packages and source-backed package roots.
+    /// WHY: backends declare everything the compiler frontend is allowed to see and resolve.
     fn frontend_surface(&self) -> BuilderSurface;
 }
 
-/// Build-system entrypoint that owns the selected backend implementation.
-///
-/// WHAT: stores the backend strategy object used by `build_project`.
-/// WHY: callers can swap backends while keeping one orchestration surface.
-pub struct ProjectBuilder {
-    pub(crate) backend: Box<dyn BackendBuilder + Send>,
+/// A backend failure keeps compiler-prepared reports separate from a client-owned build error.
+#[derive(Debug)]
+pub enum BackendInvocationFailure<E> {
+    Prepared(PreparedFailure),
+    Builder(E),
+}
+impl<E> From<PreparedFailure> for BackendInvocationFailure<E> {
+    fn from(failure: PreparedFailure) -> Self {
+        Self::Prepared(failure)
+    }
 }
 
-impl ProjectBuilder {
-    pub fn new(backend: impl BackendBuilder + Send + 'static) -> Self {
+impl<E> From<InfrastructureFailure> for BackendInvocationFailure<E> {
+    fn from(failure: InfrastructureFailure) -> Self {
+        Self::Prepared(failure.into())
+    }
+}
+
+/// Build-system entrypoint that owns the selected builtin backend implementation.
+///
+/// WHAT: stores the sendable builtin backend strategy used by command and dev-server owners.
+/// WHY: those owners retain one backend selection across their build lifecycle.
+pub struct BuilderSelection {
+    pub(crate) backend: Box<dyn BackendBuilder<Error = Infallible> + Send>,
+}
+
+impl BuilderSelection {
+    pub fn new(backend: impl BackendBuilder<Error = Infallible> + Send + 'static) -> Self {
         Self {
             backend: Box::new(backend),
         }
@@ -1792,14 +1798,19 @@ impl BuildResult {
 ///
 /// This function intentionally does not write output files so callers can decide where artifacts
 /// should be emitted.
-pub fn build_project(
-    project_builder: &ProjectBuilder,
+/// The outer result transports only a builder's own error. The inner compiler result retains
+/// the canonical diagnosed, infrastructure and staged-warning ownership contract.
+pub(crate) fn build_project<E>(
+    backend: &dyn BackendBuilder<Error = E>,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
-) -> CompilationResult<BuildResult> {
+) -> Result<CompilationResult<BuildResult>, E> {
     let build_profile = BuildProfile::from_flags(flags);
-    let valid_path = check_if_valid_path(entry_path)?;
+    let valid_path = match check_if_valid_path(entry_path) {
+        Ok(path) => path,
+        Err(error) => return Ok(Err(error.into())),
+    };
 
     // --------------------------------------------
     //   PERFORM THE CORE COMPILER FRONTEND BUILD
@@ -1812,19 +1823,20 @@ pub fn build_project(
         validated_directory_output_settings,
         mut project_source_builder,
         build_config_inputs,
-    } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
+    } = match bootstrap_project_build(backend, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(failure) => {
-            return match failure.into_diagnostic_reports() {
+            let compiler_result = match failure.into_diagnostic_reports() {
                 Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
                 Err(errors) => Err(errors),
             };
+            return Ok(compiler_result);
         }
     };
 
     let mut project_source_files = None;
     let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(string_table);
-    let frontend_outcome = compile_project_frontend_with_inputs(
+    let frontend_outcome = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
         validated_directory_output_settings.as_ref(),
@@ -1835,18 +1847,21 @@ pub fn build_project(
         &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
-    )?;
+    ) {
+        Ok(outcome) => outcome,
+        Err(errors) => return Ok(Err(errors)),
+    };
     let frontend_compilation = match frontend_outcome {
         CompilationOutcome::Success { value, .. } => value,
         CompilationOutcome::Diagnosed(reports) => {
-            return Ok(CompilationOutcome::Diagnosed(reports));
+            return Ok(Ok(CompilationOutcome::Diagnosed(reports)));
         }
     };
     let project_source_database = frontend_compilation.project_source_database.clone();
     let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
         Ok(project_compilation) => project_compilation,
         Err(error) => {
-            return match finalize_project_assembly_failure(
+            let compiler_result = match finalize_project_assembly_failure(
                 error,
                 warning_accumulator,
                 project_source_database,
@@ -1854,6 +1869,7 @@ pub fn build_project(
                 Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
                 Err(errors) => Err(errors),
             };
+            return Ok(compiler_result);
         }
     };
 
@@ -1864,7 +1880,7 @@ pub fn build_project(
         let mut backend_context = BackendBuildContext::new(&mut warning_accumulator);
         crate::timed_stage!(
             crate::timing::TimingMetric::BuildBackendTotal,
-            project_builder.backend.build_backend(
+            backend.build_backend(
                 project_compilation,
                 &config,
                 build_profile,
@@ -1875,8 +1891,8 @@ pub fn build_project(
     };
     let project = match project_result {
         Ok(project) => project,
-        Err(failure) => {
-            return match finalize_backend_failure(
+        Err(BackendInvocationFailure::Prepared(failure)) => {
+            let compiler_result = match finalize_backend_failure(
                 failure,
                 warning_accumulator,
                 project_source_database,
@@ -1884,25 +1900,30 @@ pub fn build_project(
                 Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
                 Err(errors) => Err(errors),
             };
+            return Ok(compiler_result);
+        }
+        Err(BackendInvocationFailure::Builder(error)) => {
+            warning_accumulator.discard_successful_warnings();
+            return Err(error);
         }
     };
     let output_owner = OutputOwner {
-        builder: project_builder.backend.builder_kind(),
+        builder: backend.builder_identity(),
         profile: build_profile,
     };
     let directory_output_plan = if config.entry_dir.is_dir() {
         let Some(validated_output_settings) = validated_directory_output_settings else {
-            return Err(InfrastructureFailure::internal(
+            return Ok(Err(InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
                 "Directory output settings were not available after bootstrap validation.",
             )
-            .into());
+            .into()));
         };
 
         Some(validated_output_settings.select(
             config.entry_dir.clone(),
             resolve_project_entry_root(&config),
-            output_owner,
+            output_owner.clone(),
         ))
     } else {
         None
@@ -1912,7 +1933,7 @@ pub fn build_project(
     // retained in the successful build result.
     config.config_resolution_records.clear();
     config.project_field_config_dependencies.clear();
-    Ok(CompilationOutcome::Success {
+    Ok(Ok(CompilationOutcome::Success {
         value: BuildResult {
             project,
             config,
@@ -1922,7 +1943,7 @@ pub fn build_project(
             directory_output_plan,
         },
         warnings: None,
-    })
+    }))
 }
 
 /// Build the shared Stage 0/bootstrap state used by both CLI builds and the dev server.
@@ -1933,8 +1954,8 @@ pub fn build_project(
 /// WHY: directory builds and the dev server must share one bootstrap path so config/output
 /// behavior does not drift between "build" and "serve" flows, and explicit inputs must ride
 /// the same shared state instead of command-local storage.
-pub(crate) fn bootstrap_project_build(
-    project_builder: &ProjectBuilder,
+pub(crate) fn bootstrap_project_build<E>(
+    backend: &dyn BackendBuilder<Error = E>,
     entry_path: PathBuf,
     build_config_inputs: &BuildConfigInputSet,
 ) -> Result<BuildBootstrap, BootstrapFailure> {
@@ -1956,9 +1977,9 @@ pub(crate) fn bootstrap_project_build(
 
     // Compute the builder's frontend surface once so config loading and frontend compilation
     // see the same set of allowed config keys, external packages, and source-backed packages.
-    let frontend_surface = project_builder.backend.frontend_surface();
+    let frontend_surface = backend.frontend_surface();
 
-    let frontend_style_directives = project_builder.backend.frontend_style_directives();
+    let frontend_style_directives = backend.frontend_style_directives();
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
         Err(error) => {
@@ -2001,9 +2022,7 @@ pub(crate) fn bootstrap_project_build(
     // WHY: Backends should reject unsupported settings before frontend compilation does work.
     let validation_result = {
         let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
-        project_builder
-            .backend
-            .validate_project_config(&config, &mut diagnostic_strings)
+        backend.validate_project_config(&config, &mut diagnostic_strings)
     };
     if let Err(error) = validation_result {
         let failure = error.into_prepared_failure(&string_table);

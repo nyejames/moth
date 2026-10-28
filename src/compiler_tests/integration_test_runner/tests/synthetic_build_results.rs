@@ -13,7 +13,7 @@ use super::super::{
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
+use crate::build_system::output::{BuilderIdentity, CleanupPolicy, OutputOwner};
 use crate::projects::settings::Config;
 use std::path::PathBuf;
 /// The smallest document that satisfies the ordered HTML shell contract.
@@ -52,7 +52,7 @@ pub(super) fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) ->
             crate::compiler_frontend::symbols::string_interning::StringTable::new(),
         ),
         output_owner: OutputOwner {
-            builder: BuilderKind::Html,
+            builder: BuilderIdentity::html(),
             profile: BuildProfile::Dev,
         },
         directory_output_plan: None,

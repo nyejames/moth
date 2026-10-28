@@ -36,7 +36,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::test_support::{
     TestExternalAccessKind as ExternalAccessKind, TestExternalReturnAlias as ExternalReturnAlias,
-    TestExternalReturnType as ExternalReturnType,
+    TestExternalReturnType as ExternalReturnType, set_test_external_function_return_alias,
 };
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
@@ -3262,8 +3262,15 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
         &mut external_package_registry,
         "bad_alias_host",
         vec![ExternalAccessKind::Shared],
-        ExternalReturnAlias::AliasArgs(vec![1]),
+        ExternalReturnAlias::AliasArgs(vec![0]),
         ExternalReturnType::Fixed(FixedScalar::I32),
+    );
+    // Admit a valid descriptor first, then corrupt only the stored metadata to reach
+    // the borrow checker's independent caller guard.
+    set_test_external_function_return_alias(
+        Arc::make_mut(&mut external_package_registry),
+        bad_alias_host,
+        ExternalReturnAlias::AliasArgs(vec![1]),
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 

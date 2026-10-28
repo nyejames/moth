@@ -67,17 +67,20 @@ fn parses_config_constant_declarations() {
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.version, Some("1.2.3".to_owned()));
     assert_eq!(
-        config.html_section.page_url_style.as_deref(),
+        config.builder_settings.string("html", "page_url_style"),
         Some("trailing_slash")
     );
-    assert_eq!(config.html_section.redirect_index_html, Some(true));
     assert_eq!(
-        config.html_section.dev_output.as_deref(),
+        config.builder_settings.bool("html", "redirect_index_html"),
+        Some(true)
+    );
+    assert_eq!(
+        config.output_roots.dev_output.as_deref(),
         Some("dev"),
         "the html section's schema defaults should own the output roots"
     );
     assert_eq!(
-        config.html_section.release_output.as_deref(),
+        config.output_roots.release_output.as_deref(),
         Some("release")
     );
     assert_eq!(config.template_const_loop_iteration_limit, 10001);
@@ -733,11 +736,10 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
     fs::write(&config_path, "@defaults value\n").expect("should write config dependency");
 
     let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("defaults", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1099,8 +1101,14 @@ fn accepts_valid_bool_config_keys() {
     parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives)
         .expect("valid boolean config values should parse");
 
-    assert_eq!(config.html_section.redirect_index_html, Some(false));
-    assert_eq!(config.html_section.html_inject_core_css, Some(true));
+    assert_eq!(
+        config.builder_settings.bool("html", "redirect_index_html"),
+        Some(false)
+    );
+    assert_eq!(
+        config.builder_settings.bool("html", "html_inject_core_css"),
+        Some(true)
+    );
 }
 
 #[test]
@@ -1342,11 +1350,9 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     let _path_fork = PathInternerFork::empty();
 
     let mut builder_frontend_surface = crate::builder_surface::SourcePackageRegistry::new();
-    builder_frontend_surface.register_filesystem_root(
-        "html",
-        root.join("builder/html"),
-        PackageOrigin::Builder,
-    );
+    builder_frontend_surface
+        .register_filesystem_root("html", root.join("builder/html"), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let result = super::project_roots::build_project_path_resolver(
         &config,

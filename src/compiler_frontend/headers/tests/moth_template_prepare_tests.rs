@@ -410,7 +410,9 @@ impl MothTemplateScopeFixture {
         }
 
         let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root("html", html_root.clone(), PackageOrigin::Builder);
+        source_packages
+            .register_filesystem_root("html", html_root.clone(), PackageOrigin::Builder)
+            .expect("test source root should register");
 
         let mut source_file_kinds = SourceFileKindRegistry::new();
         source_file_kinds.register("mtf", SourceFileKind::MothTemplate);

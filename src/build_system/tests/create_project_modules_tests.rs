@@ -1837,7 +1837,9 @@ fn direct_selection_resolves_source_package_facade() {
     .expect("should write helper package root");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
-    source_packages.register_filesystem_root("helper", package_root, PackageOrigin::Builder);
+    source_packages
+        .register_filesystem_root("helper", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();

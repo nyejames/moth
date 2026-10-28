@@ -5,6 +5,9 @@
 //! WHY: builders provide both binding-backed package metadata and source-backed package roots;
 //!      the compiler needs both during different stages.
 
+use crate::build_system::output::{
+    DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
+};
 use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
@@ -17,6 +20,7 @@ use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::BTreeSet;
@@ -46,6 +50,12 @@ pub struct BuilderSurface {
     ///      synthetic `.mtf` constant scope.
     pub implicit_template_scope_source_packages: BTreeSet<String>,
 }
+/// Validation failures for a complete builder surface.
+#[derive(Debug)]
+pub(crate) enum BuilderSurfaceValidationError {
+    InvalidDefinition(String),
+    Infrastructure(InfrastructureFailure),
+}
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
 
@@ -71,11 +81,67 @@ impl BuilderSurface {
         }
     }
 
-    /// Seals config schemas after the selected builder and tooling overlays finish registering.
-    pub fn finish_config_registration(&mut self) {
+    /// Validates the complete surface after the selected builder finishes registering.
+    ///
+    /// WHAT: checks project-section storage compatibility and output ownership, then rejects
+    /// overlapping source-backed and binding-backed package paths.
+    /// WHY: definition errors must fail before authored config or project source is compiled.
+    pub(crate) fn validate(&self) -> Result<(), BuilderSurfaceValidationError> {
         self.config_schemas
             .validate()
-            .expect("builder config schemas are valid");
+            .map_err(BuilderSurfaceValidationError::Infrastructure)?;
+        let sections = self.config_schemas.project_sections();
+        ensure_single_output_root_owner(sections).map_err(|error| {
+            BuilderSurfaceValidationError::InvalidDefinition(error.message.into())
+        })?;
+        // The generic project-section store retains only one optional layer around strings/bools.
+        // Entry and compiler-owned project schemas have different consumers and stay recursive.
+        for section in sections {
+            let schema = &section.schema;
+            let root = schema.node(schema.root());
+            if root.unknown_fields == UnknownFieldPolicy::Preserve {
+                return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                    "Builder section '{}' cannot preserve unknown fields in the settings store.",
+                    section.name
+                )));
+            }
+            for field_id in root.field_ids() {
+                let field = schema.field(*field_id);
+                let is_output =
+                    matches!(field.name.as_ref(), DEV_OUTPUT_FIELD | RELEASE_OUTPUT_FIELD);
+                // Output roots have shared string storage, not optional generic settings.
+                let mut shape = &field.shape;
+                if !is_output && let ConfigFieldShape::Optional(inner) = shape {
+                    shape = inner;
+                }
+                if !matches!(shape, ConfigFieldShape::String)
+                    && (is_output || !matches!(shape, ConfigFieldShape::Bool))
+                {
+                    return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                        "Builder section '{}' field '{}' has an unstorable shape: {}.",
+                        section.name,
+                        field.name,
+                        field.shape.describe()
+                    )));
+                }
+            }
+        }
+        let binding_paths = self
+            .binding_packages
+            .package_paths()
+            .map(|path| path.strip_prefix('@').unwrap_or(path))
+            .collect::<BTreeSet<_>>();
+        for source in self.source_packages.iter() {
+            let source_path = source.package_prefix.as_str();
+            for &binding_path in &binding_paths {
+                if paths_overlap(source_path, binding_path) {
+                    return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                        "Source package '@{source_path}' overlaps host package '@{binding_path}'."
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Declare a source-backed package whose exported constants enter `.mtf` implicit scope.
@@ -109,6 +175,23 @@ impl BuilderSurface {
             .join(BUILTIN_SOURCE_PACKAGES_DIR)
             .join(prefix)
     }
+}
+
+/// Whether one `/`-separated package path equals the other or nests inside it, ignoring ASCII
+/// case like the namespace collision policy.
+fn paths_overlap(left: &str, right: &str) -> bool {
+    let (shorter, longer) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    longer
+        .get(..shorter.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(shorter))
+        && longer[shorter.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| next == '/')
 }
 
 /// The grouped `project #= (...)` record schema with compiler-owned fields only.

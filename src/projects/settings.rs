@@ -4,6 +4,7 @@
 //!       configuration structures shared across the compiler and build system.
 //! WHY: keeping these values in one module prevents magic literals from spreading through the
 //!      codebase and makes capacity tuning explicit.
+use crate::build_system::output::OutputRootSettings;
 use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
 };
@@ -21,7 +22,7 @@ use crate::compiler_frontend::module_compilation::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 /// The canonical language source file extension (without dot).
@@ -64,42 +65,6 @@ pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens f
 pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
 pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
 
-/// Typed results of one validated `html #= (...)` builder section.
-///
-/// WHAT: each html section field in its validated form. Fields the record omits stay `None`
-/// unless their schema declares a default, which then stands.
-/// WHY: this struct is the HTML builder settings store; the routing and document-shell readers
-/// consume it directly. Directory HTML projects require the grouped `html` section; omitted
-/// fields still receive schema defaults.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HtmlSectionConfig {
-    /// Output roots owned by the builder section. The section schema's defaults (`dev` and
-    /// `release`) land here whenever a section validated, so output resolution can consume
-    /// them from the typed section.
-    pub dev_output: Option<String>,
-    pub release_output: Option<String>,
-    pub origin: Option<String>,
-    pub page_url_style: Option<String>,
-    pub redirect_index_html: Option<bool>,
-    pub html_lang: Option<String>,
-    pub html_title_prefix: Option<String>,
-    pub html_title_postfix: Option<String>,
-    pub html_favicon: Option<String>,
-    pub html_inject_charset: Option<bool>,
-    pub html_inject_viewport: Option<bool>,
-    pub html_inject_color_scheme: Option<bool>,
-    pub html_inject_core_css: Option<bool>,
-    pub html_body_style: Option<String>,
-}
-
-impl HtmlSectionConfig {
-    /// Directory output roots a directory project uses when its `html` section omits them.
-    /// The html section schema registers the same defaults, so an authored-but-omitted field
-    /// resolves identically.
-    pub const DEFAULT_DEV_OUTPUT: &'static str = "dev";
-    pub const DEFAULT_RELEASE_OUTPUT: &'static str = "release";
-}
-
 /// One additional authored `project` field retained after compiler-owned fields are applied.
 ///
 /// WHAT: the field's folded value plus the canonical type and exact authored span needed later by
@@ -111,6 +76,92 @@ pub(crate) struct ProjectMetadataField {
     pub type_identity: CanonicalTypeIdentity,
     pub value: PublicFoldedValue,
     pub span: Option<SourceSpan>,
+}
+
+/// Generic builder values are keyed by section and field, independently of project settings.
+/// A `none` value removes only the field in its own section.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BuilderSettings {
+    strings: BTreeMap<String, BTreeMap<String, (String, Option<SourceSpan>)>>,
+    bools: BTreeMap<String, BTreeMap<String, (bool, Option<SourceSpan>)>>,
+}
+
+impl BuilderSettings {
+    /// Return a string from the named builder section.
+    pub fn string(&self, section: &str, name: &str) -> Option<&str> {
+        self.strings
+            .get(section)?
+            .get(name)
+            .map(|(value, _)| value.as_str())
+    }
+
+    /// Return a bool from the named builder section.
+    pub fn bool(&self, section: &str, name: &str) -> Option<bool> {
+        self.bools.get(section)?.get(name).map(|(value, _)| *value)
+    }
+
+    /// Store a string, replacing any bool at the same section and field.
+    pub(crate) fn set_string(
+        &mut self,
+        section: &str,
+        name: impl Into<String>,
+        value: String,
+        span: Option<SourceSpan>,
+    ) {
+        let name = name.into();
+        if let Some(fields) = self.bools.get_mut(section) {
+            fields.remove(&name);
+        }
+        if let Some(fields) = self.strings.get_mut(section) {
+            fields.insert(name, (value, span));
+        } else {
+            self.strings
+                .insert(section.to_owned(), BTreeMap::from([(name, (value, span))]));
+        }
+    }
+
+    /// Store a bool, replacing any string at the same section and field.
+    pub(crate) fn set_bool(
+        &mut self,
+        section: &str,
+        name: impl Into<String>,
+        value: bool,
+        span: Option<SourceSpan>,
+    ) {
+        let name = name.into();
+        if let Some(fields) = self.strings.get_mut(section) {
+            fields.remove(&name);
+        }
+        if let Some(fields) = self.bools.get_mut(section) {
+            fields.insert(name, (value, span));
+        } else {
+            self.bools
+                .insert(section.to_owned(), BTreeMap::from([(name, (value, span))]));
+        }
+    }
+
+    /// Remove a value only from the named builder section.
+    pub(crate) fn clear(&mut self, section: &str, name: &str) {
+        if let Some(fields) = self.strings.get_mut(section) {
+            fields.remove(name);
+        }
+        if let Some(fields) = self.bools.get_mut(section) {
+            fields.remove(name);
+        }
+    }
+
+    fn setting_span(&self, section: &str, name: &str) -> Option<SourceSpan> {
+        self.strings
+            .get(section)
+            .and_then(|fields| fields.get(name))
+            .and_then(|(_, span)| *span)
+            .or_else(|| {
+                self.bools
+                    .get(section)
+                    .and_then(|fields| fields.get(name))
+                    .and_then(|(_, span)| *span)
+            })
+    }
 }
 
 /// WHAT: project configuration loaded from config.moth that controls build behavior.
@@ -126,15 +177,17 @@ pub struct Config {
     pub version: Option<String>,
     pub author: Option<String>,
     pub license: Option<String>,
-    /// Exact authored source spans for config keys when the key came from retained source.
+    /// Exact authored source spans for project fields and shared output roots.
     ///
-    /// Path-only and synthetic settings deliberately have no entry here rather than acquiring
-    /// a fabricated span from their display path. Crate-private: the spans resolve only under the
-    /// build owner that retains the project source database.
+    /// Builder section spans stay in `BuilderSettings`; path-only and synthetic settings
+    /// deliberately have no entry rather than acquiring a fabricated span. Crate-private: spans
+    /// resolve only under the build owner that retains the project source database.
     pub(crate) setting_spans: HashMap<String, SourceSpan>,
 
-    /// Validated results of the grouped `html` builder section when one was authored.
-    pub html_section: HtmlSectionConfig,
+    /// Output roots the active builder section authored, with `None` where it set none.
+    pub(crate) output_roots: OutputRootSettings,
+    /// Builder section values for fields no typed `Config` field owns, keyed by section and field.
+    pub(crate) builder_settings: BuilderSettings,
 
     /// Additional open `project` fields retained for later `@project` publication.
     pub(crate) extra_project_fields: Vec<ProjectMetadataField>,
@@ -160,7 +213,8 @@ impl Config {
             author: None,
             license: None,
             setting_spans: HashMap::new(),
-            html_section: HtmlSectionConfig::default(),
+            output_roots: OutputRootSettings::default(),
+            builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
             project_field_config_dependencies: Vec::new(),
@@ -178,7 +232,8 @@ impl Config {
         }
     }
 
-    /// Return the exact authored span for a config key, if the setting came from retained source.
+    /// Return the exact authored span for a project-level config key, if retained source provides
+    /// one. Builder section spans remain in their separate section-and-field-keyed store.
     pub(crate) fn setting_span(&self, key: &str) -> Option<SourceSpan> {
         self.setting_spans.get(key).copied()
     }
@@ -194,6 +249,24 @@ impl Config {
     ) -> DiagnosticDraft {
         let key_id = string_table.intern(key);
         project_config::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
+    }
+
+    /// Build a typed project-config diagnostic for a generic builder field.
+    ///
+    /// Builder field spans are scoped by section, independently of project-level config keys.
+    pub(crate) fn builder_config_diagnostic(
+        &self,
+        section: &str,
+        key: &str,
+        reason: InvalidConfigReason,
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> DiagnosticDraft {
+        let key_id = string_table.intern(key);
+        project_config::invalid_config_reason(
+            Some(key_id),
+            reason,
+            self.builder_settings.setting_span(section, key),
+        )
     }
 
     pub fn config_file_path(&self) -> PathBuf {
@@ -262,7 +335,8 @@ impl Default for Config {
             author: None,
             license: None,
             setting_spans: HashMap::new(),
-            html_section: HtmlSectionConfig::default(),
+            output_roots: OutputRootSettings::default(),
+            builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
             project_field_config_dependencies: Vec::new(),

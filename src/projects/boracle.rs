@@ -5,7 +5,7 @@
 //! WHY: frontend lowering and analysis remain compiler-owned; this module keeps the CLI surface
 //!      small without making Boracle part of normal `check`, build or project compilation.
 
-use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
+use crate::build_system::build::{BuildBootstrap, BuilderSelection, bootstrap_project_build};
 use crate::build_system::create_project_modules::compile_single_file_boracle;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::analysis::borrow_checker::{
@@ -69,14 +69,18 @@ fn solve_boracle(path: &str) -> CompilationResult<BoracleModuleReport> {
 fn compile_boracle_input(path: &str) -> CompilationResult<(BoracleModuleInput, StringTable)> {
     let normalized_path = if path.trim().is_empty() { "." } else { path };
     let valid_path = check_if_valid_path(normalized_path)?;
-    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
     let BuildBootstrap {
         config,
         style_directives,
         mut string_table,
         mut frontend_surface,
         ..
-    } = match bootstrap_project_build(&project_builder, valid_path, &BuildConfigInputSet::new()) {
+    } = match bootstrap_project_build(
+        builder_selection.backend.as_ref(),
+        valid_path,
+        &BuildConfigInputSet::new(),
+    ) {
         Ok(bootstrap) => bootstrap,
         Err(failure) => {
             return failure

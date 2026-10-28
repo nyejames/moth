@@ -1,0 +1,25 @@
+# Native host ABI
+
+The physical Wasm32 boundary between compiled Moth and native Rust host code.
+
+## Contract
+
+- Input: canonical binding identities and signatures from the external-package registry, the restricted host-binding profile, builder-selected facade exports, the variant's `ValidatedMemoryPlan` and the build-owned target assignment
+- Output: host imports and selected export wrappers using fixed scalar carriers, string spans, staged-text tickets, option tags, result frames, resource tokens and one immutable host manifest per artefact
+- Decides: boundary carriers, frame layouts, status and tag values, import naming, reserved helper and export names and the staged-text and call-scope protocols
+- Must not decide: Moth semantics, source legality, internal Moth storage representations, memory strategies, Rust signature mapping or runtime resource-table, staging-table or fault policy
+- Invariant: ordinary Moth values cross as independent, non-retained values, the error channel stays distinct from success slots and no boundary layout repairs or infers a missing compiler fact
+
+## Main paths
+
+- `src/compiler_frontend/external_packages/`
+- `src/backends/wasm/hir_to_lir/imports.rs`
+- `src/backends/wasm/runtime/imports.rs`
+- `src/build_system/build.rs` (package assembly and export selection)
+
+## Read next
+
+- `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+- `docs/src/developer-docs/project-builders/host-packages.mtf`
+- `crates/lappet/docs/host-abi.md`

@@ -207,11 +207,10 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "unused",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("unused", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let frontend = successful_compilation_value(compile_project_frontend(
         &mut config,
@@ -398,11 +397,10 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     let _path_fork = PathInternerFork::empty();
 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "widgets",
-        widget_lib,
-        PackageOrigin::ProjectLocal,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("widgets", widget_lib, PackageOrigin::ProjectLocal)
+        .expect("test source root should register");
 
     let result = compile_project_frontend(
         &mut config,

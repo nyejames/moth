@@ -5,6 +5,7 @@
 //! expression/type/rule diagnostic rendering.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     DirectSymbolPathImportView, DuplicateImportSurfaceMemberView,
     DuplicateMothTemplateInputPathView, ExplicitMothExtensionView, ExplicitSourceExtensionView,
@@ -916,6 +917,9 @@ pub(crate) fn invalid_external_module_message(
         InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
             string_table.resolve(*parser_detail).to_owned()
         }
+        InvalidExternalModuleReason::PathContainsPackageSeparator => {
+            "Its path contains `#`, which Moth package paths reserve. Rename the file.".to_owned()
+        }
         InvalidExternalModuleReason::NonUtf8Source { utf8_detail } => format!(
             "Source is not valid UTF-8 ({}).",
             string_table.resolve(*utf8_detail)
@@ -924,13 +928,18 @@ pub(crate) fn invalid_external_module_message(
     format!("External JS module `{path_text}` is invalid.\n{detail}")
 }
 
-/// Renders an invalid external module from its compact reason code and string fact.
+/// Renders an invalid external module from its compact reason code and optional string fact.
 pub(crate) fn render_invalid_external_module(
     _diagnostic: &DiagnosticView<'_>,
     view: &InvalidExternalModuleView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    let reason = view.reason_code.to_reason(view.reason_detail);
+    let Some(reason) = view.reason_code.to_reason(view.reason_detail) else {
+        crate::compiler_bug!(
+            CompilerStage::DiagnosticReporting,
+            "invalid external-module reason code and optional detail agree"
+        );
+    };
     RenderedPayload {
         message: invalid_external_module_message(view.path, &reason, context),
         guidance: Vec::new(),

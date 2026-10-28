@@ -3,7 +3,7 @@
 //! Each case builds one consumer operation in a fresh project so first-error handling cannot
 //! hide the scalar or const-record provenance contract for either input origin.
 
-use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::build_system::build::build_project;
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildConfigValueOrigin, BuildInputName, PrimitiveBuildValue,
@@ -78,13 +78,15 @@ fn assert_config_input_overflow_build(
     )
     .expect("should write facade source");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let reports = match build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &inputs,
-    ) {
+    )
+    .unwrap_or_else(|never| match never {})
+    {
         Ok(CompilationOutcome::Diagnosed(reports)) => reports,
         Ok(CompilationOutcome::Success { .. }) => {
             panic!("known consumer overflow should fail the build with source diagnostics")

@@ -11,8 +11,8 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalConstantDef, ExternalConstantValue,
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalPackageId,
-    ExternalPackageRegistry, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
-    ExternalTypeSpec,
+    ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError, ExternalReturnSlot,
+    ExternalSignatureType, ExternalTypeSpec,
 };
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
     ParsedJsFunction, ParsedJsModule, ParsedSignature,
@@ -35,13 +35,24 @@ pub struct RegisteredJsModule {
 pub enum JsModuleRegistrationError {
     /// The package registry could not accept a symbol.
     Infrastructure(InfrastructureFailure),
-    /// A parsed signature type was not representable by the JS module ABI.
+    /// A parsed declaration the JS module ABI or the package registry rejected as invalid.
     ParserDiagnostic { parser_detail: String },
 }
 
 impl From<InfrastructureFailure> for JsModuleRegistrationError {
     fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
+    }
+}
+
+impl From<ExternalRegistrationError> for JsModuleRegistrationError {
+    fn from(error: ExternalRegistrationError) -> Self {
+        match error {
+            ExternalRegistrationError::InvalidDefinition(parser_detail) => {
+                Self::ParserDiagnostic { parser_detail }
+            }
+            ExternalRegistrationError::Infrastructure(failure) => Self::Infrastructure(failure),
+        }
     }
 }
 

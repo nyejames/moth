@@ -13,9 +13,18 @@ use crate::compiler_frontend::Flag;
 /// builder policy and output resolution.
 /// WHY: output roots and builder codegen must agree on the selected profile without each layer
 /// re-deriving it from `Flag::Release`.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildProfile {
+    /// Development profile for builds optimised for iteration.
+    ///
+    /// WHAT: selects development build policy.
+    /// WHY: development builds can favour instrumentation and simpler lowerings.
     Dev,
+    /// Release profile for builds optimised for deployment.
+    ///
+    /// WHAT: selects release build policy.
+    /// WHY: release builds can apply greater optimisation and deliberate physical representations.
     Release,
 }
 
@@ -25,7 +34,7 @@ impl BuildProfile {
     /// WHAT: maps the presence of `Flag::Release` to [`BuildProfile::Release`].
     /// WHY: this is the single profile-selection helper shared by frontend profile conversion,
     /// the HTML builder and output resolution.
-    pub fn from_flags(flags: &[Flag]) -> Self {
+    pub(crate) fn from_flags(flags: &[Flag]) -> Self {
         if flags.contains(&Flag::Release) {
             Self::Release
         } else {

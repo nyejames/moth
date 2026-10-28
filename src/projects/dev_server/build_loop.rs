@@ -3,7 +3,7 @@
 //! This module delegates compilation and artifact writing to the core build APIs, then translates
 //! build outcomes into dev-server state updates and SSE reload broadcasts.
 
-use crate::build_system::build::{self, BuildResult, ProjectBuilder};
+use crate::build_system::build::{self, BuildResult, BuilderSelection};
 use crate::build_system::output::{
     OutputPlan, OutputWriteSummary, SingleFileOutputPlan, WriteMode, WriteOptions,
     write_project_outputs,
@@ -81,7 +81,7 @@ pub(crate) trait DevBuildWorker {
 
 /// Immutable builder factory and common build inputs shared across dev cycles.
 pub(crate) struct ProjectBuildExecutor {
-    builder_factory: Arc<dyn Fn() -> ProjectBuilder + Send + Sync>,
+    builder_factory: Arc<dyn Fn() -> BuilderSelection + Send + Sync>,
     build_config_inputs: Arc<BuildConfigInputSet>,
 }
 
@@ -96,7 +96,7 @@ impl Clone for ProjectBuildExecutor {
 
 impl ProjectBuildExecutor {
     pub(crate) fn new(
-        builder_factory: impl Fn() -> ProjectBuilder + Send + Sync + 'static,
+        builder_factory: impl Fn() -> BuilderSelection + Send + Sync + 'static,
         build_config_inputs: BuildConfigInputSet,
     ) -> Self {
         Self {
@@ -120,7 +120,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
 }
 
 struct ProjectBuildWorker {
-    builder: ProjectBuilder,
+    builder: BuilderSelection,
     request: DevBuildRequest,
 }
 
@@ -139,11 +139,12 @@ impl DevBuildWorker for ProjectBuildWorker {
         })?;
 
         build::build_project(
-            &self.builder,
+            self.builder.backend.as_ref(),
             entry_path,
             &self.request.flags,
             &self.request.build_config_inputs,
         )
+        .unwrap_or_else(|never| match never {})
     }
 
     fn write_outputs(
@@ -163,7 +164,7 @@ impl DevBuildWorker for ProjectBuildWorker {
                 OutputPlan::SingleFile(SingleFileOutputPlan {
                     output_root: self.request.output_root.clone(),
                     project_root: Some(project_root),
-                    owner: build_result.output_owner,
+                    owner: build_result.output_owner.clone(),
                 })
             };
             let mut diagnostic_strings =

@@ -3,7 +3,7 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::build_system::build::build_project;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
@@ -23,7 +23,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
         let entry_file = root.join(format!("{directive_name}.moth"));
         fs::write(&entry_file, source).expect("should write source file");
 
-        let builder = ProjectBuilder::new(NoDirectiveBuilder);
+        let builder = NoDirectiveBuilder;
         let result = build_project(
             &builder,
             entry_file
@@ -31,8 +31,8 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
                 .expect("temp file path should be valid UTF-8 for this test"),
             &[],
             &BuildConfigInputSet::new(),
-        );
-
+        )
+        .unwrap_or_else(|never| match never {});
         let messages = diagnosed_reports(&result);
         let (report, view) = messages
             .iter_severity(DiagnosticSeverity::Error)
@@ -69,15 +69,18 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     )
     .expect("should write source file");
 
-    let builder = ProjectBuilder::new(NoDirectiveBuilder);
-    let result = successful_compilation_value(build_project(
-        &builder,
-        entry_file
-            .to_str()
-            .expect("temp file path should be valid UTF-8 for this test"),
-        &[],
-        &BuildConfigInputSet::new(),
-    ));
+    let builder = NoDirectiveBuilder;
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            entry_file
+                .to_str()
+                .expect("temp file path should be valid UTF-8 for this test"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     assert_eq!(result.project.output_files.len(), 1);
     assert_eq!(

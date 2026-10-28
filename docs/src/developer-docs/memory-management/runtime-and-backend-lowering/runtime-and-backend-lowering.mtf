@@ -330,9 +330,17 @@ Existing Core, Builder, JavaScript-provider and curated platform bindings use a 
 
 Restricted host-binding V1 permits mutable access only to opaque foreign handles. Ordinary Moth values cross by value as non-retained inputs. A host operation that conceptually changes ordinary Moth data returns a fresh or independent result instead of mutating Moth storage through the boundary.
 
+@../native-host-abi (Native host ABI) owns this profile's physical Wasm32 boundary for native Rust hosts.
+
 ## Deferred resource-capable profiles
 
-A future resource-capable profile requires a separate complete design for identity, transfer, teardown, callbacks, async suspension, reentrancy, cycles and failures. It is not part of V1.
+V1 permits opaque handles only as host-function parameters and selected-export
+arguments. See @../native-host-abi (Native host ABI) for that ABI.
+
+A future resource-capable profile requires a separate complete design for
+identity, transfer, teardown, callbacks, async suspension, reentrancy, cycles
+and failures. It is not part of V1.
+
 
 ## JavaScript lowering
 

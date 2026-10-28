@@ -5,11 +5,11 @@ use super::{
     run_builds_until_stable, run_single_build_cycle,
 };
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project, ProjectBuilder};
+use crate::build_system::build::{BuildResult, BuilderSelection, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
-    ValidatedOutputPlan, WriteMode, WriteOptions, write_project_outputs,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary,
+    SingleFileOutputPlan, ValidatedOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
@@ -57,7 +57,7 @@ fn dev_server_failure(path: &Path, message: &str) -> InfrastructureErrors {
 
 fn test_build_output_owner() -> OutputOwner {
     OutputOwner {
-        builder: BuilderKind::Html,
+        builder: BuilderIdentity::html(),
         profile: BuildProfile::Dev,
     }
 }
@@ -226,7 +226,12 @@ fn successful_build_with_warnings(build_result: BuildResult) -> CompilationOutco
 
 fn html_build_result_with_invalid_page_url_style() -> BuildResult {
     let mut build_result = html_build_result();
-    build_result.config.html_section.page_url_style = Some(String::from("bad_style"));
+    build_result.config.builder_settings.set_string(
+        "html",
+        "page_url_style",
+        String::from("bad_style"),
+        None,
+    );
     build_result
 }
 
@@ -246,7 +251,7 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
         config: Config::new(project_root.to_path_buf()),
         source_database: None,
         warning_accumulator: BoundaryAccumulator::with_root_string_table(StringTable::new()),
-        output_owner: owner,
+        output_owner: owner.clone(),
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),
             project_root: project_root.to_path_buf(),
@@ -433,7 +438,7 @@ impl DevBuildWorker for FakeWorker {
             OutputPlan::SingleFile(SingleFileOutputPlan {
                 output_root: self.request.output_root.clone(),
                 project_root: Some(project_root),
-                owner: build_result.output_owner,
+                owner: build_result.output_owner.clone(),
             })
         };
         let summary = {
@@ -642,7 +647,12 @@ fn invalid_site_config_failure_drops_success_warnings() {
     let root = _temp.path().to_path_buf();
 
     let mut build_result = html_build_result_with_warning();
-    build_result.config.html_section.page_url_style = Some(String::from("bad_style"));
+    build_result.config.builder_settings.set_string(
+        "html",
+        "page_url_style",
+        String::from("bad_style"),
+        None,
+    );
     let executor = FakeExecutor::with_compilation_results(vec![Ok(
         successful_build_with_warnings(build_result),
     )]);
@@ -868,7 +878,7 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let executor = ProjectBuildExecutor::new(
-        || ProjectBuilder::new(HtmlProjectBuilder::new()),
+        || BuilderSelection::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
     let report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
@@ -963,7 +973,7 @@ fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
     let current_directory = std::env::current_dir().expect("resolve absolute test path");
     let entry_file = current_directory.join(OsString::from_vec(b"entry-\xff.moth".to_vec()));
     let executor = ProjectBuildExecutor::new(
-        || ProjectBuilder::new(HtmlProjectBuilder::new()),
+        || BuilderSelection::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
     let request = DevBuildRequest {
@@ -998,7 +1008,7 @@ fn project_build_executor_separates_warnings_from_output_write_failures() {
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let executor = ProjectBuildExecutor::new(
-        || ProjectBuilder::new(HtmlProjectBuilder::new()),
+        || BuilderSelection::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
     let request = DevBuildRequest {
@@ -1098,7 +1108,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
         ))
         .expect("test command input should be unique");
     let executor = ProjectBuildExecutor::new(
-        || ProjectBuilder::new(HtmlProjectBuilder::new()),
+        || BuilderSelection::new(HtmlProjectBuilder::new()),
         build_config_inputs,
     );
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -1176,7 +1186,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let executor = ProjectBuildExecutor::new(
-        || ProjectBuilder::new(HtmlProjectBuilder::new()),
+        || BuilderSelection::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
 
@@ -1988,7 +1998,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let executor = RecordingProjectExecutor {
         inner: ProjectBuildExecutor::new(
-            || ProjectBuilder::new(HtmlProjectBuilder::new()),
+            || BuilderSelection::new(HtmlProjectBuilder::new()),
             BuildConfigInputSet::new(),
         ),
         last_write: Arc::new(Mutex::new(None)),

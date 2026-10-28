@@ -14,7 +14,10 @@ fn build_html_backend(
     config: &Config,
     profile: crate::build_system::BuildProfile,
     warning_owner: &mut BoundaryAccumulator,
-) -> Result<crate::build_system::build::Project, PreparedFailure> {
+) -> Result<
+    crate::build_system::build::Project,
+    crate::build_system::build::BackendInvocationFailure<std::convert::Infallible>,
+> {
     let mut backend_context =
         crate::build_system::backend_build_context::BackendBuildContext::new(warning_owner);
     builder.build_backend(compilation, config, profile, &[], &mut backend_context)
@@ -214,8 +217,17 @@ fn register_dummy_use_widget_function(
         .map_err(provider_error_to_failure)
 }
 
-fn provider_error_to_failure(error: InfrastructureFailure) -> PreparedFailure {
-    error.into()
+fn provider_error_to_failure(
+    error: crate::compiler_frontend::external_packages::ExternalRegistrationError,
+) -> PreparedFailure {
+    match error {
+        crate::compiler_frontend::external_packages::ExternalRegistrationError::Infrastructure(
+            failure,
+        ) => failure.into(),
+        crate::compiler_frontend::external_packages::ExternalRegistrationError::InvalidDefinition(
+            message,
+        ) => panic!("dummy provider package definition was rejected: {message}"),
+    }
 }
 
 fn builder_surface_with_dummy_js_provider(calls: Arc<AtomicUsize>) -> BuilderSurface {
@@ -862,11 +874,10 @@ fn linked_module_js_lowering_is_observed_separately() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "phase6helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("phase6helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");

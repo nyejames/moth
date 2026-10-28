@@ -3,9 +3,7 @@ use super::{
     FrontendCompilationMode, compile_project_frontend, compile_project_frontend_with_inputs,
 };
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{
-    BackendBuilder, Project, ProjectBuilder, ProjectCompilation, build_project,
-};
+use crate::build_system::build::{BackendBuilder, Project, ProjectCompilation, build_project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::CleanupPolicy;
 use crate::builder_surface::BuilderSurface;
@@ -20,7 +18,7 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{
-    CompilationOutcome, CompilationResult, InfrastructureFailure, InfrastructureFailureKind,
+    CompilationOutcome, CompilationResult, InfrastructureFailureKind,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
