@@ -19,12 +19,13 @@ It retains the resulting immutable definition for the build. It calls `build`
 only after the required semantic compilation succeeds. A builder doesn't
 sequence parsing, type checking or borrow analysis itself.
 
-**Current SDK status:** The `.config(...)` helper,
-`CompiledProject::settings`, `BuildContext::compile_wasm`,
-`BuildArtifacts::add`, `write_outputs()`, macros and Rust host adapters below
-describe accepted target design, not current APIs. The delivered prototype
-selects a profile and exposes an opaque facade handle, but discards its empty
-artefact set. See
+**Current SDK status throughout this guide and its linked sections:** The
+prototype registers source and host packages, selects a profile and exposes
+an opaque project-facade handle. It discards its empty artefact set and
+publishes no files. The `.config(...)` helper, settings and entry accessors,
+custom directive registration, Wasm compilation, artefact/output APIs,
+macros and executable Rust host adapters describe accepted target design,
+not current SDK APIs. See
 @../../docs/progress/packages-and-builders (Packages and Builders Progress)
 and
 @https://github.com/nyejames/moth/blob/lappet-and-packages-work/docs/roadmap/plans/lappet-native-binding-handoff-plan.md (native-binding handoff plan).

@@ -549,6 +549,14 @@ td {
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Public Rust builder SDK</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted definition registration, rejection, project build driver, build profile and external-crate compile coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / Rust</td>
+ <td style="padding: 0.1em 0.5em; "><p><code>moth::builder::BuilderDefinition</code> registers Builder-origin source packages, native host packages described with <code>moth::host::HostFunction</code> and opt-in <code>.mtf</code>/<code>.md</code> source kinds through the existing registries. <code>finish</code> rejects invalid builder identities, duplicate or overlapping package paths, reserved <code>@project</code> and <code>@core</code> paths, relative <code>from_dir</code> paths, <code>available_in_templates</code> without <code>moth_templates</code> and host signatures outside the V1 profile. <code>moth::builder::build_project</code> compiles a project through the shared build orchestration and calls the builder&#39;s <code>build</code> step with an immutable compiled project, so source diagnostics never reach <code>build</code>. <code>moth::builder::BuildProfile</code> selects the development or release profile for one request, and the builder reads the selected profile through <code>BuildContext::profile</code>. A missing facade is a builder error, and <code>ProjectPackage</code> has no public methods yet. <code>.config(...)</code>, <code>CompiledProject::settings</code>, <code>BuildContext::compile_wasm</code>, non-empty <code>BuildArtifacts</code> registration and publication, native host adapters and the Lappet runtime remain incomplete. The driver discards the current empty artefact set. Host-binding macros are accepted future conveniences, not current APIs.</p></td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Builder runtime packages</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Targeted built-in JS-backed package, runtime asset, runtime module, pure-facade import-map, glue and backend validation coverage. Import-map assertions inspect emitted artefacts separately from the normal Node harness, which rejects import maps.</td>
