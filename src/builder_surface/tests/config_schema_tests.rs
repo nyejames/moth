@@ -570,6 +570,14 @@ fn surface_rejects_unstorable_project_section_shapes() {
         ConfigSchemaField::string_collection("value"),
         ConfigSchemaField::optional("value", ConfigFieldShape::FixedScalar(FixedScalar::I32))
             .default(PublicFoldedValue::OptionNone),
+        ConfigSchemaField::optional(
+            "value",
+            ConfigFieldShape::Optional(Box::new(ConfigFieldShape::String)),
+        ),
+        ConfigSchemaField::optional(
+            "value",
+            ConfigFieldShape::Optional(Box::new(ConfigFieldShape::Bool)),
+        ),
         ConfigSchemaField::bool("dev_output"),
         ConfigSchemaField::optional("release_output", ConfigFieldShape::String),
     ] {
@@ -625,10 +633,7 @@ fn surface_accepts_storable_sections_and_rich_entry_schemas() {
     first
         .register_field(
             first.root(),
-            ConfigSchemaField::optional(
-                "value",
-                ConfigFieldShape::Optional(Box::new(ConfigFieldShape::String)),
-            ),
+            ConfigSchemaField::optional("value", ConfigFieldShape::String),
         )
         .unwrap();
     let mut surface = surface_with_section(first);
@@ -653,6 +658,15 @@ fn surface_accepts_storable_sections_and_rich_entry_schemas() {
     let mut entry = ConfigSchema::new("entry", UnknownFieldPolicy::Preserve);
     entry
         .register_field(entry.root(), ConfigSchemaField::string_collection("values"))
+        .unwrap();
+    entry
+        .register_field(
+            entry.root(),
+            ConfigSchemaField::optional(
+                "value",
+                ConfigFieldShape::Optional(Box::new(ConfigFieldShape::String)),
+            ),
+        )
         .unwrap();
     entry.validate_and_freeze().unwrap();
     surface

@@ -94,7 +94,7 @@ impl BuilderSurface {
         ensure_single_output_root_owner(sections).map_err(|error| {
             BuilderSurfaceValidationError::InvalidDefinition(error.message.into())
         })?;
-        // The generic project-section store holds flattened optional strings and bools.
+        // The generic project-section store retains only one optional layer around strings/bools.
         // Entry and compiler-owned project schemas have different consumers and stay recursive.
         for section in sections {
             let schema = &section.schema;
@@ -111,10 +111,8 @@ impl BuilderSurface {
                     matches!(field.name.as_ref(), DEV_OUTPUT_FIELD | RELEASE_OUTPUT_FIELD);
                 // Output roots have shared string storage, not optional generic settings.
                 let mut shape = &field.shape;
-                if !is_output {
-                    while let ConfigFieldShape::Optional(inner) = shape {
-                        shape = inner;
-                    }
+                if !is_output && let ConfigFieldShape::Optional(inner) = shape {
+                    shape = inner;
                 }
                 if !matches!(shape, ConfigFieldShape::String)
                     && (is_output || !matches!(shape, ConfigFieldShape::Bool))
