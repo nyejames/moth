@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::collections::{CurlyLiteral, new_curly_literal};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -60,7 +61,7 @@ pub(crate) fn parse_curly_literal_expression(
                     fixed_capacity: shape.fixed_capacity,
                 })
             } else {
-                return Err(CompilerDiagnostic::type_mismatch(
+                return Err(types_borrows_targets::type_mismatch(
                     *type_id,
                     type_environment.builtins().string,
                     TypeMismatchContext::General,

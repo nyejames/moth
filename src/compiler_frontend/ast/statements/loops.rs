@@ -23,8 +23,10 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
     ParsedLoopHeader, ParsedRangeHeader, parse_loop_header_cursor,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidLoopHeaderReason};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -89,7 +91,8 @@ impl LoopBody {
     fn into_nodes(self) -> LoopResult<Vec<AstNode>> {
         match self {
             LoopBody::Complete(nodes) => Ok(nodes),
-            LoopBody::Retained(_) => Err(CompilerError::compiler_error(
+            LoopBody::Retained(_) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a loop body was retained after the loop decided it needs no numeric completion",
             )
             .into()),
@@ -115,7 +118,7 @@ pub fn create_loop(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -133,7 +136,7 @@ pub fn create_loop(
 
     let mut window = token_stream.subcursor_window(start_index, colon_index)?;
     if is_empty_header_window(&mut window)? {
-        return Err(CompilerDiagnostic::invalid_loop_header(
+        return Err(choices_control_flow::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
             span,
         )
@@ -144,16 +147,19 @@ pub fn create_loop(
         .or(span)
         .unwrap_or_else(|| token_stream.current_span());
     let mut window = window.with_synthetic_eof_span(eof_span);
-    let (parsed_loop_header, body_context) = parse_loop_header_cursor(
+    let mut header_warnings = Vec::new();
+    let header_result = parse_loop_header_cursor(
         &mut window,
         context,
         type_interner,
         expression_builder,
         const_values,
-        warnings,
+        &mut header_warnings,
         string_table,
         path_fork,
-    )?;
+    );
+    warnings.append(DiagnosticBag::from_diagnostics(header_warnings));
+    let (parsed_loop_header, body_context) = header_result?;
 
     token_stream.set_position(colon_index.saturating_add(1))?;
 
@@ -192,7 +198,7 @@ pub fn create_loop(
     let kind = match parsed_loop_header {
         ParsedLoopHeader::Conditional { condition } => {
             let StatementExpression::Built(condition) = condition else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a loop condition was retained after the loop decided it needs no numeric completion",
                 )
                 .into());
@@ -201,7 +207,7 @@ pub fn create_loop(
         }
         ParsedLoopHeader::Range(header) => {
             let ParsedRangeHeader::Concrete { bindings, range } = header else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a range header was retained after the loop decided it needs no numeric completion",
                 )
                 .into());
@@ -218,7 +224,7 @@ pub fn create_loop(
             pending_item,
         } => {
             let (StatementExpression::Built(iterable), None) = (iterable, pending_item) else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a collection loop source was retained after the loop decided it needs no numeric completion",
                 )
                 .into());
@@ -291,7 +297,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
         }
 
         if is_top_level && matches!(tag, TokenTag::END | TokenTag::EOF) {
-            outcome = Some(Err(CompilerDiagnostic::invalid_loop_header(
+            outcome = Some(Err(choices_control_flow::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
                 Some(token_span),
             )
@@ -312,7 +318,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
         .set_position(resume)
         .map_err(ExpressionParseError::from)?;
     outcome.unwrap_or_else(|| {
-        Err(CompilerDiagnostic::invalid_loop_header(
+        Err(choices_control_flow::invalid_loop_header(
             InvalidLoopHeaderReason::MissingColon,
             Some(token_stream.current_span()),
         )

@@ -1,8 +1,16 @@
 //! Header-owned dependency-clause scanner tests.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidDependencyClauseReason, PathKind,
+    DiagnosticBag, InvalidDependencyClauseReason, PathKind,
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -14,6 +22,25 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenTag, TokenizerEntryMode,
 };
 
+fn compact_clause_diagnostic(diagnostic: DiagnosticDraft) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
+}
+
+fn primary_span(view: DiagnosticView<'_>) -> Option<SourceSpan> {
+    match view.primary_site() {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+
+fn label_span(view: DiagnosticView<'_>, index: usize) -> Option<SourceSpan> {
+    view.durable_labels()
+        .nth(index)
+        .and_then(|label| match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        })
+}
 fn tokenize_source(source: &str) -> (LexedSource, StringTable, ExtendedSpanBuilder) {
     tokenize_named_source_with_id(source, "test.moth", SourceId::COMPILATION_ROOT)
 }
@@ -55,10 +82,16 @@ fn path_token_index(tokens: &LexedSource) -> usize {
 fn expect_infrastructure_error(error: DependencyClauseParseError, case: &str) {
     match error {
         DependencyClauseParseError::Infrastructure(_) => {}
-        DependencyClauseParseError::Diagnostic(diagnostic) => panic!(
-            "{case}: malformed path lookup must not fabricate a user diagnostic: {:?}",
-            diagnostic.payload
-        ),
+        DependencyClauseParseError::Diagnostic(diagnostic) => {
+            let diagnostic_bag = compact_clause_diagnostic(diagnostic);
+            let diagnostic = diagnostic_bag
+                .first()
+                .expect("unexpected diagnostic should compact");
+            panic!(
+                "{case}: malformed path lookup must not fabricate a user diagnostic: {}",
+                diagnostic.descriptor().code
+            );
+        }
     }
 }
 
@@ -75,7 +108,7 @@ fn parse_clause(source: &str) -> (ScannedDependencyClause, StringTable) {
     (clause, string_table)
 }
 
-fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
+fn clause_diagnostic(source: &str) -> DiagnosticDraft {
     let (tokens, _, _span_builder) = tokenize_source(source);
     let path_index = path_token_index(&tokens);
     match parse_dependency_clause_at_source(
@@ -94,27 +127,28 @@ fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
 }
 
 fn clause_error(source: &str) -> InvalidDependencyClauseReason {
-    let error = clause_diagnostic(source);
-    let DiagnosticPayload::InvalidDependencyClause { reason, .. } = error.payload else {
-        panic!(
-            "expected dependency-clause diagnostic, got {:?}",
-            error.payload
-        );
-    };
-    reason
+    let diagnostic = compact_clause_diagnostic(clause_diagnostic(source));
+    diagnostic
+        .first()
+        .and_then(|view| {
+            view.family_view::<
+                crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView,
+            >()
+        })
+        .expect("expected dependency-clause diagnostic")
+        .reason
 }
 
 #[test]
 fn recognises_likely_unquoted_filename_component() {
-    let error = clause_diagnostic("@docs/my file.md\n");
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::InvalidPath {
-            path_kind: PathKind::WhitespaceMustBeQuoted
-        }
-    ));
+    let diagnostic = compact_clause_diagnostic(clause_diagnostic("@docs/my file.md\n"));
+    assert!(diagnostic.first().is_some_and(|view| {
+        view.family_view::<
+            crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView,
+        >()
+        .is_some_and(|facts| facts.path_kind == PathKind::WhitespaceMustBeQuoted)
+    }));
 }
-
 #[test]
 fn parses_namespace_and_alias() {
     let (bare, _) = parse_clause("@core/math\n");
@@ -162,14 +196,17 @@ fn continues_only_after_comma() {
 #[test]
 fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
     let source = "@core/math sin,\n    cos tan\n";
-    let error = clause_diagnostic(source);
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::InvalidDependencyClause {
-            reason: InvalidDependencyClauseReason::MissingCommaBetweenSelections,
-            ..
-        }
-    ));
+    let diagnostic = compact_clause_diagnostic(clause_diagnostic(source));
+    let view = diagnostic
+        .first()
+        .expect("expected dependency clause diagnostic");
+    assert!(view
+        .family_view::<
+            crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView,
+        >()
+        .is_some_and(|facts| {
+            facts.reason == InvalidDependencyClauseReason::MissingCommaBetweenSelections
+        }));
     let (tokens, mut strings, _) = tokenize_source(source);
     let canonical = tokens.tokens.as_ref();
     let tan_id = strings.intern("tan");
@@ -180,7 +217,7 @@ fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
         .expect("expected the unexpected adjacent selection");
     let tan_span = canonical.spans()[tan_index];
     assert_eq!(
-        error.primary_span,
+        primary_span(view),
         Some(SourceSpan::new(tokens.file_id, tan_span))
     );
 }
@@ -315,10 +352,10 @@ fn corrupted_path_lookup_is_infrastructure_error() {
         ),
     ];
 
-    for (case, owner, table, index) in cases {
+    for (case, owner, table, index) in &cases[..3] {
         let error = match parse_dependency_clause_at_source(
             owner,
-            index,
+            *index,
             table,
             SourceId::COMPILATION_ROOT,
         ) {
@@ -327,20 +364,38 @@ fn corrupted_path_lookup_is_infrastructure_error() {
         };
         expect_infrastructure_error(error, case);
     }
+    for (case, owner, table, index) in &cases[3..] {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            parse_dependency_clause_at_source(owner, *index, table, SourceId::COMPILATION_ROOT)
+        }))
+        .expect_err("a malformed non-empty path row must panic as a compiler bug");
+        let report = panic
+            .downcast_ref::<CompilerBugReport>()
+            .expect("compiler bug panic should carry a structured report");
+        assert_eq!(report.stage, CompilerStage::DependencyResolution, "{case}");
+        assert_eq!(
+            report.message.as_ref(),
+            "path syntax row does not belong to the consumed path token",
+            "{case}"
+        );
+    }
 }
 
 fn assert_continuation_entered_statement(label: &str, source: &str, name: &str) {
-    let error = clause_diagnostic(source);
-    match error.payload {
-        DiagnosticPayload::InvalidDependencyClause {
-            reason: InvalidDependencyClauseReason::ContinuationEnteredStatement,
-            ..
-        } => {}
-        _ => panic!(
-            "{label}: expected ContinuationEnteredStatement for {source:?}, got {:?}",
-            error.payload
-        ),
-    }
+    let diagnostic = compact_clause_diagnostic(clause_diagnostic(source));
+    let view = diagnostic
+        .first()
+        .expect("expected dependency clause diagnostic");
+    assert!(
+        view.family_view::<
+            crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView,
+        >()
+        .is_some_and(|facts| {
+            facts.reason == InvalidDependencyClauseReason::ContinuationEnteredStatement
+        }),
+        "{label}: expected ContinuationEnteredStatement for {source:?}, got {}",
+        view.descriptor().code
+    );
 
     let (tokens, mut strings, _) = tokenize_source(source);
     let canonical = tokens.tokens.as_ref();
@@ -359,16 +414,12 @@ fn assert_continuation_entered_statement(label: &str, source: &str, name: &str) 
     let comma_span = canonical.spans()[comma_index];
 
     assert_eq!(
-        error.primary_span,
+        primary_span(view),
         Some(SourceSpan::new(tokens.file_id, name_span))
     );
+    assert_eq!(view.durable_labels().count(), 1);
     assert_eq!(
-        error.labels.len(),
-        1,
-        "continuation diagnostics must carry the comma as a secondary label"
-    );
-    assert_eq!(
-        error.labels[0].span,
+        label_span(view, 0),
         Some(SourceSpan::new(tokens.file_id, comma_span)),
         "secondary label should point at the continuation comma"
     );

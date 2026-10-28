@@ -63,8 +63,8 @@ pub struct ModuleDocFragment {
 ///
 /// WHAT: bundles resolved documentation fragments that HIR lowering pulls from the AST but must
 /// not store on `HirModule`.
-/// WHY: HIR owns executable/semantic IR only. This typed metadata lets the build system assemble
-/// the module compiler-metadata lane without HIR temporarily carrying non-HIR state.
+/// WHY: HIR owns executable/semantic IR only. Keeping the typed metadata separate lets the build
+///      system assemble its compiler-metadata lane without mixing non-HIR state into HIR.
 ///      Successful-module warnings are intentionally not duplicated here.
 #[derive(Debug, Clone, Default)]
 pub struct HirLoweringMetadata {

@@ -133,7 +133,7 @@ fn boracle_reducer_rejects_zero_bound_components() {
             Ok(_) => panic!("zero bound {name} unexpectedly returned Ok"),
         };
         assert_eq!(
-            error.msg,
+            &*error.message,
             format!("Boracle reducer requires {name} to be greater than zero")
         );
     }

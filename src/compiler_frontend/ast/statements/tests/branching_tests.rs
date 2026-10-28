@@ -16,16 +16,19 @@ use crate::compiler_frontend::ast::statements::match_exhaustiveness::MatchArmCov
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, PatternValue, PatternValueKind, RelationalPatternOp,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::InvalidValueReceiverView, choices_control_flow::InvalidMatchPatternView,
+    token_lexical::CommonSyntaxMistakeView, types_borrows_targets::TypeMismatchView,
+};
 use crate::compiler_frontend::compiler_messages::{
-    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticKind, DiagnosticPayload,
-    InvalidControlFlowStatementReason, InvalidMatchArmReason, InvalidMatchPatternReason,
-    NonExhaustiveMatchReason, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeMismatchContext,
+    ChoiceVariantSeparatorGap, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, first_ast_error_view, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -34,24 +37,40 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 #[test]
 fn rejects_non_single_conditions_scrutinees_and_assertion_arguments() {
     let producers = "pair || -> Bool, Bool:\nreturn true, false\n;\nempty ||:\nreturn\n;\n";
-    for (statement, produced_count) in [
-        ("if pair():\n;\n", 2),
-        ("if empty():\n;\n", 0),
-        ("if pair() is:\nelse =>\n;\n", 2),
-        ("if empty() is:\nelse =>\n;\n", 0),
-        ("assert(pair())\n", 2),
-        ("assert(empty())\n", 0),
+    for (statement, receiver, produced_count) in [
+        ("if pair():\n;\n", ValueReceiverContext::Condition, 2),
+        ("if empty():\n;\n", ValueReceiverContext::Condition, 0),
+        (
+            "if pair() is:\nelse =>\n;\n",
+            ValueReceiverContext::MatchScrutinee,
+            2,
+        ),
+        (
+            "if empty() is:\nelse =>\n;\n",
+            ValueReceiverContext::MatchScrutinee,
+            0,
+        ),
+        (
+            "assert(pair())\n",
+            ValueReceiverContext::AssertionArgument,
+            2,
+        ),
+        (
+            "assert(empty())\n",
+            ValueReceiverContext::AssertionArgument,
+            0,
+        ),
     ] {
         let source = format!("{producers}{statement}");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidValueReceiver {
-                target_count: 1,
-                produced_count: actual,
-                ..
-            } if *actual == produced_count
-        ));
+        let failure = parse_single_file_ast_diagnostic(&source);
+        assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+        let diagnostic = first_ast_error_view(&failure);
+        let receiver_facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the first error is an invalid value receiver");
+        assert_eq!(receiver_facts.receiver, receiver, "{source}");
+        assert_eq!(receiver_facts.target_count, 1, "{source}");
+        assert_eq!(receiver_facts.produced_count, produced_count, "{source}");
     }
 }
 
@@ -103,19 +122,13 @@ fn parses_if_else_statements() {
 
 #[test]
 fn rejects_same_line_else_if_statement() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "if true:\n    io.line([: [\"selected\"]])\nelse if false:\n    io.line([: [\"unsupported\"]])\n;\n",
     );
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidControlFlowStatement {
-                reason: InvalidControlFlowStatementReason::ElseIfUnsupported,
-            }
-        ),
-        "{:?}",
-        diagnostic.payload
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0042",
+        Some("invalid_control_flow_statement.else_if_unsupported"),
     );
 }
 
@@ -134,17 +147,11 @@ fn rejects_missing_if_conditions_at_the_first_boundary() {
     ];
 
     for source in cases {
-        let diagnostic = parse_single_file_ast_diagnostic(source);
-
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidControlFlowStatement {
-                    reason: InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
-                }
-            ),
-            "expected ExpectedConditionAfterIf for {source:?}, got {:?}",
-            diagnostic.payload
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0042",
+            Some("invalid_control_flow_statement.expected_condition_after_if"),
         );
     }
 }
@@ -240,37 +247,22 @@ fn parses_nested_if_else_statements() {
 
 #[test]
 fn rejects_non_boolean_if_condition_with_type_error_metadata() {
-    let diagnostic = parse_single_file_ast_diagnostic("if 1:\n    io.line([: [\"bad\"]])\n;\n");
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Condition,
-                ..
-            }
-        ),
-        "{:?}",
-        diagnostic.payload
-    );
+    let failure = parse_single_file_ast_diagnostic("if 1:\n    io.line([: [\"bad\"]])\n;\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::Condition);
 }
 
 #[test]
 fn rejects_string_if_condition_with_type_error_metadata() {
-    let diagnostic =
-        parse_single_file_ast_diagnostic("if \"text\":\n    io.line([: [\"bad\"]])\n;\n");
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Condition,
-                ..
-            }
-        ),
-        "{:?}",
-        diagnostic.payload
-    );
+    let failure = parse_single_file_ast_diagnostic("if \"text\":\n    io.line([: [\"bad\"]])\n;\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::Condition);
 }
 
 // --------------------------
@@ -515,21 +507,14 @@ fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
 
 #[test]
 fn rejects_non_boolean_match_guard_with_type_error_metadata() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "value = 1\nif value is:\n    1 if 7 => io.line([: [\"one\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Condition,
-                ..
-            }
-        ),
-        "{:?}",
-        diagnostic.payload
-    );
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::Condition);
 }
 
 #[test]
@@ -612,25 +597,19 @@ fn parses_exhaustive_choice_match_without_else_marks_exhaustive_choice() {
 
 #[test]
 fn rejects_legacy_colon_match_arm_syntax() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "value = 1\nif value is:\n    1: io.line([: [\"one\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMatchArm)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMatchArm {
-            reason: InvalidMatchArmReason::LegacyColonSyntax
-        }
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0028",
+        Some("invalid_match_arm.legacy_colon_syntax"),
     );
 }
 
 #[test]
 fn rejects_choice_match_arm_qualifier_for_other_choice() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "Status :: Ready, Busy;\n\
          OtherStatus :: Busy;\n\
          current Status = Status::Ready\n\
@@ -638,23 +617,16 @@ fn rejects_choice_match_arm_qualifier_for_other_choice() {
              OtherStatus::Busy => io.line([: [\"busy\"]])\n\
          ;\n",
     );
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMatchPattern)
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0049",
+        Some("invalid_match_pattern.qualifier_does_not_match_scrutinee"),
     );
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMatchPattern {
-                reason: InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
-                variant_name: None,
-                scrutinee_name: Some(_),
-            }
-        ),
-        "{:?}",
-        diagnostic.payload
-    );
+    let pattern = diagnostic
+        .family_view::<InvalidMatchPatternView>()
+        .expect("the first error is an invalid match pattern");
+    assert_eq!(pattern.variant_name, None);
+    assert!(pattern.scrutinee_name.is_some());
 }
 
 #[test]
@@ -666,54 +638,39 @@ fn rejects_choice_separator_gaps_in_qualified_match_patterns() {
         let source = format!(
             "Status :: Ready, Busy;\ncurrent Status = Status::Ready\nif current is:\n    {pattern} => io.line([: [\"ready\"]])\n;\n",
         );
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-
-        assert_eq!(
-            diagnostic.identity().code,
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
             "MOTH-SYNTAX-0031",
-            "source: {source:?}; diagnostic: {:?}",
-            diagnostic.payload
+            Some("common_syntax_mistake.invalid_choice_variant_spacing"),
         );
-        assert!(
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::CommonSyntaxMistake {
-                    reason: CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
-                } if *gap == expected_gap
-            ),
-            "{:?}",
-            diagnostic.payload
-        );
+        let mistake = diagnostic
+            .family_view::<CommonSyntaxMistakeView>()
+            .expect("the first error is a common syntax mistake");
+        assert_eq!(mistake.choice_gap, Some(expected_gap), "{source}");
     }
 }
 
 #[test]
 fn rejects_non_exhaustive_choice_match_without_else() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "Status :: Ready, Busy;\n\
          current Status = Status::Ready\n\
          if current is:\n\
              Ready => io.line([: [\"ready\"]])\n\
          ;\n",
     );
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::NonExhaustiveMatch {
-                reason: NonExhaustiveMatchReason::MissingVariants,
-                ref missing_variants,
-                ..
-            } if missing_variants.len() == 1
-        ),
-        "{:?}",
-        diagnostic.payload
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0050",
+        Some("non_exhaustive_match.missing_variants"),
     );
+    assert_eq!(diagnostic.string_ids().len(), 1);
 }
 
 #[test]
 fn rejects_guarded_choice_match_without_else() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "Status :: Ready, Busy;\n\
          current Status = Status::Ready\n\
          if current is:\n\
@@ -721,14 +678,12 @@ fn rejects_guarded_choice_match_without_else() {
              Busy => io.line([: [\"busy\"]])\n\
          ;\n",
     );
-
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::NonExhaustiveMatch {
-            reason: NonExhaustiveMatchReason::GuardedArmsRequireElse,
-            missing_variants: Vec::new(),
-        }
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0050",
+        Some("non_exhaustive_match.guarded_arms_require_else"),
     );
+    assert!(diagnostic.string_ids().is_empty());
 }
 
 // --------------------------
@@ -833,19 +788,13 @@ fn parses_relational_match_patterns() {
 
 #[test]
 fn rejects_semicolon_between_match_arms() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "value = 1\nif value is:\n    1 => io.line([: [\"one\"]]);\n    2 => io.line([: [\"two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMatchArm)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMatchArm {
-            reason: InvalidMatchArmReason::SemicolonDelimiter
-        }
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0028",
+        Some("invalid_match_arm.semicolon_delimiter"),
     );
 }
 
@@ -943,53 +892,49 @@ fn parses_relational_arm_after_single_line_assignment_body() {
 
 #[test]
 fn relational_patterns_without_default_are_not_exhaustive() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "value = 5\nif value is:\n    < 0 => io.line([: [\"negative\"]])\n    >= 0 => io.line([: [\"non-negative\"]])\n;\n",
     );
-
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::NonExhaustiveMatch {
-            reason: NonExhaustiveMatchReason::MissingElseArm,
-            missing_variants: Vec::new(),
-        }
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0050",
+        Some("non_exhaustive_match.missing_else_arm"),
     );
+    assert!(diagnostic.string_ids().is_empty());
 }
 
 #[test]
 fn relational_pattern_rejects_bool() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "value = true\nif value is:\n    < true => io.line([: [\"bad\"]])\n    else => io.line([: [\"fallback\"]])\n;\n",
     );
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMatchPattern)
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0049",
+        Some("invalid_match_pattern.scrutinee_type_unsupported_for_relational"),
     );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMatchPattern {
-            reason: InvalidMatchPatternReason::ScrutineeTypeUnsupportedForRelational,
-            variant_name: None,
-            scrutinee_name: None,
-        }
-    );
+    let pattern = diagnostic
+        .family_view::<InvalidMatchPatternView>()
+        .expect("the first error is an invalid match pattern");
+    assert_eq!(pattern.variant_name, None);
+    assert_eq!(pattern.scrutinee_name, None);
 }
 
 #[test]
 fn relational_pattern_rejects_string() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "value = \"abc\"\nif value is:\n    < \"def\" => io.line([: [\"before\"]])\n    else => io.line([: [\"fallback\"]])\n;\n",
     );
-
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMatchPattern {
-            reason: InvalidMatchPatternReason::ScrutineeTypeUnsupportedForRelational,
-            variant_name: None,
-            scrutinee_name: None,
-        }
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0049",
+        Some("invalid_match_pattern.scrutinee_type_unsupported_for_relational"),
     );
+    let pattern = diagnostic
+        .family_view::<InvalidMatchPatternView>()
+        .expect("the first error is an invalid match pattern");
+    assert_eq!(pattern.variant_name, None);
+    assert_eq!(pattern.scrutinee_name, None);
 }
 
 #[test]
@@ -1051,36 +996,20 @@ fn case_is_valid_as_normal_identifier() {
 // Inline value-if missing-else routing.
 
 /// Asserts the first diagnostic is the requested inline control-flow reason.
-fn assert_inline_control_flow_reason(source: &str, expected: InvalidControlFlowStatementReason) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidControlFlowStatement),
-        "expected MOTH-RULE-0042 for {source:?}, got {:?}",
-        diagnostic.kind,
-    );
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidControlFlowStatement { reason } if *reason == expected,
-        ),
-        "expected {expected:?} for {source:?}, got {:?}",
-        diagnostic.payload,
-    );
+fn assert_inline_control_flow_reason(source: &str, expected_reason_key: &'static str) {
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, "MOTH-RULE-0042", Some(expected_reason_key));
 }
 
 #[test]
 fn routes_missing_inline_else_at_declaration_boundary_through_value_if_missing_else() {
     for source in ["value = if true then 1", "value = if true then 1\n"] {
-        let diagnostic = parse_single_file_ast_diagnostic(source);
-
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidControlFlowStatement {
-                reason: InvalidControlFlowStatementReason::ValueIfMissingElse,
-            }
-        ));
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0042",
+            Some("invalid_control_flow_statement.value_if_missing_else"),
+        );
     }
 }
 
@@ -1090,7 +1019,7 @@ fn routes_missing_inline_else_at_assignment_boundary_through_value_if_missing_el
     // so the absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
-        InvalidControlFlowStatementReason::ValueIfMissingElse,
+        "invalid_control_flow_statement.value_if_missing_else",
     );
 }
 
@@ -1100,7 +1029,7 @@ fn routes_missing_inline_else_at_return_boundary_through_value_if_missing_else()
     // absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> I32:\n    return if condition then 10\n;\nvalue = choose(false)\n",
-        InvalidControlFlowStatementReason::ValueIfMissingElse,
+        "invalid_control_flow_statement.value_if_missing_else",
     );
 }
 
@@ -1110,15 +1039,15 @@ fn preserves_inline_multiline_when_newline_precedes_an_authored_else() {
     // at both assignment and return receivers, not a missing-`else` diagnostic.
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
-        InvalidControlFlowStatementReason::InlineValueIfMultiline,
+        "invalid_control_flow_statement.inline_value_if_multiline",
     );
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> I32:\n    return if condition then 10\nelse 0\n;\nvalue = choose(false)\n",
-        InvalidControlFlowStatementReason::InlineValueIfMultiline,
+        "invalid_control_flow_statement.inline_value_if_multiline",
     );
     assert_inline_control_flow_reason(
         "value = if true then 1\nelse 0\n",
-        InvalidControlFlowStatementReason::InlineValueIfMultiline,
+        "invalid_control_flow_statement.inline_value_if_multiline",
     );
 }
 
@@ -1129,7 +1058,7 @@ fn multiline_option_literal_predicate_stays_inline_value_if_multiline() {
     // the option-literal predicate reason.
     assert_inline_control_flow_reason(
         "choose |maybe String?| -> String:\n    return if maybe is \"Priya\"\nthen \"hi\" else \"guest\"\n;\nvalue = choose(none)\n",
-        InvalidControlFlowStatementReason::InlineValueIfMultiline,
+        "invalid_control_flow_statement.inline_value_if_multiline",
     );
 }
 
@@ -1137,7 +1066,7 @@ fn multiline_option_literal_predicate_stays_inline_value_if_multiline() {
 fn ignores_else_owned_by_a_later_statement() {
     assert_inline_control_flow_reason(
         "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
-        InvalidControlFlowStatementReason::ValueIfMissingElse,
+        "invalid_control_flow_statement.value_if_missing_else",
     );
 }
 
@@ -1257,18 +1186,13 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
         "the pipe is not adjacent to is when a newline separates them"
     );
 
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "name = \"Priya\"\nif name is\n|value|:\n    io.line(\"x\")\n;\n",
     );
-    assert!(
-        !matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMatchPattern {
-                reason: InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
-                ..
-            }
-        ),
-        "newline-separated pipes must not take the option-capture commitment path, got {:?}",
-        diagnostic.payload
+    let diagnostic = first_ast_error_view(&failure);
+    assert_ne!(
+        diagnostic.reason_key(),
+        Some("invalid_match_pattern.option_present_capture_on_non_optional"),
+        "a newline-separated pipe must not report the option-present-capture error",
     );
 }

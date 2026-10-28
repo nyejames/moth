@@ -2850,7 +2850,7 @@ close ratchet, not headroom.
 ## Data Layout Migration - Phase 0 Activation Baseline (historical, as of 2026-09-04)
 
 This is the historical activation baseline for
-`docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`, recorded as of
+compiler source, token and diagnostic data layout, recorded as of
 2026-09-04. Evidence-only phase: no compiler or language semantics changed. The values and status
 claims below are historical and must not be read as current workspace status; subsequent phase
 sections compare against this recorded baseline.
@@ -6762,3 +6762,284 @@ round match. External symbol path clones fall from 540,675 to 450 on generic
 scaling 160. Nominal scaling 320 makes 50% more type resolution calls
 (16,324 → 24,484) and 24% more scope contexts, the latter from the retained
 constructor-shell scope noted above, while its check total still falls.
+
+## Data Layout Migration - Phase 4 Compact Diagnostics Closeout (2026-10-25)
+
+Source checkpoint `c23ef83a0` closes Phase 4 of the source-token and diagnostic data-layout plan:
+every user diagnostic is a `DiagnosticDraft` frozen into 32-byte `DiagnosticRecord`s inside one
+`DiagnosticReport` per identity domain, the command accumulator is the only warning store, and
+the legacy `CompilerDiagnostic` model is deleted.
+
+- Toolchain: rustc/cargo `1.99.0 (b940084d7)`, Apple M1 Pro `aarch64-apple-darwin`.
+- Timing: `just bench-data-layout-check` (dev profile, one warm-up, ten measured iterations),
+  five independent runs on an otherwise idle host; the table reports each run's median and the
+  median of those medians.
+- Memory: `cargo run -p moth --release --bin data_layout_memory_probe --features
+  data_layout_memory_probe -- <fixture>` with `RAYON_NUM_THREADS=1`, one process per fixture.
+  Allocator deltas are baseline-relative proxies, not owner attribution.
+
+### Timing
+
+| case | five run medians, in ms | median of medians | Phase 4 activation baseline | change |
+| --- | --- | ---: | ---: | ---: |
+| `data_layout_diagnosed_frontend` | `41.443/41.081/40.889/41.195/40.967` | 41.081 | 44.77 | −8.2% |
+| `data_layout_warning_heavy_frontend` | `11.048/10.990/10.943/10.950/10.864` | 10.950 | 11.93 | −8.2% |
+
+The P4.6z checkpoint measured 43.432 / 10.991 ms with the same protocol; the later remediation
+slices did not regress either case.
+
+### Layout
+
+Compile-time assertions hold `DiagnosticRecord` at exactly 32 bytes, `ForeignSiteRecord` at
+8 bytes, `DiagnosticDraft` and `PreparedDiagnosticBatch` at no more than 48 bytes and
+`BoundaryFailure` at no more than 56 bytes. No diagnostic or draft is boxed; only the cold
+infrastructure aggregate is.
+
+### Report memory and ownership
+
+| fixture | outcome / errors / warnings | live report bytes | peak bytes | after report drop | records / label slots | report contexts / path tables | retained source snapshot bytes |
+| --- | --- | ---: | ---: | ---: | --- | --- | ---: |
+| `speed-test.moth` | Success / 0 / 0 | 20,972 | 3,492,682 | 1,494 | 0 / 0 | 0 / 0 | 0 |
+| `data-layout/warning-heavy.moth` | Success / 0 / 39 | 36,397 | 519,761 | 1,479 | 39 / 0 | 1 / 1 | 1,200 |
+| `adversarial/generic-trait-churn.moth` | Success / 0 / 0 | 34,691 | 1,154,606 | 1,473 | 0 / 0 | 0 / 0 | 0 |
+| `data-layout/diagnosed` | Diagnosed / 40 / 0 | 63,181 | 1,111,059 | 1,488 | 40 / 0 | 1 / 1 | 903 |
+
+The diagnosed fixture now retains one identity context and one path table for its 40 errors;
+the Phase 3 closeout recorded 1 context and 41 path tables for the same fixture. Common
+diagnostics allocate no cold label data (zero label slots), clean builds retain no report
+context, and every fixture's owner ledger is complete (`memory_ledger_incomplete=false`).
+
+### Validation
+
+`just validate` passed at `c23ef83a0` (workspace unit tests 6,237, integration 2,982/2,982,
+docs check, source and first-party audits). The first attempt failed once in
+`unguarded_parallel_compile_registers_into_an_active_timing_session`, which observed boundaries
+registered by concurrently running unguarded compile tests; the test passes alone and the
+immediate re-run passed. The full integration corpus rendered byte-identically (1,656 rendered
+files) to the render baseline captured before the P4.5 boundary migration.
+
+
+## Data Layout Migration - Phase 5 Failure Lanes Closeout (2026-10-26)
+
+Phase 5 of the source-token and diagnostic data-layout plan replaces the mixed `CompilerError`
+model with three lanes: user failures are `DiagnosticDraft` values frozen into the compact report
+model, operational and unproven internal failures are `InfrastructureFailure`, and proven
+invariants panic through `compiler_bug!` with a structured `CompilerBugReport`. Command
+boundaries return `CompilationResult<T>` (`Success` with frozen warnings, `Diagnosed`, or the outer
+`InfrastructureErrors`), and warnings render only on success.
+
+- Toolchain: rustc/cargo `1.99.0 (b940084d7)`, Apple M1 Pro `aarch64-apple-darwin`.
+- Timing: `just bench-data-layout-check` (dev profile, one warm-up, ten measured iterations), five
+  independent runs per checkout on the same host in one session. The host ran slower than on the
+  Phase 4 closeout day, so the Phase 4 close commit `e116b80fb` was re-measured beside the Phase 5
+  tree and the change is reported against that paired baseline.
+
+### Timing
+
+| case | Phase 4 close `e116b80fb` run medians, in ms | median | Phase 5 close run medians, in ms | median | change |
+| --- | --- | ---: | --- | ---: | ---: |
+| `data_layout_diagnosed_frontend` | `43.513/43.499/43.260/42.370/43.587` | 43.499 | `43.949/44.888/43.897/44.030/44.700` | 44.030 | +1.2% |
+| `data_layout_warning_heavy_frontend` | `11.862/11.936/11.721/11.495/11.787` | 11.787 | `11.817/12.205/11.844/12.112/12.264` | 12.112 | +2.8% |
+
+The diagnosed case measures the failure lane end to end; the warning-heavy case measures the
+successful path with frozen warnings. Both stay inside the 5% median budget. An intermediate
+checkpoint (`a25dd3e7f`, before the close-audit fixes) measured
+43.621 / 11.724 ms in the same session.
+
+### Layout
+
+`DiagnosticRecord` stays exactly 32 bytes, `ForeignSiteRecord` 8 bytes, `DiagnosticDraft` and
+`PreparedDiagnosticBatch` no more than 48 bytes, labels 12 bytes, `DiagnosticReportSet` no more
+than 48 bytes and `InfrastructureFailure` no more than 56 bytes. No diagnostic is boxed and no
+`result_large_err` allowance exists. Infrastructure data (host paths, stages, messages, details)
+lives only in `InfrastructureFailure`.
+
+### Validation
+
+`just validate` passed (workspace unit tests 7,395, integration 3,018/3,018, docs check, source
+and first-party audits). The first attempt failed in
+`unguarded_parallel_compile_registers_into_an_active_timing_session` because its concurrent
+fixture still expected invalid UTF-8 source to be an infrastructure read failure; it now asserts
+the `MOTH-SYNTAX-0040` source diagnostic. The integration render dump differs from the
+pre-migration baseline only in four accepted files: the infrastructure `Stage:` line, three
+failures whose coexisting warnings are no longer rendered, and one HTML-Wasm case now rejected
+by backend feature validation instead of an internal error.
+
+
+## Data Layout Migration - Phase 6 Tooling Isolation Closeout (2026-10-26)
+
+Phase 6 runs every compilation in one fresh owned worker per build request (absolute entry path,
+flags, owned `BuildConfigInputSet`, resolved output root and write policy). `catch_unwind` exists
+only at the owning host boundaries: the CLI build/check/Boracle commands, the dev-server build
+cycle and the integration runner's per-case worker. One process-wide hook suppresses structured
+`CompilerBugReport` payloads so the owning host renders each report once and delegates unknown
+panics to the previous hook. CLI compiler bugs exit with status 2 (diagnosed and infrastructure
+failures keep status 1). The dev server compiles and writes outputs without holding its state lock,
+publishes an immutable served snapshot after the worker completes, keeps the last known-good
+snapshot on any failure and keeps watching after a compiler bug.
+
+- Toolchain: rustc/cargo `1.99.0 (b940084d7)`, Apple M1 Pro `aarch64-apple-darwin`.
+
+### Panic profile and binary size
+
+Release and profiling profiles use `panic = "unwind"` because the `moth` binary contains the
+dev-server host. Stripped `cargo build --release -p moth-cli --bin moth` sizes:
+
+| build | bytes |
+| --- | ---: |
+| Phase 5 source, `panic = "abort"` (`bfb246b9b`) | 10,039,904 |
+| Phase 6 source, temporary `panic = "abort"` control | 10,073,024 |
+| Phase 6 source, `panic = "unwind"` (first measurement) | 11,991,056 |
+| Phase 6 close, `panic = "unwind"` | 12,007,632 |
+
+The profile change costs about 1.92 MB (+19%) of stripped binary size. Five
+`moth check docs --terse` release runs had a 0.16 s median under both the abort control and the
+unwind build, unchanged from the Phase 5 baseline.
+
+### Timing
+
+The data-layout frontend benchmarks do not cross the worker boundary; they were re-run to confirm
+no frontend regression. Five-run medians in the same session:
+
+| case | Phase 5 close run medians, in ms | median | Phase 6 close run medians, in ms | median |
+| --- | --- | ---: | --- | ---: |
+| `data_layout_diagnosed_frontend` | `43.949/44.888/43.897/44.030/44.700` | 44.030 | `42.203/41.537/44.786/44.821/41.566` | 42.203 |
+| `data_layout_warning_heavy_frontend` | `11.817/12.205/11.844/12.112/12.264` | 12.112 | `11.093/10.855/11.660/12.246/11.003` | 11.093 |
+
+Host load varied between the two sets; neither case regressed.
+
+### Validation
+
+`just validate` passed (workspace unit tests 7,394, integration 3,018/3,018, docs check, source
+and first-party audits). `just compiler-bug-test` passed every invocation: the structured trigger,
+the CLI check/build/Boracle compiler-bug exits and the unknown-panic hook delegation. The
+integration render dump is unchanged from the Phase 5 close.
+
+
+## Data Layout Migration - Final Closeout (2026-10-26)
+
+The final closeout commit completes the source-token and diagnostic data-layout migration; the
+measurements below were taken at `45edf6534`, whose later corrections are reporting and test
+changes only. One architecture remains: source snapshots and line starts owned by the source database, interned
+string and path tables shared into frozen lookup context, compact `SourceTokens` stores, `DiagnosticDraft`
+values frozen into 32-byte `DiagnosticRecord`s with typed side stores, a separate
+`InfrastructureFailure` lane and host-rendered compiler-bug reports from owned per-build workers.
+The architecture authority is `docs/compiler-data-layout-design.md`; deferred capabilities and
+their re-entry criteria are in the roadmap's `Compiler data-layout follow-ups` subsection.
+
+- Toolchain: rustc/cargo `1.99.0 (b940084d7)`, Apple M1 Pro `aarch64-apple-darwin`.
+
+### Report and allocator memory (Slice 7A)
+
+`cargo run -p moth --release --bin data_layout_memory_probe --features data_layout_memory_probe --
+<fixture>`, one process per fixture, run with `RAYON_NUM_THREADS=1` and with the default pool.
+Owner-ledger values and allocator deltas were identical between the serial and default runs.
+
+| fixture | outcome / errors / warnings | live report bytes | peak bytes | after report drop | Phase 0 peak bytes |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `speed-test.moth` | Success / 0 / 0 | 20,972 | 3,492,682 | 1,494 | |
+| `data-layout/warning-heavy.moth` | Success / 0 / 39 | 36,397 | 519,761 | 1,479 | 3,306,673 |
+| `adversarial/generic-trait-churn.moth` | Success / 0 / 0 | 34,691 | 1,162,190 | 1,473 | |
+| `data-layout/diagnosed` | Diagnosed / 40 / 0 | 63,181 | 1,111,131 | 1,488 | 2,579,817 |
+| `docs` | Success / 0 / 0 | 558,425 | 26,611,300 | 1,542 | 29,216,701 |
+
+`live report bytes` is the process-wide live allocator delta sampled after the build while the
+returned report owner remains alive; it is not an exclusive attribution to report-owned storage.
+`peak bytes` is the process-wide allocator peak delta, and `after report drop` is the live allocator
+delta after dropping both the owner and report. Phase 0 peaks are the activation-era process-wide
+allocator boundaries, so the last column compares allocator peaks, not the exclusive retained heap
+of any data structure: measured process-wide allocator peak bytes fell by 84% for warning-heavy,
+57% for diagnosed and 9% for docs.
+Phase 0 used rustc 1.97.1, the docs corpus has since changed and other compiler changes landed in
+between, so the fall cannot be attributed to the data layout alone.
+Speed-test, warning-heavy and diagnosed match the Phase 4 closeout exactly.
+
+Allocation calls, drop timing and merge/remap cost from the same single runs (serial / default
+pool). Allocation calls are `alloc + alloc_zeroed + realloc`. Owner release is
+`into_report`, and report drop is dropping the returned report. Merge/remap is the summed wall
+time of string and path table delta merges.
+
+| fixture | allocation calls | owner release, ns | report drop, ns | string merge/remap, ns | path merge/remap, ns |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| speed-test | 125,744 / 125,745 | 25,000 / 26,250 | 7,916 / 19,959 | 91,792 / 71,499 | 25,875 / 19,375 |
+| warning-heavy | 14,955 / 14,955 | 22,125 / 37,375 | 6,583 / 7,709 | 12,333 / 12,084 | 5,583 / 5,250 |
+| generic-trait-churn | 42,312 / 42,312 | 20,292 / 27,667 | 16,541 / 18,209 | 19,000 / 24,708 | 12,291 / 14,833 |
+| diagnosed | 48,437 / 48,437 | 43,417 / 45,542 | 9,333 / 10,791 | 83,624 / 96,253 | 7,959 / 9,125 |
+| docs | 1,552,643 / 1,552,647 | 24,292 / 24,958 | 112,500 / 122,333 | 6,581,752 / 6,778,798 | 720,075 / 711,464 |
+
+Allocation counts are reliable: the serial and parallel runs agree to within four calls. The
+timings come from one run each and are microsecond-scale apart from docs, so they bound cost
+rather than rank it. Serial and parallel merge/remap costs are comparable; the largest is
+docs string merging at about 6.6–6.8 ms of a 188–210 ms frontend run.
+
+Direct owners in the final frozen outputs:
+
+- No fixture retains `SourceTokens`, extended spans or cold diagnostic stores (labels, extras,
+  lists, substitutions, foreign sites, type-display rows).
+- Warning-heavy retains a 1,200-byte source snapshot, 46 line starts (184 B), one frozen path table
+  (78 rows, 1,584 B), 3,936 B of frozen strings and 39 records in 2,048 B of record capacity.
+- Diagnosed retains a 903-byte snapshot, 48 line starts (192 B), one frozen path table (82 rows,
+  1,548 B), 9,903 B of frozen strings and 40 records in 2,048 B.
+- Clean successful builds retain no report context; warning-bearing successes retain the
+  context their warnings need.
+
+### Optional reviews (Slice 7B)
+
+No optional experiment met its entry condition, so none was prototyped:
+
+| review | measured evidence | decision |
+| --- | --- | --- |
+| extended-span deduplication | 0 retained extended rows; final corpus 661,044 spans with 355 extended rows (2,840 B) | rejected |
+| hot/cold `SourceRecord` split | largest loaded record capacity 3,072 B; no access-pollution profile | rejected |
+| source snapshot compression/mapping | largest retained snapshot 1,200 B | rejected; needs a separate approved design |
+| path-node AoS/SoA | largest frozen table 82 rows / 1,584 B; no traversal hotspot | rejected |
+| token cold-store packing | no retained token stores | rejected |
+| diagnostic extra/list packing | no retained cold diagnostic data | rejected |
+| `LocalSpan` split | `just span-census`: 6,623 sources, max start 226,191, no start overflow at L=8–12 | L=10 (22/10) kept |
+
+`TokenShape` stays 8 bytes and `DiagnosticRecord` stays 32 bytes.
+
+### Timing
+
+Every suite ran five times with one warm-up and ten measured iterations per run. The table
+compares per-case medians of medians with the Phase 6 close (`fb071b732`) measured in the same
+session.
+
+| suite | cases | Phase 6 close average of case medians | final | change | largest case increase | largest case decrease |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| `just bench-frontend-check` | 76 | 131.84 ms | 131.11 ms | -0.6% | `numeric_independent_regions_32_frontend` +2.7% | `one_module_kitchen_sink_frontend` -2.0% |
+| `just bench-check` | 74 | 21.07 ms | 21.11 ms | +0.2% | `numeric_grouped_arithmetic_128_check` +4.0% | `numeric_independent_regions_32_check` -1.8% |
+
+No case moved by more than 5% in either direction.
+
+| case | Phase 4 activation | Phase 4 close | Phase 6 close (same session) | final run medians, in ms | final |
+| --- | ---: | ---: | ---: | --- | ---: |
+| `data_layout_diagnosed_frontend` | 44.77 | 41.081 | 41.735 | `43.042/41.374/41.527/41.500/42.042` | 41.527 |
+| `data_layout_warning_heavy_frontend` | 11.93 | 10.950 | 11.187 | `11.134/11.254/11.066/11.008/11.113` | 11.113 |
+
+Against the Phase 0 activation baseline (rustc 1.97.1, smaller case sets), the docs frontend
+case fell from about 1,822 ms to 904 ms over a docs corpus that has also changed; the suite
+averages are not comparable because both suites gained cases. `just bench-scaling` fits all 14 series within budget.
+
+### Binary size
+
+The stripped release `moth` binary is 12,007,632 bytes with `panic = "unwind"`, unchanged from
+the Phase 6 close.
+
+### Correctness and determinism
+
+- `just validate-full` passed: workspace unit tests, integration 3,018/3,018, docs check, source,
+  first-party and honesty audits, feature matrix, `bench-ci`, scaling and timer erasure.
+- `just validate` passed again on the final tree. Its first attempt failed once in
+  `unguarded_parallel_compile_registers_into_an_active_timing_session`, which counted a boundary
+  registered by a concurrently running unguarded compile test (the flake recorded at the Phase 4
+  closeout).
+- `just compiler-bug-test` passed.
+- Clippy passed with warnings denied for `aarch64-apple-darwin` (`just clippy`,
+  `just clippy-features`) and for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`, each
+  with the default and the full feature set. No `result_large_err` allowance and no boxed common
+  diagnostic exists.
+- The integration corpus renders to 1,683 files. These are byte-identical under
+  `RAYON_NUM_THREADS=1` and the default pool, and match the Phase 5 render baseline apart from the
+  four accepted Phase 5 presentation changes.
+- `moth build docs --release` produced byte-identical output (83 files) serially and in parallel.

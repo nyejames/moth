@@ -4,13 +4,13 @@ use super::EmittedFallibleResults;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ArgumentListView, CallView, ExpressionOperationView, ExpressionView, ResolvedCallableTarget,
 };
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirValueRange};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
     pub(super) fn lower_invoke_arguments(
@@ -30,7 +30,7 @@ impl<'a> HirBuilder<'a> {
                 index + usize::from(receiver.is_some()),
             )?;
             for statement in lowered.prelude {
-                self.emit_statement_to_current_block(statement, span)?;
+                self.emit_statement_to_current_block(statement)?;
             }
             values.push(lowered.value);
         }
@@ -45,12 +45,12 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[TypeId],
         span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
-        let (types, error) = self.result_call_slots(&target, span)?;
+        let (types, error) = self.result_call_slots(&target)?;
         if types != result_type_ids {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Fallible call success slots mismatch",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
         let args = self.lower_invoke_arguments(args, receiver, span)?;
         self.emit_fallible_operation(
@@ -76,32 +76,23 @@ impl<'a> HirBuilder<'a> {
             ExpressionOperationView::MapBuiltin { receiver, facts, arguments } => {
                 let op = super::super::calls::hir_map_op_from_builtin(facts.operation);
                 if facts.receiver_requires_mutable != op.requires_mutable_receiver() {
-                    return_hir_transformation_error!(
-                        "Fallible map producer has inconsistent receiver access",
-                        self.hir_error_location(&span)
-                    );
+                    return Err(InfrastructureFailure::hir_transformation("Fallible map producer has inconsistent receiver access").into());
                 }
                 let Some(error_type) = value.error_type() else {
-                    return_hir_transformation_error!(
-                        "Fallible map producer lacks an error channel",
-                        self.hir_error_location(&span)
-                    );
+                    return Err(InfrastructureFailure::hir_transformation("Fallible map producer lacks an error channel").into());
                 };
                 // Commit receiver work before arguments can enter a failure continuation.
                 let receiver = self.lower_expression_value_to_current_block(receiver)?;
                 let args = self.lower_invoke_arguments(arguments, None, &span)?;
-                let types = self.lower_call_result_types(value.success_types(), &span)?;
-                let error = self.lower_type_id(error_type, &span)?;
+                let types = self.lower_call_result_types(value.success_types())?;
+                let error = self.lower_type_id(error_type)?;
                 self.emit_fallible_operation(
                     HirFallibleOperation::MapOp { op, receiver, args }, &types, error, &span,
                 )
             }
             ExpressionOperationView::CollectionBuiltin { receiver, facts, arguments } => {
                 let Some(error) = value.error_type() else {
-                    return_hir_transformation_error!(
-                        "Fallible collection producer lacks error channel",
-                        self.hir_error_location(&span)
-                    );
+                    return Err(InfrastructureFailure::hir_transformation("Fallible collection producer lacks error channel").into());
                 };
                 self.emit_external_result_call_to_current_block(
                     facts.operation.external_function_id(), arguments, Some(receiver),
@@ -112,16 +103,12 @@ impl<'a> HirBuilder<'a> {
                 crate::compiler_frontend::ast::expressions::expression_types::ResolvedCastEvidence::Builtin { policy } =>
                     self.emit_builtin_cast_results(source, facts, *policy, &span),
                 crate::compiler_frontend::ast::expressions::expression_types::ResolvedCastEvidence::UserDefined { method_path, .. } => {
-                    let target = self.resolve_call_target_or_error(method_path, &span)?;
+                    let target = self.resolve_call_target_or_error(method_path)?;
                     self.emit_user_defined_cast_call_results(target, source, &span)
                 }
-                _ => return_hir_transformation_error!(
-                    "Unresolved fallible cast evidence", self.hir_error_location(&span)
-                ),
+                _ => Err(InfrastructureFailure::hir_transformation("Unresolved fallible cast evidence").into()),
             },
-            _ => return_hir_transformation_error!(
-                "Unsupported raw fallible producer", self.hir_error_location(&span)
-            ),
+            _ => Err(InfrastructureFailure::hir_transformation("Unsupported raw fallible producer").into()),
         }
     }
 
@@ -135,7 +122,7 @@ impl<'a> HirBuilder<'a> {
         let span = value.span();
         match metadata.target {
             ResolvedCallableTarget::Function(name) => {
-                let target = self.resolve_call_target_or_error(&name, &span)?;
+                let target = self.resolve_call_target_or_error(&name)?;
                 self.emit_result_call_to_current_block(
                     target,
                     call.arguments(),
@@ -146,10 +133,10 @@ impl<'a> HirBuilder<'a> {
             }
             ResolvedCallableTarget::Host(id) => {
                 let Some(error) = metadata.error_type.or(value.error_type()) else {
-                    return_hir_transformation_error!(
+                    return Err(InfrastructureFailure::hir_transformation(
                         "Fallible host producer lacks error channel",
-                        self.hir_error_location(&span)
-                    );
+                    )
+                    .into());
                 };
                 self.emit_external_result_call_to_current_block(
                     id,

@@ -9,8 +9,7 @@
 //!      transaction and hands back a finished delta. Equal generated identities may coexist in
 //!      unrelated boundaries and are never suppressed or resolved across them.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::module_compilation::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
     GeneratedFunctionSidecar, KnownGeneratedFunctions, validate_completed_generated_record,
@@ -46,27 +45,27 @@ impl BoundaryGeneratedFunctionStore {
     pub(crate) fn preflight(
         &self,
         delta: &GeneratedFunctionDelta,
-    ) -> Result<GeneratedFunctionPublication, CompilerError> {
+    ) -> Result<GeneratedFunctionPublication, InfrastructureFailure> {
         // Preflight the complete delta before mutation: identity/sidecar agreement, executable
         // record shape, duplicate identities inside the delta and duplicates against retained
         // state must all pass before any row is appended.
         let mut delta_identities = FxHashSet::default();
         for record in delta.records() {
             if record.identity != record.sidecar.identity {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "Generated sidecar identity {:?} disagrees with its record identity {:?}",
                     record.sidecar.identity, record.identity
                 )));
             }
-            validate_completed_generated_record(record)?;
+            validate_completed_generated_record(record);
             if !delta_identities.insert(record.identity.clone()) {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "Generated identity {:?} is duplicated inside one publication delta",
                     record.identity
                 )));
             }
             if self.by_identity.contains_key(&record.identity) {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "Generated identity {:?} was published more than once in one compilation boundary",
                     record.identity
                 )));
@@ -98,11 +97,19 @@ impl BoundaryGeneratedFunctionStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn publish(&mut self, delta: GeneratedFunctionDelta) -> Result<(), CompilerError> {
+    pub(crate) fn publish(
+        &mut self,
+        delta: GeneratedFunctionDelta,
+    ) -> Result<(), InfrastructureFailure> {
         let publication = self.preflight(&delta)?;
         self.reserve_commit(&publication);
         self.commit(publication, delta);
         Ok(())
+    }
+
+    /// Number of sidecars already published into this boundary.
+    pub(crate) fn published_record_count(&self) -> usize {
+        self.records.len()
     }
 
     /// Borrow this boundary's completed sidecars in deterministic publication order.
@@ -123,25 +130,16 @@ impl BoundaryGeneratedFunctionStore {
         }
     }
 
-    /// Move sidecar warnings in deterministic publication order.
-    pub(crate) fn take_sidecar_warnings(&mut self) -> Vec<CompilerDiagnostic> {
-        let mut warnings = Vec::new();
-        for record in &mut self.records {
-            warnings.append(&mut record.sidecar.module.metadata.warnings);
-        }
-        warnings
-    }
-
     /// Resolve one completed sidecar by its dense publication index.
     pub(crate) fn sidecar_at(
         &self,
         index: usize,
-    ) -> Result<&GeneratedFunctionSidecar, CompilerError> {
+    ) -> Result<&GeneratedFunctionSidecar, InfrastructureFailure> {
         self.records
             .get(index)
             .map(|record| &record.sidecar)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "Generated sidecar index {index} is out of range for this boundary"
                 ))
             })

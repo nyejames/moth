@@ -10,9 +10,13 @@ use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
     reusable_type_id_for_parsed_ref,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    generics_traits_api, names_declarations, types_borrows_targets,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidRouteOutputReason,
-    InvalidThisUsageReason, InvalidTypeAnnotationReason, TypeAnnotationContext,
+    InvalidReceiverDeclarationReason, InvalidRouteOutputReason, InvalidThisUsageReason,
+    InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -105,7 +109,7 @@ pub(crate) fn resolve_function_signature(
             type_id
                 .filter(|type_id| *type_id != builtin_type_ids::NONE)
                 .ok_or_else(|| {
-                    CompilerDiagnostic::invalid_type_annotation(
+                    names_declarations::invalid_type_annotation(
                         TypeAnnotationContext::SignatureParameter,
                         InvalidTypeAnnotationReason::NoneNotAllowed,
                         parameter.binding_span,
@@ -119,7 +123,7 @@ pub(crate) fn resolve_function_signature(
         {
             parameter.type_id
         } else {
-            return Err(CompilerDiagnostic::invalid_type_annotation(
+            return Err(names_declarations::invalid_type_annotation(
                 TypeAnnotationContext::SignatureParameter,
                 InvalidTypeAnnotationReason::NoneNotAllowed,
                 parameter.binding_span,
@@ -133,7 +137,7 @@ pub(crate) fn resolve_function_signature(
                     type_id,
                     type_resolution_context.type_environment,
                 ) {
-                    return Err(CompilerDiagnostic::invalid_route_output(
+                    return Err(types_borrows_targets::invalid_route_output(
                         InvalidRouteOutputReason::NotChoiceOrGeneric,
                         type_id,
                         output_span.or(parameter.binding_span),
@@ -166,7 +170,7 @@ pub(crate) fn resolve_function_signature(
         };
         if path_fork.component(resolved_parameter.id) == Some(this_name) {
             if receiver.is_some() {
-                return Err(CompilerDiagnostic::invalid_this_usage(
+                return Err(generics_traits_api::invalid_this_usage(
                     InvalidThisUsageReason::DuplicateThis {
                         function_name: function_name_id,
                     },
@@ -175,7 +179,7 @@ pub(crate) fn resolve_function_signature(
             }
 
             if parameter_index != 0 {
-                return Err(CompilerDiagnostic::invalid_this_usage(
+                return Err(generics_traits_api::invalid_this_usage(
                     InvalidThisUsageReason::NotFirstParameter {
                         function_name: function_name_id,
                     },
@@ -231,7 +235,7 @@ pub(crate) fn resolve_function_signature(
                     .is_some()
         })
         .ok_or_else(|| {
-            CompilerDiagnostic::invalid_type_annotation(
+            names_declarations::invalid_type_annotation(
                 TypeAnnotationContext::SignatureReturn,
                 InvalidTypeAnnotationReason::NoneNotAllowed,
                 function_span,
@@ -283,7 +287,7 @@ fn receiver_key_for_resolved_parameter(
     // Exact numeric scalars are builtin scalar values, like Bool, String and Char, even though
     // they have no receiver-method key of their own.
     if type_environment.fixed_scalar(receiver_type_id).is_some() {
-        return Err(CompilerDiagnostic::invalid_receiver_declaration(
+        return Err(generics_traits_api::invalid_receiver_declaration(
             InvalidReceiverDeclarationReason::BuiltinScalarType,
             span,
         ));
@@ -348,8 +352,8 @@ fn generic_receiver_type_diagnostic(
     function_name_id: StringId,
     receiver_type_id: TypeId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_receiver_declaration(
+) -> DiagnosticDraft {
+    generics_traits_api::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::GenericReceiverType {
             function_name: function_name_id,
             type_id: receiver_type_id,
@@ -362,8 +366,8 @@ fn unsupported_receiver_type_diagnostic(
     function_name_id: StringId,
     receiver_type_id: TypeId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_receiver_declaration(
+) -> DiagnosticDraft {
+    generics_traits_api::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name: function_name_id,
             type_id: receiver_type_id,

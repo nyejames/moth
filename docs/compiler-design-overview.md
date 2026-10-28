@@ -13,7 +13,7 @@ Companion authorities:
 - `docs/src/developer-docs/language/overview.mtf` routes to canonical unsuffixed language references. They own source syntax and observable semantics. Paired Basic pages teach subsets.
 - `docs/compiler-data-layout-design.md` owns source, token and diagnostic representation, identity lifetimes and the three failure lanes.
 - [Wasm optimisation](src/developer-docs/wasm-optimisation/overview.mtf) routes to the authority for backend optimisation goals, pass placement and the policy shared with Lappet. Language semantics and validated memory contracts remain with their existing owners.
-- `docs/src/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over temporary memory implementation plans.
+- `docs/src/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over measurement reports and implementation proposals.
 - `docs/src/docs/directives/directives.mtf` owns directive grammar and extension limits. `docs/src/docs/mon/mon-format.mtf` owns MON literal-data semantics.
 - `docs/src/docs/design-scope/` owns accepted and excluded language boundaries. `docs/src/developer-docs/style-guide/style-guide.mtf` owns implementation standards.
 - `docs/roadmap/roadmap.md` and its plans record accepted work, sequencing and open design. `docs/src/docs/progress/@page.moth` and the packages-and-builders matrix record support.
@@ -146,7 +146,7 @@ A successful compiler result is complete but unpublished. It contains the valida
 
 A source diagnosis publishes no partial module, public interface, generated sidecar or semantic resource table. A required generated failure diagnoses its enclosing module transaction. Build-only missing-resource watch interests may survive without manufactured semantic origins. Successful independent branches may remain available to tooling, but a backend never receives a partial linkable project.
 
-Successful artefacts contain no errors and may retain structured warnings. Diagnosed results retain their report context without pretending to be artefacts. A shared module produces one diagnostic set, not a copy per blocked dependant. Build scheduling owns blocking and aggregation.
+Successful artefacts contain no errors and no warnings. Structured warnings from successful compilation belong to the command-owned report. Diagnosed results retain their report context without pretending to be artefacts. A shared module produces one diagnostic set, not a copy per blocked dependant. Build scheduling owns blocking and aggregation.
 
 ### Compiled module artefact
 
@@ -157,7 +157,7 @@ Separate four consumer lanes:
 | `PublicSemanticInterface` | Complete canonical facts visible to semantic consumers, defined under `Public semantic interfaces`. |
 | `ModuleExecutable` | Module-local `TypeEnvironment`, validated HIR, borrow facts and local lifetime/escape facts, plus optional canonical integer proofs paired with the executable. |
 | `ModuleLinkFacts` | Backend-neutral per-function facts and generated materialisation requests, defined under `Per-function link facts`. |
-| `ModuleCompilerMetadata` | Dormant root activity, folded fragments and runtime insertion indexes, folded root metadata, documentation/API-index data, semantic resource origins and non-executable uses, site-root use and warnings. |
+| `ModuleCompilerMetadata` | Dormant root activity, folded fragments and runtime insertion indexes, folded root metadata, documentation/API-index data, semantic resource origins and non-executable uses, site-root use. |
 
 The local lanes share a publication lifetime. Other modules consume the public interface rather than donor-local semantic state. Linkers and lowerers may consume the validated executable and link lanes through explicit handoffs. Retained compact identities remain paired with their lookup context.
 
@@ -193,14 +193,33 @@ Builders consume this typed outcome. They add no error-fragment channel and neve
 
 `docs/compiler-data-layout-design.md` owns the complete failure and storage contracts:
 
-- User-caused source, project, configuration, dependency, type, access and target failures use typed diagnostic drafts that compact into deterministic reports. Warnings share the diagnostic machinery. Deferred-feature and outside-design-scope reasons stay distinct.
-- Expected operational IO, provider and host failures use `InfrastructureFailure`, outside the diagnostic store. A failure retaining compact compiler IDs carries their matching frozen identity context. Pre-source or non-source failures may instead carry ordinary filesystem/host context without compact IDs. Each failure has one context shape, never both.
-- A proven compiler invariant violation uses `compiler_bug!`. It ends the owning compilation and carries self-contained bounded report facts before suspect worker state is discarded. Malformed input, capacity limits and unavailable capabilities never justify a bug panic.
+- User-caused source, project, configuration, dependency, type, access and target failures use typed
+  diagnostic drafts that compact into deterministic reports. Warnings share the diagnostic
+  machinery; deferred-feature and outside-design-scope reasons stay distinct.
+- Expected operational IO, provider and host failures use `InfrastructureFailure`, outside the
+  diagnostic store. Owning boundaries return the ordered `InfrastructureErrors` aggregate in the
+  outer `Err` lane.
+- A proven compiler invariant violation uses `compiler_bug!`. It ends the owning compilation and
+  carries self-contained bounded report facts before suspect worker state is discarded. Malformed
+  input, capacity limits and unavailable capabilities never justify a bug panic.
 
-The current typed `CompilerError` carrier remains a bounded exception, not delivery of these final
-lanes. The data-layout authority's `Current CompilerError migration` section owns its ordered cold
-causes, identity transport and shared terminal, terse and dev-server presentation.
+The public owning result boundary is
+`CompilationResult<T> = Result<CompilationOutcome<T>, InfrastructureErrors>`.
+`CompilationOutcome::Success { value, warnings }` has `None` when there are no warnings;
+`CompilationOutcome::Diagnosed` owns only diagnosed reports. Infrastructure dominates any
+coexisting diagnostic set, which is discarded, and failures never carry unrelated prior warnings.
+Compiler bugs remain panics rather than result variants.
 
+Only command/report owners populate `Success::warnings`, after the last use of the project
+`SourceDatabase`. Inner success boundaries stage warning batches in the command-owned
+`BoundaryAccumulator` and return `warnings: None`. `build_project` returns an intermediate
+`BuildResult` retaining source context and staged warnings until output writing ends;
+`BuildResult::finish_output` freezes warnings once on success or freezes a late output diagnostic
+without staged warnings, then releases the source database. `check` and Boracle freeze at their
+command boundary, while the dev-server owner waits until output and site-configuration checks end.
+
+The data-layout authority's `Current diagnostic and failure transport` section owns ordered
+infrastructure causes and their shared terminal, terse and dev-server presentation.
 Runtime program `Error` values and entry-startup failures belong to the program's execution contract, not these compiler failure lanes. Statically invalid numeric work and undischarged exported failure are source diagnostics.
 
 Diagnostic schemas own stable codes and typed facts. Codes are not repurposed when prose changes. Stages preserve exact source spans, symbols and semantic reasons rather than pre-rendering messages. Type-display snapshots retain only what rendering needs, not complete type environments solely for diagnostics. Renderers resolve facts without mutating the report.
@@ -277,7 +296,7 @@ An otherwise unconstrained whole literal defaults to `I32`, and an otherwise unc
 
 ### Semantic and physical separation
 
-The numeric references own the full operator and conversion tables. D15 makes equal fixed types retain their type for eligible arithmetic and selects the smallest supported common domain for mixed operands. No 32-bit integer or `F32` floor remains. Checked integer results fail at the selected result width. Every binary-float operation completes at its selected precision: `F16` rounds and checks finiteness after each language-level operation, even when a wider carrier computes it. Fixed-integer comparison remains exact for every pair, including `I64` and `U64`, without requiring a common arithmetic type.
+The numeric references own the full operator and conversion tables. Equal fixed types retain their type for eligible arithmetic, and mixed operands use the smallest supported common domain. No 32-bit integer or `F32` floor remains. Checked integer results fail at the selected result width. Every binary-float operation completes at its selected precision: `F16` rounds and checks finiteness after each language-level operation, even when a wider carrier computes it. Fixed-integer comparison remains exact for every pair, including `I64` and `U64`, without requiring a common arithmetic type.
 
 Source-visible lengths, capacities, collection/map positional indices and fixed count-like builtin arguments use `I32`, with a maximum of `2_147_483_647` subject to stricter target or resource limits. Range counters retain their selected exact numeric type. Decimal exponentiation receives an `I32` exponent and keeps the base scale: `DecN ^ I32 -> DecN`.
 Allocation byte products, offsets, alignment and address calculations use suitable checked physical-size/offset representations and arithmetic, independent of source-visible `I32` counts. A valid `I32` element count neither permits a byte-product overflow nor requires the physical byte size to fit in `I32`; for example, 300,000,000 `I64` elements represent 2.4 GB where target and resource limits permit. The backend's scalar-storage section owns this physical boundary.
@@ -516,7 +535,7 @@ Separate these responsibilities at their real owners:
 | Occurrence and cold facts | Authored locations, diagnostic evidence, failure contributors, catch eligibility, const-record classification and synthetic-interface provenance where required. Shared constant content does not absorb occurrence-specific evidence. |
 | TIR | Template structure and exact-view authority during AST semantics, under `Templates and TIR`. |
 
-The common expression record does not carry declaration-only fields, cloned type syntax, absent-default sentinels or rare feature payloads. Underlying semantic types remain `TypeId`s. Authored type syntax stays with retained declarations and source ranges. Diagnostic compaction captures needed display facts before their type owner can be released, under the data-layout authority. Shrinking or dropping the expression store does not release the paired diagnostic `TypeEnvironment` or `DiagnosticRenderContext`. Retain their current dependency through all existing render and report readers until the separate diagnostic snapshot migration establishes a new release boundary.
+The common expression record does not carry declaration-only fields, cloned type syntax, absent-default sentinels or rare feature payloads. Underlying semantic types remain `TypeId`s. Authored type syntax stays with retained declarations and source ranges. Diagnostic compaction captures needed display facts into each report's `TypeDisplaySnapshot` before the module-local `TypeEnvironment` can be released. Frozen report views render from that snapshot and the frozen identity context, so no live `TypeEnvironment` or expression store is retained solely for diagnostic display.
 
 Cold facts retain their semantic meaning through folding and replacement. An empty contributor list is not by itself proof that all facts are absent: catch eligibility, typed producer conflicts, explicit exits and deferred assertion/catch evidence can still matter. Failure summaries do not repeatedly rescan expression subtrees to reconstruct origin lists. Facts needed after expression storage ends move into the consuming HIR or diagnostic owner first.
 
@@ -575,7 +594,7 @@ Whole literals may initialise fixed integers, binary floats, `Byte` and `Dec` di
 
 The shared `moth-lexical` owner supplies spelling classification and destination-aware materialisation without a fixed `i32`/`f64` bottleneck. The compiler selects the destination and owns `TypeId` resolution, operator rules and semantic folding. Compile-time constants resolve at their declaration boundary. Config, direct-template and other synthetic single-file services finish the same exact types and defaults before returning; no unresolved body state escapes.
 
-Canonical numeric references own the full operator matrix. D15 checks each result in its selected semantic type: equal fixed-type operands keep that type and an out-of-range result fails there rather than widening. Mixed types use the smallest supported common operand domain, with no 32-bit floor. Binary-float operations complete at their selected precision; every `F16` result is rounded and checked for finiteness before a later operation consumes it, even where an `F32` carrier performs the computation. Storage size and carrier width do not widen the semantic result. Comparison, explicit casts, assignment compatibility and operator selection remain separate decisions.
+Canonical numeric references own the full operator matrix. Each operation checks its result in its selected semantic type: equal fixed-type operands keep that type and an out-of-range result fails there rather than widening. Mixed types use the smallest supported common operand domain, with no 32-bit floor. Binary-float operations complete at their selected precision; every `F16` result is rounded and checked for finiteness before a later operation consumes it, even where an `F32` carrier performs the computation. Storage size and carrier width do not widen the semantic result. Comparison, explicit casts, assignment compatibility and operator selection remain separate decisions.
 
 Result-type resolution retains each completed operator's canonical result, source operand domains,
 conversion boundaries and failure decision. Folding and HIR consume those facts rather than
@@ -918,9 +937,9 @@ The module artefact validator, not HIR validation, checks folded fragments and t
 - `moth` owns semantic numeric typing, body-local receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
 - HIR records the canonical exact numeric domain and operator. `NumericFailureMode` distinguishes trapping statements from semantically infallible statements. Recoverable operations use `Invoke` with an explicit failure edge selected by the enclosing handler or function contract. A backend never reconstructs delivery from a name or catch-eligibility marker.
 - Compile-time and runtime operations preserve the same selected-width checks and rounding boundaries. `Dec` applies its exact scale rule at each operation result. Each `F16` operation rounds and checks finiteness before its result feeds another operation, even if an `F32` carrier computes it.
-- D15's mixed integer domain contains the complete operand ranges, not every possible mathematical result. Equal integer types retain their width, so `U8 + U8 -> U8` may overflow; a mixed signed/unsigned pair uses the smallest signed width containing both ranges, with no 32-bit floor. The canonical operator reference owns the full table and its explicit exceptions.
+- The mixed integer domain contains the complete operand ranges, not every possible mathematical result. Equal integer types retain their width, so `U8 + U8 -> U8` may overflow; a mixed signed/unsigned pair uses the smallest signed width containing both ranges, with no 32-bit floor. The canonical operator reference owns the full table and its explicit exceptions.
 - Safety catch eligibility remains separate from actual operation failure. Proving an operation infallible does not remove authored eligibility, but adds no failure contributor or recoverable capability. Statically invalid selected-width work remains a diagnostic in every handler context.
-- Semantic discharge is separate from check elision. The pure predicate `numeric_operation_cannot_fail`, beside the promotion table, proves fixed-width integer `Add`/`Subtract`/`Multiply`/`Negate` infallible only after applying the particular operation to the complete canonical operand ranges and proving every mathematical result lies within the selected result domain. D15's mixed-domain selection contains the complete input ranges, not every operation result: `U8 + U8 -> U8` may reach 510, and negating the minimum `I8` value may produce 128, so both can fail at their selected widths. By contrast, adding the complete `I8` and `U8` ranges yields `[-128, 382]`, which lies inside `I16` for `I8 + U8 -> I16`. The predicate reads exact types, never a semantic or build profile. AST failure facts and HIR emission use the same exact operation, operand and result predicate. Only an operation proven safe gets `NumericFailureMode::Infallible` on its `NumericOp`; backends implement it without a recoverable numeric failure edge or Wasm capability.
+- Semantic discharge is separate from check elision. The pure predicate `numeric_operation_cannot_fail`, beside the promotion table, proves fixed-width integer `Add`/`Subtract`/`Multiply`/`Negate` infallible only after applying the particular operation to the complete canonical operand ranges and proving every mathematical result lies within the selected result domain. Mixed-domain selection contains the complete input ranges, not every operation result: `U8 + U8 -> U8` may reach 510, and negating the minimum `I8` value may produce 128, so both can fail at their selected widths. By contrast, adding the complete `I8` and `U8` ranges yields `[-128, 382]`, which lies inside `I16` for `I8 + U8 -> I16`. The predicate reads exact types, never a semantic or build profile. AST failure facts and HIR emission use the same exact operation, operand and result predicate. Only an operation proven safe gets `NumericFailureMode::Infallible` on its `NumericOp`; backends implement it without a recoverable numeric failure edge or Wasm capability.
 - `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by the operation's HIR node identity and paired with that executable's exact validated HIR. Statement-to-`Invoke` rewrites preserve that identity. Each base executable and generated sidecar computes its own table from final validated HIR before publication. It carries no semantic-profile stamp and never becomes a public or cross-executable proof identity. Summary convergence alone does not alter numeric operations. Private-lane installation or handler pruning refreshes affected proof analysis when it rewrites HIR.
 - An absent or empty table or a missing operation fact retains runtime checks. Operation node identities need no remap. The analysis reads HIR without mutating it and changes neither source acceptance, AST evidence nor target gates.
 - The analysis derives closed `i128` intervals from canonical integer bounds, including the complete `U64` range, fixed integer literals and infallible integer casts. It walks each block independently with a single last-written-local cache. Every write invalidates the earlier fact: a direct-local assignment replaces it with its new interval, while projected writes clear the cache; calls and unknown statements also clear it. If checked endpoint arithmetic cannot represent an intermediate in `i128`, the analysis declines proof.

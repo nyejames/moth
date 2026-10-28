@@ -8,7 +8,6 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_messages::{BorrowDiagnosticKind, DiagnosticKind};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::module_compilation::artefact::{
@@ -63,6 +62,11 @@ fn frontend_check_borrows_propagates_failures() {
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
     let z = symbol("z", &mut path_fork, &mut string_table);
+    // The conflicting borrow is spanned so its frozen primary site can name its owning domain.
+    let conflict_span = SourceSpan::new(
+        crate::compiler_frontend::source::SourceId::from_index(1),
+        crate::compiler_frontend::source::LocalSpan::source_start(),
+    );
 
     let start_fn = function_node(
     start_name,
@@ -100,11 +104,11 @@ fn frontend_check_borrows_propagates_failures() {
                     &mut builder,
                     x,
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                    test_source_location(3),
+                    Some(conflict_span),
                 ),
                 &builder,
             )),
-            test_source_location(3),
+            Some(conflict_span),
         ),
     ],
     None,
@@ -112,17 +116,12 @@ fn frontend_check_borrows_propagates_failures() {
 
     let external_package_registry =
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
-    let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
-        &mut string_table,
-        &mut path_fork,
-        &external_package_registry,
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        const_values,
+        type_environment,
     );
 
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -136,25 +135,56 @@ fn frontend_check_borrows_propagates_failures() {
         None,
         &source_files,
     );
+    let lowered = frontend
+        .generate_hir(
+            ast,
+            crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
+            None,
+            Default::default(),
+        )
+        .expect("test HIR should lower");
+    let hir = lowered.hir_module;
+    let type_environment = lowered.type_environment;
     let generated_owner =
         FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("generated"));
+    let mut warnings = crate::compiler_frontend::compiler_messages::DiagnosticBag::new();
     let failure = frontend
-        .check_borrows_premerge(&hir, Some(&generated_owner))
+        .check_borrows_premerge(
+            &hir,
+            &type_environment,
+            &mut warnings,
+            Some(&generated_owner),
+        )
         .expect_err("borrow checking should fail");
-    let messages = failure.into_messages(&StringTable::new());
-
-    let diagnostic = messages
-        .error_diagnostics()
-        .find(|diagnostic| {
-            diagnostic.kind == DiagnosticKind::Borrow(BorrowDiagnosticKind::SharedMutableConflict)
-        })
-        .expect("borrow checking should preserve the diagnosed conflict");
+    let failure =
+        crate::compiler_frontend::tests::parse_support::freeze_ast_diagnostic_failure(failure);
+    let diagnostic = crate::compiler_frontend::tests::parse_support::first_ast_error_view(&failure);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-BORROW-0003");
+    let conflict = diagnostic
+        .family_view::<
+            crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::SharedMutableConflictView,
+        >()
+        .expect("the failure should retain the shared/mutable conflict facts");
     assert_eq!(
-        diagnostic
-            .primary_frozen_identity_handle
-            .as_ref()
-            .and_then(FrozenIdentityHandle::domain),
-        Some(&StablePackageIdentity::project_local("generated")),
+        conflict.existing_access,
+        crate::compiler_frontend::compiler_messages::BorrowAccessKind::Mutable
+    );
+    assert_eq!(
+        conflict.requested_access,
+        crate::compiler_frontend::compiler_messages::BorrowAccessKind::Shared
+    );
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                context,
+                ..
+            } if match (context, generated_owner.get()) {
+                (Some(context), Some(owner)) => std::ptr::eq(context, owner),
+                (None, None) => true,
+                _ => false,
+            }
+        ),
         "generated borrow diagnostics must retain their HIR owner domain"
     );
 }
@@ -251,7 +281,6 @@ fn successful_borrow_report_can_be_stored_on_module() {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: std::path::PathBuf::from("main.moth"),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),

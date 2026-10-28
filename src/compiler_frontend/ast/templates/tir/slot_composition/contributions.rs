@@ -24,8 +24,9 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use rustc_hash::FxHashMap;
 
 use super::helpers::{
-    children_of_node, extra_loose_content_without_default_slot_error, internal_compiler_error,
-    loose_content_without_default_slot_error, root_node_id_for_template, unknown_slot_target_error,
+    children_of_node, extra_loose_content_without_default_slot_error,
+    internal_infrastructure_failure, loose_content_without_default_slot_error,
+    root_node_id_for_template, unknown_slot_target_error,
 };
 use crate::compiler_frontend::ast::templates::tir::slot_layout::TirSlotSchema;
 
@@ -111,7 +112,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
     // loose content that flows into positional or default slots.
     for &child_id in fill_children {
         let Some(child_node) = store.get_node(child_id) else {
-            return Err(internal_compiler_error(
+            return Err(internal_infrastructure_failure(
                 "TIR slot routing: fill template child node ID was not present in the store.",
             ));
         };
@@ -124,7 +125,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
             TemplateIrNodeKind::InsertContribution { template } => Some(*template),
             TemplateIrNodeKind::ChildTemplate { reference, .. } => {
                 let template = store.get_template(reference.root).ok_or_else(|| {
-                    internal_compiler_error(
+                    internal_infrastructure_failure(
                         "TIR slot routing: child template ID was not present in the store.",
                     )
                 })?;
@@ -152,13 +153,13 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
 
         if let Some(insert_template_id) = insert_info {
             let target_template = store.get_template(insert_template_id).ok_or_else(|| {
-                internal_compiler_error(
+                internal_infrastructure_failure(
                     "TIR slot routing: slot-insert helper referenced a missing template.",
                 )
             })?;
 
             let TemplateType::SlotInsert(target_key) = &target_template.kind else {
-                return Err(internal_compiler_error(
+                return Err(internal_infrastructure_failure(
                     "TIR slot routing: slot-insert helper is not a SlotInsert template.",
                 ));
             };
@@ -247,7 +248,7 @@ fn collect_insert_contribution_content(
 
     for child_id in insert_children {
         let Some(child_node) = store.get_node(child_id) else {
-            return Err(internal_compiler_error(
+            return Err(internal_infrastructure_failure(
                 "TIR slot routing: insert contribution child node ID was not present in the store.",
             ));
         };
@@ -255,13 +256,13 @@ fn collect_insert_contribution_content(
         match &child_node.kind {
             TemplateIrNodeKind::InsertContribution { template } => {
                 let target_template = store.get_template(*template).ok_or_else(|| {
-                    internal_compiler_error(
+                    internal_infrastructure_failure(
                         "TIR slot routing: nested InsertContribution referenced a missing template.",
                     )
                 })?;
 
                 let TemplateType::SlotInsert(target_key) = &target_template.kind else {
-                    return Err(internal_compiler_error(
+                    return Err(internal_infrastructure_failure(
                         "TIR slot routing: nested InsertContribution referenced a template that is not a SlotInsert helper.",
                     ));
                 };
@@ -331,7 +332,7 @@ fn collect_loose_tir_contributions(
 
     for node_id in loose_nodes {
         let node = store.get_node(node_id).ok_or_else(|| {
-            internal_compiler_error(
+            internal_infrastructure_failure(
                 "TIR slot routing: loose contribution node ID was not present in the store.",
             )
         })?;
@@ -392,7 +393,7 @@ fn tir_nodes_are_whitespace_only_text(
 
     for node_id in nodes {
         let node = store.get_node(*node_id).ok_or_else(|| {
-            internal_compiler_error(
+            internal_infrastructure_failure(
                 "TIR slot routing: loose contribution whitespace check found a node ID that was not present in the store.",
             )
         })?;

@@ -22,7 +22,7 @@
 //! and preparing path table, a complete prepared output, or nothing for deferred text); source
 //! kind, paths and retained snapshots are resolved from the shared source database.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareOutput;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -82,13 +82,16 @@ impl PreparedSource {
     pub(crate) fn new(
         source_id: SourceId,
         output: FileFrontendPrepareOutput,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         if output.file_id != source_id {
-            return Err(CompilerError::compiler_error(format!(
-                "prepared source identity {} does not match its slot owner {}",
-                output.file_id.index(),
-                source_id.index(),
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "prepared source identity {} does not match its slot owner {}",
+                    output.file_id.index(),
+                    source_id.index(),
+                ),
+            ));
         }
 
         Ok(Self { output })
@@ -127,19 +130,23 @@ impl PreparedSourceSlots {
         file_index: usize,
         source_id: SourceId,
         output: FileFrontendPrepareOutput,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let slot_count = self.slots.len();
         let slot = self.slots.get_mut(file_index).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "file preparation record carries file index {file_index} but the module \
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "file preparation record carries file index {file_index} but the module \
                  has only {slot_count} files",
-            ))
+                ),
+            )
         })?;
 
         if slot.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation record occupies file index {file_index} more than once",
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!("file preparation record occupies file index {file_index} more than once",),
+            ));
         }
 
         *slot = Some(PreparedSource::new(source_id, output)?);
@@ -148,10 +155,10 @@ impl PreparedSourceSlots {
 
     /// Verify that every slot is occupied before a caller that requires a complete module
     /// preparation consumes the store.
-    pub(crate) fn ensure_filled(&self) -> Result<(), CompilerError> {
+    pub(crate) fn ensure_filled(&self) -> Result<(), InfrastructureFailure> {
         for (file_index, slot) in self.slots.iter().enumerate() {
             if slot.is_none() {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "file preparation left file index {file_index} unfilled; every \
                      selected source must be prepared exactly once",
                 )));

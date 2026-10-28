@@ -25,7 +25,7 @@ use super::traces::{TraceAccess, TraceEntry};
 use super::{ExecutionTrace, OracleBounds, OracleLimitReason, OracleOutcome, execute_bounded};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 #[test]
 fn boracle_oracle_many_shared_aliases_on_one_node_do_not_conflict() {
@@ -619,7 +619,7 @@ fn boracle_oracle_defining_write_on_unavailable_place_installs_nothing() {
 
     let error = execute_bounded(&fixture.finish(), OracleBounds::default())
         .expect_err("a deferred defining write must not install a role");
-    assert!(error.msg.contains("non-defining access"), "{error:?}");
+    assert!(error.message.contains("non-defining access"), "{error:?}");
 }
 #[test]
 fn boracle_oracle_slot_definition_write_defers_replacement_to_writer() {
@@ -709,7 +709,7 @@ fn boracle_oracle_slot_replacement_retires_the_destination_held_capability() {
         )
         .expect("the destination-held capability should issue");
 
-    // A multi-holder loan can no longer carry this probe end to end, so the transition's
+    // A multi-holder loan cannot carry this probe end to end, so the transition's
     // retirement contract is checked on the state it owns: the replaced slot row ends the
     // capability the destination held, with the holder retired at the writer's position.
     let replacement = state
@@ -1125,7 +1125,7 @@ fn boracle_oracle_scope_exit_retires_places_and_ends_holder_intervals() {
     exited.access(exited_alias, UseKind::Read, false);
     let error = execute_bounded(&exited.finish(), OracleBounds::default())
         .expect_err("access through an exited alias must be rejected");
-    assert!(error.msg.contains("non-defining access"));
+    assert!(error.message.contains("non-defining access"));
 }
 
 #[test]
@@ -1280,7 +1280,7 @@ fn boracle_oracle_duplicated_holder_loan_reaches_a_real_outcome() {
     );
 }
 #[test]
-fn boracle_oracle_unavailable_loan_place_is_compiler_error_before_refusal() {
+fn boracle_oracle_unavailable_loan_place_is_infrastructure_failure_before_refusal() {
     let mut fixture = Fixture::new(3);
     let owner = fixture.place(0, []);
     let first_holder = fixture.place(1, []);
@@ -1295,13 +1295,13 @@ fn boracle_oracle_unavailable_loan_place_is_compiler_error_before_refusal() {
     let error = execute_bounded(&fixture.finish(), OracleBounds::default())
         .expect_err("an unresolvable loan place must stay malformed");
     assert!(
-        error.msg.contains("is unavailable"),
+        error.message.contains("is unavailable"),
         "unexpected error: {error:?}"
     );
 }
 
 #[test]
-fn boracle_oracle_unavailable_multi_holder_loan_holder_is_compiler_error() {
+fn boracle_oracle_unavailable_multi_holder_loan_holder_is_infrastructure_failure() {
     let mut fixture = Fixture::new(3);
     let owner = fixture.place(0, []);
     let first_holder = fixture.place(1, []);
@@ -1317,7 +1317,7 @@ fn boracle_oracle_unavailable_multi_holder_loan_holder_is_compiler_error() {
     let error = execute_bounded(&fixture.finish(), OracleBounds::default())
         .expect_err("an unavailable holder must keep its error lane");
     assert!(
-        error.msg.contains("holder") && error.msg.contains("is unavailable"),
+        error.message.contains("holder") && error.message.contains("is unavailable"),
         "unexpected error: {error:?}"
     );
 }
@@ -1368,7 +1368,7 @@ fn boracle_oracle_killed_capability_with_different_target_is_not_superseded() {
 
     let error = execute_bounded(&problem, OracleBounds::new(256, 4096, 8, 4096))
         .expect_err("a later loan row for another generation must not supersede the ended row");
-    assert!(error.msg.contains("after its end"));
+    assert!(error.message.contains("after its end"));
 }
 
 #[test]
@@ -2768,7 +2768,7 @@ fn boracle_oracle_repeated_loan_issue_is_independent_and_kill_scoped() {
     );
 
     // Two executions of the static issue and kill events prove that each iteration gets a fresh
-    // capability: reusing the ended capability would make the second kill a CompilerError.
+    // capability: reusing the ended capability would make the second kill an InfrastructureFailure.
     match run_with_bounds(killed_problem, OracleBounds::new(256, 4096, 2, 4096)) {
         OracleOutcome::Inconclusive {
             reason:
@@ -5212,18 +5212,18 @@ fn run(problem: BorrowProblem) -> OracleOutcome {
     execute_bounded(&problem, OracleBounds::default()).expect("fixture should execute")
 }
 #[test]
-fn boracle_oracle_non_defining_unavailable_access_is_compiler_error() {
+fn boracle_oracle_non_defining_unavailable_access_is_infrastructure_failure() {
     let mut fixture = Fixture::new(1);
     let place = fixture.place(0, []);
     fixture.access(place, UseKind::Read, false);
 
     let error = execute_bounded(&fixture.finish(), OracleBounds::default())
         .expect_err("an unavailable non-defining access must be rejected");
-    assert!(error.msg.contains("non-defining access"));
+    assert!(error.message.contains("non-defining access"));
 }
 
 #[test]
-fn boracle_oracle_access_after_explicit_end_is_compiler_error() {
+fn boracle_oracle_access_after_explicit_end_is_infrastructure_failure() {
     let mut fixture = Fixture::new(1);
     let place = fixture.place(0, []);
     fixture.fresh(place);
@@ -5233,7 +5233,7 @@ fn boracle_oracle_access_after_explicit_end_is_compiler_error() {
 
     let error = execute_bounded(&fixture.finish(), OracleBounds::default())
         .expect_err("an access after an explicit capability end must be rejected");
-    assert!(error.msg.contains("after its end"));
+    assert!(error.message.contains("after its end"));
 }
 
 #[test]
@@ -5320,7 +5320,7 @@ fn boracle_oracle_unresolvable_event_cross_reference_is_rejected_at_construction
     let error = fixture
         .finish_result()
         .expect_err("an unresolvable event use must be rejected");
-    assert!(error.msg.contains("access use"));
+    assert!(error.message.contains("access use"));
 }
 
 #[test]
@@ -5844,7 +5844,7 @@ impl Fixture {
             .expect("operational fixture should validate")
     }
 
-    fn finish_result(mut self) -> Result<BorrowProblem, CompilerError> {
+    fn finish_result(mut self) -> Result<BorrowProblem, InfrastructureFailure> {
         let exit_point = self.new_point();
         let terminator = Event::new(
             EventId::new(self.parts.events.len() as u32),

@@ -9,6 +9,8 @@ use crate::builder::{
     BuildArtifacts, BuildContext, BuildRequest, BuilderDefinition, CompiledProject, Error,
     ErrorKind, ProjectBuilder, build_project,
 };
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::cell::Cell;
 #[cfg(unix)]
 use std::ffi::OsString;
@@ -161,15 +163,13 @@ fn source_diagnostics_return_compilation_error_without_building() {
         .expect_err("source with diagnostics should fail the build");
 
     assert_eq!(error.kind(), ErrorKind::Compilation);
-    let rendered_lines = error.messages().join("\n");
-    let displayed = error.to_string();
-    let displayed_lines = displayed.lines().collect::<Vec<_>>();
-    assert_eq!(displayed_lines.len(), error.messages().len() + 1);
     assert!(
-        !displayed_lines[0].is_empty(),
-        "display should start with a summary"
+        error
+            .messages()
+            .iter()
+            .any(|message| { message.split('|').nth(2) == Some("@page.moth") }),
+        "diagnosed source must retain its authored path"
     );
-    assert_eq!(displayed_lines[1..].join("\n"), rendered_lines);
     assert_eq!(builder.build_calls.get(), 0);
 }
 
@@ -201,8 +201,11 @@ fn warnings_are_returned_as_rendered_lines() {
         "each warning should render as one terse line"
     );
     assert!(
-        built.warnings().iter().all(|warning| !warning.is_empty()),
-        "every rendered warning line should be non-empty"
+        built.warnings().iter().all(|warning| {
+            warning.starts_with("W|MOTH-RULE-0022|")
+                && warning.split('|').nth(2) == Some("@page.moth")
+        }),
+        "frozen warnings must retain their stable code and authored source path"
     );
     assert_eq!(builder.build_calls.get(), 1);
 }
@@ -222,4 +225,54 @@ fn non_utf8_project_root_returns_infrastructure_error_without_building() {
         "error should name the rejected root"
     );
     assert_eq!(builder.build_calls.get(), 0);
+}
+
+#[test]
+fn infrastructure_error_kind_uses_modern_failure_classification() {
+    let compiler_detail = "typed internal failure detail";
+    let compiler_error = Error::from_infrastructure_errors(
+        InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, compiler_detail)
+            .into(),
+    );
+    assert_eq!(compiler_error.kind(), ErrorKind::CompilerBug);
+    assert!(
+        compiler_error.messages()[0].contains(compiler_detail),
+        "terse compiler-bug reporting should retain the infrastructure cause"
+    );
+
+    let operational_detail = "typed filesystem failure detail";
+    let operational_error = Error::from_infrastructure_errors(
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            Path::new("project"),
+            operational_detail,
+        )
+        .into(),
+    );
+    assert_eq!(operational_error.kind(), ErrorKind::Infrastructure);
+    assert!(
+        operational_error.messages()[0].contains(operational_detail),
+        "terse operational reporting should retain the infrastructure cause"
+    );
+
+    let mut mixed_errors = InfrastructureErrors::new(InfrastructureFailure::filesystem(
+        CompilerStage::ProjectBuildAssembly,
+        Path::new("project"),
+        operational_detail,
+    ));
+    mixed_errors.push(InfrastructureFailure::internal(
+        CompilerStage::ProjectBuildAssembly,
+        compiler_detail,
+    ));
+    let mixed_error = Error::from_infrastructure_errors(mixed_errors);
+    assert_eq!(mixed_error.kind(), ErrorKind::CompilerBug);
+    assert_eq!(mixed_error.messages().len(), 1);
+    let record = &mixed_error.messages()[0];
+    let operational_position = record
+        .find(operational_detail)
+        .expect("the operational primary cause must survive SDK conversion");
+    let compiler_position = record
+        .find(compiler_detail)
+        .expect("the additional compiler cause must survive SDK conversion");
+    assert!(operational_position < compiler_position);
 }

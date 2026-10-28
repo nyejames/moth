@@ -7,7 +7,9 @@
 
 use super::Error;
 use crate::build_system::output::BuilderIdentity;
+use crate::builder_surface::definition::BuilderSurfaceValidationError;
 use crate::builder_surface::{BuilderSurface, PackageOrigin, SourceFileKind};
+use crate::compiler_frontend::external_packages::ExternalRegistrationError;
 use crate::host::HostFunction;
 use std::fmt;
 use std::path::PathBuf;
@@ -155,11 +157,22 @@ impl BuilderDefinitionDraft {
             }
         }
 
+        // These registrations only validate this draft's descriptors and use IDs issued by
+        // this private registry. Rejections belong to the definition, not compiler execution.
+        let registration_error_to_builder_error = |error: ExternalRegistrationError| match error {
+            ExternalRegistrationError::InvalidDefinition(message) => {
+                Error::invalid_definition(message)
+            }
+            ExternalRegistrationError::Infrastructure(failure) => {
+                Error::invalid_definition(String::from(failure.message))
+            }
+        };
+
         for package in &self.host_packages {
             let package_id = surface
                 .binding_packages
                 .register_package(&package.path, PackageOrigin::Builder)
-                .map_err(|error| Error::invalid_definition(error.msg))?;
+                .map_err(registration_error_to_builder_error)?;
             for function in &package.functions {
                 let spec = function.to_spec().map_err(|reason| {
                     Error::invalid_definition(format!(
@@ -171,7 +184,7 @@ impl BuilderDefinitionDraft {
                 surface
                     .binding_packages
                     .register_external_function(package_id, spec)
-                    .map_err(|error| Error::invalid_definition(error.msg))?;
+                    .map_err(registration_error_to_builder_error)?;
             }
         }
 
@@ -179,9 +192,15 @@ impl BuilderDefinitionDraft {
             surface.source_file_kinds.register(kind.extension(), kind);
         }
 
-        surface
-            .validate()
-            .map_err(|error| Error::invalid_definition(error.msg))?;
+        match surface.validate() {
+            Ok(()) => {}
+            Err(BuilderSurfaceValidationError::InvalidDefinition(message)) => {
+                return Err(Error::invalid_definition(message));
+            }
+            Err(BuilderSurfaceValidationError::Infrastructure(failure)) => {
+                return Err(Error::from_infrastructure_errors(failure.into()));
+            }
+        }
         Ok(BuilderDefinition { identity, surface })
     }
 }

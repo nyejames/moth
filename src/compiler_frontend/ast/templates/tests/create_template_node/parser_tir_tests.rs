@@ -38,9 +38,7 @@ fn parse_template(
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -77,9 +75,7 @@ fn parse_const_required_template(
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, path_fork);
     let template_ir_store = context.template_ir_store();
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -238,9 +234,8 @@ fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
 
 #[test]
 fn template_tir_folds_nested_child_as_child_template_boundary() {
-    // A foldable nested child template now stays a `ChildTemplate` TIR boundary
-    // because the TIR formatter is authoritative for child-template output. The
-    // final folded output still matches the old linear-text result.
+    // A foldable nested child template remains a `ChildTemplate` TIR boundary because the
+    // TIR formatter is authoritative for child-template output.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -472,9 +467,8 @@ fn conditional_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
         .join("");
     assert_eq!(conditional_body_text, "prefixbody");
 
-    // The head-prefix portion of the body root should retain the parser-emitted
-    // TIR node. The owner root is now
-    // the Conditional itself, so the prefix lives only inside its selected
+    // The head-prefix portion of the body root retains the parser-emitted TIR node.
+    // The owner root is the `Conditional`, so the prefix lives only inside its selected
     // body.
     assert_eq!(
         parser_tir_text(body_children[0], &store, &string_table),
@@ -852,9 +846,7 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -914,9 +906,8 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
 #[test]
 fn inline_code_head_insert_records_formatted_tir_phase() {
     // Markdown/head-insert inline-code surfaces install a module-local `Formatted`
-    // TIR reference and the TIR formatter now classifies the head-expression
-    // insert as a `DynamicExpression` anchor, so the formatted TIR root records
-    // the inline-code span.
+    // TIR reference. The formatter classifies the head-expression insert as a
+    // `DynamicExpression` anchor, so the formatted TIR root records the inline-code span.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1165,8 +1156,7 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
 #[test]
 fn head_expression_folds_through_tir_formatter() {
     // Head-origin non-literal expressions are formatter-visible opaque anchors.
-    // The TIR formatter now owns that shape directly instead of rebuilding a
-    // parser TIR.
+    // The TIR formatter owns that shape directly.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1487,9 +1477,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         &mut path_fork,
     );
     let wrapper_source_path = wrapper_file_tokens.source_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1525,9 +1513,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
         &mut path_fork,
     );
     let parent_source_path = parent_file_tokens.source_path;
-    let canonical_owner = parent_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = parent_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1596,9 +1582,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         &mut path_fork,
     );
     let wrapper_source_path = wrapper_file_tokens.source_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1634,9 +1618,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         &mut path_fork,
     );
     let parent_source_path = parent_file_tokens.source_path;
-    let canonical_owner = parent_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = parent_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1727,9 +1709,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         &mut path_fork,
     );
     let wrapper_source_path = wrapper_file_tokens.source_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1766,9 +1746,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         &mut path_fork,
     );
     let insert_source_path = insert_file_tokens.source_path;
-    let canonical_owner = insert_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = insert_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1830,9 +1808,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         &mut path_fork,
     );
     let parent_source_path = parent_file_tokens.source_path;
-    let canonical_owner = parent_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = parent_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -2222,9 +2198,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         &mut path_fork,
     );
     let wrapper_source_path = wrapper_file_tokens.source_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -2259,9 +2233,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         &mut path_fork,
     );
     let parent_source_path = parent_file_tokens.source_path;
-    let canonical_owner = parent_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = parent_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -2345,9 +2317,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         &mut path_fork,
     );
     let wrapper_source_path = wrapper_file_tokens.source_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -2383,9 +2353,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         &mut path_fork,
     );
     let parent_source_path = parent_file_tokens.source_path;
-    let canonical_owner = parent_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = parent_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");

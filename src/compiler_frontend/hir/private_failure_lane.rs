@@ -4,6 +4,7 @@
 //! edges. Installation preserves success slots and producer identities, routes catches
 //! and prunes unreachable handlers before final validation and analysis refresh.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::VecDeque;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -13,7 +14,7 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::numeric_failure_codes;
@@ -121,12 +122,13 @@ struct LaneInstaller<'a> {
 }
 
 impl LaneInstaller<'_> {
-    fn prepare_ids(&mut self) -> Result<(), CompilerError> {
+    fn prepare_ids(&mut self) -> Result<(), InfrastructureFailure> {
         let mut next_local = 0u32;
         let mut next_node = 0u32;
         for (index, block) in self.hir.blocks.iter().enumerate() {
             if block.id != BlockId(index as u32) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "private failure lane install requires dense HIR block ids",
                 ));
             }
@@ -147,7 +149,7 @@ impl LaneInstaller<'_> {
     }
 
     /// Installing an error channel leaves every ordered success slot and return intact.
-    fn install_return_lanes(&mut self) -> Result<(), CompilerError> {
+    fn install_return_lanes(&mut self) -> Result<(), InfrastructureFailure> {
         let error_type = if self.lane_functions.is_empty() {
             return Ok(());
         } else {
@@ -158,7 +160,8 @@ impl LaneInstaller<'_> {
                 continue;
             }
             if function.error_return.is_some() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "private internal failure lane cannot coexist with a source error slot",
                 ));
             }
@@ -219,7 +222,7 @@ impl LaneInstaller<'_> {
         function_id: FunctionId,
         block_id: BlockId,
         index: usize,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         let statement = &self.hir.blocks[block_id.0 as usize].statements[index];
         match &statement.kind {
             HirStatementKind::Call { target, .. } => self.target_uses_private_lane(target),
@@ -251,7 +254,10 @@ impl LaneInstaller<'_> {
             .statements
             .pop()
             .ok_or_else(|| {
-                CompilerError::compiler_error("private failure lane lost its selected producer")
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    "private failure lane lost its selected producer",
+                )
             })?;
         let (operation, destinations, scalar_destination) = match statement.kind {
             HirStatementKind::Call {
@@ -286,7 +292,8 @@ impl LaneInstaller<'_> {
                 Some(result),
             ),
             _ => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "private failure lane selected a non-producer statement",
                 )
                 .into());
@@ -307,7 +314,8 @@ impl LaneInstaller<'_> {
                 .call_result_contracts
                 .get_mut(target)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
                         "private failure lane call is missing its nonlocal result contract",
                     )
                 })?;
@@ -322,7 +330,8 @@ impl LaneInstaller<'_> {
         let catch_handler = self.catch_handlers.get(&statement.id).copied();
         let error_result = if let Some(handler) = catch_handler {
             if self.local_type(handler.error_local) != Some(error_type) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
                     "catch handler error local does not hold a builtin Error value",
                 )
                 .into());
@@ -338,7 +347,7 @@ impl LaneInstaller<'_> {
             error
         } else {
             if !self.function_propagates_builtin_error(function_id)? {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::HirConstruction,
                     "private implicit failure reached a function with no Error! slot and no internal lane",
                 ).into());
             }
@@ -358,7 +367,10 @@ impl LaneInstaller<'_> {
                 HirLocalDestination::Define(local) => success_results.push(local),
                 HirLocalDestination::Update(local) => {
                     let ty = self.local_type(local).ok_or_else(|| {
-                        CompilerError::compiler_error("private failure result local has no type")
+                        InfrastructureFailure::internal(
+                            CompilerStage::HirConstruction,
+                            "private failure result local has no type",
+                        )
                     })?;
                     let result = self.allocate_local(block_id, ty, region);
                     success_results.push(result);
@@ -406,7 +418,7 @@ impl LaneInstaller<'_> {
     fn assert_records_reference_live_calls(
         &self,
         records: &[CatchProtectedCall],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         // Most modules carry no protected calls, so skip indexing every call statement.
         if records.is_empty() {
             return Ok(());
@@ -423,7 +435,8 @@ impl LaneInstaller<'_> {
             .iter()
             .any(|record| !call_statements.contains(&record.statement))
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
                 "Catch-protected call record does not reference an infallible call",
             ));
         }
@@ -435,7 +448,7 @@ impl LaneInstaller<'_> {
     /// WHAT: convergence may prove every protected call infallible, leaving the lowering-time
     ///       handler unreachable. Blocks reachable from such a handler but from no function entry
     ///       are removed; entry-reachable blocks such as the shared catch merge are kept.
-    /// WHY: proof may remove a handler's runtime path (plan section 7), and full-strength
+    /// WHY: proof may remove a handler's runtime path, and full-strength
     ///      ownership validation requires every remaining block to belong to a function CFG.
     fn prune_unrouted_catch_handlers(&mut self, handlers: &[CatchHandlerRecord]) {
         if handlers.is_empty() {
@@ -526,9 +539,10 @@ impl LaneInstaller<'_> {
                 };
                 let error_type = self.builtin_error_type()?;
                 if self.local_type(error) != Some(error_type) {
-                    return Err(CompilerError::compiler_error(format!(
-                        "{owner} error local must hold builtin Error"
-                    ))
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
+                        format!("{owner} error local must hold builtin Error"),
+                    )
                     .into());
                 }
                 let region = self.hir.blocks[block_id.0 as usize].region;
@@ -545,7 +559,7 @@ impl LaneInstaller<'_> {
     /// callees and statement-owned checks have installed their escaping edges.
     ///
     /// Returns whether the entry return was narrowed.
-    fn narrow_entry_return(&mut self) -> Result<bool, CompilerError> {
+    fn narrow_entry_return(&mut self) -> Result<bool, InfrastructureFailure> {
         let Some(function_id) = self.hir.start_function else {
             return Ok(false);
         };
@@ -571,7 +585,7 @@ impl LaneInstaller<'_> {
     fn function_propagates_builtin_error(
         &self,
         function_id: FunctionId,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         if self.lane_functions.contains(&function_id) {
             return Ok(true);
         }
@@ -579,7 +593,7 @@ impl LaneInstaller<'_> {
         Ok(error_type.is_some() && self.builtin_error == error_type)
     }
 
-    fn target_uses_private_lane(&self, target: &CallTarget) -> Result<bool, CompilerError> {
+    fn target_uses_private_lane(&self, target: &CallTarget) -> Result<bool, InfrastructureFailure> {
         match target {
             CallTarget::Local(function_id) => Ok(self.lane_functions.contains(function_id)),
             CallTarget::CrossModule(_)
@@ -589,7 +603,10 @@ impl LaneInstaller<'_> {
         }
     }
 
-    fn call_summary(&self, target: &CallTarget) -> Result<&PublicCallSummary, CompilerError> {
+    fn call_summary(
+        &self,
+        target: &CallTarget,
+    ) -> Result<&PublicCallSummary, InfrastructureFailure> {
         let summary = match target {
             CallTarget::Local(function) => self.report.analysis.public_call_summaries.get(function),
             CallTarget::CrossModule(origin) => self.hir.imported_call_summaries.get(origin),
@@ -602,31 +619,36 @@ impl LaneInstaller<'_> {
             CallTarget::External(_) => None,
         };
         summary.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "private failure lane has no exact call summary for {target:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                format!("private failure lane has no exact call summary for {target:?}"),
+            )
         })
     }
 
-    fn builtin_error_type(&self) -> Result<TypeId, CompilerError> {
+    fn builtin_error_type(&self) -> Result<TypeId, InfrastructureFailure> {
         self.builtin_error.ok_or_else(|| {
-            CompilerError::compiler_error("private failure lane requires the builtin Error type")
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "private failure lane requires the builtin Error type",
+            )
         })
     }
 
-    fn function_index(&self, function_id: FunctionId) -> Result<usize, CompilerError> {
+    fn function_index(&self, function_id: FunctionId) -> Result<usize, InfrastructureFailure> {
         self.hir
             .functions
             .iter()
             .position(|function| function.id == function_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "private failure lane lost function {function_id:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!("private failure lane lost function {function_id:?}"),
+                )
             })
     }
 
-    fn function_entry(&self, function_id: FunctionId) -> Result<BlockId, CompilerError> {
+    fn function_entry(&self, function_id: FunctionId) -> Result<BlockId, InfrastructureFailure> {
         Ok(self.hir.functions[self.function_index(function_id)?].entry)
     }
 
@@ -724,17 +746,20 @@ fn statement_has_implicit_failure(kind: &HirStatementKind) -> bool {
 fn private_lane_functions(
     hir: &HirModule,
     report: &BorrowCheckReport,
-) -> Result<FxHashSet<FunctionId>, CompilerError> {
+) -> Result<FxHashSet<FunctionId>, InfrastructureFailure> {
     let mut lane_functions = FxHashSet::default();
     for function in &hir.functions {
         let facts = hir
             .function_failure_facts
             .get(&function.id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "private failure lane is missing semantic facts for {:?}",
-                    function.id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
+                        "private failure lane is missing semantic facts for {:?}",
+                        function.id
+                    ),
+                )
             })?;
         if !matches!(facts.boundary, HirBuiltinFailureBoundary::InferPrivate) {
             continue;
@@ -744,10 +769,13 @@ fn private_lane_functions(
             .public_call_summaries
             .get(&function.id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "private failure lane is missing the call summary for {:?}",
-                    function.id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
+                        "private failure lane is missing the call summary for {:?}",
+                        function.id
+                    ),
+                )
             })?;
         if summary.escapes_builtin_failure {
             lane_functions.insert(function.id);

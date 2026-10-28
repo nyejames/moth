@@ -16,6 +16,17 @@ use crate::compiler_frontend::ast::templates::tir::{
     prepare_tir_view,
 };
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terminal, terse,
 };
@@ -44,8 +55,8 @@ struct TemplateSourceFixture {
 }
 
 impl TemplateSourceFixture {
-    fn canonical_owner(&self) -> Option<Arc<SourceTokens>> {
-        Some(Arc::clone(self.source_owner.tokens()))
+    fn canonical_owner(&self) -> Arc<SourceTokens> {
+        Arc::clone(self.source_owner.tokens())
     }
 }
 
@@ -371,9 +382,7 @@ fn folded_template_output_with_style_directives(
     let source_path = fixture.source_path;
     let context =
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
-    let canonical_owner = fixture
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = fixture.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -433,7 +442,11 @@ fn template_parse_rendered_error_with_style_directives(
     ) {
         Ok(lexed) => publish_template_source(lexed),
         Err(TokenizeFailure::Diagnosed(diagnostic)) => {
-            return render_test_diagnostic(&diagnostic, &string_table);
+            let compacted = compact_template_diagnostic(diagnostic);
+            let view = compacted
+                .first()
+                .expect("template source diagnostic compacts to one record");
+            return render_template_diagnostic(view, &string_table);
         }
         Err(TokenizeFailure::Infrastructure(error)) => {
             panic!("template fixture tokenization encountered infrastructure failure: {error:?}")
@@ -443,9 +456,7 @@ fn template_parse_rendered_error_with_style_directives(
 
     let context =
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
-    let canonical_owner = fixture
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = fixture.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -466,39 +477,57 @@ fn template_parse_rendered_error_with_style_directives(
     )
     .expect_err("template should fail to parse");
     let diagnostic = expect_template_diagnostic(error);
-
-    render_test_diagnostic(&diagnostic, &string_table)
+    let view = diagnostic
+        .first()
+        .expect("template source diagnostic compacts to one record");
+    render_template_diagnostic(view, &string_table)
 }
 
-/// Extract the source-diagnostic lane expected by a template parser test.
-///
-/// Template construction now preserves internal retained-data failures separately. Tests that
-/// exercise authored source rejection must state that expectation instead of treating a compiler
-/// infrastructure error as an interchangeable diagnostic.
-fn expect_template_diagnostic(
-    error: TemplateError,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+/// Compact a single template source diagnostic for typed test assertions.
+fn compact_template_diagnostic(diagnostic: DiagnosticDraft) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
+}
+
+fn expect_template_diagnostic(error: TemplateError) -> CompactDiagnosticBagForTest {
     match error {
-        TemplateError::Diagnostic(diagnostic) => diagnostic,
+        TemplateError::Diagnostic(diagnostic)
+        | TemplateError::EmptyArguments(diagnostic)
+        | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
+            compact_template_diagnostic(diagnostic)
+        }
         TemplateError::Infrastructure(error) => {
             panic!("expected a template source diagnostic, got infrastructure failure: {error:?}")
         }
     }
 }
 
-fn render_test_diagnostic(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+fn assert_invalid_template_structure(
+    diagnostic: &CompactDiagnosticBagForTest,
+    expected_reason: InvalidTemplateStructureReason,
+) {
+    let facts = diagnostic
+        .first()
+        .expect("template source diagnostic should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("template diagnostic should retain typed structure facts");
+    let (expected_code, _expected_type, expected_limit) =
+        InvalidTemplateStructureCode::split(expected_reason);
+    assert_eq!(facts.reason, expected_code);
+    assert_eq!(facts.limit, expected_limit);
+}
+
+fn render_template_diagnostic(
+    diagnostic: DiagnosticView<'_>,
     string_table: &StringTable,
 ) -> String {
     let render_context = DiagnosticRenderContext::new(string_table);
-    let mut rendered = terse::format_terse_diagnostic_with_context(diagnostic, render_context);
+    let mut rendered = terse::format_terse_diagnostic_view(diagnostic, render_context);
 
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_guidance_view(diagnostic, render_context);
     if !guidance.is_empty() {
         rendered.push('\n');
         rendered.push_str(&guidance.join("\n"));
     }
-
     rendered
 }
 
@@ -513,7 +542,7 @@ fn template_warnings_with_style_directives(
     source: &str,
     runtime_context: bool,
     style_directives: &StyleDirectiveRegistry,
-) -> Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+) -> Vec<crate::compiler_frontend::compiler_messages::DiagnosticDraft> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -539,9 +568,7 @@ fn template_warnings_with_style_directives(
     } else {
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork)
     };
-    let canonical_owner = fixture
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = fixture.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");

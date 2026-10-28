@@ -235,7 +235,7 @@ Compatible extension points within the accepted memory model:
 - escape analysis
 - REC selection and elision for proven families
 
-These must preserve source-language semantics and the unified ownership contract. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
+These must preserve source-language semantics and the unified ownership contract. A missing physical strategy after successful topology validation is an `InfrastructureFailure`, not a silent collector fallback.
 
 ## Common mistakes
 

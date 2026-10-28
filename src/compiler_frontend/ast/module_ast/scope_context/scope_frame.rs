@@ -258,8 +258,8 @@ pub(crate) struct LocalDeclaration {
 /// WHAT: owns the declarations authored in this scope layer and an index of their names.
 ///       The `parent` link is a stable `ScopeFrameId` pointing to the enclosing frame,
 ///       which may itself have a parent.
-/// WHY: child scopes no longer need a private copy of every visible local declaration;
-///      they create a new empty frame and inherit ancestor declarations through parent IDs.
+/// WHY: child scopes inherit ancestor declarations through parent IDs instead of copying every
+///      visible declaration into a new frame.
 #[derive(Clone)]
 pub(crate) struct ScopeFrame {
     /// Declarations authored in this frame, in source order.

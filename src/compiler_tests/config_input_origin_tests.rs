@@ -8,9 +8,10 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildConfigValueOrigin, BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity,
-};
+use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -78,40 +79,41 @@ fn assert_config_input_overflow_build(
     .expect("should write facade source");
 
     let builder = HtmlProjectBuilder::new();
-    let Err(messages) = build_project(
+    let reports = match build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &inputs,
-    ) else {
-        panic!("known consumer overflow should fail the build with source diagnostics");
+    )
+    .unwrap_or_else(|never| match never {})
+    {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("known consumer overflow should fail the build with source diagnostics")
+        }
+        Err(errors) => {
+            panic!("known consumer overflow produced infrastructure errors: {errors:?}")
+        }
     };
 
-    assert_eq!(
-        messages.error_count(),
-        1,
-        "each independent project should produce exactly one total error"
-    );
-    let errors = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
+    let errors = reports
+        .iter_severity(DiagnosticSeverity::Error)
         .collect::<Vec<_>>();
     assert_eq!(
         errors.len(),
         1,
         "the error should be one source diagnostic, not an infrastructure failure"
     );
-    let (diagnostic_index, diagnostic) = errors[0];
-    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0053");
-    let DiagnosticPayload::CompileTimeEvaluationError { reason, .. } = &diagnostic.payload else {
-        panic!("MOTH-RULE-0053 should carry its typed compile-time evaluation payload");
-    };
-    assert_eq!(*reason, CompileTimeEvaluationErrorReason::IntegerOverflow);
+    let (report, view) = errors[0];
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0053");
+    assert_eq!(
+        view.reason_key(),
+        Some("compile_time_evaluation_error.integer_overflow")
+    );
 
-    let render_context = messages.diagnostic_render_context(diagnostic_index);
+    let render_context = DiagnosticRenderContext::for_report(report);
     let primary_position = render_context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("authored overflow should resolve through its retained identity");
     let expected_consumer_path =
         fs::canonicalize(&consumer_path).expect("consumer source should canonicalize");
@@ -144,17 +146,15 @@ fn assert_config_input_overflow_build(
         "the retained source snapshot should identify the authored overflow operator"
     );
 
-    let (origin_label, origin) = diagnostic
-        .labels
-        .iter()
+    let (origin_label, origin) = view
+        .durable_labels()
         .find_map(|label| {
-            let Some(DiagnosticLabelMessage::ConfigInputOrigin { input_name, origin }) =
-                label.message.as_ref()
+            let DurableLabelMessage::ConfigInputOrigin { input_name, origin } = label.message
             else {
                 return None;
             };
-            (render_context.string_table.resolve(*input_name) == "configured_maximum")
-                .then_some((label, *origin))
+            (render_context.string_table.resolve(input_name) == "configured_maximum")
+                .then_some((label, origin))
         })
         .expect("the overflow should carry configured_maximum provenance");
     assert_eq!(
@@ -163,7 +163,7 @@ fn assert_config_input_overflow_build(
     );
 
     let origin_position = render_context
-        .label_position(origin_label)
+        .site_position(origin_label.site)
         .expect("the matching provenance label should resolve through its retained identity");
     let expected_facade_path =
         fs::canonicalize(&facade_path).expect("facade source should canonicalize");

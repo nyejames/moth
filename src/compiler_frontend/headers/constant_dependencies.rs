@@ -5,9 +5,12 @@
 //! WHY: dependency sorting must order constants before AST folds their initializer expressions.
 //! MUST NOT: type-check expressions or decide whether a full initializer is foldable.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag,
+    CompileTimeEvaluationErrorReason, DiagnosticBag,
 };
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -449,44 +452,27 @@ fn is_nominal_constructor(
 // Diagnostic helpers
 // ---------------------------------------------------------------------------
 
-fn attach_reference_span(
-    mut diagnostic: CompilerDiagnostic,
-    reference: &InitializerReference,
-) -> CompilerDiagnostic {
-    diagnostic.primary_span = reference.span;
-    diagnostic
-}
-
-fn self_reference_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    attach_reference_span(
-        CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::ConstantSelfReference,
-            Some(reference.name),
-            reference.span,
-        ),
-        reference,
+fn self_reference_error(reference: &InitializerReference) -> DiagnosticDraft {
+    choices_control_flow::compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::ConstantSelfReference,
+        Some(reference.name),
+        reference.span,
     )
 }
 
-fn not_visible_constant_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    attach_reference_span(
-        CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::ConstantNotVisible,
-            Some(reference.name),
-            reference.span,
-        ),
-        reference,
+fn not_visible_constant_error(reference: &InitializerReference) -> DiagnosticDraft {
+    choices_control_flow::compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::ConstantNotVisible,
+        Some(reference.name),
+        reference.span,
     )
 }
 
-fn non_constant_reference_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    attach_reference_span(
-        CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-            Some(reference.name),
-            reference.span,
-        ),
-        reference,
+fn non_constant_reference_error(reference: &InitializerReference) -> DiagnosticDraft {
+    choices_control_flow::compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+        Some(reference.name),
+        reference.span,
     )
 }
 
@@ -495,17 +481,14 @@ fn same_file_forward_reference_error(
     target_path: &PathId,
     reference: &InitializerReference,
     path_fork: &PathInternerFork,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let target_name = path_fork
         .component(*target_path)
         .or_else(|| path_fork.component(*constant_path));
-    attach_reference_span(
-        CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
-            target_name,
-            reference.span,
-        ),
-        reference,
+    choices_control_flow::compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
+        target_name,
+        reference.span,
     )
 }
 
@@ -519,13 +502,16 @@ fn missing_constant_position_error(
     constant_path: &PathId,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-) -> CompilerError {
+) -> InfrastructureFailure {
     let mut scratch = Vec::new();
-    CompilerError::compiler_error(format!(
-        "Missing constant position metadata for classified source constant '{}' - \
+    InfrastructureFailure::internal(
+        CompilerStage::HeaderParsing,
+        format!(
+            "Missing constant position metadata for classified source constant '{}' - \
          the constant inventory map is corrupted",
-        path_fork.render_portable(*constant_path, string_table, &mut scratch),
-    ))
+            path_fork.render_portable(*constant_path, string_table, &mut scratch),
+        ),
+    )
 }
 
 #[cfg(test)]

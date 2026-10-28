@@ -57,7 +57,7 @@ pub const TIMING_FRONTEND_BORROW_CONVERGE_NAME: &str =
     crate::timing::TIMING_FRONTEND_BORROW_CONVERGE_NAME;
 
 /// Resolve a stable schema name to the concise label used by benchmark
-/// summaries. Unknown or legacy names are returned unchanged.
+/// summaries. Unknown names are returned unchanged.
 #[cfg(feature = "timers")]
 pub fn timing_metric_label(name: &str) -> &str {
     crate::timing::benchmark_label_for_name(name)

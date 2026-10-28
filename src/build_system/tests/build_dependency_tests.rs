@@ -3,8 +3,10 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{ProjectCompilation, build_project};
+use crate::build_system::build::{BackendInvocationFailure, ProjectCompilation, build_project};
 use crate::build_system::output::output_path_identity;
+use crate::builder_surface::PackageOrigin;
+use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalJsLowering, ExternalReturnSlot,
@@ -367,7 +369,6 @@ mod built_outputs_tests {
                 .collect(),
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::html(),
-            warnings: Vec::new(),
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         }
@@ -510,8 +511,10 @@ fn build_single_file_project_includes_reachable_dependency_files() {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let builder = HtmlProjectBuilder::new();
-        let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-            .expect("build should succeed");
+        let result = successful_compilation_value(
+            build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
+                .unwrap_or_else(|never| match never {}),
+        );
 
         let outputs = BuiltOutputs::index(&result.project);
         assert_eq!(
@@ -556,13 +559,15 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     .expect("should write js");
 
     let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("project-local JS import should build through generated glue");
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let outputs = BuiltOutputs::index(&result.project);
     let html = html_text(outputs.at("index.html"));
@@ -619,13 +624,15 @@ fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
     let root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases/html_js_reexport_linking/input");
     let builder = HtmlProjectBuilder::new();
-    let mut result = build_project(
-        &builder,
-        root.to_str().expect("fixture path should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("the pure re-export fixture should build");
+    let mut result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("fixture path should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let provider_path = "_moth/js/components/background-animation.js";
     let source = root.join("src/components/background-animation.js");
@@ -652,11 +659,10 @@ fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
     // behavior remain owned by the output writer's focused tests.
     let temp = tempfile::tempdir().expect("should create output directory");
     let output_root = temp.path().join("output");
-    write_project_outputs(
+    successful_compilation_value(write_project_outputs(
         &result.project,
         &always_write_options(output_root.clone(), None),
-    )
-    .expect("the planned re-export outputs should materialise");
+    ));
     assert_eq!(
         fs::read(output_root.join(provider_path)).expect("provider output should exist"),
         fs::read(&source).expect("authored provider source should be readable")
@@ -680,6 +686,7 @@ struct RegisteredJsPackageBuilder {
 }
 
 impl BackendBuilder for RegisteredJsPackageBuilder {
+    type Error = std::convert::Infallible;
     fn frontend_surface(&self) -> BuilderSurface {
         let mut surface = HtmlProjectBuilder::new().frontend_surface();
         let mut packages = [
@@ -705,9 +712,9 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
     fn validate_project_config(
         &self,
         config: &Config,
-        string_table: &mut StringTable,
+        strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
-        HtmlProjectBuilder::new().validate_project_config(config, string_table)
+        HtmlProjectBuilder::new().validate_project_config(config, strings)
     }
 
     fn build_backend(
@@ -716,8 +723,8 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
         config: &Config,
         build_profile: BuildProfile,
         flags: &[Flag],
-        string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         let providers = [
             (
                 "binding.js",
@@ -821,13 +828,7 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
             );
             assert_eq!(asset.asset_kind, "js");
         }
-        HtmlProjectBuilder::new().build_backend(
-            compilation,
-            config,
-            build_profile,
-            flags,
-            string_table,
-        )
+        HtmlProjectBuilder::new().build_backend(compilation, config, build_profile, flags, context)
     }
 }
 
@@ -895,13 +896,15 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 marker_root,
                 reverse_registration: reversed,
             };
-            let mut built = build_project(
-                &builder,
-                project_root.to_str().expect("fixture path should be UTF-8"),
-                &[],
-                &BuildConfigInputSet::new(),
-            )
-            .expect("registered source and project providers should link together");
+            let mut built = successful_compilation_value(
+                build_project(
+                    &builder,
+                    project_root.to_str().expect("fixture path should be UTF-8"),
+                    &[],
+                    &BuildConfigInputSet::new(),
+                )
+                .unwrap_or_else(|never| match never {}),
+            );
             let project_source = project_root.join("src/binding.js");
             let package_source = package_root.join("providers/binding.js");
             assert_deferred_provider_sources(
@@ -927,11 +930,10 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 ],
             );
             let output_root = root.join("output");
-            write_project_outputs(
+            successful_compilation_value(write_project_outputs(
                 &built.project,
                 &always_write_options(output_root.clone(), None),
-            )
-            .expect("the central writer should materialise registered package assets");
+            ));
             for (path, source) in [
                 ("_moth/js/binding.js", &project_source),
                 ("_moth/js/providers/binding.js", &package_source),
@@ -1059,19 +1061,16 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
             fs::write(path, source).expect("should write sibling fixture");
         }
         let builder = HtmlProjectBuilder::new();
-        let errors = match build_project(
+        let result = build_project(
             &builder,
             root.to_str().expect("fixture root should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
-        ) {
-            Ok(_) => panic!("module-root-relative lookup must not search normal sibling modules"),
-            Err(errors) => errors,
-        };
-        assert!(!errors.has_infrastructure_error());
-        let codes = errors
-            .diagnostics()
-            .map(|diagnostic| diagnostic.kind.code())
+        )
+        .unwrap_or_else(|never| match never {});
+        let codes = diagnosed_reports(&result)
+            .iter()
+            .map(|(_, view)| view.descriptor().code)
             .collect::<Vec<_>>();
         assert_eq!(codes, vec!["MOTH-IMPORT-0005"]);
         if let Some(baseline) = &baseline {
@@ -1119,13 +1118,15 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     .expect("should write shared provider");
 
     let builder = HtmlProjectBuilder::new();
-    let mut result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("both pages should consume the scoped support facade");
+    let mut result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
     assert_deferred_provider_sources(
         &mut result.project,
         &[("_moth/js/shared/binding.js", source.as_path())],
@@ -1186,13 +1187,15 @@ fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_as
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/cases/html_js_binding_runtime_topology/input");
     let builder = HtmlProjectBuilder::new();
-    let mut result = build_project(
-        &builder,
-        root.to_str().expect("fixture path should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("the binding topology fixture should build");
+    let mut result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("fixture path should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let inner_source = root.join("src/outer/inner/binding.js");
     let alternate_source = root.join("src/alternate/binding.js");
@@ -1270,13 +1273,15 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     .expect("should write js");
 
     let builder = HtmlProjectBuilder::new();
-    let mut result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("fallible project-local JS import should build through generated glue");
+    let mut result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let source = facade.join("provider.js");
     assert_deferred_provider_sources(
@@ -1343,13 +1348,15 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     .expect("should write js");
 
     let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("non-fallible project-local JS import with runtime helper should build");
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let outputs = BuiltOutputs::index(&result.project);
     outputs.at(RUNTIME_MODULE_PATH);
@@ -1383,13 +1390,15 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     .expect("should write js");
 
     let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("fallible project-local JS import without runtime helper should build");
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let outputs = BuiltOutputs::index(&result.project);
     outputs.none_matching("runtime module", |path| {
@@ -1421,13 +1430,15 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     .expect("should write js");
 
     let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("unreachable project-local JS import should not request runtime artifacts");
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let outputs = BuiltOutputs::index(&result.project);
     outputs.none_matching("generated glue module", |path| {
@@ -1479,13 +1490,15 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     .expect("should write page");
 
     let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("unused @html canvas helper should not request runtime artifacts");
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let outputs = BuiltOutputs::index(&result.project);
     outputs.none_matching("built-in canvas asset", |path| {
@@ -1535,13 +1548,15 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     .expect("should write page");
 
     let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("@web/canvas should build through generated glue");
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let mut result = result;
     let canvas_output_path = deferred_canvas_output_path(&result.project);
@@ -1610,13 +1625,15 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     .expect("should write page");
 
     let builder = HtmlProjectBuilder::new();
-    let mut result = build_project(
-        &builder,
-        root.to_str().expect("temp dir should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("reachable @html canvas helper should build through generated glue");
+    let mut result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
 
     let canvas_output_path = deferred_canvas_output_path(&result.project);
     let canvas_asset = deferred_resource_text(&mut result.project, &canvas_output_path);
@@ -1651,7 +1668,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
 }
 
 #[test]
-fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
+fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src_dir = root.join("src");
@@ -1666,27 +1683,25 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     fs::write(docs_dir.join("@page.moth"), "value = 2\n").expect("should write docs page");
 
     let builder = MultiModuleDiagnosticBuilder;
-    let Err(messages) = build_project(
+    let result = build_project(
         &builder,
         root.to_str().expect("temp dir path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
-    ) else {
-        panic!("builder diagnostics should fail the build");
-    };
+    )
+    .unwrap_or_else(|never| match never {});
+    let reports = diagnosed_reports(&result);
 
-    let errors = messages.error_diagnostics().collect::<Vec<_>>();
+    let errors = reports
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(errors.len(), 1);
-    let warnings = messages.warnings().collect::<Vec<_>>();
-    assert_eq!(warnings.len(), 1);
-
-    assert_eq!(
-        errors[0].primary_span, None,
+    assert!(
+        matches!(
+            errors[0].1.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+        ),
         "path-only backend diagnostics are spanless",
-    );
-    assert_eq!(
-        warnings[0].primary_span, None,
-        "path-only backend warnings are spanless",
     );
 }
 #[test]
@@ -1721,8 +1736,10 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     let builder = HtmlProjectBuilder::new();
     let entry = root.to_str().expect("temp dir should be UTF-8");
 
-    let first = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
-        .expect("first literal const build should succeed");
+    let first = successful_compilation_value(
+        build_project(&builder, entry, &[], &BuildConfigInputSet::new())
+            .unwrap_or_else(|never| match never {}),
+    );
     let first_outputs = BuiltOutputs::index(&first.project);
     let first_html = html_text(first_outputs.at("index.html"));
     assert!(
@@ -1737,8 +1754,10 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     )
     .expect("should rewrite literal");
 
-    let second = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
-        .expect("second literal const build should succeed");
+    let second = successful_compilation_value(
+        build_project(&builder, entry, &[], &BuildConfigInputSet::new())
+            .unwrap_or_else(|never| match never {}),
+    );
     let second_outputs = BuiltOutputs::index(&second.project);
     let second_html = html_text(second_outputs.at("index.html"));
     assert!(
@@ -1785,8 +1804,10 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
 
     let builder = HtmlProjectBuilder::new();
     let entry = root.to_str().expect("temp dir should be UTF-8");
-    let built = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
-        .expect("mixed const and function build should succeed");
+    let built = successful_compilation_value(
+        build_project(&builder, entry, &[], &BuildConfigInputSet::new())
+            .unwrap_or_else(|never| match never {}),
+    );
     let outputs = BuiltOutputs::index(&built.project);
 
     // Exactly one glue module across multiple semantic uses of one provider module:

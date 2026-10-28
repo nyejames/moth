@@ -7,11 +7,12 @@
 //! WHY: the shared parser is the single owner of member-name uniqueness. Function-, struct-
 //! and choice-specific duplicate validators would duplicate that ownership.
 
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DuplicateDeclarationView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
-    RuleDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticCategory};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
@@ -108,66 +109,73 @@ fn owner_path(path_fork: &mut PathInternerFork, string_table: &mut StringTable) 
 /// stable `MOTH-RULE-0002` kind, current member primary, first member secondary, and the
 /// scope-neutral rendered message.
 fn assert_shared_duplicate_diagnostic(
-    failure: &HeaderParseFailure,
+    failure: HeaderParseFailure,
     string_table: &StringTable,
     expected_name: &str,
     expected_first_span: SourceSpan,
     expected_duplicate_span: SourceSpan,
 ) {
-    let error = match failure {
+    let draft = match failure {
         HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
         HeaderParseFailure::Infrastructure(error) => {
             panic!("duplicate-member parser infrastructure failure: {error:?}")
         }
     };
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("duplicate-member diagnostic should compact");
     assert_eq!(
-        error.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration),
+        diagnostic.category(),
+        DiagnosticCategory::Rule,
+        "duplicate members must use the Rule diagnostic category",
+    );
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-RULE-0002",
         "duplicate members must use MOTH-RULE-0002 DuplicateDeclaration",
     );
 
-    let DiagnosticPayload::DuplicateDeclaration { name } = &error.payload else {
-        panic!(
-            "expected DuplicateDeclaration payload, got {:?}",
-            error.payload
-        );
-    };
-    assert_eq!(string_table.resolve(*name), expected_name);
+    let facts = diagnostic
+        .family_view::<DuplicateDeclarationView>()
+        .expect("duplicate members must retain DuplicateDeclaration facts");
+    assert_eq!(string_table.resolve(facts.name), expected_name);
 
+    let primary_span = match diagnostic.primary_site() {
+        SiteRef::Local(span) => span,
+        site => panic!("duplicate member primary must be local, got {site:?}"),
+    };
     assert_eq!(
-        error.primary_span,
-        Some(expected_duplicate_span),
+        primary_span, expected_duplicate_span,
         "duplicate member must be the primary exact source span",
     );
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
     assert_eq!(
-        error.labels.len(),
+        labels.len(),
         1,
         "only the secondary (first) member label remains",
     );
-
-    let secondary = &error.labels[0];
+    let secondary = labels[0];
+    let secondary_span = match secondary.site {
+        SiteRef::Local(span) => span,
+        site => panic!("previous-declaration label must be local, got {site:?}"),
+    };
+    assert!(secondary.spanned);
     assert_eq!(
-        secondary.style,
-        DiagnosticLabelStyle::Secondary,
-        "remaining label must be the first member",
-    );
-    assert_eq!(
-        secondary.span,
-        Some(expected_first_span),
+        secondary_span, expected_first_span,
         "secondary label must retain the first member's exact source span",
     );
     assert_ne!(
-        error.primary_span, secondary.span,
+        primary_span, secondary_span,
         "primary and secondary member spans must differ",
     );
-    assert_eq!(
+    assert!(matches!(
         secondary.message,
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-        "secondary label must mark the previous declaration",
-    );
+        DurableLabelMessage::PreviousDeclaration
+    ));
 
     let render_context = DiagnosticRenderContext::new(string_table);
-    let guidance = terminal::format_payload_guidance(&error.payload, render_context);
+    let guidance = terminal::format_guidance_view(diagnostic, render_context);
     let expected_fragment = format!(
         "Cannot declare '{expected_name}' because that name is already visible in this scope"
     );
@@ -191,11 +199,10 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let function_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
-    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
-        .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
     let error = parse_function_signature_syntax(
         &mut declaration_cursor,
         &mut warnings,
@@ -206,7 +213,7 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
     .expect_err("duplicate function parameters must be rejected by the shared parser");
 
     assert_shared_duplicate_diagnostic(
-        &error,
+        error,
         &string_table,
         "value",
         expected_first_span,
@@ -226,11 +233,10 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let struct_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
-    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
-        .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
     let error = parse_record_body(
         &mut declaration_cursor,
         &mut string_table,
@@ -242,7 +248,7 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
     .expect_err("duplicate struct fields must be rejected by the shared parser");
 
     assert_shared_duplicate_diagnostic(
-        &error,
+        error,
         &string_table,
         "value",
         expected_first_span,
@@ -262,11 +268,10 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let choice_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "message");
-    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
-        .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
     let error = parse_record_body(
         &mut declaration_cursor,
         &mut string_table,
@@ -278,7 +283,7 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     .expect_err("duplicate choice payload fields must be rejected by the shared parser");
 
     assert_shared_duplicate_diagnostic(
-        &error,
+        error,
         &string_table,
         "message",
         expected_first_span,
@@ -298,11 +303,10 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let method_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
-    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
-        .expect("test token stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
     let error = parse_trait_requirement_signature_syntax(
         &mut declaration_cursor,
         &mut warnings,
@@ -313,7 +317,7 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     .expect_err("duplicate trait-requirement parameters must be rejected by the shared parser");
 
     assert_shared_duplicate_diagnostic(
-        &error,
+        error,
         &string_table,
         "value",
         expected_first_span,
@@ -333,9 +337,8 @@ fn distinct_members_parse_successfully_through_shared_parser() {
         &mut span_builder,
     );
     let struct_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
-    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
-        .expect("test token stream must expose canonical tokens");
+    let mut warnings = DiagnosticBag::new();
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
     let fields = parse_record_body(
         &mut declaration_cursor,
         &mut string_table,

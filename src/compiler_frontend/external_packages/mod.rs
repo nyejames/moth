@@ -1,6 +1,6 @@
 //! Builtin external function metadata and registry.
 //!
-//! WHAT: defines the external-call surface the frontend and borrow checker understand today.
+//! WHAT: defines the external-call surface the frontend and borrow checker understand.
 //! WHY: external calls need one canonical metadata source for signature lowering and call semantics.
 //!
 //! External symbols are registered by package scope: `(package_path, symbol_path)` uniquely

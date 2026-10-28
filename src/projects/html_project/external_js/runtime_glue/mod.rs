@@ -16,7 +16,7 @@ pub(crate) use runtime_modules::emit_build_runtime_modules;
 
 use crate::backends::js::external_module_export_glue_function_name;
 use crate::build_system::build::{FileKind, OutputFile};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
@@ -53,7 +53,7 @@ pub(crate) fn generate_module_glue(
     registry: &ExternalPackageRegistry,
     html_output_path: &Path,
     release_build: bool,
-) -> Result<ModuleGlueResult, CompilerError> {
+) -> Result<ModuleGlueResult, InfrastructureFailure> {
     let referenced_exports = exports::collect_referenced_exports(
         module,
         external_imports,
@@ -73,7 +73,6 @@ pub(crate) fn generate_module_glue(
     //      the browser resolves ES module imports relative to the importing module's URL.
     let package_asset_paths = build_package_asset_path_map(module, external_imports);
 
-    // Generate the glue module source.
     let glue_source = source::generate_glue_module_source(
         &referenced_exports,
         &package_asset_paths,

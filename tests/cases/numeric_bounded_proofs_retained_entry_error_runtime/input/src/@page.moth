@@ -1,6 +1,6 @@
 -- HTML executes the safe operations before the retained U32 overflow check.
 -- Its built-in Error propagates to the entry, preventing runtime fragment publication.
--- HTML-Wasm rejects the narrow I16 sum at its source operation before runtime: under D15 the
+-- HTML-Wasm rejects the narrow I16 sum at its source operation before runtime: the
 -- U8 plus I8 operation completes in I16, which the bounded Wasm scalar step does not lower.
 
 u8_sum |left U8, right I8| -> I16:

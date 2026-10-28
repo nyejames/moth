@@ -25,8 +25,8 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -156,12 +156,11 @@ pub(super) fn parse_core_style_directive(
         }
 
         CoreStyleDirectiveKind::Slot | CoreStyleDirectiveKind::Insert => {
-            return Err(TemplateError::from(CompilerError::new(
+            return Err(TemplateError::from(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 format!(
                     "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
                 ),
-                core_invariant_span(token_stream),
-                ErrorType::Compiler,
             )));
         }
     }
@@ -187,13 +186,4 @@ fn apply_markdown_style(build_state: &mut TemplateBuildState) {
 
 pub(super) fn mark_template_body_whitespace_style_controlled(build_state: &mut TemplateBuildState) {
     build_state.style.body_whitespace_policy = BodyWhitespacePolicy::StyleDirectiveControlled;
-}
-
-/// Read-only invariant span on the canonical cursor view.
-///
-/// WHAT: reports the current token span for the slot/insert dispatch
-/// invariant without advancing the stream.
-/// WHY: the invariant span is a pure token-local read.
-fn core_invariant_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
 }

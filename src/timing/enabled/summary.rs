@@ -46,9 +46,8 @@ pub(crate) struct TimingSummarySection {
 
 /// One source-package or main-project boundary row.
 ///
-/// Phase 4 registers and populates these. The model owns the shape now so
-/// boundary attribution never leaks through generic row metadata or
-/// metric-name prefixes.
+/// Boundary rows have a dedicated shape so attribution does not leak through generic
+/// row metadata or metric-name prefixes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TimingBoundarySummary {
     pub(crate) label: Cow<'static, str>,
@@ -58,9 +57,9 @@ pub(crate) struct TimingBoundarySummary {
 
 /// The single slowest-module attribution row.
 ///
-/// Phase 4 computes module work as preparation attributed to the module plus
-/// `frontend.module.semantic_total`. The model owns the shape now so
-/// absolute filesystem paths cannot appear in basic output.
+/// Module work is preparation attributed to the module plus
+/// `frontend.module.semantic_total`. The model owns the shape so absolute filesystem paths
+/// cannot appear in basic output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TimingSlowestModuleSummary {
     pub(crate) identity: Cow<'static, str>,

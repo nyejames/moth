@@ -6,7 +6,9 @@
 //! prepared root files; external consumers cannot bypass those public surfaces.
 //! MUST NOT: perform general dependency target resolution (that belongs in `target_resolution.rs`).
 
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
+use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::binding_environment::target_resolution::suffix_matches_with_optional_source_extension;
@@ -21,9 +23,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Result for public export boundary checks.
 ///
-/// Public-export checks use the same plain `CompilerDiagnostic` boundary as
+/// Public-export checks use the same compact `DiagnosticDraft` boundary as
 /// their callers.
-type BoundaryCheckResult<T> = Result<T, CompilerDiagnostic>;
+type BoundaryCheckResult<T> = Result<T, DiagnosticDraft>;
 
 /// Result of looking up a dependency path against a module public export.
 pub(crate) enum PublicExportLookupResult {
@@ -76,12 +78,13 @@ pub(crate) struct PublicExportResolutionInput<'a> {
 /// WHAT: checks whether the dependency path starts with a known package prefix or module root,
 /// and whether the consumer is outside that module. If so, looks up the symbol name in the
 /// public surface's exported entries.
+/// Module-root boundary paths that exceed path-table capacity are an `Err`, not a lookup miss.
 pub(crate) fn resolve_public_export_boundary(
     input: &mut PublicExportResolutionInput<'_>,
-) -> Option<PublicExportLookupResult> {
+) -> Result<Option<PublicExportLookupResult>, DiagnosticDraft> {
     // Try cross-package public export resolution first.
     if let Some(result) = try_resolve_package_public_export(input) {
-        return Some(result);
+        return Ok(Some(result));
     }
 
     // Try cross-module-root public export resolution.
@@ -176,7 +179,7 @@ pub(super) fn effective_module_boundary_path(
     file_module_membership: &FxHashMap<PathId, PathId>,
     module_root_boundaries: &[ModuleRootBoundary],
     path_fork: &mut PathInternerFork,
-) -> PathId {
+) -> Result<PathId, DiagnosticDraft> {
     let module_root = file_module_membership.get(consumer_file).copied();
     let prefix = module_root
         .and_then(|root| {
@@ -189,7 +192,7 @@ pub(super) fn effective_module_boundary_path(
     let mut scratch = Vec::new();
     path_fork
         .try_join(prefix, *dependency_path, &mut scratch)
-        .expect("path interner fork exhausted while deriving module boundary path")
+        .ok_or_else(token_lexical::logical_path_capacity)
 }
 
 /// Cross-module-root public export lookup.
@@ -197,9 +200,9 @@ pub(super) fn effective_module_boundary_path(
 /// WHAT: when a dependency path targets a regular module root under the entry root and the
 fn try_resolve_module_root_public_export(
     input: &mut PublicExportResolutionInput<'_>,
-) -> Option<PublicExportLookupResult> {
+) -> Result<Option<PublicExportLookupResult>, DiagnosticDraft> {
     if input.module_root_boundaries.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mut components_buf = Vec::new();
@@ -207,7 +210,7 @@ fn try_resolve_module_root_public_export(
         .path_fork
         .resolve_components(*input.header_path, &mut components_buf);
     if components.is_empty() {
-        return None;
+        return Ok(None);
     }
     let effective_path = effective_module_boundary_path(
         input.consumer_file,
@@ -215,8 +218,16 @@ fn try_resolve_module_root_public_export(
         input.file_module_membership,
         input.module_root_boundaries,
         input.path_fork,
-    );
+    )?;
 
+    Ok(lookup_module_root_public_export(input, effective_path))
+}
+
+/// Finds the public surface of the longest module-root boundary that owns the effective path.
+fn lookup_module_root_public_export(
+    input: &mut PublicExportResolutionInput<'_>,
+    effective_path: PathId,
+) -> Option<PublicExportLookupResult> {
     // Find the longest matching module root prefix.
     for boundary in input.module_root_boundaries {
         if input
@@ -396,7 +407,7 @@ pub(crate) fn check_source_package_boundary(
     }
 
     let public_surface_name_id = input.string_table.intern(target_package);
-    Err(CompilerDiagnostic::not_exported_by_public_surface(
+    Err(imports::not_exported_by_public_surface(
         *input.requested_path,
         public_surface_name_id,
         ImportPublicSurfaceType::SourcePackage,

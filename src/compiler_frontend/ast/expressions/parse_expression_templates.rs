@@ -19,8 +19,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     fold_prepared_template, prepare_tir_view_with_source_scope,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -85,7 +87,8 @@ pub(super) fn parse_template_expression(
             .get_template(template.tir_reference.root)
             .map(|template_ir| template_ir.kind.clone())
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Parsed template kind was missing from its module-local TIR store.",
                 )
             })?
@@ -174,7 +177,7 @@ pub(super) fn parse_template_expression(
         }
 
         TemplateType::SlotDefinition(_) => {
-            let diagnostic = CompilerDiagnostic::invalid_template_slot(
+            let diagnostic = templates::invalid_template_slot(
                 InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody,
                 None,
                 Some(token_stream.current_span()),

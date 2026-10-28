@@ -89,10 +89,10 @@ pub(crate) fn file_name_is_config_file(file_name: &str) -> bool {
 
 /// Whether a filesystem filename is a legacy `#*.moth` root-like filename.
 ///
-/// WHAT: identifies the old normal-root marker so Stage 0 can reject it with a structured
-/// diagnostic that tells the author to rename `#name.moth` to `@name.moth`.
-/// WHY: the old marker is invalid after the `@` migration. This predicate is used only for
-///      the legacy rejection diagnostic, not for root classification.
+/// WHAT: identifies the `#` root marker so Stage 0 can reject it with a structured diagnostic
+/// that tells the author to rename `#name.moth` to `@name.moth`.
+/// WHY: `#`-prefixed root files are invalid; this predicate is used only for the rejection
+/// diagnostic, not for root classification.
 pub(crate) fn file_name_is_legacy_hash_root_file(file_name: &str) -> bool {
     let Some(root_name) = file_name.strip_prefix('#') else {
         return false;

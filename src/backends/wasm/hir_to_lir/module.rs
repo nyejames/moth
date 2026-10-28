@@ -8,9 +8,7 @@ use crate::backends::wasm::lir::types::WasmLirFunctionId;
 use crate::backends::wasm::request::{WasmBackendRequest, WasmFunctionEmissionPolicy};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    CompilerError, CompilerMessages,
-};
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::BlockId;
@@ -27,7 +25,7 @@ pub(crate) fn lower_hir_module_to_lir(
     string_table: &StringTable,
     path_table: &PathTable,
     type_environment: &TypeEnvironment,
-) -> Result<crate::backends::wasm::lir::module::WasmLirModule, CompilerMessages> {
+) -> Result<crate::backends::wasm::lir::module::WasmLirModule, InfrastructureFailure> {
     // WHAT: one mutable context carries all per-module lowering state.
     // WHY: keeps interning/ids/import planning coherent and deterministic.
     let mut context = WasmLirLoweringContext::new(
@@ -43,12 +41,10 @@ pub(crate) fn lower_hir_module_to_lir(
 
     // WHAT: register stable function mappings before lowering any bodies.
     // WHY: call lowering depends on these mappings even for forward references.
-    register_function_maps(&mut context, &function_selection.functions)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    register_function_maps(&mut context, &function_selection.functions);
     // WHAT: pre-register host imports required by the module.
     // WHY: keeps import ids deterministic and avoids re-scan during statement lowering.
-    register_required_host_imports(&mut context, function_selection.reachable_blocks.as_ref())
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    register_required_host_imports(&mut context, function_selection.reachable_blocks.as_ref())?;
 
     for hir_function in &function_selection.functions {
         let selected_blocks = match &request.function_emission_policy {
@@ -57,15 +53,13 @@ pub(crate) fn lower_hir_module_to_lir(
                 selection.blocks_for_function(hir_function.id)
             }
         };
-        let lowered = lower_function(&mut context, hir_function, selected_blocks)
-            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        let lowered = lower_function(&mut context, hir_function, selected_blocks)?;
         context.lir_module.functions.push(lowered);
     }
 
     // WHAT: synthesize post-lowering export wrapper functions.
     // WHY: wrapper boundary keeps user bodies internal while export ABI stays stable.
-    synthesize_export_wrappers(&mut context)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    synthesize_export_wrappers(&mut context)?;
 
     Ok(context.lir_module)
 }
@@ -105,10 +99,7 @@ fn sorted_functions(mut functions: Vec<HirFunction>) -> Vec<HirFunction> {
     functions
 }
 
-fn register_function_maps(
-    context: &mut WasmLirLoweringContext<'_>,
-    functions: &[HirFunction],
-) -> Result<(), CompilerError> {
+fn register_function_maps(context: &mut WasmLirLoweringContext<'_>, functions: &[HirFunction]) {
     // This mapping is intentionally explicit so lowering, code-section ordering, and debug
     // correlation all share the same stable function ids.
     for (next_id, function) in functions.iter().enumerate() {
@@ -116,6 +107,4 @@ fn register_function_maps(
             .function_map
             .insert(function.id, WasmLirFunctionId(next_id as u32));
     }
-
-    Ok(())
 }

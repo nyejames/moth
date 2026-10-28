@@ -129,7 +129,7 @@ Borrow validation will read validated HIR and write side tables. It will not rew
 - invalid terminality that AST should have rejected
 - unsupported operation shape
 - missing local or broken lowering invariant
-- internal `CompilerError` when transformation contracts break
+- internal `InfrastructureFailure` when transformation contracts break
 
 Keep internal failures separate from source diagnostics. Authors did not "misuse HIR." The compiler misfired.
 

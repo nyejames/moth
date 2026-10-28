@@ -9,15 +9,17 @@ use crate::compiler_frontend::ast::const_values::{ConstValueId, ConstValuePayloa
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, GenericInferenceSubject,
-    InvalidFieldAccessReason, InvalidGenericInstantiationReason,
+use crate::compiler_frontend::compiler_messages::GenericInferenceSubject;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationShape, InvalidGenericInstantiationView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, parse_single_file_ast,
+    parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -255,47 +257,47 @@ fn parses_builtin_error_with_default_code_field() {
 
 #[test]
 fn rejects_removed_builtin_error_fields() {
-    let diagnostic = parse_single_file_ast_diagnostic("err = Error(\"bad\")\nvalue = err.kind\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFieldAccess {
-            reason: InvalidFieldAccessReason::UnknownMember,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("err = Error(\"bad\")\nvalue = err.kind\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0048",
+        Some("invalid_field_access.unknown_member"),
+    );
 }
 
 #[test]
 fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_labels() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "Pair type T = |\n\
              left T,\n\
              right T,\n\
          |\n\
          bad Pair of I32 = Pair(\"two\", 1)\n",
     );
-
-    let DiagnosticPayload::InvalidGenericInstantiation {
-        reason: InvalidGenericInstantiationReason::ConflictingInference { subject, .. },
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!(
-            "expected a generic inference conflict, got {:?}",
-            diagnostic.payload
-        );
-    };
-    assert_eq!(*subject, GenericInferenceSubject::NominalType);
-    assert_eq!(diagnostic.labels.len(), 1);
-    let previous_evidence_span = diagnostic.labels[0].span;
-
-    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Secondary);
-    assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence)
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0057",
+        Some("invalid_generic_instantiation.conflicting_inference"),
     );
-    assert_ne!(diagnostic.primary_span, previous_evidence_span);
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("generic conflict should retain its typed inference facts");
+    let GenericInstantiationShape::ConflictingInference { subject, .. } = facts.shape else {
+        panic!("expected conflicting generic inference facts");
+    };
+    assert_eq!(subject, GenericInferenceSubject::NominalType);
+
+    // Durable labels are secondary labels; their message retains the previous-evidence role.
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::GenericInferencePreviousEvidence
+    ));
+    let label_spans = ast_error_label_spans(diagnostic);
+    assert_eq!(label_spans.len(), 1);
+    assert!(label_spans[0].is_some());
+    assert_ne!(ast_error_primary_span(diagnostic), label_spans[0]);
 }
 
 #[test]

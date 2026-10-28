@@ -1,6 +1,5 @@
 //! Instruction lowering from Wasm LIR to wasm-encoder instructions.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::lir::instructions::{
     WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
@@ -10,7 +9,8 @@ use crate::backends::wasm::lir::types::{
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use rustc_hash::FxHashMap;
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
@@ -28,7 +28,7 @@ pub(crate) fn emit_statement(
     statement: &WasmLirStmt,
     context: &LirBodyEmitContext<'_>,
     plan: &WasmEmitPlan,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // WHAT: lower each LIR statement into explicit Wasm stack-machine instructions.
     // WHY: statement lowering is the only place that maps semantic LIR ops to concrete opcodes.
     match statement {
@@ -50,29 +50,27 @@ pub(crate) fn emit_statement(
         }
         WasmLirStmt::ConstStaticPtr { dst, data } => {
             let offset = plan.data_offsets.get(data).copied().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::wasm_generation(format!(
                     "Wasm emission missing offset for static data {:?} in function {:?}",
                     data, context.function_id
                 ))
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
             })?;
             function.instruction(&Instruction::I32Const(offset as i32));
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::ConstLength { dst, value } => {
             if *value > i32::MAX as u32 {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::wasm_generation(format!(
                     "Wasm emission cannot lower length {} > i32::MAX in function {:?}",
                     value, context.function_id
-                ))
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+                )));
             }
             function.instruction(&Instruction::I32Const(*value as i32));
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::Copy { dst, src } | WasmLirStmt::Move { dst, src } => {
-            // WHAT: the current emitter models copy/move as local assignment in emitted Wasm.
-            // WHY: ownership specialization remains in runtime/helper behavior for now.
+            // Copy and move assign local values here; Wasm ownership-specific copy/move and
+            // handle reclamation semantics are not implemented.
             function.instruction(&Instruction::LocalGet(local_index(*src, context)?));
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
@@ -91,22 +89,20 @@ pub(crate) fn emit_statement(
                     .get(function_id)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::wasm_generation(format!(
                             "Wasm emission missing callee function index for {:?} in {:?}",
                             function_id, context.function_id
                         ))
-                        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
                     })?,
                 WasmCalleeRef::Import(import_id) => plan
                     .import_function_indices
                     .get(import_id)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::wasm_generation(format!(
                             "Wasm emission missing import function index for {:?} in {:?}",
                             import_id, context.function_id
                         ))
-                        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
                     })?,
             };
             function.instruction(&Instruction::Call(callee_index));
@@ -125,18 +121,16 @@ pub(crate) fn emit_statement(
         }
         WasmLirStmt::StringPushLiteral { buffer, data } => {
             let ptr = plan.data_offsets.get(data).copied().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::wasm_generation(format!(
                     "Wasm emission missing static pointer for {:?} in {:?}",
                     data, context.function_id
                 ))
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
             })?;
             let len = plan.data_lengths.get(data).copied().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::wasm_generation(format!(
                     "Wasm emission missing static length for {:?} in {:?}",
                     data, context.function_id
                 ))
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
             })?;
             function.instruction(&Instruction::LocalGet(local_index(*buffer, context)?));
             function.instruction(&Instruction::I32Const(ptr as i32));
@@ -198,10 +192,7 @@ pub(crate) fn emit_statement(
             )?));
         }
         WasmLirStmt::RetainHandle { .. } => {
-            // WHAT: retain is currently a no-op at codegen level.
-            // WHY: the current helper runtime uses transitional collected scaffolding, so this
-            // reserved hook has no effect. Final lowering will derive retain traffic from the
-            // validated memory plan rather than from a tracing-collector fallback.
+            // No retain helper exists, and the emitter emits no instructions for this LIR variant.
         }
         WasmLirStmt::IntEq { dst, lhs, rhs } => {
             emit_compare(function, *lhs, *rhs, context, true)?;
@@ -289,7 +280,7 @@ pub(crate) fn emit_statement(
                 (WasmAbiType::I64, WasmAbiType::F64, true) => &Instruction::F64ConvertI64S,
                 (WasmAbiType::I64, WasmAbiType::F64, false) => &Instruction::F64ConvertI64U,
                 (source_type, dst_type, _) => {
-                    return Err(wasm_generation_error(format!(
+                    return Err(InfrastructureFailure::wasm_generation(format!(
                         "Wasm IntegerToFloat requires an integer source and F32/F64 destination, found {source_type:?} -> {dst_type:?}"
                     )));
                 }
@@ -425,17 +416,18 @@ fn emit_float_range_candidate(
     precision: BinaryFloatPrecision,
     inclusive: bool,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let [current, step, end, ascending] = inputs;
     let [candidate_dst, in_range_dst, scratch] = output_ids;
     let carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => {
-            return Err(wasm_generation_error(
-                "Wasm float range candidates do not support F16".to_owned(),
-            ));
-        }
+        // Binary16 candidates are rejected by validate_wasm_checked_numeric_ops before lowering
+        // (see stmt.rs lower_float_range_candidate).
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm float range candidates do not support F16"
+        ),
     };
     ensure_local_abi(current, carrier, context, "float range current")?;
     ensure_local_abi(step, carrier, context, "float range step")?;
@@ -489,7 +481,10 @@ fn emit_float_range_candidate(
                 &Instruction::F64Gt
             },
         ),
-        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was rejected above"),
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm float range candidates already rejected Binary16 before this opcode selection"
+        ),
     };
 
     function.instruction(&Instruction::LocalGet(local_index(ascending, context)?));
@@ -508,7 +503,7 @@ fn emit_float_range_candidate(
     // Native F32/F64 operations already rounded into scratch. Keep the finite predicate separate
     // from ordinary checked arithmetic so an out-of-range infinity exits without trapping.
     function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
-    super::checked_float::emit_finite_float_predicate(function, precision)?;
+    super::checked_float::emit_finite_float_predicate(function, precision);
     function.instruction(&Instruction::LocalGet(local_index(ascending, context)?));
     function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
     function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
@@ -538,7 +533,7 @@ fn emit_integer_to_string(
     context: &LirBodyEmitContext<'_>,
     plan: &WasmEmitPlan,
     signed: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let operation = if signed {
         "StringFromI64"
     } else {
@@ -556,7 +551,7 @@ fn emit_integer_to_string(
         }
         (WasmAbiType::I64, _) => {}
         (other, _) => {
-            return Err(wasm_generation_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm {operation} requires an I32 or I64 integer carrier, found {other:?}"
             )));
         }
@@ -578,7 +573,7 @@ fn emit_float_to_string(
     precision: BinaryFloatPrecision,
     context: &LirBodyEmitContext<'_>,
     plan: &WasmEmitPlan,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (value_abi, selector) = match precision {
         BinaryFloatPrecision::Binary16 => (WasmAbiType::F32, 16),
         BinaryFloatPrecision::Binary32 => (WasmAbiType::F32, 32),
@@ -646,7 +641,7 @@ pub(crate) fn emit_terminator(
     function: &mut Function,
     terminator: &WasmLirTerminator,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match terminator {
         WasmLirTerminator::Jump(target) => {
             set_dispatch_target(function, *target, context)?;
@@ -685,7 +680,7 @@ fn set_dispatch_target(
     function: &mut Function,
     target: WasmLirBlockId,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // WHAT: convert target block id into dispatcher-table index.
     // WHY: branch/jump terminators communicate control flow via dispatch-local updates.
     let target_index = context
@@ -693,11 +688,10 @@ fn set_dispatch_target(
         .get(&target)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission missing block index for target {:?} in function {:?}",
                 target, context.function_id
             ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
 
     function.instruction(&Instruction::I32Const(target_index as i32));
@@ -719,18 +713,17 @@ fn emit_compare(
     rhs: WasmLirLocalId,
     context: &LirBodyEmitContext<'_>,
     is_eq: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
     function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
 
     let lhs_type = local_type(lhs, context, "lhs")?;
     let rhs_type = local_type(rhs, context, "rhs")?;
     if lhs_type != rhs_type {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm emission type mismatch in comparison: lhs {:?} is {:?}, rhs {:?} is {:?} in {:?}",
             lhs, lhs_type, rhs, rhs_type, context.function_id
-        ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+        )));
     }
 
     match lhs_type {
@@ -756,11 +749,10 @@ fn emit_compare(
             });
         }
         WasmAbiType::Void => {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission cannot compare Void-typed locals in function {:?}",
                 context.function_id
-            ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+            )));
         }
         WasmAbiType::I32 | WasmAbiType::Handle => {
             function.instruction(if is_eq {
@@ -781,15 +773,14 @@ fn emit_string_compare(
     context: &LirBodyEmitContext<'_>,
     plan: &WasmEmitPlan,
     negate: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let lhs_type = local_type(lhs, context, "lhs")?;
     let rhs_type = local_type(rhs, context, "rhs")?;
     if lhs_type != WasmAbiType::Handle || rhs_type != WasmAbiType::Handle {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm emission String comparison requires Handle operands, found lhs {:?}, rhs {:?} in {:?}",
             lhs_type, rhs_type, context.function_id
-        ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+        )));
     }
 
     function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
@@ -811,18 +802,17 @@ fn emit_ordered_compare(
     rhs: WasmLirLocalId,
     context: &LirBodyEmitContext<'_>,
     kind: OrderedCompareKind,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
     function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
 
     let lhs_type = local_type(lhs, context, "lhs")?;
     let rhs_type = local_type(rhs, context, "rhs")?;
     if lhs_type != rhs_type {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm emission type mismatch in ordered comparison: lhs {:?} is {:?}, rhs {:?} is {:?} in {:?}",
             lhs, lhs_type, rhs, rhs_type, context.function_id
-        ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+        )));
     }
     match lhs_type {
         WasmAbiType::I32 | WasmAbiType::I64 => {
@@ -845,11 +835,10 @@ fn emit_ordered_compare(
             });
         }
         WasmAbiType::Handle | WasmAbiType::Void => {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission cannot lower ordered comparison for ABI type {:?} in function {:?}",
                 lhs_type, context.function_id
-            ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+            )));
         }
     }
 
@@ -864,7 +853,7 @@ fn emit_scalar_compare(
     lhs_type: WasmScalarComparisonType,
     rhs_type: WasmScalarComparisonType,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let lhs_integer = integer_scalar_shape(lhs_type).is_some();
     let rhs_integer = integer_scalar_shape(rhs_type).is_some();
     let lhs_float = matches!(lhs_type, WasmScalarComparisonType::Float(_));
@@ -890,7 +879,7 @@ fn emit_scalar_compare(
             emit_float_as_f64(function, rhs, rhs_type, context)?;
             emit_float_compare(function, 64, op, context)
         }
-        _ => Err(wasm_generation_error(format!(
+        _ => Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm scalar comparison received incompatible operand types {lhs_type:?} and {rhs_type:?} in {:?}",
             context.function_id
         ))),
@@ -905,14 +894,14 @@ fn emit_integer_compare(
     rhs_type: WasmScalarComparisonType,
     op: WasmScalarComparisonOp,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (lhs_bits, lhs_signed) = integer_scalar_shape(lhs_type).ok_or_else(|| {
-        wasm_generation_error(format!(
+        InfrastructureFailure::wasm_generation(format!(
             "Wasm integer comparison received non-integer lhs {lhs_type:?}"
         ))
     })?;
     let (rhs_bits, rhs_signed) = integer_scalar_shape(rhs_type).ok_or_else(|| {
-        wasm_generation_error(format!(
+        InfrastructureFailure::wasm_generation(format!(
             "Wasm integer comparison received non-integer rhs {rhs_type:?}"
         ))
     })?;
@@ -993,7 +982,7 @@ fn emit_signed_u64_ordered_compare(
     unsigned_type: WasmScalarComparisonType,
     op: WasmScalarComparisonOp,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     emit_integer_as_i64(function, signed_local, signed_type, context)?;
     function.instruction(&Instruction::I64Const(0));
     function.instruction(&Instruction::I64LtS);
@@ -1019,9 +1008,9 @@ fn emit_integer_as_i64(
     local: WasmLirLocalId,
     scalar_type: WasmScalarComparisonType,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (bits, signed) = integer_scalar_shape(scalar_type).ok_or_else(|| {
-        wasm_generation_error(format!(
+        InfrastructureFailure::wasm_generation(format!(
             "Wasm expected an integer scalar type, found {scalar_type:?} in {:?}",
             context.function_id
         ))
@@ -1044,13 +1033,13 @@ fn emit_float_as_native(
     local: WasmLirLocalId,
     scalar_type: WasmScalarComparisonType,
     context: &LirBodyEmitContext<'_>,
-) -> Result<u8, CompilerError> {
+) -> Result<u8, InfrastructureFailure> {
     let bits = float_width(scalar_type)?;
     let expected_abi = match bits {
         32 => WasmAbiType::F32,
         64 => WasmAbiType::F64,
         _ => {
-            return Err(wasm_generation_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm scalar comparison cannot use F{bits} in {:?}",
                 context.function_id
             )));
@@ -1066,7 +1055,7 @@ fn emit_float_as_f64(
     local: WasmLirLocalId,
     scalar_type: WasmScalarComparisonType,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let bits = emit_float_as_native(function, local, scalar_type, context)?;
     if bits == 32 {
         function.instruction(&Instruction::F64PromoteF32);
@@ -1079,7 +1068,7 @@ fn emit_float_compare(
     bits: u8,
     op: WasmScalarComparisonOp,
     context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let instruction = match bits {
         32 => match op {
             WasmScalarComparisonOp::Eq => &Instruction::F32Eq,
@@ -1098,7 +1087,7 @@ fn emit_float_compare(
             WasmScalarComparisonOp::Ge => &Instruction::F64Ge,
         },
         _ => {
-            return Err(wasm_generation_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm scalar comparison cannot use F{bits} in {:?}",
                 context.function_id
             )));
@@ -1119,14 +1108,20 @@ fn emit_integer_compare_opcode(
             function.instruction(match abi {
                 WasmAbiType::I32 => &Instruction::I32Eq,
                 WasmAbiType::I64 => &Instruction::I64Eq,
-                _ => unreachable!("integer comparison requires an integer carrier"),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "integer comparison requires an integer carrier"
+                ),
             });
         }
         WasmScalarComparisonOp::Ne => {
             function.instruction(match abi {
                 WasmAbiType::I32 => &Instruction::I32Ne,
                 WasmAbiType::I64 => &Instruction::I64Ne,
-                _ => unreachable!("integer comparison requires an integer carrier"),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "integer comparison requires an integer carrier"
+                ),
             });
         }
         WasmScalarComparisonOp::Lt
@@ -1144,7 +1139,10 @@ fn ordered_compare_kind(op: WasmScalarComparisonOp) -> OrderedCompareKind {
         WasmScalarComparisonOp::Le => OrderedCompareKind::Le,
         WasmScalarComparisonOp::Gt => OrderedCompareKind::Gt,
         WasmScalarComparisonOp::Ge => OrderedCompareKind::Ge,
-        _ => unreachable!("only ordered comparisons have an ordered comparison kind"),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "only ordered comparisons have an ordered comparison kind"
+        ),
     }
 }
 
@@ -1175,7 +1173,10 @@ fn emit_integer_ordered_opcode(
             (OrderedCompareKind::Gt, true) => &Instruction::I64GtU,
             (OrderedCompareKind::Ge, true) => &Instruction::I64GeU,
         },
-        _ => unreachable!("integer comparison requires an integer carrier"),
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "integer comparison requires an integer carrier"
+        ),
     };
     function.instruction(instruction);
 }
@@ -1192,21 +1193,22 @@ fn integer_abi(
     bits: u8,
     scalar_type: WasmScalarComparisonType,
     context: &LirBodyEmitContext<'_>,
-) -> Result<WasmAbiType, CompilerError> {
+) -> Result<WasmAbiType, InfrastructureFailure> {
     match bits {
         8 | 16 | 32 => Ok(WasmAbiType::I32),
         64 => Ok(WasmAbiType::I64),
-        _ => Err(wasm_generation_error(format!(
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "Wasm scalar comparison received invalid integer type {scalar_type:?} in {:?}",
             context.function_id
-        ))),
+        ),
     }
 }
 
-fn float_width(scalar_type: WasmScalarComparisonType) -> Result<u8, CompilerError> {
+fn float_width(scalar_type: WasmScalarComparisonType) -> Result<u8, InfrastructureFailure> {
     match scalar_type {
         WasmScalarComparisonType::Float(bits) => Ok(bits),
-        _ => Err(wasm_generation_error(format!(
+        _ => Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm expected a float scalar type, found {scalar_type:?}"
         ))),
     }
@@ -1217,10 +1219,10 @@ pub(super) fn ensure_local_abi(
     expected: WasmAbiType,
     context: &LirBodyEmitContext<'_>,
     operation: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let actual = local_type(local, context, operation)?;
     if actual != expected {
-        return Err(wasm_generation_error(format!(
+        return Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm {operation} expected {expected:?}, found {actual:?} for {local:?} in {:?}",
             context.function_id
         )));
@@ -1228,45 +1230,41 @@ pub(super) fn ensure_local_abi(
     Ok(())
 }
 
-fn invert_ordered_op(op: WasmScalarComparisonOp) -> Result<WasmScalarComparisonOp, CompilerError> {
+fn invert_ordered_op(
+    op: WasmScalarComparisonOp,
+) -> Result<WasmScalarComparisonOp, InfrastructureFailure> {
     match op {
         WasmScalarComparisonOp::Lt => Ok(WasmScalarComparisonOp::Gt),
         WasmScalarComparisonOp::Le => Ok(WasmScalarComparisonOp::Ge),
         WasmScalarComparisonOp::Gt => Ok(WasmScalarComparisonOp::Lt),
         WasmScalarComparisonOp::Ge => Ok(WasmScalarComparisonOp::Le),
-        _ => Err(wasm_generation_error(
+        _ => Err(InfrastructureFailure::wasm_generation(
             "Wasm mixed signed/unsigned comparison requires an ordering operator".to_owned(),
         )),
     }
-}
-
-pub(super) fn wasm_generation_error(message: String) -> CompilerError {
-    CompilerError::compiler_error(message)
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
 }
 
 pub(super) fn local_type(
     local_id: WasmLirLocalId,
     context: &LirBodyEmitContext<'_>,
     label: &str,
-) -> Result<WasmAbiType, CompilerError> {
+) -> Result<WasmAbiType, InfrastructureFailure> {
     context
         .local_type_by_id
         .get(&local_id)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission missing local type for {label} {:?} in function {:?}",
                 local_id, context.function_id
             ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })
 }
 
 pub(super) fn local_index(
     local_id: WasmLirLocalId,
     context: &LirBodyEmitContext<'_>,
-) -> Result<u32, CompilerError> {
+) -> Result<u32, InfrastructureFailure> {
     // WHAT: resolve LIR local ids to final Wasm local indices.
     // WHY: keeping this lookup centralized guarantees consistent error diagnostics.
     context
@@ -1274,25 +1272,23 @@ pub(super) fn local_index(
         .get(&local_id)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission missing local index for {:?} in function {:?}",
                 local_id, context.function_id
             ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })
 }
 
 pub(super) fn helper_index(
     plan: &WasmEmitPlan,
     helper: WasmRuntimeHelper,
-) -> Result<u32, CompilerError> {
+) -> Result<u32, InfrastructureFailure> {
     // WHAT: resolve synthesized helper to its planned function index.
     // WHY: helper calls are encoded as direct calls and must match plan indices exactly.
     plan.helper_indices.get(&helper).copied().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
+        InfrastructureFailure::wasm_generation(format!(
             "Wasm emission missing helper function index for {}",
             crate::backends::wasm::emit::sections::helper_name(helper)
         ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
     })
 }

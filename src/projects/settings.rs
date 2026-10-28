@@ -9,8 +9,13 @@ use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
@@ -60,27 +65,6 @@ pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens f
 pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
 pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
 
-/// Typed results of one validated `html #= (...)` builder section.
-///
-/// WHAT: each html section field in its validated form. Fields the record omits stay `None`.
-/// WHY: this struct is the HTML builder settings store. The routing and document-shell readers
-/// consume it directly. Directory HTML projects require the grouped `html` section.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HtmlSectionConfig {
-    pub origin: Option<String>,
-    pub page_url_style: Option<String>,
-    pub redirect_index_html: Option<bool>,
-    pub html_lang: Option<String>,
-    pub html_title_prefix: Option<String>,
-    pub html_title_postfix: Option<String>,
-    pub html_favicon: Option<String>,
-    pub html_inject_charset: Option<bool>,
-    pub html_inject_viewport: Option<bool>,
-    pub html_inject_color_scheme: Option<bool>,
-    pub html_inject_core_css: Option<bool>,
-    pub html_body_style: Option<String>,
-}
-
 /// One additional authored `project` field retained after compiler-owned fields are applied.
 ///
 /// WHAT: the field's folded value plus the canonical type and exact authored span needed later by
@@ -102,37 +86,56 @@ pub(crate) struct ProjectMetadataField {
 /// for each one. A keyed store lets each builder read its own settings by the names it registered.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BuilderSettings {
-    strings: BTreeMap<String, String>,
-    bools: BTreeMap<String, bool>,
+    strings: BTreeMap<String, (String, Option<SourceSpan>)>,
+    bools: BTreeMap<String, (bool, Option<SourceSpan>)>,
 }
 
 impl BuilderSettings {
     /// Return the string value stored under a field name, if the section authored one.
     pub fn string(&self, name: &str) -> Option<&str> {
-        self.strings.get(name).map(String::as_str)
+        self.strings.get(name).map(|(value, _)| value.as_str())
     }
 
     /// Return the bool value stored under a field name, if the section authored one.
     pub fn bool(&self, name: &str) -> Option<bool> {
-        self.bools.get(name).copied()
+        self.bools.get(name).map(|(value, _)| *value)
     }
 
     /// Store a string value under a field name, replacing any bool value stored there.
-    pub(crate) fn set_string(&mut self, name: &str, value: String) {
-        self.bools.remove(name);
-        self.strings.insert(name.to_owned(), value);
+    pub(crate) fn set_string(
+        &mut self,
+        name: impl Into<String>,
+        value: String,
+        span: Option<SourceSpan>,
+    ) {
+        let name = name.into();
+        self.bools.remove(&name);
+        self.strings.insert(name, (value, span));
     }
 
     /// Store a bool value under a field name, replacing any string value stored there.
-    pub(crate) fn set_bool(&mut self, name: &str, value: bool) {
-        self.strings.remove(name);
-        self.bools.insert(name.to_owned(), value);
+    pub(crate) fn set_bool(
+        &mut self,
+        name: impl Into<String>,
+        value: bool,
+        span: Option<SourceSpan>,
+    ) {
+        let name = name.into();
+        self.strings.remove(&name);
+        self.bools.insert(name, (value, span));
     }
 
     /// Remove whichever value is stored under a field name.
     pub(crate) fn clear(&mut self, name: &str) {
         self.strings.remove(name);
         self.bools.remove(name);
+    }
+
+    fn setting_span(&self, name: &str) -> Option<SourceSpan> {
+        self.strings
+            .get(name)
+            .and_then(|(_, span)| *span)
+            .or_else(|| self.bools.get(name).and_then(|(_, span)| *span))
     }
 }
 
@@ -149,14 +152,12 @@ pub struct Config {
     pub version: Option<String>,
     pub author: Option<String>,
     pub license: Option<String>,
-    /// Exact authored source spans for config keys when the key came from retained source.
+    /// Exact authored source spans for project fields and shared output roots.
     ///
-    /// Path-only and synthetic settings deliberately have no entry here rather than acquiring
-    /// a fabricated span from their display path.
-    pub setting_spans: HashMap<String, SourceSpan>,
-
-    /// Validated results of the grouped `html` builder section when one was authored.
-    pub html_section: HtmlSectionConfig,
+    /// Builder section spans stay in `BuilderSettings`; path-only and synthetic settings
+    /// deliberately have no entry rather than acquiring a fabricated span. Crate-private: spans
+    /// resolve only under the build owner that retains the project source database.
+    pub(crate) setting_spans: HashMap<String, SourceSpan>,
 
     /// Output roots the active builder section authored, with `None` where it set none.
     pub(crate) output_roots: OutputRootSettings,
@@ -187,7 +188,6 @@ impl Config {
             author: None,
             license: None,
             setting_spans: HashMap::new(),
-            html_section: HtmlSectionConfig::default(),
             output_roots: OutputRootSettings::default(),
             builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
@@ -207,8 +207,9 @@ impl Config {
         }
     }
 
-    /// Return the exact authored span for a config key, if the setting came from retained source.
-    pub fn setting_span(&self, key: &str) -> Option<SourceSpan> {
+    /// Return the exact authored span for a project-level config key, if retained source provides
+    /// one. Builder section spans remain in their separate name-keyed store.
+    pub(crate) fn setting_span(&self, key: &str) -> Option<SourceSpan> {
         self.setting_spans.get(key).copied()
     }
 
@@ -219,10 +220,28 @@ impl Config {
         &self,
         key: &str,
         reason: InvalidConfigReason,
-        string_table: &mut StringTable,
-    ) -> CompilerDiagnostic {
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> DiagnosticDraft {
         let key_id = string_table.intern(key);
-        CompilerDiagnostic::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
+        project_config::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
+    }
+
+    /// Build a typed project-config diagnostic for a generic builder field.
+    ///
+    /// Builder fields use a separate name-keyed span store from project-level config keys, which
+    /// may share the same field name.
+    pub(crate) fn builder_config_diagnostic(
+        &self,
+        key: &str,
+        reason: InvalidConfigReason,
+        string_table: &mut DiagnosticStringBuilder,
+    ) -> DiagnosticDraft {
+        let key_id = string_table.intern(key);
+        project_config::invalid_config_reason(
+            Some(key_id),
+            reason,
+            self.builder_settings.setting_span(key),
+        )
     }
 
     pub fn config_file_path(&self) -> PathBuf {
@@ -236,26 +255,31 @@ impl Config {
 /// narrow escape hatch for filesystem/tooling failures discovered during validation.
 /// WHY: `BackendBuilder::validate_project_config` is a build boundary, so callers need one result
 /// type that can still distinguish normal user config feedback from internal failures.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProjectConfigError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(Box<InfrastructureFailure>),
 }
 
 impl ProjectConfigError {
-    pub fn into_messages(self, string_table: StringTable) -> CompilerMessages {
+    pub fn into_prepared_failure(self, root_string_table: &StringTable) -> PreparedFailure {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic(diagnostic, string_table)
+                PreparedDiagnosticBatch::capture_from_root_string_table(
+                    DiagnosticBag::from(diagnostic),
+                    root_string_table,
+                    None,
+                    || None,
+                )
+                .map(PreparedFailure::Diagnosed)
+                .unwrap_or_else(PreparedFailure::from)
             }
-            ProjectConfigError::Infrastructure(error) => {
-                CompilerMessages::from_error(*error, string_table)
-            }
+            ProjectConfigError::Infrastructure(error) => PreparedFailure::from(*error),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
+    pub(crate) fn into_diagnostic(self) -> Option<DiagnosticDraft> {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => Some(diagnostic),
             ProjectConfigError::Infrastructure(_) => None,
@@ -263,14 +287,14 @@ impl ProjectConfigError {
     }
 }
 
-impl From<CompilerDiagnostic> for ProjectConfigError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for ProjectConfigError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         ProjectConfigError::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for ProjectConfigError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for ProjectConfigError {
+    fn from(error: InfrastructureFailure) -> Self {
         ProjectConfigError::Infrastructure(Box::new(error))
     }
 }
@@ -286,7 +310,6 @@ impl Default for Config {
             author: None,
             license: None,
             setting_spans: HashMap::new(),
-            html_section: HtmlSectionConfig::default(),
             output_roots: OutputRootSettings::default(),
             builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),

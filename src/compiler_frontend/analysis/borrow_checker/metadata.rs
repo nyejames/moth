@@ -13,7 +13,7 @@ use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -96,7 +96,6 @@ impl<'a> BorrowChecker<'a> {
                         "Borrow checker found duplicate local function id '{}' while building public call summaries",
                         function.id
                     ),
-                    self.diagnostics.function_error_span(function.id),
                 ));
             }
 
@@ -112,17 +111,13 @@ impl<'a> BorrowChecker<'a> {
                             position,
                             self.diagnostics.function_name(function.id)
                         ),
-                        self.diagnostics.function_error_span(function.id),
                     ));
                 }
                 if !parameter_owner_locals.insert(*param) {
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Borrow checker found parameter local '{}' owned by more than one function",
-                            self.diagnostics.local_name(*param)
-                        ),
-                        self.diagnostics.function_error_span(function.id),
-                    ));
+                    return Err(self.diagnostics.internal_error(format!(
+                        "Borrow checker found parameter local '{}' owned by more than one function",
+                        self.diagnostics.local_name(*param)
+                    )));
                 }
 
                 let Some(is_mutable) = local_mutability_by_id.get(param).copied() else {
@@ -132,7 +127,6 @@ impl<'a> BorrowChecker<'a> {
                             self.diagnostics.local_name(*param),
                             self.diagnostics.function_name(function.id)
                         ),
-                        self.diagnostics.function_error_span(function.id),
                     ));
                 };
 
@@ -162,14 +156,11 @@ impl<'a> BorrowChecker<'a> {
         self.stabilize_return_alias_summaries()?;
 
         if self.public_call_summaries.len() != self.module.functions.len() {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Borrow checker retained {} public call summaries for {} local functions",
-                    self.public_call_summaries.len(),
-                    self.module.functions.len()
-                ),
-                self.diagnostics.module_error_span(),
-            ));
+            return Err(self.diagnostics.internal_error(format!(
+                "Borrow checker retained {} public call summaries for {} local functions",
+                self.public_call_summaries.len(),
+                self.module.functions.len()
+            )));
         }
 
         Ok(())
@@ -182,13 +173,10 @@ impl<'a> BorrowChecker<'a> {
         let recursive_functions = self.recursive_return_alias_functions()?;
         for function_id in &recursive_functions {
             let Some(summary) = self.public_call_summaries.get_mut(function_id) else {
-                return Err(self.diagnostics.internal_error(
-                    format!(
-                        "Borrow checker is missing the public call summary for recursive function '{}'",
-                        self.diagnostics.function_name(*function_id)
-                    ),
-                    self.diagnostics.function_error_span(*function_id),
-                ));
+                return Err(self.diagnostics.internal_error(format!(
+                    "Borrow checker is missing the public call summary for recursive function '{}'",
+                    self.diagnostics.function_name(*function_id)
+                )));
             };
             // A recursive return-summary cycle has no finite body summary to project through.
             // Publish Unknown at the cycle boundary so callers cannot mistake the initial Fresh
@@ -220,13 +208,10 @@ impl<'a> BorrowChecker<'a> {
             let mut changed = false;
             for (function_id, _, retained) in &retained_by_function {
                 let Some(summary) = self.public_call_summaries.get_mut(function_id) else {
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Borrow checker is missing the public call summary for function '{}'",
-                            self.diagnostics.function_name(*function_id)
-                        ),
-                        self.diagnostics.function_error_span(*function_id),
-                    ));
+                    return Err(self.diagnostics.internal_error(format!(
+                        "Borrow checker is missing the public call summary for function '{}'",
+                        self.diagnostics.function_name(*function_id)
+                    )));
                 };
 
                 if summary.return_alias != *retained {
@@ -240,10 +225,9 @@ impl<'a> BorrowChecker<'a> {
             }
         }
 
-        Err(self.diagnostics.internal_error(
-            "Borrow checker could not stabilize local return-alias summaries",
-            self.diagnostics.module_error_span(),
-        ))
+        Err(self
+            .diagnostics
+            .internal_error("Borrow checker could not stabilize local return-alias summaries"))
     }
 
     fn recursive_return_alias_functions(&self) -> Result<FxHashSet<FunctionId>, BorrowCheckError> {
@@ -313,7 +297,6 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker is missing statement facts while finalizing public call summary for function '{}'",
                             self.diagnostics.function_name(function.id)
                         ),
-                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
 
@@ -333,11 +316,7 @@ impl<'a> BorrowChecker<'a> {
                         for (argument_index, argument) in
                             self.module.expressions.values(*args).iter().enumerate()
                         {
-                            if !self.call_argument_writes(
-                                target,
-                                argument_index,
-                                self.diagnostics.statement_error_span(statement),
-                            )? {
+                            if !self.call_argument_writes(target, argument_index)? {
                                 continue;
                             }
 
@@ -349,7 +328,6 @@ impl<'a> BorrowChecker<'a> {
                                         argument_index,
                                         self.diagnostics.function_name(function.id)
                                     ),
-                                    self.diagnostics.statement_error_span(statement),
                                 ));
                             };
                             for root in &argument_fact.roots {
@@ -366,7 +344,6 @@ impl<'a> BorrowChecker<'a> {
                                     "Borrow checker is missing map receiver value facts while finalizing public call summary for function '{}'",
                                     self.diagnostics.function_name(function.id)
                                 ),
-                                self.diagnostics.statement_error_span(statement),
                             ));
                         };
                         for root in &receiver_fact.roots {
@@ -382,15 +359,10 @@ impl<'a> BorrowChecker<'a> {
             } = &block.terminator
             {
                 for (index, argument) in self.module.expressions.values(*args).iter().enumerate() {
-                    if self.call_argument_writes(
-                        target,
-                        index,
-                        self.diagnostics.terminator_error_span(*block_id),
-                    )? {
+                    if self.call_argument_writes(target, index)? {
                         let Some(fact) = report.analysis.value_facts.get(argument) else {
                             return Err(self.diagnostics.internal_error(
                                 "Missing Invoke argument borrow fact during call-summary publication",
-                                self.diagnostics.terminator_error_span(*block_id),
                             ));
                         };
                         for root in &fact.roots {
@@ -410,7 +382,6 @@ impl<'a> BorrowChecker<'a> {
                 let Some(fact) = report.analysis.value_facts.get(receiver) else {
                     return Err(self.diagnostics.internal_error(
                         "Missing Invoke map receiver borrow fact during call-summary publication",
-                        self.diagnostics.terminator_error_span(*block_id),
                     ));
                 };
                 // Map keys and stored values are borrowed inputs, not mutated parameters.
@@ -423,13 +394,10 @@ impl<'a> BorrowChecker<'a> {
         }
 
         let Some(summary) = self.public_call_summaries.get_mut(&function.id) else {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Borrow checker is missing the public call summary for function '{}'",
-                    self.diagnostics.function_name(function.id)
-                ),
-                self.diagnostics.function_error_span(function.id),
-            ));
+            return Err(self.diagnostics.internal_error(format!(
+                "Borrow checker is missing the public call summary for function '{}'",
+                self.diagnostics.function_name(function.id)
+            )));
         };
 
         let mut changed = false;
@@ -449,18 +417,14 @@ impl<'a> BorrowChecker<'a> {
         &self,
         target: &CallTarget,
         argument_index: usize,
-        span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<bool, BorrowCheckError> {
         match target {
             CallTarget::Local(function_id) => {
                 let Some(summary) = self.public_call_summaries.get(function_id) else {
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Borrow checker is missing the public call summary for function '{}'",
-                            self.diagnostics.function_name(*function_id)
-                        ),
-                        self.diagnostics.function_error_span(*function_id),
-                    ));
+                    return Err(self.diagnostics.internal_error(format!(
+                        "Borrow checker is missing the public call summary for function '{}'",
+                        self.diagnostics.function_name(*function_id)
+                    )));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
                     return Err(self.diagnostics.internal_error(
@@ -469,7 +433,6 @@ impl<'a> BorrowChecker<'a> {
                             argument_index,
                             self.diagnostics.function_name(*function_id)
                         ),
-                        self.diagnostics.function_error_span(*function_id),
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -480,7 +443,6 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the provider call summary for imported function {origin:?}"
                         ),
-                        span,
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -488,7 +450,6 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing imported call summary for {origin:?}"
                         ),
-                        span,
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -499,7 +460,6 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the call summary for module-private function {identity:?}"
                         ),
-                        span,
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -507,7 +467,6 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing module-private call summary for {identity:?}"
                         ),
-                        span,
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -519,7 +478,6 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the call summary for generated function {identity:?}"
                         ),
-                        span,
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -527,7 +485,6 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing generated call summary for {identity:?}"
                         ),
-                        span,
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -542,7 +499,6 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while finalizing public call summary",
                             function_id.name()
                         ),
-                        span,
                     ));
                 };
                 let Some(parameter) = definition.parameters.get(argument_index) else {
@@ -551,7 +507,6 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker found out-of-range argument {} while finalizing host call summary for '{}'",
                             argument_index, definition.name
                         ),
-                        span,
                     ));
                 };
                 Ok(parameter.access_kind == ExternalAccessKind::Mutable)
@@ -577,14 +532,11 @@ impl<'a> BorrowChecker<'a> {
 
         for param in &function.params {
             if !local_info_by_id.contains_key(param) {
-                return Err(self.diagnostics.internal_error(
-                    format!(
-                        "Function '{}' parameter '{}' is missing from reachable local layout",
-                        self.diagnostics.function_name(function.id),
-                        self.diagnostics.local_name(*param)
-                    ),
-                    self.diagnostics.function_error_span(function.id),
-                ));
+                return Err(self.diagnostics.internal_error(format!(
+                    "Function '{}' parameter '{}' is missing from reachable local layout",
+                    self.diagnostics.function_name(function.id),
+                    self.diagnostics.local_name(*param)
+                )));
             }
         }
 
@@ -898,12 +850,7 @@ impl<'a> BorrowChecker<'a> {
             let mut mask = RootSet::empty(local_regions.len());
 
             for (local_index, local_region) in local_regions.iter().enumerate() {
-                if self.is_region_ancestor_of(
-                    *local_region,
-                    block.region,
-                    function_id,
-                    *block_id,
-                )? {
+                if self.is_region_ancestor_of(*local_region, block.region, *block_id)? {
                     mask.insert(local_index);
                 }
             }
@@ -918,7 +865,6 @@ impl<'a> BorrowChecker<'a> {
         &self,
         ancestor: crate::compiler_frontend::hir::ids::RegionId,
         mut region: crate::compiler_frontend::hir::ids::RegionId,
-        function_id: crate::compiler_frontend::hir::ids::FunctionId,
         block_id: BlockId,
     ) -> Result<bool, BorrowCheckError> {
         // Walk parent links from `region` to root.
@@ -928,24 +874,10 @@ impl<'a> BorrowChecker<'a> {
             }
 
             let Some(parent) = self.region_parent_by_id.get(&region).copied() else {
-                let span = self
-                    .module
-                    .side_table
-                    .hir_source_span_for_hir(HirLocation::Block(block_id))
-                    .or_else(|| {
-                        self.module
-                            .side_table
-                            .ast_span_for_hir(HirLocation::Block(block_id))
-                    })
-                    .or_else(|| self.diagnostics.function_error_span(function_id));
-
-                return Err(self.diagnostics.internal_error(
-                    format!(
-                        "Borrow checker could not resolve region '{}' while analyzing block '{}'",
-                        region.0, block_id
-                    ),
-                    span,
-                ));
+                return Err(self.diagnostics.internal_error(format!(
+                    "Borrow checker could not resolve region '{}' while analyzing block '{}'",
+                    region.0, block_id
+                )));
             };
 
             let Some(parent) = parent else {

@@ -70,7 +70,7 @@ INFERRED #= 1\n"
     )
     .expect("parsed type headers should prepare");
     assert!(
-        prepared.warnings.is_empty(),
+        prepared.warnings.as_slice().is_empty(),
         "warning-free preparation must not add diagnostic span rows"
     );
     assert_eq!(
@@ -209,7 +209,15 @@ INFERRED #= 1\n"
         .retain_text(final_id, source.clone())
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
-    let database = database.finish().expect("install original span table");
+    database
+        .finish_source(final_id)
+        .expect("the source should finalize after its last span producer");
+    database
+        .assemble_finalized_tables()
+        .expect("the frozen source table should assemble");
+    let database = database
+        .finish()
+        .expect("the already-finalized source table should validate");
     let range = rebound_capacity_span.byte_range(&database);
     assert_eq!(
         source.get(range.start() as usize..range.end() as usize),
@@ -308,7 +316,7 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
     )
     .expect("generic headers should prepare");
     assert!(
-        prepared.warnings.is_empty(),
+        prepared.warnings.as_slice().is_empty(),
         "valid generic names should not add warning spans"
     );
     assert_eq!(
@@ -435,7 +443,15 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         .retain_text(final_id, source.clone())
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
-    let database = database.finish().expect("install original span table");
+    database
+        .finish_source(final_id)
+        .expect("the source should finalize after its last span producer");
+    database
+        .assemble_finalized_tables()
+        .expect("the frozen source table should assemble");
+    let database = database
+        .finish()
+        .expect("the already-finalized source table should validate");
     let resolve = |span: SourceSpan| {
         let range = span.byte_range(&database);
         source

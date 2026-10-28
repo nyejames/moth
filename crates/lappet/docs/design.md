@@ -114,10 +114,13 @@ and measured performance justify it. Other engines and targets are later work.
 
 ## Rust bindings
 
-Rust is the sole native host-binding interface in V1. Reuse Moth's manual typed
-descriptors and its accepted `#[moth::host_function]` and `#[moth::host_type]`
-conveniences. Both feed one checked registration path. Lappet does not introduce
-another signature language, global plugin scan or general reflection system.
+Rust is the sole native host-binding interface in V1. The current `moth::host`
+surface uses manual descriptors. The accepted `#[moth::host_function]` and
+`#[moth::host_type]` conveniences will feed the same checked registration path
+when delivered, but they aren't available APIs today. Lappet has no executable
+adapters or native runtime yet. It does not introduce another signature
+language, global plugin scan or general reflection system.
+
 
 A builder describes its API once for compilation and installs the corresponding
 Rust implementation for execution. Resolve and check imports before application

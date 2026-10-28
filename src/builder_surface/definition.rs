@@ -17,7 +17,7 @@ use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::BTreeSet;
@@ -46,6 +46,12 @@ pub struct BuilderSurface {
     /// WHY: only the active builder owns the contract that connects a source package to the
     ///      synthetic `.mtf` constant scope.
     pub implicit_template_scope_source_packages: BTreeSet<String>,
+}
+/// Validation failures for a complete builder surface.
+#[derive(Debug)]
+pub(crate) enum BuilderSurfaceValidationError {
+    InvalidDefinition(String),
+    Infrastructure(InfrastructureFailure),
 }
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
@@ -78,8 +84,10 @@ impl BuilderSurface {
     /// package whose paths are equal or nest inside one another.
     /// WHY: the two registries are separate, so neither can see a cross-kind overlap that would
     /// make dependency resolution ambiguous.
-    pub fn validate(&self) -> Result<(), CompilerError> {
-        self.config_schemas.validate()?;
+    pub(crate) fn validate(&self) -> Result<(), BuilderSurfaceValidationError> {
+        self.config_schemas
+            .validate()
+            .map_err(BuilderSurfaceValidationError::Infrastructure)?;
         let binding_paths = self
             .binding_packages
             .package_paths()
@@ -89,7 +97,7 @@ impl BuilderSurface {
             let source_path = source.package_prefix.as_str();
             for &binding_path in &binding_paths {
                 if paths_overlap(source_path, binding_path) {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
                         "Source package '@{source_path}' overlaps host package '@{binding_path}'."
                     )));
                 }

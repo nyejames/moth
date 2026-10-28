@@ -175,11 +175,11 @@ fn classifier_accepts_distinct_valid_output_folders() {
 }
 
 #[test]
-fn classifier_skips_entry_root_containment_in_transitional_root_form() {
+fn classifier_skips_entry_root_containment_when_entry_root_is_project_root() {
     // Empty or "." entry root means the entry root covers the whole project, so a project-relative
     // output folder is validated only against the project root.
     let dev = classify_output_folder(Path::new("dev"), &project_root(), None)
-        .expect("dev should be valid in transitional root form");
+        .expect("dev should be valid when the entry root is the project root");
     assert_eq!(dev.relative_path, PathBuf::from("dev"));
     assert_eq!(dev.resolved_path, PathBuf::from("/project/dev"));
 }
@@ -187,11 +187,13 @@ fn classifier_skips_entry_root_containment_in_transitional_root_form() {
 #[cfg(unix)]
 #[test]
 fn config_and_write_time_containment_share_canonical_classification() {
+    use crate::compiler_tests::test_diagnostics::assert_output_rejection;
     use std::os::unix::fs::symlink;
 
     use crate::build_system::output::manifest::validate_output_root_is_safe;
-    use crate::compiler_frontend::symbols::string_interning::StringTable;
-    use crate::compiler_tests::test_diagnostics::assert_output_rejection;
+    use crate::compiler_frontend::compiler_errors::{CompilationOutcome, InfrastructureErrors};
+    use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+    use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 
     let _project_temp = tempfile::tempdir().expect("should create project temp dir");
     let project_root = _project_temp.path().to_path_buf();
@@ -212,14 +214,18 @@ fn config_and_write_time_containment_share_canonical_classification() {
         validate_directory_output_root_containment(&folder.resolved_path, &project_root, None,),
         expected
     );
-    let messages = validate_output_root_is_safe(
+    let error = validate_output_root_is_safe(
         &folder.resolved_path,
         &project_root,
         Some(&project_root.join("src")),
-        &StringTable::new(),
     )
     .expect_err("symlink output root should be rejected");
-    assert_output_rejection(&messages, "output-root-not-inside-project");
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_infrastructure(Box::new(InfrastructureErrors::new(error)));
+    let failure = accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed);
+    assert_output_rejection(&failure, "output-root-not-inside-project");
 }
 
 // -------------------------

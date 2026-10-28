@@ -101,9 +101,8 @@ export function mothErr(code, message) {
 /// Builder-owned registry of allowed core JS runtime module imports.
 ///
 /// WHAT: holds the set of registered core JS runtime modules and their sources.
-/// WHY: v1 registers only `@moth/runtime`, but the shape is kept extensible
-///      so future phases can register additional core runtime modules without
-///      changing the scanner logic.
+/// WHY: v1 registers only `@moth/runtime`, but the shape stays extensible so additional
+///      core runtime modules can be registered without changing the scanner logic.
 pub struct RuntimeModuleRegistry {
     modules: Vec<CoreJsRuntimeModule>,
 }

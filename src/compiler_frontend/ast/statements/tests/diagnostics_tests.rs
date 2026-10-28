@@ -5,18 +5,22 @@
 
 use super::{UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidStatementPositionReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::InvalidStatementPositionView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidStatementPositionReason};
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageRegistry, ExternalSymbolId,
 };
-use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_registry;
+use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+    ast_first_error_rendered_message, freeze_ast_diagnostic_failure,
+    parse_single_file_ast_build_result_with_registry,
+};
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
@@ -70,14 +74,18 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
     let token_span = cursor.current_span();
     let diagnostic = unexpected_statement_token(&cursor, &mut string_table)
         .expect("unexpected statement token projection should stay on the diagnostic lane");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStatementPosition {
-            reason: InvalidStatementPositionReason::UnexpectedComma
-        }
-    ));
-    assert_eq!(diagnostic.primary_span, Some(token_span));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidStatementPositionView>()
+        .expect("the diagnostic is an invalid statement position");
+    assert_eq!(
+        facts.reason,
+        InvalidStatementPositionReason::UnexpectedComma
+    );
+    assert!(matches!(diagnostic.primary_site(), SiteRef::Local(span) if span == token_span));
 }
 #[test]
 fn unexpected_scope_close_retains_exact_multibyte_span() {
@@ -95,14 +103,18 @@ fn unexpected_scope_close_retains_exact_multibyte_span() {
     assert_eq!(cursor.current_tag(), TokenTag::END);
     let token_span = cursor.current_span();
     let diagnostic = unexpected_scope_close(UnexpectedScopeCloseContext::Expression, &cursor);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStatementPosition {
-            reason: InvalidStatementPositionReason::UnexpectedScopeCloseInExpression
-        }
-    ));
-    assert_eq!(diagnostic.primary_span, Some(token_span));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidStatementPositionView>()
+        .expect("the diagnostic is an invalid statement position");
+    assert_eq!(
+        facts.reason,
+        InvalidStatementPositionReason::UnexpectedScopeCloseInExpression
+    );
+    assert!(matches!(diagnostic.primary_site(), SiteRef::Local(span) if span == token_span));
 }
 
 fn assert_external_binding_collision(source: &str, name: &str) {
@@ -113,36 +125,25 @@ fn assert_external_binding_collision(source: &str, name: &str) {
             ExternalSymbolId::Function(ExternalFunctionId::IoPrint),
         )
         .unwrap();
-    let diagnostic = parse_single_file_ast_build_result_with_registry(source, registry)
+    let failure = parse_single_file_ast_build_result_with_registry(source, registry)
         .err()
-        .unwrap();
-
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
-    let DiagnosticPayload::ShadowedName {
-        name: authored_name,
-    } = diagnostic.payload
-    else {
-        panic!("expected the authored shadowed name: {source}");
-    };
-    let mut authored = TestSourceContext::new("@page.moth");
-    authored
-        .tokenize(
-            source,
-            &mut PathInternerFork::empty(),
-            &StyleDirectiveRegistry::built_ins(),
-            TokenizerEntryMode::SourceFile,
-        )
-        .unwrap();
-    assert_eq!(authored.preparation_parts().0.resolve(authored_name), name);
+        .expect("external binding collision should fail AST construction");
+    let boundary_failure = freeze_ast_diagnostic_failure(failure);
+    let diagnostic = assert_ast_diagnostic(&boundary_failure, "MOTH-RULE-0038", None);
+    assert_eq!(
+        ast_first_error_rendered_message(&boundary_failure),
+        format!("Shadowed name '{name}'"),
+        "{source}",
+    );
 
     let start = source.rfind(name).unwrap() as u32;
     let span = LocalSpan::exact(start, name.len() as u32, &mut ExtendedSpanBuilder::new()).unwrap();
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
         "{source}",
     );
-    assert!(diagnostic.labels.is_empty(), "{source}");
+    assert!(ast_error_label_spans(diagnostic).is_empty(), "{source}");
 }
 
 #[test]

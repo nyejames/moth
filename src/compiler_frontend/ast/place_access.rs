@@ -7,7 +7,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOperationView, ExpressionView,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -23,7 +23,7 @@ pub(crate) fn classify_receiver_source_state(
     node: &AstNode,
     expressions: &AstExpressionBuilder,
     path_fork: &PathInternerFork,
-) -> Result<ReceiverSourceState, CompilerError> {
+) -> Result<ReceiverSourceState, InfrastructureFailure> {
     let NodeKind::ExpressionStatement(expression) = &node.kind else {
         return Ok(ReceiverSourceState::Temporary);
     };

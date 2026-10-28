@@ -17,6 +17,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::builtins::error_type::is_reserved_parameter_contract_symbol;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, generics_traits_api, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidThisUsageReason, NameNamespace,
     ReservedNameOwner,
@@ -255,7 +260,7 @@ impl ScopeContext {
         &'a self,
         name: &StringId,
         span: Option<SourceSpan>,
-    ) -> Result<Option<ValueDeclarationRef<'a>>, CompilerDiagnostic> {
+    ) -> Result<Option<ValueDeclarationRef<'a>>, DiagnosticDraft> {
         match self.get_reference(name) {
             Some(ScopeDeclarationRef::Local {
                 declaration,
@@ -274,13 +279,11 @@ impl ScopeContext {
                 binding,
                 binding_span,
             })),
-            Some(ScopeDeclarationRef::RouteParameter(_)) => {
-                Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::RouteParameterRead,
-                    None,
-                    span,
-                ))
-            }
+            Some(ScopeDeclarationRef::RouteParameter(_)) => Err(calls_data::invalid_call_shape(
+                InvalidCallShapeReason::RouteParameterRead,
+                None,
+                span,
+            )),
             None => Ok(None),
         }
     }
@@ -294,13 +297,13 @@ impl ScopeContext {
         name: StringId,
         span: Option<SourceSpan>,
         string_table: &StringTable,
-    ) -> Option<CompilerDiagnostic> {
+    ) -> Option<DiagnosticDraft> {
         if self
             .trait_environment()
             .core_trait_id_for_name(name, string_table)
             .is_some()
         {
-            return Some(CompilerDiagnostic::reserved_name_collision(
+            return Some(names_declarations::reserved_name_collision(
                 name,
                 ReservedNameOwner::CoreTrait,
                 span,
@@ -312,7 +315,7 @@ impl ScopeContext {
         // declarations) must reserve them, because the contract spelling is only meaningful in
         // parameter position and a same-named binding would make the signature ambiguous.
         if is_reserved_parameter_contract_symbol(string_table.resolve(name)) {
-            return Some(CompilerDiagnostic::reserved_name_collision(
+            return Some(names_declarations::reserved_name_collision(
                 name,
                 ReservedNameOwner::ParameterContract,
                 span,
@@ -326,7 +329,7 @@ impl ScopeContext {
                 || visibility.visible_external_symbols.contains_key(&name)
                 || visibility.visible_namespace_records.contains_key(&name)
         }) {
-            return Some(CompilerDiagnostic::shadowed_name(name, None, span));
+            return Some(names_declarations::shadowed_name(name, span));
         }
         None
     }
@@ -336,13 +339,11 @@ impl ScopeContext {
         &self,
         this_id: StringId,
         span: SourceSpan,
-    ) -> Result<ValueDeclarationRef<'_>, CompilerDiagnostic> {
+    ) -> Result<ValueDeclarationRef<'_>, DiagnosticDraft> {
         if self.is_assignment_target_unavailable(this_id) {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
+            return Err(names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
                 Some(this_id),
-                None,
-                None,
                 None,
                 None,
                 Some(span),
@@ -351,7 +352,7 @@ impl ScopeContext {
 
         self.get_value_reference(&this_id, Some(span))?
             .ok_or_else(|| {
-                CompilerDiagnostic::invalid_this_usage(
+                generics_traits_api::invalid_this_usage(
                     InvalidThisUsageReason::NotInReceiverMethod,
                     Some(span),
                 )
@@ -363,17 +364,17 @@ impl ScopeContext {
         &self,
         name: StringId,
         span: SourceSpan,
-    ) -> Result<ValueDeclarationRef<'_>, CompilerDiagnostic> {
+    ) -> Result<ValueDeclarationRef<'_>, DiagnosticDraft> {
         self.get_value_reference(&name, Some(span))?.ok_or_else(|| {
             if self.is_visible_type_alias_name(name) {
-                CompilerDiagnostic::namespace_misuse(
+                names_declarations::namespace_misuse(
                     name,
                     NameNamespace::Value,
                     NameNamespace::Type,
                     Some(span),
                 )
             } else {
-                CompilerDiagnostic::unknown_value_name(name, Some(span))
+                names_declarations::unknown_value_name(name, Some(span))
             }
         })
     }
@@ -588,7 +589,8 @@ impl ScopeContext {
         let struct_path = type_environment
             .nominal_path(type_id)
             .ok_or_else(|| {
-                TemplateError::from(CompilerError::compiler_error(
+                TemplateError::from(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Struct declaration did not resolve to a nominal type path.",
                 ))
             })?

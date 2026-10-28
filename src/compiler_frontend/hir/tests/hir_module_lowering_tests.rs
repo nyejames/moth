@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
 };
 use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -192,12 +193,14 @@ fn struct_field_declaration(
 }
 
 use crate::compiler_frontend::hir::hir_builder::{
-    build_ast_with_registered_types, expressions_to_owned_render_node,
-    expressions_to_owned_render_node_with_resources, fixture_resource, lower_ast,
-    lower_ast_with_metadata, lower_module,
+    expressions_to_owned_render_node, expressions_to_owned_render_node_with_resources,
+    fixture_resource, lower_module,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
+};
 
 #[test]
 fn registers_declarations_and_resolves_start_function() {
@@ -547,10 +550,13 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("template constants should fail in HIR");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(error.msg.contains(
+    let error = match error {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
+    assert!(error.message.contains(
         "Template constant reached HIR module-constant lowering before AST materialized it.",
     ));
 }
@@ -618,10 +624,13 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("nested template constants should fail");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(error.msg.contains(
+    let error = match error {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
+    assert!(error.message.contains(
         "Template constant reached HIR module-constant lowering before AST materialized it.",
     ));
 }

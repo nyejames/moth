@@ -5,7 +5,7 @@
 //! WHY: numeric spellings and destination rounding must agree across compiler and data readers.
 //!
 //! Token storage, `StringTable` resolution, compiler diagnostics and arbitrary-precision `Dec`
-//! values remain compiler-owned adapters.
+//! values remain owned by the compiler.
 use super::binary16::decimal_to_f16;
 use super::decimal::NumberScale;
 use super::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};

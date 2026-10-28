@@ -6,18 +6,15 @@
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, TypeMismatchContext, ValueReceiverContext,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
+use crate::compiler_frontend::compiler_messages::{TypeMismatchContext, ValueReceiverContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Stage-local result for condition-type validation helpers.
-///
-/// The helper returns the plain `CompilerDiagnostic` used by the diagnosed
-/// frontend lane; callers preserve that value until their owning boundary.
-type ConditionValidationResult = Result<(), CompilerDiagnostic>;
+type ConditionValidationResult = Result<(), DiagnosticDraft>;
 
 /// Shared helper that checks a condition expression against `Bool`.
 ///
@@ -33,7 +30,7 @@ pub(crate) fn ensure_boolean_condition(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::type_mismatch(
+    Err(types_borrows_targets::type_mismatch(
         type_environment.builtins().bool,
         condition_type,
         TypeMismatchContext::Condition,

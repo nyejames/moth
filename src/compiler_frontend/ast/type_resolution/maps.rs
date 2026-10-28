@@ -17,7 +17,9 @@
 //! - generic nominal instantiation or bound-evidence checks for map arguments.
 //! - map literal parsing or map member validation in AST bodies.
 
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMapTypeReason};
+use crate::compiler_frontend::compiler_messages::InvalidMapTypeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -63,7 +65,7 @@ pub(crate) fn validate_map_key_type(
     key_type_id: TypeId,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let builtins = type_environment.builtins();
     let is_supported_fixed_scalar =
         type_environment
@@ -85,7 +87,7 @@ pub(crate) fn validate_map_key_type(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::invalid_map_type(
+    Err(calls_data::invalid_map_type(
         InvalidMapTypeReason::UnsupportedKeyType {
             key_type: key_type_id,
         },

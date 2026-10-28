@@ -36,6 +36,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         &mut spans,
     )
     .expect("source should tokenize");
+    let tokenizer_span_count = spans.len();
     let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
         owner,
@@ -53,8 +54,14 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     let original_span = prepared.file_dependency_clauses[0].dependency.span;
     assert_eq!(
         spans.len(),
-        1,
-        "retained dependency records reuse the lexical overflow row"
+        tokenizer_span_count,
+        "dependency header records should reuse the lexical overflow rows"
+    );
+    let dependency_range = original_span.resolve_with(spans.resolver_for(source_id));
+    assert_eq!(
+        source.get(dependency_range.start() as usize..dependency_range.end() as usize),
+        Some(path_text.as_str()),
+        "the retained dependency span should resolve to its authored path"
     );
 
     let mut merged = StringTable::new();
@@ -107,6 +114,12 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         .retain_text(final_id, source.clone())
         .expect("retain source snapshot");
     database.retain_span_builder(final_id, spans);
+    database
+        .finish_source(final_id)
+        .expect("test source should finalize");
+    database
+        .assemble_finalized_tables()
+        .expect("the original span table should assemble");
     let database = database.finish().expect("install original span table");
     let resolve = |span: SourceSpan| {
         let range = span.byte_range(&database);
@@ -286,6 +299,12 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
         .retain_text(final_id, source.clone())
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
+    database
+        .finish_source(final_id)
+        .expect("test source should finalize");
+    database
+        .assemble_finalized_tables()
+        .expect("the original span table should assemble");
     let database = database.finish().expect("install original span table");
     let resolve = |span: SourceSpan| {
         let range = span.byte_range(&database);
@@ -601,6 +620,12 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
         .retain_text(final_id, source.to_owned())
         .expect("retain source snapshot");
     database.retain_span_builder(final_id, spans);
+    database
+        .finish_source(final_id)
+        .expect("test source should finalize");
+    database
+        .assemble_finalized_tables()
+        .expect("the original span table should assemble");
     let database = database.finish().expect("install original span table");
     let resolve = |span: SourceSpan| {
         let range = span.byte_range(&database);
@@ -778,6 +803,12 @@ Generic of A must {trait_name}\n"
         .retain_text(final_id, source.clone())
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
+    database
+        .finish_source(final_id)
+        .expect("test source should finalize");
+    database
+        .assemble_finalized_tables()
+        .expect("the original span table should assemble");
     let database = database.finish().expect("install original span table");
     let resolve = |span: SourceSpan| {
         let range = span.byte_range(&database);

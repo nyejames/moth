@@ -59,7 +59,7 @@ fn handle_connection_with_timeouts(
             let build_state = state
                 .build_state
                 .lock()
-                .map_err(|_| io::Error::other("build state lock was poisoned"))?;
+                .expect("dev-server host bug: build-state lock poisoned");
             strip_origin_prefix(request_path, &build_state.html_site_config.origin)
         };
         if request.method == "POST" && site_local_path.as_deref() == Some("/__moth/runtime-report")
@@ -85,7 +85,7 @@ fn handle_connection_with_timeouts(
         let build_state = state
             .build_state
             .lock()
-            .map_err(|_| io::Error::other("build state lock was poisoned"))?;
+            .expect("dev-server host bug: build-state lock poisoned");
         let origin = &build_state.html_site_config.origin;
 
         if request_path == "/" && origin != "/" {
@@ -116,7 +116,7 @@ fn handle_connection_with_timeouts(
                         &site_local_path,
                         request_query,
                         &build_state,
-                    )?)
+                    ))
                 }
             }
         } else {
@@ -157,7 +157,7 @@ enum PreparedResponse {
         body: String,
     },
     Bytes {
-        body: Vec<u8>,
+        body: Arc<Vec<u8>>,
         content_type: &'static str,
     },
     Redirect {
@@ -397,10 +397,12 @@ fn handle_runtime_report(
     let build_state = state
         .build_state
         .lock()
-        .map_err(|_| io::Error::other("build state lock was poisoned"))?;
+        .expect("dev-server host bug: build-state lock poisoned");
     if !build_state.last_build_ok
         || report.build != build_state.last_build_version
-        || !static_files::is_known_entry(&report.entry, &build_state.output_dir)
+        || !build_state
+            .served_html_entries
+            .contains(report.entry.as_str())
     {
         drop(build_state);
         return send_report_status(stream, "409 CONFLICT");
@@ -537,7 +539,7 @@ fn send_prepared_response(stream: &mut TcpStream, response: PreparedResponse) ->
             body,
         } => send_text_response(stream, status_line, content_type, &body),
         PreparedResponse::Bytes { body, content_type } => {
-            send_response_bytes(stream, "200 OK", content_type, &body)
+            send_response_bytes(stream, "200 OK", content_type, body.as_slice())
         }
         PreparedResponse::Redirect {
             status_line,
@@ -550,20 +552,24 @@ fn prepare_static_response(
     request_path: &str,
     request_query: Option<&str>,
     build_state: &BuildState,
-) -> io::Result<PreparedResponse> {
-    let resolved_request = static_files::resolve_request(
+) -> PreparedResponse {
+    let resolved_request = static_files::resolve_request_with_file_exists(
         request_path,
         request_query,
         &build_state.output_dir,
         build_state.entry_page_rel.as_deref(),
         build_state.html_site_config.clone(),
+        |path| {
+            path.strip_prefix(&build_state.output_dir)
+                .ok()
+                .is_some_and(|relative| build_state.served_artifacts.contains_key(relative))
+        },
     );
-
     if let ResolvedRequest::Redirect { location } = resolved_request {
-        return Ok(PreparedResponse::Redirect {
+        return PreparedResponse::Redirect {
             status_line: "302 FOUND",
             location,
-        });
+        };
     }
 
     if matches!(resolved_request, ResolvedRequest::MissingEntryPage) && !build_state.last_build_ok {
@@ -575,12 +581,7 @@ fn prepare_static_response(
                 build_state.last_build_version,
             )
         });
-
-        return Ok(PreparedResponse::text(
-            "200 OK",
-            "text/html; charset=utf-8",
-            error_page,
-        ));
+        return PreparedResponse::text("200 OK", "text/html; charset=utf-8", error_page);
     }
 
     let (resolved_path, resolved_kind) = match resolved_request {
@@ -592,31 +593,28 @@ fn prepare_static_response(
                 &build_state.html_site_config.origin,
                 build_state.last_build_version,
             );
-            return Ok(PreparedResponse::text(
-                "200 OK",
-                "text/html; charset=utf-8",
-                error_page,
-            ));
+            return PreparedResponse::text("200 OK", "text/html; charset=utf-8", error_page);
         }
         ResolvedRequest::NotFound | ResolvedRequest::InvalidPath => {
-            return Ok(PreparedResponse::text(
+            return PreparedResponse::text(
                 "404 NOT FOUND",
                 "text/plain; charset=utf-8",
                 "Not Found",
-            ));
+            );
         }
         ResolvedRequest::Redirect { .. } => {
-            return Ok(PreparedResponse::text(
+            return PreparedResponse::text(
                 "500 INTERNAL SERVER ERROR",
                 "text/plain; charset=utf-8",
                 "Internal Server Error",
-            ));
+            );
         }
     };
 
-    // Failed builds replace resolved page HTML requests with diagnostics while still allowing
-    // supporting assets to load so the browser can keep the previous shell alive.
-    if should_serve_failed_build_html(resolved_kind, build_state) {
+    // Failed builds replace page requests and direct HTML asset requests with diagnostics, but
+    // keep their last-good non-HTML assets served.
+    let content_type = static_files::content_type_for_path(&resolved_path);
+    if should_serve_failed_build_html(resolved_kind, content_type, build_state) {
         let error_page = build_state.last_error_html.clone().unwrap_or_else(|| {
             render_runtime_error_page(
                 "Build Failed",
@@ -625,63 +623,58 @@ fn prepare_static_response(
                 build_state.last_build_version,
             )
         });
-
-        return Ok(PreparedResponse::text(
-            "200 OK",
-            "text/html; charset=utf-8",
-            error_page,
-        ));
+        return PreparedResponse::text("200 OK", "text/html; charset=utf-8", error_page);
     }
 
-    let content_type = static_files::content_type_for_path(&resolved_path);
+    let relative_path = match resolved_path.strip_prefix(&build_state.output_dir) {
+        Ok(relative_path) => relative_path,
+        Err(_) => {
+            return PreparedResponse::text(
+                "500 INTERNAL SERVER ERROR",
+                "text/plain; charset=utf-8",
+                "Resolved output path is outside the output directory",
+            );
+        }
+    };
+    let Some(body) = build_state.served_artifacts.get(relative_path) else {
+        return PreparedResponse::text("404 NOT FOUND", "text/plain; charset=utf-8", "Not Found");
+    };
     if resolved_kind == ResolvedRequestKind::PageHtml
         || static_files::is_html_content_type(content_type)
     {
-        let html = match std::fs::read_to_string(&resolved_path) {
+        let html = match std::str::from_utf8(body.as_slice()) {
             Ok(contents) => contents,
             Err(error) => {
-                return Ok(PreparedResponse::text(
+                return PreparedResponse::text(
                     "500 INTERNAL SERVER ERROR",
                     "text/plain; charset=utf-8",
-                    format!("Failed to read HTML file: {error}"),
-                ));
+                    format!("Failed to decode HTML file: {error}"),
+                );
             }
         };
-
-        let entry = match resolved_path.strip_prefix(&build_state.output_dir) {
-            Ok(relative_path) => portable_path_text(relative_path),
-            Err(_) => {
-                return Ok(PreparedResponse::text(
-                    "500 INTERNAL SERVER ERROR",
-                    "text/plain; charset=utf-8",
-                    "Resolved HTML path is outside the output directory",
-                ));
-            }
-        };
+        let entry = portable_path_text(relative_path);
         let injected_html = static_files::inject_dev_client(
-            &html,
+            html,
             &build_state.html_site_config.origin,
-            build_state.last_build_version,
+            build_state.served_artifacts_version,
             &entry,
         );
-        return Ok(PreparedResponse::text(
-            "200 OK",
-            content_type,
-            injected_html,
-        ));
+        return PreparedResponse::text("200 OK", content_type, injected_html);
     }
 
-    Ok(PreparedResponse::Bytes {
-        body: std::fs::read(resolved_path)?,
+    PreparedResponse::Bytes {
+        body: Arc::clone(body),
         content_type,
-    })
+    }
 }
-
 fn should_serve_failed_build_html(
     resolved_kind: ResolvedRequestKind,
+    content_type: &str,
     build_state: &BuildState,
 ) -> bool {
-    !build_state.last_build_ok && resolved_kind == ResolvedRequestKind::PageHtml
+    !build_state.last_build_ok
+        && (resolved_kind == ResolvedRequestKind::PageHtml
+            || static_files::is_html_content_type(content_type))
 }
 
 fn send_text_response(

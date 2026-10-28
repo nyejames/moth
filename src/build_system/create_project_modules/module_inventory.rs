@@ -13,9 +13,11 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -80,6 +82,7 @@ struct ModuleCompilationJobDraft {
     string_table_base_len: usize,
     path_base_len: usize,
     prepared: PreparedModule,
+    preparation_warnings: Vec<DiagnosticDraft>,
     #[cfg(feature = "timers")]
     timing_module_key: crate::timing::TimingModuleKey,
 }
@@ -98,7 +101,10 @@ pub(crate) struct ModuleCompilationJob {
     pub(crate) string_table_base_len: usize,
     /// Prefix length used when merging this job's local path fork.
     pub(crate) path_base_len: usize,
+    /// Prepared semantic and source state consumed by the module compiler.
     pub(crate) prepared: PreparedModule,
+    /// Preparation diagnostics carried transiently until the command sink takes ownership.
+    pub(crate) preparation_warnings: Vec<DiagnosticDraft>,
     #[cfg(feature = "timers")]
     pub(crate) timing_module_key: crate::timing::TimingModuleKey,
 }
@@ -140,6 +146,8 @@ pub(crate) struct CheckOnlyModuleCompilationJob {
     pub(crate) external_dependency_resolution_table: ExternalImportResolutionTable,
     /// Provider-independent prepared semantic payload for the transient source.
     pub(crate) prepared: PreparedModule,
+    /// Preparation diagnostics carried transiently until semantic compilation stages them.
+    pub(crate) preparation_warnings: Vec<DiagnosticDraft>,
 }
 
 /// One transient authored provider clause bound to a canonical module interface.
@@ -169,23 +177,27 @@ fn resolve_directory_dependency_path(
     provider: &RetainedDependencyPath,
     source_path: &Path,
     string_table: &mut StringTable,
-) -> Result<ResolvedDependency, PremergeFailure> {
+) -> Result<ResolvedDependency, PreparedFailure> {
     directory_dependency_resolution
         .resolve_dependency(provider, source_path, string_table)
         .map_err(|diagnostic| {
             // Move the local table into the batch; the caller aborts discovery on this diagnosed
             // path, so no clone is needed to carry the diagnostic.  Keep the issuing fork beside
             // it so its `PathId` domain remains valid after the source owner is finalized.
-            let table = std::mem::take(string_table);
-            let mut failure = PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                diagnostic, table,
-            ));
-            if let Err(error) = failure.attach_path_table_if_missing(Arc::new(
-                directory_dependency_resolution.path_fork().snapshot_table(),
-            )) {
-                return PremergeFailure::Infrastructure(error.into());
+            let table = string_table.take_for_handoff();
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                || {
+                    Some(Arc::new(
+                        directory_dependency_resolution.path_fork().shared_table(),
+                    ))
+                },
+            ) {
+                Ok(batch) => PreparedFailure::Diagnosed(batch),
+                Err(error) => PreparedFailure::Infrastructure(error.into()),
             }
-            failure
         })
 }
 
@@ -211,8 +223,8 @@ struct ModuleDiscoveryContext<'a, 'sources> {
 ///       scheduler; completed waves publish immutable interfaces before later consumers bind.
 /// WHY: preserving wave boundaries lets the directory compiler execute provider-dependent semantic
 ///      jobs in dependency order while retaining one deterministic scheduling contract. File
-///      preparation may use Rayon inside each job, but semantic module jobs remain serial until a
-///      separate parallel-wave phase changes the publication protocol.
+///      preparation may use Rayon inside each job; semantic module jobs remain serial because the
+///      publication owner commits generated deltas in deterministic order.
 pub(crate) struct ModuleCompilationSchedule {
     waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
@@ -231,6 +243,21 @@ impl ModuleCompilationSchedule {
     /// Each wave is non-empty and contains every canonical module assigned to the graph wave.
     pub(crate) fn waves(&self) -> &[Vec<ModuleCompilationJob>] {
         &self.waves
+    }
+    /// Source candidates participating in canonical and prepared check-only module outcomes.
+    ///
+    /// The inventory owner filters these identities by retained text after discovery and
+    /// finalizes each loaded source once the last canonical/deferred preparation has returned.
+    pub(crate) fn candidate_source_ids(&self) -> impl Iterator<Item = CompilerSourceId> + '_ {
+        self.waves
+            .iter()
+            .flat_map(|wave| wave.iter())
+            .flat_map(|job| job.prepared.semantic.candidate_source_ids.iter().copied())
+            .chain(
+                self.check_only_jobs
+                    .iter()
+                    .flat_map(|job| job.prepared.semantic.candidate_source_ids.iter().copied()),
+            )
     }
     pub(crate) fn canonical_source_package_dependencies(
         &self,
@@ -256,10 +283,10 @@ impl ModuleCompilationSchedule {
         project_path_resolver: &ProjectPathResolver,
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
-        string_table: &mut StringTable,
-        path_interner: &mut PathInternerBuilder,
+        string_table: &StringTable,
+        path_interner: &PathInternerBuilder,
         selected_source_texts: &mut SelectedSourceTextMap,
-    ) -> Result<(), PremergeFailure> {
+    ) -> Result<(), PreparedFailure> {
         let specs = std::mem::take(&mut self.check_only_specs);
         if specs.is_empty() {
             return Ok(());
@@ -270,6 +297,13 @@ impl ModuleCompilationSchedule {
         };
         let fork_source = string_table.fork_source();
         let path_fork_source = path_interner.fork_source();
+        let source_tree_index = directory_dependency_resolution.source_tree_index();
+        let mut remaining_jobs_by_owner = FxHashMap::<ModuleId, usize>::default();
+        for spec in &specs {
+            *remaining_jobs_by_owner
+                .entry(spec.owner_module_id)
+                .or_default() += 1;
+        }
         for spec in specs {
             let CheckOnlyModuleSpec {
                 owner_module_id,
@@ -277,11 +311,11 @@ impl ModuleCompilationSchedule {
                 candidate_source_indices,
                 stable_origin,
             } = spec;
-            self.check_only_jobs.push(prepare_check_only_module(
+            let job = prepare_check_only_module(
                 owner_module_id,
                 source_index,
                 &candidate_source_indices,
-                directory_dependency_resolution.source_tree_index(),
+                source_tree_index,
                 style_directives,
                 &preparation_context,
                 source_spans,
@@ -293,7 +327,21 @@ impl ModuleCompilationSchedule {
                 &fork_source,
                 &path_fork_source,
                 selected_source_texts,
-            )?);
+            )?;
+            self.check_only_jobs.push(job);
+            let remaining = remaining_jobs_by_owner
+                .get_mut(&owner_module_id)
+                .expect("check-only owner count was established from every spec");
+            *remaining -= 1;
+            if *remaining == 0 {
+                finalize_owned_module_source_spans(
+                    owner_module_id,
+                    source_tree_index,
+                    source_spans,
+                    selected_source_texts,
+                )
+                .map_err(PreparedFailure::from)?;
+            }
         }
         Ok(())
     }
@@ -319,56 +367,6 @@ impl ModuleCompilationSchedule {
     }
 }
 
-/// Discovers one compilation job for every canonical module in the directory project.
-///
-/// Root files are seeded from every graph node in deterministic `ModuleId`
-/// order. Reachable-file discovery retains direct `ModuleId` edges for cross-module dependencies;
-/// after discovery completes the edges enter the graph as provider-before-consumer order, and the
-/// returned modules are ordered by the populated graph's compile waves. The directory compiler
-/// consumes these waves sequentially; each job may use Rayon for file preparation, but semantic
-/// module publication remains serial. Only normal roots remain entry candidates, but support and
-/// facade roots now own API-only semantic jobs. A defensive
-/// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces as a
-/// typed premerge failure without panicking; the final boundary owns the vessel conversion.
-#[allow(dead_code)]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "project discovery keeps configuration, resolver, sources, directives and dependency resolution, mutable span/graph/import/resource/string/path owners and the timers-only boundary separate"
-)]
-pub(crate) fn discover_all_modules_in_project(
-    config: &Config,
-    project_path_resolver: &ProjectPathResolver,
-    source_files: &SourceDatabase,
-    source_spans: &mut SourceSpanBuilders<'_>,
-    project_module_graph: &mut ProjectModuleGraph,
-    style_directives: &StyleDirectiveRegistry,
-    external_imports: &mut ExternalImportDiscoveryState<'_>,
-    directory_dependency_resolution: DirectoryDependencyResolution<'_>,
-    resource_inputs: &mut ResourceInputRegistry,
-    string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
-    #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
-    let mut selected_source_texts = SelectedSourceTextMap::default();
-    discover_all_modules_in_project_with_check_only(
-        config,
-        project_path_resolver,
-        source_files,
-        source_spans,
-        project_module_graph,
-        style_directives,
-        external_imports,
-        directory_dependency_resolution,
-        resource_inputs,
-        false,
-        &mut selected_source_texts,
-        string_table,
-        path_interner,
-        #[cfg(feature = "timers")]
-        timing_boundary,
-    )
-}
-
 /// Discover a project inventory and optionally prepare transient check-only units.
 ///
 /// The default project discovery path remains canonical-only. Check mode opts in explicitly so
@@ -389,9 +387,9 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
+    path_interner: &PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -431,9 +429,9 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
+    path_interner: &PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -472,9 +470,9 @@ fn discover_all_modules_in_boundary(
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
+    path_interner: &PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
     let source_origin_lookup = project_module_graph
         .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
@@ -487,19 +485,25 @@ fn discover_all_modules_in_boundary(
     drop(source_origin_lookup);
 
     if require_normal_entry && project_module_graph.entry_modules().is_empty() {
-        // Move the local table into the diagnosed batch; the final boundary owns the single
-        // vessel conversion.
+        // Diagnostic identities intern through the narrow builder; the table then moves to the
+        // diagnosed batch for the final boundary handoff.
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
         let diagnostic = config_diagnostic(
             config,
             "entry_root",
             InvalidConfigReason::NoRootModuleEntries {
-                entry_root: path_id(project_path_resolver.entry_root(), string_table),
+                entry_root: path_id(project_path_resolver.entry_root(), &mut diagnostic_strings),
             },
-            string_table,
+            &mut diagnostic_strings,
         );
-        let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+        let table = string_table.take_for_handoff();
+        return Err(PreparedFailure::Diagnosed(
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                None,
+            ),
         ));
     }
 
@@ -535,7 +539,7 @@ fn discover_all_modules_in_boundary(
 
     // Freeze the graph's adjacency into sorted `Vec<ModuleId>` storage before compile waves are
     // computed. The no-edge production graph also completes here so scheduling always reads one
-    // frozen adjacency. Mutation or scheduling in an invalid phase is an internal `CompilerError`.
+    // frozen adjacency. Mutation or scheduling in an invalid phase is an internal `InfrastructureFailure`.
     project_module_graph.complete()?;
 
     // Order the discovered modules by the completed graph's compile waves so providers precede
@@ -611,7 +615,7 @@ fn compiler_source_ids_for_indices(
     source_indices: &[SourceRecordIndex],
     source_tree_index: &SourceTreeIndex,
     source_files: &SourceDatabase,
-) -> Result<Vec<CompilerSourceId>, CompilerError> {
+) -> Result<Vec<CompilerSourceId>, InfrastructureFailure> {
     source_indices
         .iter()
         .map(|source_index| {
@@ -620,7 +624,7 @@ fn compiler_source_ids_for_indices(
                 .get_by_canonical_path(canonical_path)
                 .map(|source_record| source_record.id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "module inventory: source row {} is absent from the boundary source file table",
                         source_index.index(),
                     ))
@@ -632,17 +636,55 @@ fn compiler_source_id_for_index(
     source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
     source_files: &SourceDatabase,
-) -> Result<CompilerSourceId, CompilerError> {
+) -> Result<CompilerSourceId, InfrastructureFailure> {
     let canonical_path = source_tree_index.source(source_index).canonical_path();
     source_files
         .get_by_canonical_path(canonical_path)
         .map(|source_record| source_record.id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "module inventory: source row {} is absent from the boundary source file table",
-                source_index.index(),
-            ))
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "module inventory: source row {} is absent from the boundary source file table",
+                    source_index.index(),
+                ),
+            )
         })
+}
+
+/// Finalize every successfully selected source owned by one module after its last preparation job.
+fn finalize_owned_module_source_spans(
+    module_id: ModuleId,
+    source_tree_index: &SourceTreeIndex,
+    source_spans: &mut SourceSpanBuilders<'_>,
+    selected_source_texts: &SelectedSourceTextMap,
+) -> Result<(), InfrastructureFailure> {
+    let source_files = source_spans.sources();
+    for source_index in source_tree_index.owned_source_indices(module_id) {
+        let source_record = source_tree_index.source(*source_index);
+        let canonical_path = source_record.canonical_path();
+        let Some(source_id) = source_files
+            .get_by_canonical_path(canonical_path)
+            .map(|slot| slot.id)
+        else {
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "module inventory: owned source row {} is absent from the boundary source file table",
+                    source_index.index(),
+                ),
+            ));
+        };
+        if source_files.retained_text(source_id).is_none()
+            && !selected_source_texts.contains_successful(canonical_path)
+        {
+            continue;
+        }
+        if !source_spans.is_source_finalized(source_id)? {
+            source_spans.finish_source(source_id)?;
+        }
+    }
+    Ok(())
 }
 /// Prepare one owned, unselected Moth source as an isolated transient semantic unit.
 ///
@@ -672,7 +714,7 @@ fn prepare_check_only_module(
     fork_source: &StringTableForkSource,
     path_fork_source: &PathInternerForkSource,
     selected_source_texts: &mut SelectedSourceTextMap,
-) -> Result<CheckOnlyModuleCompilationJob, PremergeFailure> {
+) -> Result<CheckOnlyModuleCompilationJob, PreparedFailure> {
     let candidate_source_ids = compiler_source_ids_for_indices(
         candidate_source_indices,
         source_tree_index,
@@ -686,11 +728,14 @@ fn prepare_check_only_module(
         source.ownership(),
         SourceOwnership::Owned(owner) if owner == owner_module_id
     ) {
-        return Err(CompilerError::compiler_error(format!(
-            "ModuleId {} check-only source row {} is not an owned Moth source",
-            owner_module_id.index(),
-            source_index.index()
-        ))
+        return Err(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            format!(
+                "ModuleId {} check-only source row {} is not an owned Moth source",
+                owner_module_id.index(),
+                source_index.index()
+            ),
+        )
         .into());
     }
 
@@ -791,7 +836,7 @@ fn prepare_check_only_module(
             )
         };
         let input = input_result.map_err(|error| {
-            let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+            let path_table = Arc::new(syntax.path_fork_mut().shared_table());
             error.into_failure(syntax.string_table_mut(), path_table)
         })?;
         // `prepare_source` already returns the premerge lane, so propagate directly without
@@ -816,7 +861,7 @@ fn prepare_check_only_module(
             let action = match action {
                 Ok(action) => action,
                 Err(error) => {
-                    let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+                    let path_table = Arc::new(syntax.path_fork_mut().shared_table());
                     return Err(error.into_failure(syntax.string_table_mut(), path_table));
                 }
             };
@@ -932,7 +977,7 @@ fn prepare_check_only_module(
         if target_kind == SourceFileKind::Moth {
             // `.moth` targets are classified as source-kind/no-value references, not content
             // sources. Keep this defensive arm from manufacturing another transient Moth root if
-            // a future classifier ever hands one to the content lane.
+            // a classifier ever hands one to the content lane.
             continue;
         }
         if !matches!(
@@ -967,7 +1012,7 @@ fn prepare_check_only_module(
             )
         };
         let target_input = target_input_result.map_err(|error| {
-            let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+            let path_table = Arc::new(syntax.path_fork_mut().shared_table());
             error.into_failure(syntax.string_table_mut(), path_table)
         })?;
         // Already in the premerge lane; propagate without an intermediate vessel.
@@ -995,7 +1040,7 @@ fn prepare_check_only_module(
 
     // `finish` already returns the premerge lane; propagate directly. The final boundary
     // owns the single vessel conversion.
-    let prepared = syntax.finish()?;
+    let (prepared, preparation_warnings) = syntax.finish()?;
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
         string_table_base_len,
@@ -1005,22 +1050,23 @@ fn prepare_check_only_module(
         external_packages: Arc::new(isolated_external_packages),
         external_dependency_resolution_table: isolated_resolution_table,
         prepared,
+        preparation_warnings,
     })
 }
 
 /// Insert resolved dependency edges directly by `ModuleId` into the project module graph.
 ///
 /// WHAT: the namespace already resolved each edge to boundary-local `ModuleId` pairs, so this
-///       function inserts provider-before-consumer edges with authored spans without a
-///       path-to-ID mapping step. Edges are sorted by (provider, consumer) `ModuleId` pair before
-///       insertion so the retained span and insertion order are deterministic and independent
-///       of Rayon completion order.
-/// WHY: the graph owns edge adjacency and the retained span side table, while the namespace
-///      resolves structural references to `ModuleId`s before they reach this insertion boundary.
+///       function inserts provider-before-consumer edges with authored paths and spans without
+///       a path-to-ID mapping step. Edges are sorted by `(provider, consumer)` `ModuleId` pair
+///       before insertion, making retained provenance deterministic and independent of Rayon
+///       completion order.
+/// WHY: the graph owns edge adjacency and provenance, while the namespace resolves structural
+///      references to `ModuleId`s before they reach this insertion boundary.
 fn insert_resolved_dependency_edges(
     project_module_graph: &mut ProjectModuleGraph,
     resolved_edges: &[ResolvedDependencyEdge],
-) -> Result<(), PremergeFailure> {
+) -> Result<(), PreparedFailure> {
     if resolved_edges.is_empty() {
         return Ok(());
     }
@@ -1038,23 +1084,22 @@ fn insert_resolved_dependency_edges(
     });
 
     for edge in ordered_edges {
-        project_module_graph.add_resolved_dependency_edge(
-            edge.provider_module_id,
-            edge.consumer_module_id,
-            edge.graph_span,
-        )?;
+        project_module_graph
+            .add_resolved_dependency_edge(edge.provider_module_id, edge.consumer_module_id)?;
     }
 
     Ok(())
 }
 
-/// Build the internal `CompilerError` for a disagreement between the project module graph's
-/// normal entry set and the discovered module inventories.
+/// Raise a compiler-bug report when the project module graph and discovered inventories disagree.
 ///
 /// Reaching this helper means the graph and discovery disagree on which normal entry roots exist,
-/// which is a proven invariant violation rather than a user-facing failure.
-fn graph_inventory_mismatch_error(reason: String) -> PremergeFailure {
-    PremergeFailure::Infrastructure(CompilerError::compiler_error(reason).into())
+/// which is a proven compiler invariant violation rather than a user-facing failure.
+fn graph_inventory_mismatch_error(reason: String) -> PreparedFailure {
+    crate::compiler_bug!(
+        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+        "{reason}"
+    )
 }
 
 /// Group module-job drafts by the populated graph's compile waves and attach each stable origin.
@@ -1068,8 +1113,8 @@ fn graph_inventory_mismatch_error(reason: String) -> PremergeFailure {
 ///      dependency-ordered wave order is known after those edges enter the graph. The graph and
 ///      discovery must agree exactly on the graph node set: every graph node needs one matching
 ///      discovered draft and vice versa. Duplicate jobs, missing graph entries and leftover
-///      inventories are all internal invariant failures in the premerge lane. A graph cycle is
-///      the same kind of internal failure reported by `compile_waves`.
+///      inventories are all internal invariant failures in the premerge lane. Dependency cycles
+///      are user-authored circular-dependency diagnostics in the premerge lane.
 fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
     drafts: Vec<ModuleCompilationJobDraft>,
@@ -1077,7 +1122,7 @@ fn order_discovered_modules_by_compile_waves(
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     check_only_specs: Vec<CheckOnlyModuleSpec>,
     source_module_origins: Arc<SourceModuleOriginTable>,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let waves = project_module_graph.compile_waves()?;
 
     // Index discovered drafts by their graph-assigned `ModuleId`. A duplicate `ModuleId` means
@@ -1122,6 +1167,7 @@ fn order_discovered_modules_by_compile_waves(
                 string_table_base_len: draft.string_table_base_len,
                 path_base_len: draft.path_base_len,
                 prepared: draft.prepared,
+                preparation_warnings: draft.preparation_warnings,
                 #[cfg(feature = "timers")]
                 timing_module_key: draft.timing_module_key,
             });
@@ -1167,10 +1213,10 @@ fn discover_modules_serial_provider_capable(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
-    string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
+    string_table: &StringTable,
+    path_interner: &PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationJobBatch, PremergeFailure> {
+) -> Result<ModuleCompilationJobBatch, PreparedFailure> {
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,
@@ -1304,7 +1350,7 @@ fn discover_modules_serial_provider_capable(
             let input = match input_result {
                 Ok(input) => input,
                 Err(error) => {
-                    let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+                    let path_table = Arc::new(syntax.path_fork_mut().shared_table());
                     return Err(error.into_failure(syntax.string_table_mut(), path_table));
                 }
             };
@@ -1329,7 +1375,7 @@ fn discover_modules_serial_provider_capable(
                 let action = match action {
                     Ok(action) => action,
                     Err(error) => {
-                        let path_table = Arc::new(syntax.path_fork_mut().snapshot_table());
+                        let path_table = Arc::new(syntax.path_fork_mut().shared_table());
                         return Err(error.into_failure(syntax.string_table_mut(), path_table));
                     }
                 };
@@ -1379,7 +1425,6 @@ fn discover_modules_serial_provider_capable(
                             provider_module_id,
                             consumer_module_id,
                             dependency_shell_id: provider.dependency_shell_id,
-                            graph_span: Some(provider.span),
                         });
                     }
                     ResolvedDependency::SourcePackageSurface {
@@ -1437,7 +1482,7 @@ fn discover_modules_serial_provider_capable(
         };
         // `finish` already returns the premerge lane; propagate directly. The final boundary
         // owns the single vessel conversion.
-        let prepared = syntax.finish()?;
+        let (prepared, preparation_warnings) = syntax.finish()?;
         add_frontend_counter(FrontendCounter::ModuleCount, 1);
         add_frontend_counter(
             FrontendCounter::SourceFileCount,
@@ -1453,6 +1498,7 @@ fn discover_modules_serial_provider_capable(
             prepared.semantic.source_file_count as u64,
             prepared.semantic.source_byte_count as u64,
         );
+        let has_deferred_check_only = !check_only_source_indices.is_empty();
         for check_only_source_index in check_only_source_indices {
             check_only_specs.push(CheckOnlyModuleSpec {
                 owner_module_id: seed.module_id,
@@ -1461,12 +1507,22 @@ fn discover_modules_serial_provider_capable(
                 stable_origin: stable_origin.clone(),
             });
         }
+        if !has_deferred_check_only {
+            finalize_owned_module_source_spans(
+                seed.module_id,
+                source_tree_index,
+                source_spans,
+                selected_source_texts,
+            )
+            .map_err(PreparedFailure::from)?;
+        }
         let path_base_len = prepared.semantic.path_fork.base_len();
         drafts.push(ModuleCompilationJobDraft {
             module_id: seed.module_id,
             string_table_base_len,
             path_base_len,
             prepared,
+            preparation_warnings,
             #[cfg(feature = "timers")]
             timing_module_key,
         });

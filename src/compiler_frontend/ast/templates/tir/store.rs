@@ -25,7 +25,6 @@ mod store_support;
 
 use crate::compiler_frontend::arena::capacity::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::const_values::ConstValueId;
-use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{SlotPlaceholder, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::tir::ids::{
@@ -48,7 +47,8 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
     TemplateIrSummary, summarize_existing_root, summarize_runtime_slot_representation,
 };
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_sets_are_equivalent;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use rustc_hash::FxHashMap;
 
@@ -293,7 +293,7 @@ impl TemplateIrStore {
         source: TemplateIrId,
         new_root: TemplateIrNodeId,
         metadata: DerivedTemplateMetadata,
-    ) -> Result<TemplateIrId, CompilerError> {
+    ) -> Result<TemplateIrId, InfrastructureFailure> {
         self.validate_derived_publication(source, new_root)?;
         let summary = summarize_existing_root(self, new_root)?;
         let derived = self.derived_template(source, new_root, summary, metadata)?;
@@ -311,12 +311,15 @@ impl TemplateIrStore {
         new_root: TemplateIrNodeId,
         plan: TemplateSlotPlanId,
         metadata: DerivedTemplateMetadata,
-    ) -> Result<TemplateIrId, CompilerError> {
+    ) -> Result<TemplateIrId, InfrastructureFailure> {
         self.validate_derived_publication(source, new_root)?;
         if self.get_slot_plan(plan).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot publish runtime-slot template {source} with missing or uncommitted slot plan {plan}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR store cannot publish runtime-slot template {source} with missing or uncommitted slot plan {plan}."
+                ),
+            ));
         }
 
         let summary = summarize_runtime_slot_representation(self, new_root, plan)?;
@@ -331,25 +334,32 @@ impl TemplateIrStore {
         &self,
         source: TemplateIrId,
         new_root: TemplateIrNodeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(source_template) = self.get_template(source) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot derive from unknown source template {source}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store cannot derive from unknown source template {source}."),
+            ));
         };
 
         if self.get_node(new_root).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot version template {source} around missing root node {new_root}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR store cannot version template {source} around missing root node {new_root}."
+                ),
+            ));
         }
 
         if let Some(plan) = source_template.runtime_slot_plan
             && self.get_slot_plan(plan).is_none()
         {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot preserve missing or uncommitted slot plan {plan} while deriving template {source}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR store cannot preserve missing or uncommitted slot plan {plan} while deriving template {source}."
+                ),
+            ));
         }
 
         Ok(())
@@ -361,11 +371,12 @@ impl TemplateIrStore {
         new_root: TemplateIrNodeId,
         mut summary: TemplateIrSummary,
         metadata: DerivedTemplateMetadata,
-    ) -> Result<TemplateIr, CompilerError> {
+    ) -> Result<TemplateIr, InfrastructureFailure> {
         let source_template = self.get_template(source).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR store cannot derive from unknown source template {source}."
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store cannot derive from unknown source template {source}."),
+            )
         })?;
         apply_derived_metadata(&mut summary, source_template, metadata);
 
@@ -384,7 +395,7 @@ impl TemplateIrStore {
         &mut self,
         id: TemplateIrId,
         kind: TemplateType,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let template = self.template_mut(id)?;
         template.kind = kind;
         Ok(())
@@ -394,11 +405,14 @@ impl TemplateIrStore {
         &mut self,
         id: TemplateIrId,
         plan: TemplateSlotPlanId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.get_slot_plan(plan).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot attach missing or uncommitted slot plan {plan} to template {id}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR store cannot attach missing or uncommitted slot plan {plan} to template {id}."
+                ),
+            ));
         }
 
         let template = self.template_mut(id)?;
@@ -410,11 +424,14 @@ impl TemplateIrStore {
         &mut self,
         id: TemplateIrId,
         wrapper_set: TemplateWrapperSetId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.get_wrapper_set(wrapper_set).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot attach missing wrapper set {wrapper_set} to template {id}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR store cannot attach missing wrapper set {wrapper_set} to template {id}."
+                ),
+            ));
         }
 
         let template = self.template_mut(id)?;
@@ -468,20 +485,20 @@ impl TemplateIrStore {
     pub(crate) fn tir_slot_placeholder_from_ast(
         &mut self,
         placeholder: &SlotPlaceholder,
-    ) -> Result<TirSlotPlaceholder, TemplateError> {
+    ) -> TirSlotPlaceholder {
         let occurrence_id = self.next_slot_occurrence_id();
         let applied_child_wrapper_set =
             self.push_or_reuse_optional_wrapper_set(&placeholder.applied_child_wrappers);
         let child_wrapper_set =
             self.push_or_reuse_optional_wrapper_set(&placeholder.child_wrappers);
 
-        Ok(TirSlotPlaceholder::with_wrapper_sets(
+        TirSlotPlaceholder::with_wrapper_sets(
             placeholder.key.to_owned(),
             occurrence_id,
             applied_child_wrapper_set,
             child_wrapper_set,
             placeholder.skip_parent_child_wrappers,
-        ))
+        )
     }
 
     pub(crate) fn get_template(&self, id: TemplateIrId) -> Option<&TemplateIr> {
@@ -491,9 +508,12 @@ impl TemplateIrStore {
     pub(super) fn template_mut(
         &mut self,
         id: TemplateIrId,
-    ) -> Result<&mut TemplateIr, CompilerError> {
+    ) -> Result<&mut TemplateIr, InfrastructureFailure> {
         self.templates.get_mut(id.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!("TIR store has no template {id}."))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store has no template {id}."),
+            )
         })
     }
 
@@ -505,10 +525,11 @@ impl TemplateIrStore {
         &mut self,
         node_id: TemplateIrNodeId,
         template_id: TemplateIrId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let node = self.node_mut(node_id)?;
         let TemplateIrNodeKind::ChildTemplate { reference, .. } = &mut node.kind else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR store cannot replace a non-child-template reference.",
             ));
         };
@@ -519,10 +540,13 @@ impl TemplateIrStore {
     pub(super) fn node_mut(
         &mut self,
         id: TemplateIrNodeId,
-    ) -> Result<&mut TemplateIrNode, CompilerError> {
-        self.nodes
-            .get_mut(id.index())
-            .ok_or_else(|| CompilerError::compiler_error(format!("TIR store has no node {id}.")))
+    ) -> Result<&mut TemplateIrNode, InfrastructureFailure> {
+        self.nodes.get_mut(id.index()).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store has no node {id}."),
+            )
+        })
     }
 
     pub(crate) fn get_wrapper_set(&self, id: TemplateWrapperSetId) -> Option<&TemplateWrapperSet> {

@@ -991,7 +991,6 @@ fn validate_fingerprint_exclude(
         authored_path,
     )?;
 
-    // Reject duplicate excludes.
     if seen_excludes.iter().any(|seen| seen == &relative_path) {
         return Err(invalid(
             manifest_path,
@@ -1296,7 +1295,6 @@ fn validate_partitioned(
         ));
     }
 
-    // Reject duplicate logical or canonical roots.
     for (i, left) in roots.iter().enumerate() {
         for (_j, right) in roots.iter().enumerate().skip(i + 1) {
             if left.relative == right.relative || left.canonical == right.canonical {

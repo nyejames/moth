@@ -18,10 +18,11 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::numeric_text::parse::{materialize_fixed_scalar, materialize_number};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -85,7 +86,10 @@ pub(super) fn parse_literal_expression(
             let mut token = token_stream
                 .current_numeric_literal_in(string_table)?
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("numeric literal token had no payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "numeric literal token had no payload",
+                    )
                 })?;
             let span = Some(token_stream.current_span());
 
@@ -117,11 +121,7 @@ pub(super) fn parse_literal_expression(
                 let expression = if let Some((scale, type_id)) = number_destination {
                     let value = materialize_number(&token, token.sign, scale, string_table)
                         .map_err(|reason| {
-                            CompilerDiagnostic::invalid_number_literal(
-                                token.source_text,
-                                reason,
-                                span,
-                            )
+                            token_lexical::invalid_number_literal(token.source_text, reason, span)
                         })?;
                     expression_builder.number(
                         const_values,
@@ -139,7 +139,7 @@ pub(super) fn parse_literal_expression(
                     )
                     .map_err(|reason| {
                         // Use authored source text so diagnostics report the original literal.
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+                        token_lexical::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
                     expression_builder.fixed_scalar(const_values, value, span, *state.value_mode)?
@@ -154,7 +154,7 @@ pub(super) fn parse_literal_expression(
                     )
                     .map_err(|reason| {
                         // Use authored source text so diagnostics report the original literal.
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+                        token_lexical::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
                     expression_builder.fixed_scalar(const_values, value, span, *state.value_mode)?
@@ -195,7 +195,10 @@ pub(super) fn parse_literal_expression(
             let string = token_stream
                 .current_string_id_in(string_table)?
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("string literal token had no payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "string literal token had no payload",
+                    )
                 })?;
             let span = Some(token_stream.current_span());
             let string_expr =
@@ -221,7 +224,10 @@ pub(super) fn parse_literal_expression(
                 .current()
                 .and_then(|token| token.bool_value())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("boolean literal token had no payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "boolean literal token had no payload",
+                    )
                 })?;
             let span = Some(token_stream.current_span());
             let bool_expr =
@@ -247,7 +253,10 @@ pub(super) fn parse_literal_expression(
                 .current()
                 .and_then(|token| token.char_value())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("char literal token had no payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "char literal token had no payload",
+                    )
                 })?;
             let span = Some(token_stream.current_span());
             let char_expr =
@@ -275,7 +284,7 @@ pub(super) fn parse_literal_expression(
                 let type_environment = type_interner.environment();
                 let Some(inner_type_id) = type_environment.option_inner_type(*expected_type_id)
                 else {
-                    return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    return Err(choices_control_flow::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
                         span,
@@ -288,7 +297,7 @@ pub(super) fn parse_literal_expression(
                 // option shape from the opposite operand during evaluation.
                 type_interner.builtins().none
             } else {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                return Err(choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                     None,
                     span,

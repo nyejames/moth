@@ -134,7 +134,7 @@ fn boundary_rejects_publishing_the_same_generated_identity_twice() {
         ]))
         .unwrap_err();
 
-    assert!(error.msg.contains("published more than once"));
+    assert!(error.message.contains("published more than once"));
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn late_generated_duplicate_leaves_existing_owners_unchanged() {
 
     assert!(
         error
-            .msg
+            .message
             .contains("duplicated inside one publication delta")
     );
     assert_eq!(
@@ -200,7 +200,7 @@ fn sidecar_record_identity_disagreement_leaves_store_unchanged() {
         ]))
         .unwrap_err();
 
-    assert!(error.msg.contains("disagrees with its record identity"));
+    assert!(error.message.contains("disagrees with its record identity"));
     assert!(store.records.is_empty());
     assert!(store.by_identity.is_empty());
     assert_eq!(store.sidecars().count(), 0);

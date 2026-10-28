@@ -1,0 +1,11 @@
+entry = "without_extension"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0003"]
+message_contains = ["Moth files use .moth"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0003"
+count = 1

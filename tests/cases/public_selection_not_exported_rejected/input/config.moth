@@ -1,0 +1,5 @@
+project #= (
+    name = "public_selection_not_exported_rejected",
+    entry_root = "src",
+)
+html #= ()

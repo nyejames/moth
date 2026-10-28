@@ -2,7 +2,7 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` in this module means a missing compiler setup service or internal
+//! `InfrastructureFailure` in this module means a missing compiler setup service or internal
 //! infrastructure failure. These are not user-facing diagnostics.
 
 use super::lookup::ScopeDeclarationRef;

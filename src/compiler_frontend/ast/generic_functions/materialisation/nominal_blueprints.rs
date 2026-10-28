@@ -5,16 +5,19 @@ use super::semantic_closure::collect_reachable_nominal_identities;
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     MaterialisationNominalOriginResolver, MaterialisationNominalSource,
-    const_store_error_into_compiler_error, import_canonical_folded_value,
+    const_store_error_into_prepared_failure, import_canonical_folded_value,
 };
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstValueStore, ConstValueStoreError};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity, CanonicalTypeProjectionContext,
     ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity, GenericDeclarationOrigin,
     canonical_builtin_for_key, intern_canonical_builtin, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition, TypeDefinition,
@@ -161,7 +164,10 @@ impl NominalMaterialisationBlueprint {
                     }
                 }
             }
-            _ => unreachable!("semantic equality guarantees matching nominal blueprint kinds"),
+            _ => crate::compiler_bug!(
+                CompilerStage::GenericMaterialisation,
+                "semantic equality guarantees matching nominal blueprint kinds"
+            ),
         }
     }
 }
@@ -195,12 +201,13 @@ pub(super) fn materialised_nominal_declaration(
     local_path: PathId,
     type_id: TypeId,
     type_environment: &TypeEnvironment,
-) -> Result<Declaration, CompilerError> {
+) -> Result<Declaration, InfrastructureFailure> {
     let shell = match type_environment.get(type_id) {
         Some(TypeDefinition::Struct(_)) => DeclarationShell::Struct,
         Some(TypeDefinition::Choice(_)) => DeclarationShell::Choice,
         _ => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialised nominal binding has no struct or choice definition",
             ));
         }
@@ -224,7 +231,7 @@ pub(super) fn materialised_struct_fields(
     services: &mut GeneratedValueMaterialisationServices<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Option<Vec<Declaration>>, Box<InfrastructureErrors>> {
+) -> Result<Option<Vec<Declaration>>, PreparedFailure> {
     if !matches!(
         type_environment.get(type_id),
         Some(TypeDefinition::Struct(_))
@@ -239,13 +246,15 @@ pub(super) fn materialised_struct_fields(
         ..
     } = &blueprint.definition
     else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Materialised struct has a non-struct nominal blueprint",
         )
         .into());
     };
     if fields.len() != blueprint_fields.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Materialised struct field count disagrees with its stable blueprint",
         )
         .into());
@@ -256,7 +265,8 @@ pub(super) fn materialised_struct_fields(
             .component(field.name)
             .is_some_and(|name| string_table.resolve(name) == blueprint_field.name);
         if !field_name_matches {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialised struct field name disagrees with its stable blueprint",
             )
             .into());
@@ -278,7 +288,9 @@ pub(super) fn materialised_struct_fields(
                 string_table,
                 field_span,
             )
-            .map_err(const_store_error_into_compiler_error)?;
+            .map_err(|error| {
+                const_store_error_into_prepared_failure(error, string_table, Some(type_environment))
+            })?;
             DeclarationValue::Default(value_id)
         } else {
             DeclarationValue::Absent
@@ -306,7 +318,7 @@ impl ModuleMaterialisationCapture {
         const_values: &ConstValueStore,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut nominal_type_ids = FxHashMap::default();
         for (identity, type_id) in self.type_environment.canonical_type_identities() {
             if matches!(
@@ -338,12 +350,13 @@ impl ModuleMaterialisationCapture {
         type_id: TypeId,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<NominalMaterialisationBlueprint, CompilerError> {
+    ) -> Result<NominalMaterialisationBlueprint, InfrastructureFailure> {
         let generic_parameter_list_id = match self.type_environment.get(type_id) {
             Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
             Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
             _ => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation nominal blueprint target is not a struct or choice",
                 ));
             }
@@ -356,7 +369,8 @@ impl ModuleMaterialisationCapture {
                 .type_environment
                 .generic_parameters(generic_parameter_list_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation nominal references a missing generic parameter list",
                     )
                 })?;
@@ -370,7 +384,8 @@ impl ModuleMaterialisationCapture {
             if let Some(public_parameters) = public_parameters
                 && public_parameters.len() != generic_parameter_list.parameters.len()
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation nominal public generic surface has inconsistent arity",
                 ));
             }
@@ -384,7 +399,7 @@ impl ModuleMaterialisationCapture {
                 if let Some(public_parameters) = public_parameters {
                     let public_parameter = &public_parameters[index];
                     if public_parameter.identity.authored_name() != name {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Materialisation nominal public generic parameter name disagrees with its local definition",
                         ));
                     }
@@ -405,7 +420,7 @@ impl ModuleMaterialisationCapture {
                     ),
                     CanonicalTypeIdentity::ModulePrivateNominal(_) => None,
                     _ => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Materialisation generic parameter owner is not nominal",
                         ));
                     }
@@ -418,7 +433,7 @@ impl ModuleMaterialisationCapture {
                             .canonical_identity_for_id(*trait_id)
                             .cloned()
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                     "Materialisation nominal generic bound has no canonical trait identity",
                                 )
                             })
@@ -431,7 +446,7 @@ impl ModuleMaterialisationCapture {
                     bounds,
                 })
                     })
-                    .collect::<Result<Box<[_]>, CompilerError>>()?;
+                    .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
             (generic_parameters, parameter_slots)
         } else {
             (
@@ -463,12 +478,14 @@ impl ModuleMaterialisationCapture {
                 )?,
             },
             None => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation nominal blueprint target is not a registered type",
                 ));
             }
             Some(_) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation nominal blueprint target is not a struct or choice",
                 ));
             }
@@ -485,7 +502,7 @@ impl ModuleMaterialisationCapture {
         identity: &CanonicalTypeIdentity,
     ) -> Result<
         Option<&[crate::compiler_frontend::public_interface::PublicGenericParameterSurface]>,
-        CompilerError,
+        InfrastructureFailure,
     > {
         let CanonicalTypeIdentity::SourceNominal(origin) = identity else {
             return Ok(None);
@@ -504,7 +521,8 @@ impl ModuleMaterialisationCapture {
             PublicDeclarationSemantics::Choice(semantics) => {
                 Ok(Some(&semantics.generic_parameters))
             }
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation nominal origin resolved to a non-nominal public declaration",
             )),
         }
@@ -530,13 +548,14 @@ impl ModuleMaterialisationCapture {
         nominal_path: Option<&PathId>,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<Box<[NominalFieldBlueprint]>, CompilerError> {
+    ) -> Result<Box<[NominalFieldBlueprint]>, InfrastructureFailure> {
         let paths = path_fork;
         fields
             .iter()
             .map(|field| {
                 let name = paths.component(field.name).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation nominal field path has no defining name",
                     )
                 })?;
@@ -570,7 +589,7 @@ impl ModuleMaterialisationCapture {
                     span: authored_span,
                 })
             })
-            .collect::<Result<Box<[_]>, CompilerError>>()
+            .collect::<Result<Box<[_]>, InfrastructureFailure>>()
     }
 
     fn nominal_choice_blueprints(
@@ -581,7 +600,7 @@ impl ModuleMaterialisationCapture {
         nominal_path: Option<&PathId>,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<Box<[NominalChoiceVariantBlueprint]>, CompilerError> {
+    ) -> Result<Box<[NominalChoiceVariantBlueprint]>, InfrastructureFailure> {
         variants
             .iter()
             .map(|variant| {
@@ -603,16 +622,17 @@ impl ModuleMaterialisationCapture {
                     payload_fields,
                 })
             })
-            .collect::<Result<Box<[_]>, CompilerError>>()
+            .collect::<Result<Box<[_]>, InfrastructureFailure>>()
     }
 
     pub(super) fn materialisation_type_blueprint(
         &self,
         type_id: TypeId,
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
-    ) -> Result<MaterialisationTypeBlueprint, CompilerError> {
+    ) -> Result<MaterialisationTypeBlueprint, InfrastructureFailure> {
         let definition = self.type_environment.get(type_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation nominal member references an unknown local type",
             )
         })?;
@@ -628,7 +648,7 @@ impl ModuleMaterialisationCapture {
                         .map(MaterialisationTypeBlueprint::Canonical)
                 })
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                         "Materialisation nominal member references a foreign unresolved generic parameter",
                     )
                 }),
@@ -641,7 +661,7 @@ impl ModuleMaterialisationCapture {
                     .cloned()
                     .map(MaterialisationTypeBlueprint::Canonical)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation, format!(
                             "Materialisation nominal member TypeId({}) has no canonical identity: {definition:?}",
                             type_id.0,
                         ))
@@ -652,7 +672,7 @@ impl ModuleMaterialisationCapture {
                     .external_package_registry
                     .resolve_type_package_and_symbol_path(external.type_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Materialisation nominal external member type is absent from the binding registry",
                         )
                     })?;
@@ -671,7 +691,7 @@ impl ModuleMaterialisationCapture {
                     .type_environment
                     .type_id_for_nominal_id(instance.base)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Materialisation generic instance has no nominal base type",
                         )
                     })?;
@@ -680,7 +700,7 @@ impl ModuleMaterialisationCapture {
                     .canonical_identity_for_type_id(base_type_id)
                     .cloned()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Materialisation generic instance base has no canonical identity",
                         )
                     })?;
@@ -693,7 +713,7 @@ impl ModuleMaterialisationCapture {
                     .collect::<Result<Box<[_]>, _>>()?;
                 Ok(MaterialisationTypeBlueprint::GenericInstance { base, arguments })
             }
-            TypeDefinition::Function(_) => Err(CompilerError::compiler_error(
+            TypeDefinition::Function(_) => Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                 "Materialisation nominal member cannot contain a function type",
             )),
             TypeDefinition::AnonymousConstRecordMarker => Ok(
@@ -706,7 +726,7 @@ impl ModuleMaterialisationCapture {
         &self,
         constructed: &crate::compiler_frontend::datatypes::definitions::ConstructedTypeDefinition,
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
-    ) -> Result<MaterialisationTypeBlueprint, CompilerError> {
+    ) -> Result<MaterialisationTypeBlueprint, InfrastructureFailure> {
         let arguments = constructed.arguments.as_ref();
         let project = |type_id| self.materialisation_type_blueprint(type_id, parameter_slots);
         match constructed.constructor {
@@ -752,10 +772,17 @@ impl ModuleMaterialisationCapture {
     }
 }
 
-fn materialisation_type_arity_error(shape: &str, expected: usize, actual: usize) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Materialisation {shape} type has malformed arity: expected {expected}, found {actual}",
-    ))
+fn materialisation_type_arity_error(
+    shape: &str,
+    expected: usize,
+    actual: usize,
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::GenericMaterialisation,
+        format!(
+            "Materialisation {shape} type has malformed arity: expected {expected}, found {actual}",
+        ),
+    )
 }
 
 pub(super) fn intern_generated_canonical_type(
@@ -765,7 +792,7 @@ pub(super) fn intern_generated_canonical_type(
     nominal_source: &impl MaterialisationNominalSource,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, ConstValueStoreError> {
     if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
         return Ok(type_id);
     }
@@ -779,7 +806,7 @@ pub(super) fn intern_generated_canonical_type(
                 None => type_environment
                     .type_id_for_canonical_identity(identity)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "Generated canonical Error type has no declaring-context builtin declaration",
                         )
                     })?,
@@ -847,7 +874,8 @@ pub(super) fn intern_generated_canonical_type(
             let (external_type_id, _) = external_registry
                 .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated canonical external type is absent from the binding registry",
                     )
                 })?;
@@ -867,9 +895,11 @@ pub(super) fn intern_generated_canonical_type(
                 Some(TypeDefinition::Struct(definition)) => definition.id,
                 Some(TypeDefinition::Choice(definition)) => definition.id,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated canonical generic base is not nominal",
-                    ));
+                    )
+                    .into());
                 }
             };
             let mut interned_arguments = Vec::with_capacity(arguments.len());
@@ -900,9 +930,11 @@ pub(super) fn intern_generated_canonical_type(
                 Some(TypeDefinition::Struct(definition)) => definition.id,
                 Some(TypeDefinition::Choice(definition)) => definition.id,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Generated private generic base is not nominal",
-                    ));
+                    )
+                    .into());
                 }
             };
             let mut interned_arguments = Vec::with_capacity(arguments.len());
@@ -920,9 +952,11 @@ pub(super) fn intern_generated_canonical_type(
                 .intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
         }
         CanonicalTypeIdentity::GenericParameter(_) => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Generated request retained an unresolved generic parameter",
-            ));
+            )
+            .into());
         }
         CanonicalTypeIdentity::AnonymousConstRecord => {
             type_environment.anonymous_const_record_type()
@@ -939,7 +973,7 @@ pub(super) fn intern_materialisation_type_blueprint(
     external_registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, ConstValueStoreError> {
     match blueprint {
         MaterialisationTypeBlueprint::Canonical(identity) => intern_generated_canonical_type(
             identity,
@@ -953,9 +987,11 @@ pub(super) fn intern_materialisation_type_blueprint(
             .get(*slot)
             .copied()
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation nominal member references an invalid generic parameter slot",
                 )
+                .into()
             }),
         MaterialisationTypeBlueprint::Collection {
             element,
@@ -1018,9 +1054,11 @@ pub(super) fn intern_materialisation_type_blueprint(
                 Some(TypeDefinition::Struct(definition)) => definition.id,
                 Some(TypeDefinition::Choice(definition)) => definition.id,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation generic instance base is not nominal",
-                    ));
+                    )
+                    .into());
                 }
             };
             let expected_arity = type_environment
@@ -1028,7 +1066,8 @@ pub(super) fn intern_materialisation_type_blueprint(
                 .and_then(|list_id| type_environment.generic_parameters(list_id))
                 .map(|parameters| parameters.parameters.len())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation generic instance base has no generic parameter list",
                     )
                 })?;
@@ -1037,7 +1076,8 @@ pub(super) fn intern_materialisation_type_blueprint(
                     "generic instance",
                     expected_arity,
                     arguments.len(),
-                ));
+                )
+                .into());
             }
             let arguments = arguments
                 .iter()
@@ -1062,16 +1102,18 @@ fn materialisation_nominal_path(
     identity: &CanonicalTypeIdentity,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<PathId, CompilerError> {
+) -> Result<PathId, ConstValueStoreError> {
     let mut path = PathId::ROOT;
-    let mut push_component = |component: &str| -> Result<(), CompilerError> {
-        path = path_fork
-            .try_intern_child(path, string_table.intern(component))
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "path table exhausted while interning materialised nominal path",
-                )
-            })?;
+    let mut push_component = |component: &str| -> Result<(), ConstValueStoreError> {
+        let Some(next_path) = path_fork.try_intern_child(path, string_table.intern(component))
+        else {
+            return Err(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                None,
+            )
+            .into());
+        };
+        path = next_path;
         Ok(())
     };
     push_component("<materialised>")?;
@@ -1091,9 +1133,11 @@ fn materialisation_nominal_path(
             push_component(identity.defining_path())?;
         }
         _ => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation nominal path requested for a non-nominal identity",
-            ));
+            )
+            .into());
         }
     }
     Ok(path)
@@ -1101,8 +1145,8 @@ fn materialisation_nominal_path(
 
 fn append_materialisation_module_origin(
     origin: &crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity,
-    push_component: &mut impl FnMut(&str) -> Result<(), CompilerError>,
-) -> Result<(), CompilerError> {
+    push_component: &mut impl FnMut(&str) -> Result<(), ConstValueStoreError>,
+) -> Result<(), ConstValueStoreError> {
     let package_origin = match origin.package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
         crate::builder_surface::PackageOrigin::Builder => "builder",
@@ -1140,14 +1184,17 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
     external_registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, ConstValueStoreError> {
     // Only `intern_generated_canonical_type` calls this, and it has already checked that
     // the identity is unregistered; the registration below relies on that absence.
     let blueprint = nominal_source.nominal_blueprint(identity).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "Generated request nominal {identity:?} is absent from {}",
-            N::SOURCE_LABEL
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            format!(
+                "Generated request nominal {identity:?} is absent from {}",
+                N::SOURCE_LABEL
+            ),
+        )
     })?;
 
     // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
@@ -1207,14 +1254,16 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                     .get(&TypeParameterId(index as u32))
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Generated nominal parameter registration omitted a parameter slot",
                         )
                     })?;
                 let parameter_type_id = type_environment
                     .type_id_for_generic_parameter(parameter_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Generated nominal parameter registration omitted its type handle",
                         )
                     })?;
@@ -1226,7 +1275,7 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                 }
                 Ok(parameter_type_id)
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?
     } else {
         Vec::new()
     };
@@ -1238,20 +1287,23 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                     .nominal_path(type_id)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Generated struct nominal shell has no local path",
                         )
                     })?;
             let fields = fields
                 .iter()
                 .map(|field| {
-                    let name = path_fork
-                        .try_intern_child(nominal_path, string_table.intern(&field.name))
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "path table exhausted while interning materialised field",
-                            )
-                        })?;
+                    let Some(name) =
+                        path_fork.try_intern_child(nominal_path, string_table.intern(&field.name))
+                    else {
+                        return Err(token_lexical::compiler_capacity_exceeded(
+                            CapacityResource::PathNodes,
+                            field.span,
+                        )
+                        .into());
+                    };
                     Ok(FieldDefinition {
                         name,
                         type_id: intern_materialisation_type_blueprint(
@@ -1263,10 +1315,10 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                             string_table,
                             path_fork,
                         )?,
-                        span: None,
+                        span: field.span,
                     })
                 })
-                .collect::<Result<Box<[_]>, CompilerError>>()?;
+                .collect::<Result<Box<[_]>, ConstValueStoreError>>()?;
             type_environment.update_struct_fields(type_id, fields);
         }
         NominalMaterialisationDefinition::Choice { variants } => {
@@ -1275,7 +1327,8 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                     .nominal_path(type_id)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Generated choice nominal shell has no local path",
                         )
                     })?;
@@ -1289,16 +1342,16 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                             .payload_fields
                             .iter()
                             .map(|field| {
-                                let name = path_fork
-                                    .try_intern_child(
-                                        nominal_path,
-                                        string_table.intern(&field.name),
+                                let Some(name) = path_fork.try_intern_child(
+                                    nominal_path,
+                                    string_table.intern(&field.name),
+                                ) else {
+                                    return Err(token_lexical::compiler_capacity_exceeded(
+                                        CapacityResource::PathNodes,
+                                        field.span,
                                     )
-                                    .ok_or_else(|| {
-                                        CompilerError::compiler_error(
-                                            "path table exhausted while interning materialised field",
-                                        )
-                                    })?;
+                                    .into());
+                                };
                                 Ok(FieldDefinition {
                                     name,
                                     type_id: intern_materialisation_type_blueprint(
@@ -1310,10 +1363,10 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                                         string_table,
                                         path_fork,
                                     )?,
-                                    span: None,
+                                    span: field.span,
                                 })
                             })
-                            .collect::<Result<Box<[_]>, CompilerError>>()?;
+                            .collect::<Result<Box<[_]>, ConstValueStoreError>>()?;
                         ChoiceVariantPayloadDefinition::Record { fields }
                     };
                     Ok(ChoiceVariantDefinition {
@@ -1323,7 +1376,7 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
                         span: None,
                     })
                 })
-                .collect::<Result<Box<[_]>, CompilerError>>()?;
+                .collect::<Result<Box<[_]>, ConstValueStoreError>>()?;
             type_environment.update_choice_variants(type_id, variants);
         }
     }
@@ -1335,7 +1388,7 @@ impl ModuleMaterialisationCapture {
     pub(super) fn stable_type_identity(
         &self,
         type_id: TypeId,
-    ) -> Result<CanonicalTypeIdentity, CompilerError> {
+    ) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
         stable_type_identity(
             type_id,
             &self.type_environment,
@@ -1348,7 +1401,7 @@ impl ModuleMaterialisationPreparation {
     pub(super) fn stable_type_identity(
         &self,
         type_id: TypeId,
-    ) -> Result<CanonicalTypeIdentity, CompilerError> {
+    ) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
         stable_type_identity(
             type_id,
             &self.type_environment,
@@ -1361,7 +1414,7 @@ fn stable_type_identity(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
-) -> Result<CanonicalTypeIdentity, CompilerError> {
+) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
     let nominal_origins = MaterialisationNominalOriginResolver { type_environment };
     let generic_parameter_origins = FoldedValueGenericParameterResolver;
     let projection_context = CanonicalTypeProjectionContext::new(

@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -157,8 +157,8 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
 fn start_reachability_ignores_unreachable_function_external_calls() {
     let reachable_external_function = ExternalFunctionId::Synthetic(99);
     let unreachable_external_function = ExternalFunctionId::Synthetic(100);
-    let reachable_location = call_site_span(10, 4);
-    let unreachable_location = call_site_span(20, 8);
+    let reachable_location = Some(call_site_span(10, 4));
+    let unreachable_location = Some(call_site_span(20, 8));
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -206,9 +206,9 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
 fn reachable_collection_push_call_sites_preserve_ids_and_duplicates() {
     let growable_push = ExternalFunctionId::CollectionPushGrowable;
     let fixed_push = ExternalFunctionId::CollectionPushFixed;
-    let growable_location = call_site_span(10, 4);
-    let fixed_location = call_site_span(10, 8);
-    let repeated_growable_location = call_site_span(10, 12);
+    let growable_location = Some(call_site_span(10, 4));
+    let fixed_location = Some(call_site_span(10, 8));
+    let repeated_growable_location = Some(call_site_span(10, 12));
     let module = hir_module(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
@@ -507,9 +507,9 @@ fn function_link_facts_reject_missing_function_provenance() {
     let error = collect_module_function_link_facts(&module_without_provenance)
         .expect_err("missing function provenance must be an invariant error");
     assert!(
-        error.msg.contains("provenance"),
+        error.message.contains("provenance"),
         "error should identify missing function provenance: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -517,8 +517,8 @@ fn function_link_facts_reject_missing_function_provenance() {
 fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order() {
     let external_from_first_callee = ExternalFunctionId::Synthetic(220);
     let external_from_second_callee = ExternalFunctionId::Synthetic(221);
-    let second_callee_location = call_site_span(30, 2);
-    let first_callee_successor_location = call_site_span(40, 2);
+    let second_callee_location = Some(call_site_span(30, 2));
+    let first_callee_successor_location = Some(call_site_span(40, 2));
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -633,7 +633,7 @@ fn backend_selection_rejects_a_detached_cfg_with_colliding_ids() {
         .validate_for_hir(&target_module)
         .expect_err("selection from another CFG must be rejected");
 
-    assert!(error.msg.contains("does not match the CFG"));
+    assert!(error.message.contains("does not match the CFG"));
 }
 
 #[test]
@@ -674,7 +674,7 @@ fn backend_selection_rejects_a_detached_call_graph_with_colliding_ids() {
         .validate_for_hir(&target_module)
         .expect_err("selection with an omitted callee must be rejected");
 
-    assert!(error.msg.contains("omits callee"));
+    assert!(error.message.contains("omits callee"));
 }
 
 #[test]
@@ -781,7 +781,7 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
 #[test]
 fn custom_roots_are_supported_without_using_module_start() {
     let external_function = ExternalFunctionId::Synthetic(300);
-    let call_site_location = call_site_span(60, 2);
+    let call_site_location = Some(call_site_span(60, 2));
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -815,8 +815,8 @@ fn custom_roots_are_supported_without_using_module_start() {
 
 #[test]
 fn reachability_records_reachable_map_uses_only() {
-    let operation_location = call_site_span(41, 4);
-    let unreachable_location = call_site_span(50, 6);
+    let operation_location = Some(call_site_span(41, 4));
+    let unreachable_location = Some(call_site_span(50, 6));
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -884,9 +884,9 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
         ),
         None,
     );
-    let first_location = call_site_span(40, 2);
-    let second_location = call_site_span(41, 4);
-    let unreachable_location = call_site_span(50, 6);
+    let first_location = Some(call_site_span(40, 2));
+    let second_location = Some(call_site_span(41, 4));
+    let unreachable_location = Some(call_site_span(50, 6));
     let mut expressions = test_expression_store();
     let module = hir_module_with_expressions(
         FunctionId(0),
@@ -980,10 +980,10 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
         ),
         None,
     );
-    let outer_location = call_site_span(40, 2);
-    let nested_branch_location = call_site_span(41, 4);
-    let sibling_branch_location = call_site_span(42, 6);
-    let after_branch_location = call_site_span(43, 8);
+    let outer_location = Some(call_site_span(40, 2));
+    let nested_branch_location = Some(call_site_span(41, 4));
+    let sibling_branch_location = Some(call_site_span(42, 6));
+    let after_branch_location = Some(call_site_span(43, 8));
     let mut expressions = test_expression_store();
     let module = hir_module_with_expressions(
         FunctionId(0),
@@ -1110,8 +1110,8 @@ fn missing_function_references_are_internal_hir_errors() {
     let error = collect_test_reachability(&module, &[FunctionId(99)])
         .expect_err("missing root function should fail");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Function link facts are missing"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Function link facts are missing"));
 }
 
 #[test]
@@ -1137,8 +1137,8 @@ fn missing_block_references_are_internal_hir_errors() {
     )
     .expect_err("missing target block should fail");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unknown HIR block id"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unknown HIR block id"));
 }
 
 #[test]
@@ -1157,8 +1157,8 @@ fn uninitialized_terminators_are_internal_hir_errors() {
     )
     .expect_err("uninitialized terminator should fail");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Uninitialized HIR terminator"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Uninitialized HIR terminator"));
 }
 
 fn hir_module(
@@ -1270,7 +1270,7 @@ fn test_expression_store() -> HirExpressionStore {
 fn collect_test_reachability(
     module: &HirModule,
     roots: &[FunctionId],
-) -> Result<HirReachability, crate::compiler_frontend::compiler_errors::CompilerError> {
+) -> Result<HirReachability, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
     let function_facts = collect_module_function_link_facts(module)?;
     collect_reachability_from_function_link_facts(&function_facts, roots)
 }
@@ -1630,8 +1630,8 @@ fn reachability_collects_runtime_casts_in_match_pattern_values() {
 
 #[test]
 fn reachability_records_reachable_float_statements_only() {
-    let reachable_location = call_site_span(30, 2);
-    let unreachable_location = call_site_span(50, 4);
+    let reachable_location = Some(call_site_span(30, 2));
+    let unreachable_location = Some(call_site_span(50, 4));
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -1745,11 +1745,11 @@ fn reachable_map_use_summaries(
         .collect()
 }
 
-fn call_site_span(start: u32, length: u32) -> Option<SourceSpan> {
+fn call_site_span(start: u32, length: u32) -> SourceSpan {
     let mut extended_spans = ExtendedSpanBuilder::default();
     let local_span = LocalSpan::exact(start, length, &mut extended_spans)
         .expect("small call-site fixture spans should fit inline");
-    Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local_span))
+    SourceSpan::new(SourceId::COMPILATION_ROOT, local_span)
 }
 
 fn sorted_function_ids(reachability: &HirReachability) -> Vec<u32> {
@@ -1833,7 +1833,7 @@ fn external_id_sort_key(id: &ExternalFunctionId) -> String {
 #[test]
 fn invoke_calls_retain_call_facts_and_both_successors() {
     let external = ExternalFunctionId::Synthetic(900);
-    let span = call_site_span(30, 4);
+    let span = Some(call_site_span(30, 4));
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -1891,7 +1891,7 @@ fn invoke_numeric_facts_preserve_exact_domain_and_recoverable_delivery() {
         operator: NumericOperator::Add,
         domain: NumericScalar::Fixed(FixedScalar::I32),
     };
-    let span = call_site_span(40, 2);
+    let span = Some(call_site_span(40, 2));
     let module = hir_module(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
@@ -1939,7 +1939,7 @@ fn invoke_numeric_facts_preserve_exact_domain_and_recoverable_delivery() {
 
 #[test]
 fn invoke_map_operations_retain_map_facts_and_operand_uses() {
-    let span = call_site_span(45, 3);
+    let span = Some(call_site_span(45, 3));
     let mut expressions = test_expression_store();
     let receiver_statement =
         structural_string_statement(&mut expressions, 0, vec![ConstStringPiece::SiteRoot], span);

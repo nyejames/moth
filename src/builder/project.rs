@@ -10,17 +10,19 @@
 
 use super::compiled_project::{BuildArtifacts, BuildContext, CompiledProject};
 use super::{BuildProfile, BuilderDefinition, Error};
-use crate::build_system::build::{self, BackendBuilder, Project, ProjectCompilation};
+use crate::build_system::backend_build_context::BackendBuildContext;
+use crate::build_system::build::{
+    self, BackendBuilder, BackendInvocationFailure, Project, ProjectCompilation,
+};
 use crate::build_system::output::{BuilderIdentity, CleanupPolicy};
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
+use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::{Config, ProjectConfigError};
-use std::cell::Cell;
 use std::path::PathBuf;
 
 /// The builder a project author implements to turn a compiled project into outputs.
@@ -106,7 +108,6 @@ pub fn build_project(
     let adapter = ProjectBuilderAdapter {
         builder,
         definition,
-        builder_error: Cell::new(None),
     };
     let release_flags = [Flag::Release];
     let flags: &[Flag] = match request.profile {
@@ -114,24 +115,26 @@ pub fn build_project(
         BuildProfile::Release => &release_flags,
     };
     let build_result =
-        build::build_project(&adapter, project_root, flags, &BuildConfigInputSet::new());
+        build::build_project(&adapter, project_root, flags, &BuildConfigInputSet::new())?;
 
-    // WHY: `CompilerMessages` cannot carry the SDK error, so `build_backend` parks it in the
-    // adapter and returns a placeholder failure. The parked error is checked first, so the
-    // placeholder never reaches the caller.
-    if let Some(builder_error) = adapter.builder_error.take() {
-        return Err(builder_error);
-    }
-
-    let mut build_result = build_result
-        .map_err(|compiler_messages| Error::from_compiler_messages(&compiler_messages))?;
-
-    let warnings = match build_result.take_warning_messages() {
-        None => Vec::new(),
-        Some(warning_messages) if warning_messages.infrastructure_errors().is_some() => {
-            return Err(Error::from_compiler_messages(&warning_messages));
+    let build_result = match build_result {
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            return Err(Error::from_diagnostic_reports(&reports));
         }
-        Some(warning_messages) => format_terse_compiler_messages(&warning_messages),
+        Err(errors) => {
+            return Err(Error::from_infrastructure_errors(errors));
+        }
+    };
+
+    let warnings = match build_result.finish_output(Ok(())) {
+        Ok(CompilationOutcome::Success { warnings, .. }) => warnings
+            .map(|reports| format_terse_diagnostic_reports(&reports))
+            .unwrap_or_default(),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            return Err(Error::from_diagnostic_reports(&reports));
+        }
+        Err(errors) => return Err(Error::from_infrastructure_errors(errors)),
     };
 
     Ok(BuiltProject { warnings })
@@ -139,18 +142,16 @@ pub fn build_project(
 
 /// Presents a `ProjectBuilder` to the compiler's shared build orchestration.
 ///
-/// WHAT: answers the orchestration's identity, surface and config questions from the builder's
-/// definition, and runs the builder's `build` step in the backend slot.
-/// WHY: the orchestration only understands `BackendBuilder`, so the SDK reuses it instead of
-/// duplicating the frontend and config flow.
+/// The adapter borrows the public builder for one synchronous call and carries the exact
+/// builder-originated failure through the build-client result instead of the compiler lanes.
 struct ProjectBuilderAdapter<'builder> {
     builder: &'builder dyn ProjectBuilder,
     definition: BuilderDefinition,
-    /// The builder's error, parked here because the orchestration carries only compiler messages.
-    builder_error: Cell<Option<Error>>,
 }
 
 impl BackendBuilder for ProjectBuilderAdapter<'_> {
+    type Error = Error;
+
     fn builder_identity(&self) -> BuilderIdentity {
         self.definition.builder_identity()
     }
@@ -161,29 +162,22 @@ impl BackendBuilder for ProjectBuilderAdapter<'_> {
         _config: &Config,
         build_profile: BuildProfile,
         _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        _backend_context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         let resource_inputs = project_compilation.take_resource_inputs();
         let compiled_project = CompiledProject::new(project_compilation);
         let mut context = BuildContext::new(build_profile);
 
         match self.builder.build(&compiled_project, &mut context) {
-            // WHY: the driver does not write outputs yet, so the artifacts are dropped here.
+            // The prototype discards artifacts; it does not publish them.
             Ok(_artifacts) => Ok(Project {
                 output_files: Vec::new(),
                 entry_page_rel: None,
                 cleanup_policy: CleanupPolicy::generic(std::iter::empty::<&str>()),
-                warnings: Vec::new(),
                 deferred_resources: Vec::new(),
                 resource_inputs,
             }),
-            Err(builder_error) => {
-                self.builder_error.set(Some(builder_error));
-                Err(CompilerMessages::from_error(
-                    CompilerError::compiler_error("The project builder reported a failure."),
-                    StringTable::new(),
-                ))
-            }
+            Err(builder_error) => Err(BackendInvocationFailure::Builder(builder_error)),
         }
     }
 
@@ -192,17 +186,16 @@ impl BackendBuilder for ProjectBuilderAdapter<'_> {
     }
 
     fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        // WHY: SDK builders register no template style directives.
+        // SDK builders register no template style directives.
         Vec::new()
     }
 
     fn validate_project_config(
         &self,
         _config: &Config,
-        _string_table: &mut StringTable,
+        _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
-        // WHY: SDK builders add no checks beyond the generic config schema validation that already
-        // ran while loading config.
+        // Generic config-schema validation already ran while loading config.
         Ok(())
     }
 }

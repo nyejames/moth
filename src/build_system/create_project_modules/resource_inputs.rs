@@ -5,7 +5,7 @@
 //! WHY: graph activity and output liveness are separate. A referenced resource must be known and
 //! watchable even when no reachable output ultimately emits it, while the compiler-facing table
 //! remains free of filesystem and byte-source policy.
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
@@ -118,7 +118,7 @@ impl ResourceInputRegistry {
     pub(crate) fn preflight_resource_source_associations(
         &self,
         associations: &[ResourceSourceAssociation],
-    ) -> Result<ResourceSourcePublication, CompilerError> {
+    ) -> Result<ResourceSourcePublication, InfrastructureFailure> {
         let mut pending_by_origin: FxHashMap<&StableResourceOriginId, ResourceSourceId> =
             FxHashMap::default();
         let mut new_associations = Vec::new();
@@ -126,13 +126,13 @@ impl ResourceInputRegistry {
         for association in associations {
             let source_id = association.source;
             let Some(record) = self.records.get(source_id.index()) else {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource origin attachment references unknown source ID {}",
                     source_id.index()
                 )));
             };
             if record.source_id != source_id {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource origin attachment source ID {} disagrees with its record ID {}",
                     source_id.index(),
                     record.source_id.index()
@@ -141,7 +141,7 @@ impl ResourceInputRegistry {
 
             if let Some(existing_source_id) = self.source_by_origin.get(&association.origin) {
                 if *existing_source_id != source_id {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "resource origin {:?} is attached to source ID {}, not {}",
                         association.origin,
                         existing_source_id.index(),
@@ -153,7 +153,7 @@ impl ResourceInputRegistry {
 
             if let Some(existing_source_id) = pending_by_origin.get(&association.origin) {
                 if *existing_source_id != source_id {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "resource origin {:?} is attached to source ID {}, not {}",
                         association.origin,
                         existing_source_id.index(),
@@ -229,14 +229,14 @@ impl ResourceInputRegistry {
     pub(crate) fn hash_source(
         &mut self,
         source_id: ResourceSourceId,
-    ) -> Result<u64, CompilerError> {
+    ) -> Result<u64, InfrastructureFailure> {
         let source_index = source_id.index();
         let (content_state, canonical_source_path) = self
             .records
             .get(source_index)
             .map(|record| (record.content, &record.canonical_source_path))
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource source ID {} is outside the source registry",
                     source_id.index()
                 ))
@@ -247,17 +247,14 @@ impl ResourceInputRegistry {
                 // The filesystem read completes before the record below is borrowed mutably to
                 // store the cached result: the canonical path is borrowed, never copied.
                 let bytes = fs::read(canonical_source_path).map_err(|error| {
-                    CompilerError::file_error(
-                        canonical_source_path,
-                        format!(
-                            "Failed to read resource source '{}': {error}",
-                            canonical_source_path.display()
-                        ),
-                    )
+                    InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, canonical_source_path, format!(
+                        "Failed to read resource source '{}': {error}",
+                        canonical_source_path.display()
+                    ))
                 })?;
                 let content_hash = resource_content_hash(&bytes);
                 let record = self.records.get_mut(source_index).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "resource source ID {} disappeared while hashing",
                         source_id.index()
                     ))
@@ -278,13 +275,16 @@ impl ResourceInputRegistry {
     pub(crate) fn read_source(
         &mut self,
         source_id: ResourceSourceId,
-    ) -> Result<&[u8], CompilerError> {
+    ) -> Result<&[u8], InfrastructureFailure> {
         let content_hash = self.hash_source(source_id)?;
         let record = self.records.get_mut(source_id.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "resource source ID {} disappeared while reading",
-                source_id.index()
-            ))
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "resource source ID {} disappeared while reading",
+                    source_id.index()
+                ),
+            )
         })?;
 
         if matches!(record.content, ResourceContentState::Hashed { .. }) {
@@ -292,25 +292,28 @@ impl ResourceInputRegistry {
         }
 
         record.bytes.as_deref().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "resource source ID {} has no cached bytes after hashing",
-                source_id.index()
-            ))
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "resource source ID {} has no cached bytes after hashing",
+                    source_id.index()
+                ),
+            )
         })
     }
 
     /// Prove the registry's dense IDs and canonical-path index still agree at a boundary handoff.
-    pub(crate) fn validate(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate(&self) -> Result<(), InfrastructureFailure> {
         for (index, record) in self.records().iter().enumerate() {
             if record.source_id.index() != index {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource source ID {} is stored at record index {index}",
                     record.source_id.index()
                 )));
             }
             if self.by_canonical_path.get(&record.canonical_source_path) != Some(&record.source_id)
             {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource source {:?} is absent from its canonical-path index",
                     record.canonical_source_path
                 )));
@@ -319,13 +322,13 @@ impl ResourceInputRegistry {
 
         for (origin, source_id) in &self.source_by_origin {
             let Some(record) = self.records.get(source_id.index()) else {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource origin {origin:?} points outside the source registry at ID {}",
                     source_id.index()
                 )));
             };
             if record.source_id != *source_id {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "resource origin {origin:?} points to source ID {}, but that record owns ID {}",
                     source_id.index(),
                     record.source_id.index()
@@ -339,7 +342,7 @@ impl ResourceInputRegistry {
                 .iter()
                 .any(|record| record.canonical_source_path == interest.canonical_path)
             {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "missing resource watch {:?} overlaps an existing source",
                     interest.canonical_path
                 )));

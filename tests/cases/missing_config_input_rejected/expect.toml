@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+reason = "invalid_config.missing_config_input"
+path = "input/@page.moth"
+line = 1

@@ -34,9 +34,8 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ParsedReceiverValue, ValueBlock, ValueMatchBlock,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -87,19 +86,18 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         classification,
         path_fork,
     }) {
-        Some(Ok(ClassifiedSinglePredicateHeader::Predicate(header))) => *header,
-        Some(Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(seed))) => {
+        Ok(ClassifiedSinglePredicateHeader::Predicate(header)) => *header,
+        Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(seed)) => {
             return SinglePredicateParseOutcome::OrdinarySubject(seed);
         }
-        Some(Err(error)) => return SinglePredicateParseOutcome::Decided(Err(error)),
-        None => return SinglePredicateParseOutcome::Absent,
+        Err(error) => return SinglePredicateParseOutcome::Decided(Err(error)),
     };
 
     if header.body_delimiter != IfHeaderDelimiter::InlineThen
         || token_stream.current_tag() != TokenTag::THEN
     {
         return SinglePredicateParseOutcome::Decided(Err(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             )
@@ -109,7 +107,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
 
     if !same_logical_line(token_stream, header_index, token_stream.position()) {
         return SinglePredicateParseOutcome::Decided(Err(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::InlineValueIfMultiline,
                 Some(token_stream.current_span()),
             )
@@ -149,7 +147,7 @@ struct InlineValueMatchParseInput<'a, 'b, 'tokens> {
 }
 
 /// The speculative outer parser may discard only authored diagnostics. Once a match shape is
-/// accepted, the inner parser retains `CompilerError` until AST emission.
+/// accepted, the inner parser retains `InfrastructureFailure` until AST emission.
 type InlineValueMatchResult<T> = Result<T, ExpressionParseError>;
 
 fn parse_inline_value_match(

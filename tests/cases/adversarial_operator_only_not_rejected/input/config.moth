@@ -1,0 +1,5 @@
+project #= (
+    name = "adversarial_operator_only_not_rejected",
+    entry_root = "src",
+)
+html #= ()

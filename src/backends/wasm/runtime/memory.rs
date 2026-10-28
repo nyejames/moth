@@ -58,21 +58,21 @@ impl WasmScalarStorageKind {
     ///
     /// `Byte` remains a distinct semantic type but has the same physical octet representation as
     /// U8. F16 uses the portable binary16 conversion helpers at the scalar memory boundary.
-    #[allow(dead_code)] // Wasm scalar places will consume this when their owning lowering lands.
-    pub(crate) const fn from_fixed_scalar(scalar: FixedScalar) -> Option<Self> {
+    #[allow(dead_code)] // No production HIR caller; projected-place lowering is rejected before LIR.
+    pub(crate) const fn from_fixed_scalar(scalar: FixedScalar) -> Self {
         match scalar {
-            FixedScalar::I8 => Some(Self::I8),
-            FixedScalar::U8 => Some(Self::U8),
-            FixedScalar::I16 => Some(Self::I16),
-            FixedScalar::U16 => Some(Self::U16),
-            FixedScalar::I32 => Some(Self::I32),
-            FixedScalar::U32 => Some(Self::U32),
-            FixedScalar::I64 => Some(Self::I64),
-            FixedScalar::U64 => Some(Self::U64),
-            FixedScalar::F16 => Some(Self::F16),
-            FixedScalar::F32 => Some(Self::F32),
-            FixedScalar::F64 => Some(Self::F64),
-            FixedScalar::Byte => Some(Self::U8),
+            FixedScalar::I8 => Self::I8,
+            FixedScalar::U8 => Self::U8,
+            FixedScalar::I16 => Self::I16,
+            FixedScalar::U16 => Self::U16,
+            FixedScalar::I32 => Self::I32,
+            FixedScalar::U32 => Self::U32,
+            FixedScalar::I64 => Self::I64,
+            FixedScalar::U64 => Self::U64,
+            FixedScalar::F16 => Self::F16,
+            FixedScalar::F32 => Self::F32,
+            FixedScalar::F64 => Self::F64,
+            FixedScalar::Byte => Self::U8,
         }
     }
 
@@ -80,10 +80,10 @@ impl WasmScalarStorageKind {
     ///
     /// Every bounded numeric identity is an exact fixed scalar, so the scalar owns its storage
     /// and its storage follows from the scalar alone.
-    #[allow(dead_code)] // The production HIR scalar-place path is not in this change.
+    #[allow(dead_code)] // No production HIR caller; projected-place lowering is rejected before LIR.
     pub(crate) const fn for_numeric_scalar(scalar: NumericScalar) -> Option<Self> {
         match scalar {
-            NumericScalar::Fixed(scalar) => Self::from_fixed_scalar(scalar),
+            NumericScalar::Fixed(scalar) => Some(Self::from_fixed_scalar(scalar)),
             NumericScalar::Number(_) => None,
         }
     }

@@ -5,8 +5,8 @@
 //! tagged entries (same-module source, provider-owned file, cross-module target). Registered
 //! binding packages and source-backed package surfaces are explicit shared entries keyed by
 //! dependency prefix.
-//! WHY: replaces filesystem candidate probing and public-surface fallback with indexed
-//! lookups, keeping boundary identity attached to boundary-local `SourceId`/`ModuleId`. The
+//! WHY: indexed lookups avoid filesystem candidate probing and public-surface fallback,
+//! and keep boundary identity attached to boundary-local `SourceId`/`ModuleId`. The
 //! canonical path leaves the namespace only as the IO/enqueue handle for the current compiler.
 //!
 //! Resolution rules:
@@ -27,9 +27,10 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidImportPathReason, PremergeFailure,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::{InvalidImportPathReason, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -156,7 +157,7 @@ pub(crate) enum ResolvedDependency {
 /// WHY: the build-system authority requires Core, Builder and dependency source packages to
 /// compile as separate graphs with their own source indexes. This owner is the single Stage 0
 /// home for the namespace lookup tables that replace filesystem probing and public-surface
-/// fallback on the migrated directory production path.
+/// fallback on the directory production path.
 #[derive(Default)]
 pub(crate) struct ModuleNamespaceSet {
     /// One namespace per project module, indexed by project `ModuleId`.
@@ -249,7 +250,7 @@ impl<'a> DirectoryDependencyResolution<'a> {
         provider: &RetainedDependencyPath,
         declaring_canonical_path: &Path,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+    ) -> Result<ResolvedDependency, DiagnosticDraft> {
         self.namespace_set.resolve_dependency(
             provider,
             declaring_canonical_path,
@@ -281,8 +282,8 @@ impl<'a> DirectoryDependencyResolution<'a> {
         provider_path: PathId,
         declaring_canonical_path: &Path,
         dependency_span: Option<SourceSpan>,
-        string_table: &mut StringTable,
-    ) -> Result<PathBuf, CompilerDiagnostic> {
+        string_table: &StringTable,
+    ) -> Result<PathBuf, DiagnosticDraft> {
         self.namespace_set.resolve_provider_target(
             provider_path,
             declaring_canonical_path,
@@ -332,7 +333,7 @@ impl ModuleNamespaceSet {
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
         project_path_resolver: &ProjectPathResolver,
-    ) -> Result<Self, PremergeFailure> {
+    ) -> Result<Self, PreparedFailure> {
         let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
         let roots = std::iter::once(project_path_resolver.entry_root().to_path_buf())
             .chain(project_path_resolver.module_roots().cloned())
@@ -370,8 +371,8 @@ impl ModuleNamespaceSet {
     /// extensions, resolves source-backed package surfaces, and looks up the dependency path in
     /// the owning module's namespace. Returns a tagged `ResolvedDependency` carrying the canonical
     /// path as the IO handle and the boundary-local `ModuleId` for project graph edges.
-    /// WHY: replaces the legacy filesystem source-surface fallback and candidate probing with
-    /// indexed facts.
+    /// WHY: the indexed source-tree facts are the single owner of filesystem-backed source
+    /// surfaces and candidate resolution.
     #[allow(
         clippy::too_many_arguments,
         reason = "namespace resolution keeps the shared set, retained provider path, declaring file, source-tree lookup, boundary, package prefix, mutable string table and shared path fork as separate inputs"
@@ -385,7 +386,7 @@ impl ModuleNamespaceSet {
         package_prefix: Option<&str>,
         string_table: &mut StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+    ) -> Result<ResolvedDependency, DiagnosticDraft> {
         let dependency_path = provider.path;
         let dependency_span = Some(provider.span);
         reject_invalid_path_components(dependency_path, dependency_span, string_table, path_fork)?;
@@ -393,7 +394,7 @@ impl ModuleNamespaceSet {
         reject_explicit_source_extension(
             dependency_path,
             dependency_span,
-            string_table,
+            &mut DiagnosticStringBuilder::new(string_table),
             path_fork,
         )?;
 
@@ -401,13 +402,11 @@ impl ModuleNamespaceSet {
         let prefix_components = path_fork.resolve_components(dependency_path, &mut scratch);
         let source_index = source_tree_index
             .source_index_for_canonical_path(declaring_canonical_path)
-            .ok_or_else(|| {
-                CompilerDiagnostic::missing_import_target(dependency_path, dependency_span)
-            })?;
+            .ok_or_else(|| imports::missing_import_target(dependency_path, dependency_span))?;
         let SourceOwnership::Owned(consumer_module_id) =
             source_tree_index.source(source_index).ownership()
         else {
-            return Err(CompilerDiagnostic::missing_import_target(
+            return Err(imports::missing_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -426,7 +425,7 @@ impl ModuleNamespaceSet {
         let key = portable_dependency_key(prefix_components, string_table);
 
         if namespace.is_ambiguous(&key) {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
+            return Err(imports::ambiguous_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -453,13 +452,13 @@ impl ModuleNamespaceSet {
         }
 
         if find_module_bypass_prefix(&namespace.entries, &key).is_some() {
-            return Err(CompilerDiagnostic::cross_module_import_not_exported(
+            return Err(imports::cross_module_import_not_exported(
                 dependency_path,
                 dependency_span,
             ));
         }
 
-        Err(CompilerDiagnostic::missing_import_target(
+        Err(imports::missing_import_target(
             dependency_path,
             dependency_span,
         ))
@@ -497,10 +496,10 @@ impl ModuleNamespaceSet {
         declaring_canonical_path: &Path,
         dependency_span: Option<SourceSpan>,
         resolution: &DirectoryDependencyResolution<'_>,
-        string_table: &mut StringTable,
-    ) -> Result<PathBuf, CompilerDiagnostic> {
+        string_table: &StringTable,
+    ) -> Result<PathBuf, DiagnosticDraft> {
         if path_contains_dotdot(provider_path, resolution.path_fork, string_table) {
-            return Err(CompilerDiagnostic::invalid_import_path(
+            return Err(imports::invalid_import_path(
                 provider_path,
                 InvalidImportPathReason::ParentDirectorySegment,
                 dependency_span,
@@ -509,15 +508,13 @@ impl ModuleNamespaceSet {
         let source_index = resolution
             .source_tree_index
             .source_index_for_canonical_path(declaring_canonical_path)
-            .ok_or_else(|| {
-                CompilerDiagnostic::missing_import_target(provider_path, dependency_span)
-            })?;
+            .ok_or_else(|| imports::missing_import_target(provider_path, dependency_span))?;
         let SourceOwnership::Owned(module_id) = resolution
             .source_tree_index
             .source(source_index)
             .ownership()
         else {
-            return Err(CompilerDiagnostic::missing_import_target(
+            return Err(imports::missing_import_target(
                 provider_path,
                 dependency_span,
             ));
@@ -544,7 +541,7 @@ impl ModuleNamespaceSet {
             string_table,
         );
         if namespace.is_ambiguous(&key) {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
+            return Err(imports::ambiguous_import_target(
                 provider_path,
                 dependency_span,
             ));
@@ -557,19 +554,13 @@ impl ModuleNamespaceSet {
                 .canonical_path()
                 .to_path_buf()),
             Some(NamespaceEntry::CrossModule { .. })
-            | Some(NamespaceEntry::SameModuleSource { .. }) => {
-                Err(CompilerDiagnostic::cross_module_import_not_exported(
-                    provider_path,
-                    dependency_span,
-                ))
-            }
-            None if find_module_bypass_prefix(&namespace.entries, &key).is_some() => {
-                Err(CompilerDiagnostic::cross_module_import_not_exported(
-                    provider_path,
-                    dependency_span,
-                ))
-            }
-            None => Err(CompilerDiagnostic::missing_import_target(
+            | Some(NamespaceEntry::SameModuleSource { .. }) => Err(
+                imports::cross_module_import_not_exported(provider_path, dependency_span),
+            ),
+            None if find_module_bypass_prefix(&namespace.entries, &key).is_some() => Err(
+                imports::cross_module_import_not_exported(provider_path, dependency_span),
+            ),
+            None => Err(imports::missing_import_target(
                 provider_path,
                 dependency_span,
             )),
@@ -585,11 +576,16 @@ impl ModuleNamespaceSet {
         project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Option<ResolvedDependency>, CompilerDiagnostic> {
+    ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_span = Some(provider.span);
         reject_invalid_path_components(provider.path, dependency_span, string_table, path_fork)?;
         reject_direct_special_file_dependency(provider, string_table, path_fork)?;
-        reject_explicit_source_extension(provider.path, dependency_span, string_table, path_fork)?;
+        reject_explicit_source_extension(
+            provider.path,
+            dependency_span,
+            &mut DiagnosticStringBuilder::new(string_table),
+            path_fork,
+        )?;
         let mut scratch = Vec::new();
         let components = path_fork.resolve_components(provider.path, &mut scratch);
         let key = portable_dependency_key(components, string_table);
@@ -612,14 +608,14 @@ impl ModuleNamespaceSet {
         consumer_module_id: ModuleId,
         local_dependency_keys: impl Iterator<Item = &'a str>,
         key: &str,
-    ) -> Result<Option<ResolvedDependency>, CompilerDiagnostic> {
+    ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_path = provider.path;
         let dependency_span = Some(provider.span);
         let source_package_surface = self.find_source_package_surface(key);
         let binding_package_prefix = self.binding_package_prefix_for_key(key);
 
         if source_package_surface.is_some() && binding_package_prefix.is_some() {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
+            return Err(imports::ambiguous_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -627,7 +623,7 @@ impl ModuleNamespaceSet {
 
         if let Some(binding_prefix) = binding_package_prefix {
             if namespace_conflicts_with_package_prefix(local_dependency_keys, binding_prefix) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
+                return Err(imports::ambiguous_import_target(
                     dependency_path,
                     dependency_span,
                 ));
@@ -638,7 +634,7 @@ impl ModuleNamespaceSet {
 
         if let Some((dependency_prefix, _root_file)) = source_package_surface {
             if namespace_conflicts_with_package_prefix(local_dependency_keys, key) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
+                return Err(imports::ambiguous_import_target(
                     dependency_path,
                     dependency_span,
                 ));
@@ -653,7 +649,7 @@ impl ModuleNamespaceSet {
         }
 
         if self.is_source_package_private_path(key) {
-            return Err(CompilerDiagnostic::cross_module_import_not_exported(
+            return Err(imports::cross_module_import_not_exported(
                 dependency_path,
                 dependency_span,
             ));
@@ -924,9 +920,8 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 /// from the owning boundary's `SourceTreeIndex`.
 ///
 /// For a same-module source, the entry's `supported` flag is checked so a recognized-but-
-/// unsupported extension (for example `.mtf` without builder registration) produces the same
-/// `UnsupportedSourceFileKind` diagnostic the old filesystem-backed resolver produced, without
-/// a filesystem probe.
+/// unsupported extension (for example `.mtf` without builder registration) produces the
+/// `UnsupportedSourceFileKind` diagnostic without a filesystem probe.
 fn resolve_entry(
     entry: &NamespaceEntry,
     index: &SourceTreeIndex,
@@ -934,7 +929,7 @@ fn resolve_entry(
     dependency_path: PathId,
     dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<ResolvedDependency, CompilerDiagnostic> {
+) -> Result<ResolvedDependency, DiagnosticDraft> {
     match entry {
         NamespaceEntry::SameModuleSource {
             source_index,
@@ -942,8 +937,9 @@ fn resolve_entry(
         } => {
             let record = index.source(*source_index);
             if !record.supported() {
-                let extension_id = string_table.intern(source_kind.extension());
-                return Err(CompilerDiagnostic::unsupported_source_file_kind(
+                let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                let extension_id = diagnostic_strings.intern(source_kind.extension());
+                return Err(imports::unsupported_source_file_kind(
                     dependency_path,
                     extension_id,
                     dependency_span,
@@ -968,9 +964,10 @@ fn resolve_entry(
                 root_file,
             })
         }
-        NamespaceEntry::SameModuleProvider { .. } => Err(
-            CompilerDiagnostic::missing_import_target(dependency_path, dependency_span),
-        ),
+        NamespaceEntry::SameModuleProvider { .. } => Err(imports::missing_import_target(
+            dependency_path,
+            dependency_span,
+        )),
     }
 }
 
@@ -979,7 +976,7 @@ fn reject_direct_special_file_dependency(
     provider: &RetainedDependencyPath,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let source_component = path_fork
         .component(provider.path)
         .map(|component| string_table.resolve(component));
@@ -991,7 +988,7 @@ fn reject_direct_special_file_dependency(
                 && component.ends_with(".moth")
                 && component.len() > "+.moth".len())
     }) {
-        return Err(CompilerDiagnostic::direct_special_file_import(
+        return Err(imports::direct_special_file_import(
             provider.path,
             Some(provider.span),
         ));
@@ -1004,16 +1001,16 @@ fn reject_direct_special_file_dependency(
 fn reject_invalid_path_components(
     dependency_path: PathId,
     dependency_span: Option<SourceSpan>,
-    string_table: &mut StringTable,
+    string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let mut scratch = Vec::new();
     let components = path_fork.resolve_components(dependency_path, &mut scratch);
     if components
         .iter()
         .any(|component| string_table.resolve(*component) == "..")
     {
-        return Err(CompilerDiagnostic::invalid_import_path(
+        return Err(imports::invalid_import_path(
             dependency_path,
             InvalidImportPathReason::ParentDirectorySegment,
             dependency_span,
@@ -1025,10 +1022,7 @@ fn reject_invalid_path_components(
         .map(|component| string_table.resolve(*component))
         .is_some_and(|component| component == "." || component == "..")
     {
-        return Err(CompilerDiagnostic::bare_file_import(
-            dependency_path,
-            dependency_span,
-        ));
+        return Err(imports::bare_file_import(dependency_path, dependency_span));
     }
 
     Ok(())
@@ -1038,19 +1032,17 @@ fn reject_invalid_path_components(
 fn reject_explicit_source_extension(
     dependency_path: PathId,
     dependency_span: Option<SourceSpan>,
-    string_table: &mut StringTable,
+    strings: &mut DiagnosticStringBuilder<'_>,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerDiagnostic> {
-    if let Some(extension) = explicit_source_extension(dependency_path, string_table, path_fork) {
+) -> Result<(), DiagnosticDraft> {
+    if let Some(extension) =
+        explicit_source_extension(dependency_path, strings.strings(), path_fork)
+    {
         let diagnostic = if extension == SourceFileKind::Moth.extension() {
-            CompilerDiagnostic::explicit_moth_extension(dependency_path, dependency_span)
+            imports::explicit_moth_extension(dependency_path, dependency_span)
         } else {
-            let extension_id = string_table.intern(&extension);
-            CompilerDiagnostic::explicit_source_extension(
-                dependency_path,
-                extension_id,
-                dependency_span,
-            )
+            let extension_id = strings.intern(&extension);
+            imports::explicit_source_extension(dependency_path, extension_id, dependency_span)
         };
         return Err(diagnostic);
     }

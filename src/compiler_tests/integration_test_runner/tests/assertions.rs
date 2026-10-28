@@ -20,15 +20,23 @@ use super::synthetic_build_results::{
     build_result_with_output_files, success_test_case,
 };
 use crate::build_system::build::{BuildResult, FileKind};
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, imports, names_declarations, token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidAssignmentTargetReason,
-    InvalidOutputFolderReason,
+    DiagnosticBag, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,26 +49,57 @@ fn test_span(source: SourceId, start: u32, length: u32) -> SourceSpan {
     )
 }
 
-fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
+fn diagnostic_result(
+    diagnostics: Vec<DiagnosticDraft>,
+    string_table: StringTable,
+    source_database: Option<Arc<SourceDatabase>>,
+) -> CompilationResult<()> {
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        string_table,
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, source_database.map(|source| (source, None)));
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
+}
+
+fn assignment_target_draft(
+    target_name: Option<StringId>,
+    declaration_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft = names_declarations::invalid_assignment_target(
+        InvalidAssignmentTargetReason::ImmutableBinding,
+        target_name,
+        None,
+        None,
+        span,
+    );
+    match declaration_span {
+        Some(declaration_span) => draft.with_label(
+            Some(declaration_span),
+            Some(LabelDraftMessage::ImmutableBindingDeclaration),
+        ),
+        None => draft,
+    }
+}
+
+fn diagnostic_messages(codes: &[&str]) -> CompilationResult<()> {
     let string_table = StringTable::new();
     let diagnostics = codes
         .iter()
         .map(|code| match *code {
-            "MOTH-RULE-0044" => CompilerDiagnostic::invalid_assignment_target(
-                InvalidAssignmentTargetReason::ImmutableBinding,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-            "MOTH-SYNTAX-0003" => CompilerDiagnostic::unexpected_trailing_comma(None),
+            "MOTH-RULE-0044" => assignment_target_draft(None, None, None),
+            "MOTH-SYNTAX-0003" => token_lexical::unexpected_trailing_comma(None),
             other => panic!("test diagnostic code is not constructed: {other}"),
         })
         .collect();
 
-    CompilerMessages::from_diagnostics(diagnostics, string_table)
+    diagnostic_result(diagnostics, string_table, None)
 }
 
 fn diagnostic_expectation(
@@ -85,16 +124,8 @@ fn diagnostic_expectation(
 fn failure_message_contains_uses_structured_render_output() {
     let mut string_table = StringTable::new();
     let variable_name = string_table.intern("value");
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        Some(variable_name),
-        None,
-        None,
-        None,
-        None,
-        None,
-    );
-    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    let diagnostic = assignment_target_draft(Some(variable_name), None, None);
+    let failure = diagnostic_result(vec![diagnostic], string_table, None);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],
@@ -104,7 +135,7 @@ fn failure_message_contains_uses_structured_render_output() {
         message_contains: vec!["Cannot reassign `value`".to_string()],
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -129,32 +160,22 @@ fn failure_message_contains_includes_rendered_label_text() {
     source_database
         .retain_text(source_id, "value\n".to_owned())
         .expect("label source text should be retained");
-    let label_text = string_table.intern("secondary context lives here");
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .with_labels(vec![DiagnosticLabel::secondary(
-        Some(test_span(source_id, 0, 1)),
-        Some(DiagnosticLabelMessage::RenderedText(label_text)),
-    )]);
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
+    let diagnostic = assignment_target_draft(None, Some(test_span(source_id, 0, 1)), None);
+    let failure = diagnostic_result(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    );
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
-        message_contains: vec!["secondary context lives here".to_string()],
+        message_contains: vec!["immutable binding declared here".to_string()],
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -270,7 +291,7 @@ fn contains_matching_requires_every_expected_occurrence() {
     assert!(!reason.contains("Unexpected codes"), "{reason}");
 }
 
-fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
+fn structured_diagnostic_messages(fixture_root: &Path) -> CompilationResult<()> {
     let primary_path = fixture_root.join("input/main.moth");
     let secondary_path = fixture_root.join("input/helper.moth");
     let entry_path = fixture_root.join("config.moth");
@@ -301,19 +322,13 @@ fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
 
     let primary_span = test_span(primary_source, 7, 1);
     let secondary_span = test_span(secondary_source, 13, 1);
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        None,
-        None,
-        None,
-        None,
-        Some(secondary_span),
-        Some(primary_span),
-    );
+    let diagnostic = assignment_target_draft(None, Some(secondary_span), Some(primary_span));
 
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-    messages
+    diagnostic_result(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    )
 }
 
 fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureExpectation {
@@ -362,7 +377,10 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     assert!(result.passed, "{:?}", result.failure_reason);
 }
 
-fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> CompilerMessages {
+fn relative_structured_diagnostic_messages(
+    scope: &str,
+    fixture_root: &Path,
+) -> CompilationResult<()> {
     let source_scope = scope
         .strip_suffix("/declaration.header")
         .unwrap_or(scope)
@@ -386,18 +404,12 @@ fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> 
         .retain_text(source_id, "aa\nbb\ncc\ndddd\n".to_owned())
         .expect("relative structured source text should be retained");
 
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(test_span(source_id, 7, 1)),
-    );
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-    messages
+    let diagnostic = assignment_target_draft(None, None, Some(test_span(source_id, 7, 1)));
+    diagnostic_result(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    )
 }
 
 #[test]
@@ -569,24 +581,33 @@ fn exact_warning_expectation(codes: &[&str]) -> WarningExpectation {
     })
 }
 
-fn warning_build_result(codes: &[&str]) -> BuildResult {
-    let mut result = build_result_with_index_html(VALID_HTML);
+fn warning_build_result(codes: &[&str]) -> (BuildResult, Option<DiagnosticReportSet>) {
+    let result = build_result_with_index_html(VALID_HTML);
     let mut string_table = StringTable::new();
     let alias = string_table.intern("Alias");
     let symbol = string_table.intern("symbol");
     let warnings = codes
         .iter()
         .map(|code| match *code {
-            "MOTH-RULE-0022" => CompilerDiagnostic::unreachable_match_arm(None),
-            "MOTH-IMPORT-0003" => {
-                CompilerDiagnostic::dependency_alias_case_mismatch(alias, symbol, None)
-            }
+            "MOTH-RULE-0022" => choices_control_flow::unreachable_match_arm(None),
+            "MOTH-IMPORT-0003" => imports::dependency_alias_case_mismatch(alias, symbol, None),
             other => panic!("test warning code is not constructed: {other}"),
         })
         .collect();
-    result.string_table = string_table;
-    result.warnings = warnings;
-    result
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(warnings),
+        string_table,
+        None,
+        None,
+    );
+    let mut warning_accumulator = BoundaryAccumulator::new();
+    warning_accumulator.append_prepared(batch, None);
+    let warnings = Some(
+        warning_accumulator
+            .finish(InstallMode::Frozen)
+            .expect("test warnings should freeze"),
+    );
+    (result, warnings)
 }
 
 #[test]
@@ -600,11 +621,8 @@ fn exact_warning_codes_match_success_warnings_independent_of_order() {
         artifacts_must_not_exist: Vec::new(),
     };
     let case = success_test_case(BackendId::Html, expectation.clone());
-    let result = validate_success_result(
-        &case,
-        warning_build_result(&["MOTH-RULE-0022", "MOTH-IMPORT-0003"]),
-        &expectation,
-    );
+    let (build_result, warnings) = warning_build_result(&["MOTH-RULE-0022", "MOTH-IMPORT-0003"]);
+    let result = validate_success_result(&case, build_result, warnings, &expectation);
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -620,11 +638,8 @@ fn exact_warning_codes_report_missing_and_unexpected_codes() {
         artifacts_must_not_exist: Vec::new(),
     };
     let case = success_test_case(BackendId::Html, expectation.clone());
-    let result = validate_success_result(
-        &case,
-        warning_build_result(&["MOTH-IMPORT-0003"]),
-        &expectation,
-    );
+    let (build_result, warnings) = warning_build_result(&["MOTH-IMPORT-0003"]);
+    let result = validate_success_result(&case, build_result, warnings, &expectation);
     let reason = result
         .failure_reason
         .expect("different warning code should fail matching");
@@ -648,11 +663,8 @@ fn exact_warning_codes_report_duplicate_count_mismatch() {
         artifacts_must_not_exist: Vec::new(),
     };
     let case = success_test_case(BackendId::Html, expectation.clone());
-    let result = validate_success_result(
-        &case,
-        warning_build_result(&["MOTH-RULE-0022"]),
-        &expectation,
-    );
+    let (build_result, warnings) = warning_build_result(&["MOTH-RULE-0022"]);
+    let result = validate_success_result(&case, build_result, warnings, &expectation);
     let reason = result
         .failure_reason
         .expect("duplicate warning count should fail matching");
@@ -676,11 +688,8 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
         artifacts_must_not_exist: Vec::new(),
     };
     let ignored_case = success_test_case(BackendId::Html, ignored.clone());
-    let ignored_result = validate_success_result(
-        &ignored_case,
-        warning_build_result(&["MOTH-RULE-0022"]),
-        &ignored,
-    );
+    let (build_result, warnings) = warning_build_result(&["MOTH-RULE-0022"]);
+    let ignored_result = validate_success_result(&ignored_case, build_result, warnings, &ignored);
     assert!(ignored_result.passed, "{:?}", ignored_result.failure_reason);
 
     let forbidden = SuccessExpectation {
@@ -688,11 +697,9 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
         ..ignored
     };
     let forbidden_case = success_test_case(BackendId::Html, forbidden.clone());
-    let forbidden_result = validate_success_result(
-        &forbidden_case,
-        warning_build_result(&["MOTH-RULE-0022"]),
-        &forbidden,
-    );
+    let (build_result, warnings) = warning_build_result(&["MOTH-RULE-0022"]);
+    let forbidden_result =
+        validate_success_result(&forbidden_case, build_result, warnings, &forbidden);
     assert!(!forbidden_result.passed);
     assert!(
         forbidden_result
@@ -703,57 +710,14 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
 }
 
 #[test]
-fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() {
-    let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
-    // diagnostic_codes owns the error contract only; warning_codes independently owns the
-    // warning. A warning code must never appear in diagnostic_codes for a failed compilation.
-    let expectation = FailureExpectation {
-        warnings: exact_warning_expectation(&["MOTH-RULE-0022"]),
-        message_contains: Vec::new(),
-        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
-        diagnostic_assertions: Vec::new(),
-        diagnostic_match: DiagnosticMatchMode::Exact,
-        diagnostic_match_reason: None,
-    };
-
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
-
-    assert!(result.passed, "{:?}", result.failure_reason);
-}
-
-#[test]
-fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
-    let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
-    let expectation = FailureExpectation {
-        warnings: WarningExpectation::Ignore,
-        message_contains: Vec::new(),
-        diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned()],
-        diagnostic_assertions: Vec::new(),
-        diagnostic_match: DiagnosticMatchMode::Exact,
-        diagnostic_match_reason: None,
-    };
-
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
-
-    assert!(result.passed, "{:?}", result.failure_reason);
-}
-
-#[test]
 fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
     let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
-    // Authoring the warning code as a diagnostic code must fail: the warning is not in the
-    // error-severity stream, so the multiset reports it as missing.
+    let error = token_lexical::unexpected_trailing_comma(None);
+    let failure = diagnostic_result(vec![error], string_table, None);
+    // Failure expectations inspect diagnosed error reports only; a warning-family code remains
+    // missing from the failure diagnostic contract.
     let expectation = FailureExpectation {
-        warnings: exact_warning_expectation(&["MOTH-RULE-0022"]),
+        warnings: WarningExpectation::Ignore,
         message_contains: Vec::new(),
         diagnostic_codes: vec!["MOTH-SYNTAX-0003".to_owned(), "MOTH-RULE-0022".to_owned()],
         diagnostic_assertions: Vec::new(),
@@ -761,7 +725,7 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(
         !result.passed,
@@ -778,13 +742,11 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
 }
 
 #[test]
-fn warning_prose_cannot_satisfy_error_message_contains() {
+fn failure_message_contains_requires_matching_error_text() {
     let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
-    // The unreachable-match-arm warning prose must not satisfy message_contains because the
-    // fragment check only inspects error-severity diagnostics.
+    let error = token_lexical::unexpected_trailing_comma(None);
+    let failure = diagnostic_result(vec![error], string_table, None);
+    // The requested fragment is absent from the diagnosed error report.
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         message_contains: vec!["Unreachable match arm".to_owned()],
@@ -794,16 +756,16 @@ fn warning_prose_cannot_satisfy_error_message_contains() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(
         !result.passed,
-        "warning prose must not satisfy error-only message_contains"
+        "message_contains must match text from a diagnosed error"
     );
     let reason = result
         .failure_reason
         .as_deref()
-        .expect("a warning-prose mismatch should report a reason");
+        .expect("an unmatched error fragment should report a reason");
     assert!(
         reason.contains("not found in any emitted error"),
         "unexpected reason: {reason}"
@@ -948,7 +910,7 @@ fn acceptance_only_html_baseline_rejects_broken_html() {
         FileKind::Html("<!DOCTYPE html><html><head></head><body></body>".to_owned()),
     )]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(!result.passed);
     assert!(
@@ -968,7 +930,7 @@ fn absence_contract_passes_when_forbidden_path_not_built() {
         FileKind::Html(VALID_HTML.to_owned()),
     )]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         result.passed,
@@ -991,7 +953,7 @@ fn absence_contract_fails_when_forbidden_path_is_built() {
         ),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         !result.passed,
@@ -1018,7 +980,7 @@ fn absence_contract_ignores_not_built_files() {
         (PathBuf::from("api/index.html"), FileKind::NotBuilt),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         result.passed,
@@ -1331,7 +1293,7 @@ fn duplicate_artifact_paths_fail_the_case_as_a_harness_failure() {
         ),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(!result.passed, "an ambiguous artifact set cannot pass");
     assert_eq!(
@@ -1366,7 +1328,7 @@ fn artifact_absence_contract_normalizes_the_authored_path() {
         ),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(!result.passed, "the forbidden artifact was produced");
     assert!(
@@ -1424,7 +1386,7 @@ fn html_shell_contract_reports_a_missing_marker() {
 
 #[test]
 fn html_shell_contract_rejects_a_repeated_marker() {
-    // Two heads is not a document; the previous check accepted it because one `<head>` existed.
+    // A document must contain exactly one head; finding one opening marker is insufficient.
     let duplicated_head = VALID_HTML.replace("  <head>\n", "  <head>\n  <head>\n");
 
     assert_eq!(
@@ -1479,9 +1441,8 @@ fn html_shell_contract_still_rejects_a_marker_repeated_in_markup() {
 
 // --- Golden artifact kind and encoding contracts ---------------------------------------------
 //
-// A golden names a file. Comparing a directory or an unbuilt path as empty bytes let an empty
-// golden pass against a path that holds no file, and lossy UTF-8 silently rewrote the expected
-// text before comparing it.
+// A golden names a file. Treating a directory or an unbuilt path as empty bytes could satisfy an
+// empty golden, and lossy UTF-8 decoding could alter expected text before comparison.
 
 /// Writes one golden file and returns the discovered expectation for it.
 #[track_caller]
@@ -1507,7 +1468,7 @@ fn golden_expectation_with(
 fn golden_validation_rejects_a_directory_where_a_file_is_expected() {
     let root = tempfile::tempdir().expect("should create temp dir");
     let golden_dir = root.path().join("golden");
-    // An empty golden is exactly the case the old empty-bytes conversion could satisfy.
+    // An empty golden must not satisfy a directory merely because both expose no file bytes.
     let golden = golden_expectation_with(&golden_dir, "index.html", "", None);
 
     let build_result =

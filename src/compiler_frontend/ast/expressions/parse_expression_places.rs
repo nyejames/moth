@@ -24,12 +24,16 @@ use crate::compiler_frontend::ast::field_access::{
 use crate::compiler_frontend::ast::module_ast::scope_context::ValueDeclarationRef;
 use crate::compiler_frontend::ast::numeric_construction::NumericBindingId;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
+    DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
     InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -75,7 +79,7 @@ pub(super) fn parse_mutable_receiver_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let marker_span = Some(token_stream.current_postfix_operator_span());
+    let marker_span = Some(token_stream.current_span());
     token_stream.advance();
 
     if !matches!(
@@ -85,15 +89,15 @@ pub(super) fn parse_mutable_receiver_expression(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
+                InfrastructureFailure::malformed_token_projection(
                     "mutable-receiver symbol diagnostic",
+                    error,
                 )
             })?
             .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             found,
-            current_span(token_stream),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -107,10 +111,8 @@ pub(super) fn parse_mutable_receiver_expression(
             .peek_next_tag()
             .is_some_and(TokenTag::is_assignment_operator)
         {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
+            return Err(names_declarations::invalid_assignment_target(
                 InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
-                None,
-                None,
                 None,
                 None,
                 None,
@@ -118,7 +120,7 @@ pub(super) fn parse_mutable_receiver_expression(
             )
             .into());
         }
-        return Err(CompilerDiagnostic::invalid_receiver_call(
+        return Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
             None,
             None,
@@ -134,7 +136,7 @@ pub(super) fn parse_mutable_receiver_expression(
     // Member access on it is reported by the ordinary member diagnostic, never by a field,
     // method or trait search against a type that does not exist yet.
     if let Some(pending_binding) = receiver_declaration.pending_binding() {
-        let receiver_span = current_span(token_stream);
+        let receiver_span = Some(token_stream.current_span());
         token_stream.advance();
         push_pending_numeric_binding(context, expression, pending_binding, receiver_span, false)?;
         // The authored `~` opened a mutable receiver chain over a real place: the retained member
@@ -163,7 +165,8 @@ pub(super) fn parse_mutable_receiver_expression(
     // A ready root needs its declaration for the field-access chain below; the pending case
     // above is the only shape without one.
     let Some(receiver) = receiver_declaration.ready_declaration() else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a mutable receiver root carried neither a ready declaration nor a pending numeric \
              binding",
         )
@@ -223,7 +226,7 @@ pub(super) fn parse_copy_place_expression(
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
     match token_stream.current_tag() {
         TokenTag::OPEN_PARENTHESIS => {
-            let open_span = current_span(token_stream);
+            let open_span = Some(token_stream.current_span());
             token_stream.advance();
 
             let mut parsed_place = parse_copy_place_expression(
@@ -240,15 +243,15 @@ pub(super) fn parse_copy_place_expression(
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
+                        InfrastructureFailure::malformed_token_projection(
                             "copy-place closing-delimiter diagnostic",
+                            error,
                         )
                     })?;
-                return Err(CompilerDiagnostic::expected_token_from_tags(
-                    TokenTag::CLOSE_PARENTHESIS,
+                return Err(token_lexical::expected_token_from_projections(
+                    DiagnosticToken::from_static_tag(TokenTag::CLOSE_PARENTHESIS),
                     found,
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -274,7 +277,7 @@ pub(super) fn parse_copy_place_expression(
             // `TypeId` yet: retain the authored `copy` of the reference so the expression entry
             // raises the body-root deferral for the whole fragment.
             if let Some(pending_binding) = place_declaration.pending_binding() {
-                let reference_span = current_span(token_stream);
+                let reference_span = Some(token_stream.current_span());
                 token_stream.advance();
                 return Ok(ParsedCopyPlace::PendingNumeric {
                     binding: pending_binding,
@@ -285,7 +288,8 @@ pub(super) fn parse_copy_place_expression(
             // A ready root needs its declaration for the place payload below; the pending case
             // above is the only shape without one.
             let Some(place_declaration) = place_declaration.ready_declaration() else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a copy-place root carried neither a ready declaration nor a pending numeric \
                      binding",
                 )
@@ -302,11 +306,11 @@ pub(super) fn parse_copy_place_expression(
                     InvalidCopyTargetReason::FunctionName
                 };
                 Err(
-                    CompilerDiagnostic::invalid_copy_target(reason, current_span(token_stream))
+                    calls_data::invalid_copy_target(reason, Some(token_stream.current_span()))
                         .into(),
                 )
             } else {
-                let reference_span = current_span(token_stream);
+                let reference_span = Some(token_stream.current_span());
                 let reference_expression = reference_expression_from_declaration(
                     place_declaration,
                     context,
@@ -339,7 +343,7 @@ pub(super) fn parse_copy_place_expression(
                         ParsedPostfixExpression::Value(value) => value,
                         // A retained receiver call has no value and can never be a place.
                         ParsedPostfixExpression::RetainedOperand(item) => {
-                            return Err(CompilerDiagnostic::invalid_copy_target(
+                            return Err(calls_data::invalid_copy_target(
                                 InvalidCopyTargetReason::NonPlace,
                                 item.source_span(expression_builder)?,
                             )
@@ -356,7 +360,7 @@ pub(super) fn parse_copy_place_expression(
                 let Some(place) =
                     place_expression_from_expression(expression_builder, copied_expression)?
                 else {
-                    return Err(CompilerDiagnostic::invalid_copy_target(
+                    return Err(calls_data::invalid_copy_target(
                         InvalidCopyTargetReason::NonPlace,
                         copied_span,
                     )
@@ -370,16 +374,15 @@ pub(super) fn parse_copy_place_expression(
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                 token_stream.current_tag(),
-                current_span(token_stream),
-                "Expression Parsing",
+                CompilerStage::AstConstruction,
                 "copy-place parsing",
             )?;
 
-            Err(reserved_trait_keyword_error(keyword, current_span(token_stream)).into())
+            Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
         TokenTag::MUTABLE => {
-            let marker_span = current_span(token_stream);
+            let marker_span = Some(token_stream.current_span());
             token_stream.advance();
 
             match parse_copy_place_expression(
@@ -391,7 +394,7 @@ pub(super) fn parse_copy_place_expression(
                 string_table,
                 path_fork,
             ) {
-                Ok(_) => Err(CompilerDiagnostic::invalid_copy_target(
+                Ok(_) => Err(calls_data::invalid_copy_target(
                     InvalidCopyTargetReason::MutableMarkerNotAllowed,
                     marker_span,
                 )
@@ -400,9 +403,9 @@ pub(super) fn parse_copy_place_expression(
             }
         }
 
-        _ => Err(CompilerDiagnostic::invalid_copy_target(
+        _ => Err(calls_data::invalid_copy_target(
             InvalidCopyTargetReason::NonPlace,
-            current_span(token_stream),
+            Some(token_stream.current_span()),
         )
         .into()),
     }
@@ -420,12 +423,16 @@ fn resolve_place_root<'a>(
             let symbol_id = token_stream
                 .current_string_id_in(string_table)?
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("place root symbol had no string payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "place root symbol had no string payload",
+                    )
                 })?;
             context.resolve_value_reference(symbol_id, span)?
         }
         _ => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "place root resolution received a token other than a name or `this`",
             )
             .into());
@@ -505,7 +512,8 @@ pub(crate) fn expression_from_place_expression(
         match projection {
             PlaceProjectionView::Field { field, result_type } => fields.push((field, result_type)),
             PlaceProjectionView::Index { .. } => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "compound read received an unsupported indexed place",
                 )
                 .into());
@@ -528,8 +536,4 @@ pub(crate) fn expression_from_place_expression(
         )?;
     }
     Ok(value)
-}
-
-fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
 }

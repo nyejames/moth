@@ -85,13 +85,15 @@ pub(crate) struct BenchmarkCaseExecution {
 pub(crate) struct BenchmarkCaseFailure {
     pub(crate) case_id: String,
     pub(crate) workload_id: String,
+    pub(crate) details: Box<BenchmarkCaseFailureDetails>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BenchmarkCaseFailureDetails {
     pub(crate) runner: BenchmarkRunner,
     pub(crate) entry: PathBuf,
     pub(crate) kind: BenchmarkFailureKind,
-    pub(crate) exit_code: Option<i32>,
-    pub(crate) benchmark_status: Option<BenchmarkDiagnosticStatus>,
-    pub(crate) stdout_evidence: Option<String>,
-    pub(crate) stderr_evidence: Option<String>,
+    pub(crate) evidence: BenchmarkFailureEvidence,
 }
 
 /// Stable failure categories shared by preflight and later measurement callers.
@@ -138,11 +140,11 @@ pub(crate) enum BenchmarkFailureKind {
 }
 
 #[derive(Debug, Clone, Default)]
-struct BenchmarkFailureEvidence {
-    exit_code: Option<i32>,
-    benchmark_status: Option<BenchmarkDiagnosticStatus>,
-    stdout: Option<String>,
-    stderr: Option<String>,
+pub(crate) struct BenchmarkFailureEvidence {
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) benchmark_status: Option<BenchmarkDiagnosticStatus>,
+    pub(crate) stdout: Option<String>,
+    pub(crate) stderr: Option<String>,
 }
 
 /// Execute every selected case once, preserving selection order.
@@ -611,13 +613,12 @@ fn case_failure(
     BenchmarkCaseFailure {
         case_id: case.id.clone(),
         workload_id,
-        runner: case.runner.clone(),
-        entry,
-        kind,
-        exit_code: evidence.exit_code,
-        benchmark_status: evidence.benchmark_status,
-        stdout_evidence: evidence.stdout,
-        stderr_evidence: evidence.stderr,
+        details: Box::new(BenchmarkCaseFailureDetails {
+            runner: case.runner.clone(),
+            entry,
+            kind,
+            evidence,
+        }),
     }
 }
 
@@ -647,16 +648,16 @@ impl Display for BenchmarkCaseFailure {
             "case '{}' (workload '{}', {}, entry '{}')",
             self.case_id,
             self.workload_id,
-            RunnerDisplay(&self.runner),
-            self.entry.display()
+            RunnerDisplay(&self.details.runner),
+            self.details.entry.display()
         )?;
-        write!(formatter, "  failure: {}", self.kind)?;
+        write!(formatter, "  failure: {}", self.details.kind)?;
 
-        if let Some(exit_code) = self.exit_code {
+        if let Some(exit_code) = self.details.evidence.exit_code {
             write!(formatter, "\n  exit code: {exit_code}")?;
         }
 
-        if let Some(status) = self.benchmark_status {
+        if let Some(status) = self.details.evidence.benchmark_status {
             write!(
                 formatter,
                 "\n  diagnostic status: errors={} warnings={}",
@@ -664,11 +665,11 @@ impl Display for BenchmarkCaseFailure {
             )?;
         }
 
-        if let Some(stdout) = &self.stdout_evidence {
+        if let Some(stdout) = &self.details.evidence.stdout {
             write!(formatter, "\n  stdout:\n{stdout}")?;
         }
 
-        if let Some(stderr) = &self.stderr_evidence {
+        if let Some(stderr) = &self.details.evidence.stderr {
             write!(formatter, "\n  stderr:\n{stderr}")?;
         }
 

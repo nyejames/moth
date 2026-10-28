@@ -4,9 +4,28 @@
 //! WHY: these helpers are shared by terminal, terse, and dev-server renderers, but they do not
 //! need to live in the root render module map.
 
-use super::{DiagnosticRenderContext, diagnostic_type_name, token_kind_name};
+use super::{
+    DiagnosticRenderContext, RenderedPayload, expected_token_message, invalid_expression_message,
+    token_kind_name,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidLoopHeaderCode, InvalidLoopHeaderView, InvalidMatchArmView,
+    InvalidStandaloneStatementView, InvalidStatementPositionView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidParameterContractView, InvalidThisUsageView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidStyleDirectiveView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    CommonSyntaxMistakeView, ExpectedSymbolStatementView, InvalidExpressionView,
+    InvalidStringEscapeView, MissingCollectionItemView, MissingOperatorOperandView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, InvalidLoopHeaderReason,
+    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, CompilerStage, InvalidLoopHeaderReason,
     InvalidMatchArmReason, InvalidParameterContractReason, InvalidStandaloneStatementReason,
     InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidThisUsageReason,
     InvalidTypeAnnotationReason, MissingWhitespace, OperatorOperandPosition, ParameterContractKind,
@@ -15,6 +34,36 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+
+/// WHAT: renders an expected-token diagnostic from its compact facts.
+/// WHY: the record stores the expected and found tokens that `expected_token_message` consumes.
+pub(crate) fn render_expected_token(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ExpectedTokenView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: expected_token_message(
+            &facts.expected,
+            facts.found.as_ref(),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders the typed reason for an invalid expression.
+/// WHY: the compact row stores the reason `invalid_expression_message` consumes.
+pub(crate) fn render_invalid_expression(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidExpressionView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_expression_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
 
 pub(crate) fn invalid_parameter_contract_message(reason: InvalidParameterContractReason) -> String {
     let contract_name = |contract: ParameterContractKind| contract.spelling();
@@ -74,6 +123,23 @@ pub(crate) fn invalid_parameter_contract_message(reason: InvalidParameterContrac
         }
     }
 }
+
+/// WHAT: renders an invalid parameter contract from its reason code and optional kinds.
+/// WHY: the code determines which contract facts the reason requires.
+pub(crate) fn render_invalid_parameter_contract(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidParameterContractView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.contract, facts.nested_contract)
+        .expect("a parameter-contract code stores its required kinds");
+    RenderedPayload {
+        message: invalid_parameter_contract_message(reason),
+        guidance: Vec::new(),
+    }
+}
 pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -> String {
     match reason {
         InvalidStringEscapeReason::UnsupportedEscape { escaped } => format!(
@@ -86,6 +152,20 @@ pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -
         InvalidStringEscapeReason::TrailingBackslash => {
             "The string ends with a backslash. Add a supported escaped character or remove the backslash.".to_owned()
         }
+    }
+}
+
+/// WHAT: renders an invalid escape from its reason code and character fact.
+/// WHY: the code distinguishes the escape reason that uses the otherwise neutral character fact.
+pub(crate) fn render_invalid_string_escape(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStringEscapeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts.reason.to_reason(facts.escaped);
+    RenderedPayload {
+        message: invalid_string_escape_message(reason),
+        guidance: Vec::new(),
     }
 }
 
@@ -169,6 +249,23 @@ pub(crate) fn invalid_number_literal_message(
     }
 }
 
+/// WHAT: renders an invalid number literal from its compact facts.
+/// WHY: the literal text and the reason are the whole message; the reason is rebuilt from its code and data.
+pub(crate) fn render_invalid_number_literal(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidNumberLiteralView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = view
+        .code
+        .to_reason(view.scalar, view.scale)
+        .expect("an invalid-number-literal record stores the data its reason code names");
+    RenderedPayload {
+        message: invalid_number_literal_message(view.literal_text, reason, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
 /// The inclusive range a fixed scalar's literals must fall inside.
 ///
 /// WHY: the materialisation diagnostic names the exact destination range, and the fixed scalar
@@ -193,6 +290,22 @@ pub(crate) fn invalid_style_directive_message(
     format!("Style directive '${name}' is unsupported here. Registered directives are {supported}.")
 }
 
+/// WHAT: renders a style-directive diagnostic from its compact fact view.
+/// WHY: the row stores both string ids needed by the existing message helper.
+pub(crate) fn render_invalid_style_directive(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStyleDirectiveView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_style_directive_message(
+            facts.directive_name,
+            facts.supported_directives,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 pub(crate) fn invalid_type_annotation_message(
     reason: &InvalidTypeAnnotationReason,
     string_table: &dyn StringTableResolver,
@@ -234,6 +347,23 @@ pub(crate) fn invalid_type_annotation_message(
             "Nested optional types are not supported. Aliases that already expand to an optional type cannot be marked with '?' again."
                 .to_string()
         }
+    }
+}
+
+/// Renders an invalid type annotation from its compact reason and optional found token.
+pub(crate) fn render_invalid_type_annotation(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidTypeAnnotationView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _context = facts.context;
+    let reason = facts
+        .code
+        .to_reason(facts.token)
+        .expect("a token-carrying reason code has its token fact");
+    RenderedPayload {
+        message: invalid_type_annotation_message(&reason, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
@@ -423,6 +553,26 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
 }
 }
 
+/// WHAT: renders a common syntax mistake and its existing correction guidance.
+/// WHY: the row stores the reason code separately from its keyword, spacing and separator data.
+pub(crate) fn render_common_syntax_mistake(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CommonSyntaxMistakeView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .reason
+        .to_reason(facts.keyword, facts.spacing_error, facts.choice_gap)
+        .expect("the common-syntax-mistake code has its required data");
+    RenderedPayload {
+        message: common_syntax_mistake_message(&reason, context.string_table),
+        guidance: vec![format!(
+            "Suggestion: {}",
+            common_syntax_mistake_suggestion(&reason)
+        )],
+    }
+}
+
 pub(crate) fn missing_operator_operand_message(
     operator: StringId,
     position: OperatorOperandPosition,
@@ -442,6 +592,23 @@ pub(crate) fn missing_operator_operand_message(
     }
 }
 
+/// WHAT: renders the missing operator's position and authored spelling.
+/// WHY: the compact row retains only the string id and the three-way operand position.
+pub(crate) fn render_missing_operator_operand(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &MissingOperatorOperandView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_operator_operand_message(
+            facts.operator,
+            facts.position,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_standalone_statement_message(
     reason: InvalidStandaloneStatementReason,
 ) -> String {
@@ -458,12 +625,51 @@ pub(crate) fn invalid_standalone_statement_message(
     }
 }
 
+/// WHAT: renders an invalid standalone statement from its compact reason code.
+/// WHY: the compact view carries the reason `invalid_standalone_statement_message` consumes.
+pub(crate) fn render_invalid_standalone_statement(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStandaloneStatementView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_standalone_statement_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn expected_symbol_statement_message() -> String {
     "Expected a symbol-led statement.".to_string()
 }
 
+/// WHAT: renders the fixed symbol-led-statement message.
+/// WHY: the family has no payload facts, and its fixed message is not empty.
+pub(crate) fn render_expected_symbol_statement(
+    _diagnostic: &DiagnosticView<'_>,
+    _facts: &ExpectedSymbolStatementView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: expected_symbol_statement_message(),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn missing_collection_item_message() -> String {
     "Expected a collection item after the comma".to_string()
+}
+
+/// WHAT: renders the fixed missing-collection-item message.
+/// WHY: the family has no payload facts, and its fixed message is not empty.
+pub(crate) fn render_missing_collection_item(
+    _diagnostic: &DiagnosticView<'_>,
+    _facts: &MissingCollectionItemView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_collection_item_message(),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String {
@@ -489,10 +695,20 @@ pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String
     }
 }
 
-pub(crate) fn invalid_loop_header_message(
-    reason: InvalidLoopHeaderReason,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
+/// WHAT: renders an invalid match arm from its compact reason code.
+/// WHY: the compact view carries the reason `invalid_match_arm_message` consumes.
+pub(crate) fn render_invalid_match_arm(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidMatchArmView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_match_arm_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> String {
     match reason {
         InvalidLoopHeaderReason::EmptyHeader => {
             "Loop header is empty. Expected a condition or iteration source after 'loop'.".to_string()
@@ -542,17 +758,12 @@ pub(crate) fn invalid_loop_header_message(
         InvalidLoopHeaderReason::BindingAlreadyDeclared => {
             "Loop binding is already declared in this scope.".to_string()
         }
-        InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type } => match found_type {
-            Some(found_type) => {
-                let found_type = diagnostic_type_name(found_type, context);
-                format!("Collection loop source must be a collection. Found '{found_type}'.")
-            }
-            // The source's exact type is selected at the owning body root, so the message names
-            // the unresolved expression instead of a fabricated default width.
-            None => "Collection loop source must be a collection. Found an unresolved expression \
-                     whose exact type is selected at the end of the enclosing body."
-                .to_string(),
-        },
+        InvalidLoopHeaderReason::CollectionSourceNotCollection { .. } => {
+            crate::compiler_bug!(
+                CompilerStage::DiagnosticReporting,
+                "collection type details are rendered from the snapshot"
+            )
+        }
         InvalidLoopHeaderReason::MissingRangeSeparator => {
             "Range loops must include 'to' between bounds.".to_string()
         }
@@ -571,6 +782,43 @@ pub(crate) fn invalid_loop_header_message(
         InvalidLoopHeaderReason::ExpectedHeaderExpression => {
             "Expected an expression in loop header.".to_string()
         }
+    }
+}
+
+fn invalid_loop_header_collection_source_message(found_type: Option<&str>) -> String {
+    match found_type {
+        Some(found_type) => {
+            format!("Collection loop source must be a collection. Found '{found_type}'.")
+        }
+        None => "Collection loop source must be a collection. Found an unresolved expression \
+                 whose exact type is selected at the end of the enclosing body."
+            .to_string(),
+    }
+}
+
+/// WHAT: renders an invalid loop header from its compact reason and captured source type.
+/// WHY: the code selects the reason text, and the optional type display spells the captured type.
+pub(crate) fn render_invalid_loop_header(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidLoopHeaderView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let message = match facts.reason {
+        InvalidLoopHeaderCode::CollectionSourceNotCollection => {
+            let found_type = facts.found_type.map(|found_type| {
+                diagnostic.types().display_for_render(
+                    found_type,
+                    context.string_table,
+                    context.path_table(),
+                )
+            });
+            invalid_loop_header_collection_source_message(found_type.as_deref())
+        }
+        reason => invalid_loop_header_message(reason.to_reason(None)),
+    };
+    RenderedPayload {
+        message,
+        guidance: Vec::new(),
     }
 }
 
@@ -612,6 +860,19 @@ pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositio
     }
 }
 
+/// WHAT: renders an invalid statement position from its compact reason code.
+/// WHY: the compact view carries the reason `invalid_statement_position_message` consumes.
+pub(crate) fn render_invalid_statement_position(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStatementPositionView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_statement_position_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_this_usage_message(
     reason: InvalidThisUsageReason,
     string_table: &dyn StringTableResolver,
@@ -645,5 +906,22 @@ pub(crate) fn invalid_this_usage_message(
             "'This' is only valid inside trait declarations. Use a concrete type name here."
                 .to_string()
         }
+    }
+}
+
+/// WHAT: renders invalid `this` usage from its reason code and optional function name.
+/// WHY: only the two function-specific codes read the stored name.
+pub(crate) fn render_invalid_this_usage(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidThisUsageView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.function_name)
+        .expect("a this-usage code stores its required function name");
+    RenderedPayload {
+        message: invalid_this_usage_message(reason, context.string_table),
+        guidance: Vec::new(),
     }
 }

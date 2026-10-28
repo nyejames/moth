@@ -7,8 +7,8 @@
 
 use super::super::events::AccessKind;
 use super::super::origins::{CallResultProvenance, CallResultUnknownReason};
-use super::{FunctionProblemBuilder, compiler_error};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use super::{FunctionProblemBuilder, internal_failure};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAccessKind, ExternalHirReturnAlias,
 };
@@ -21,7 +21,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         &self,
         target: &CallTarget,
         argument_count: usize,
-    ) -> Result<(Vec<AccessKind>, CallResultProvenance), CompilerError> {
+    ) -> Result<(Vec<AccessKind>, CallResultProvenance), InfrastructureFailure> {
         if let CallTarget::External(id) = target {
             let Some(registry) = self.external_registry else {
                 return Ok((
@@ -30,7 +30,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 ));
             };
             let Some(definition) = registry.get_function_by_id(*id) else {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle problem extraction cannot resolve external call {:?}",
                     id
                 )));
@@ -44,7 +44,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 })
                 .collect::<Vec<_>>();
             if accesses.len() != argument_count {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle external call {:?} has {} arguments but metadata has {} parameters",
                     id,
                     argument_count,
@@ -72,7 +72,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         };
         let Some(summary) = summary else {
             if let CallTarget::CrossModule(id) = target {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "Boracle problem extraction is missing the provider call summary for imported function {id:?}"
                 )));
             }
@@ -94,7 +94,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             ));
         };
         if summary.parameters.len() != argument_count {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "Boracle call summary for {target:?} has {} parameters but call has {argument_count} arguments",
                 summary.parameters.len()
             )));

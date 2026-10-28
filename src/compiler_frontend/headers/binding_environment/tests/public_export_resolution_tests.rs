@@ -74,7 +74,8 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
         path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&mut input);
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
     assert!(
         matches!(
             result,
@@ -129,7 +130,8 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
         path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&mut input);
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
     assert!(
         matches!(result, Some(PublicExportLookupResult::ExportedSource { ref path, .. }) if path == &greet_source),
         "cross-module child dependency should resolve through the child public surface"
@@ -172,7 +174,8 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
         path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&mut input);
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
     assert!(
         matches!(result, Some(PublicExportLookupResult::NotExported { .. })),
         "cross-module dependency of a non-exported symbol should be rejected"
@@ -233,7 +236,8 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
         path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&mut input);
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
     assert!(matches!(
         result,
         Some(PublicExportLookupResult::ExportedProviderSelection {
@@ -289,7 +293,8 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
         path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&mut input);
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
     assert!(
         matches!(
             result,
@@ -330,7 +335,8 @@ fn consumer_without_module_membership_uses_empty_prefix() {
         path_fork: &mut path_fork,
     };
 
-    let result = resolve_public_export_boundary(&mut input);
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
     assert!(
         matches!(result, Some(PublicExportLookupResult::NotExported { .. })),
         "unknown consumer targeting a child module should see NotExported for a missing symbol"

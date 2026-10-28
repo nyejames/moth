@@ -17,12 +17,16 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 use rustc_hash::FxHashMap;
 
 use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, ParameterContract};
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
+    InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -41,18 +45,18 @@ use crate::compiler_frontend::type_coercion::compatibility::{
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 
 pub(crate) enum CallValidationError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
-impl From<CompilerDiagnostic> for CallValidationError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
-        CallValidationError::Diagnostic(diagnostic)
+impl From<DiagnosticDraft> for CallValidationError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for CallValidationError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for CallValidationError {
+    fn from(error: InfrastructureFailure) -> Self {
         CallValidationError::Infrastructure(error.into())
     }
 }
@@ -110,14 +114,14 @@ pub(crate) enum CallDiagnosticName<'a> {
 }
 
 impl<'a> CallDiagnosticName<'a> {
-    pub(crate) fn diagnostic_callee_name(self, string_table: &mut StringTable) -> Option<StringId> {
+    pub(crate) fn diagnostic_callee_name(self, string_table: &mut StringTable) -> StringId {
         match self {
-            Self::Interned(name) => Some(name),
+            Self::Interned(name) => name,
             Self::PathComponent {
                 component,
                 fallback,
-            } => Some(component.unwrap_or_else(|| string_table.intern(fallback))),
-            Self::Borrowed(name) => Some(string_table.intern(name)),
+            } => component.unwrap_or_else(|| string_table.intern(fallback)),
+            Self::Borrowed(name) => string_table.intern(name),
             Self::ChoiceVariant {
                 choice_name,
                 variant_name,
@@ -126,7 +130,7 @@ impl<'a> CallDiagnosticName<'a> {
                     .map(|name| string_table.resolve(name))
                     .unwrap_or("<choice>");
                 let variant_name = string_table.resolve(variant_name);
-                Some(string_table.get_or_intern(format!("{choice_name}::{variant_name}")))
+                string_table.get_or_intern(format!("{choice_name}::{variant_name}"))
             }
         }
     }
@@ -213,7 +217,7 @@ impl<'a> CallDiagnosticContext<'a> {
         }
     }
 
-    pub(crate) fn diagnostic_callee_name(self, string_table: &mut StringTable) -> Option<StringId> {
+    pub(crate) fn diagnostic_callee_name(self, string_table: &mut StringTable) -> StringId {
         self.callee_name.diagnostic_callee_name(string_table)
     }
 
@@ -567,7 +571,8 @@ fn resolve_call_arguments_with_type_policy(
                         let metadata = const_values
                             .metadata(default_value)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::AstConstruction,
                                     "default argument constant ID outside owner",
                                 )
                             })?
@@ -612,12 +617,12 @@ fn resolve_call_arguments_with_type_policy(
                     CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionDefaultFills,
                 });
             } else {
-                return Err(CompilerDiagnostic::invalid_call_shape(
+                return Err(calls_data::invalid_call_shape(
                     InvalidCallShapeReason::MissingArgument {
                         parameter_name: expectation.name,
                         parameter_index: slot,
                     },
-                    diagnostics.diagnostic_callee_name(string_table),
+                    Some(diagnostics.diagnostic_callee_name(string_table)),
                     span,
                 )
                 .into());
@@ -637,7 +642,9 @@ fn resolve_call_arguments_with_type_policy(
                 diagnostics.callable_title(),
                 diagnostics.rendered_callee_name(string_table)
             );
-            return Err(CompilerError::compiler_error(message).into());
+            return Err(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, message).into(),
+            );
         };
         let actual_type_id = expression_builder
             .view_owned(argument.value)?
@@ -660,7 +667,8 @@ fn resolve_call_arguments_with_type_policy(
             ExpectedParameterType::ConstructionShape(_) => {
                 // WHY: construction-only shapes are materialised at body-root completion before
                 // completed call validation; reaching here is a compiler ordering bug.
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Construction-only numeric shape reached completed call validation.",
                 )
                 .into());
@@ -668,7 +676,8 @@ fn resolve_call_arguments_with_type_policy(
             ExpectedParameterType::GenericParameter(_) => {
                 // WHY: generic inference and parse-side retention consume template expectations;
                 // completed calls validate against the instantiated signature, never the template.
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Generic parameter expectation reached completed call validation.",
                 )
                 .into());
@@ -706,7 +715,7 @@ fn resolve_call_arguments_with_type_policy(
                 CallSurfaceKind::Assertion => TypeMismatchContext::AssertionArgument,
                 _ => TypeMismatchContext::FunctionArgument,
             };
-            return Err(CompilerDiagnostic::type_mismatch(
+            return Err(types_borrows_targets::type_mismatch(
                 expected_type_id,
                 actual_type_id,
                 mismatch_context,
@@ -751,24 +760,24 @@ fn classify_call_passing_mode(
             // must be declared mutable. Point at the value expression, since no `~` was authored,
             // so the compiler does not suggest a marker-only repair.
             CallArgumentSourceState::ImmutablePlace { binding_name } => {
-                Err(CompilerDiagnostic::invalid_call_shape(
+                Err(calls_data::invalid_call_shape(
                     InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
                         parameter_name: expectation.name,
                         parameter_index: slot_index,
                         binding_name,
                     },
-                    diagnostics.diagnostic_callee_name(string_table),
+                    Some(diagnostics.diagnostic_callee_name(string_table)),
                     argument.span,
                 )
                 .into())
             }
             // A mutable place passed without `~` needs the explicit marker.
-            CallArgumentSourceState::MutablePlace => Err(CompilerDiagnostic::invalid_call_shape(
+            CallArgumentSourceState::MutablePlace => Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::MutableAccessRequired {
                     parameter_name: expectation.name,
                     parameter_index: slot_index,
                 },
-                diagnostics.diagnostic_callee_name(string_table),
+                Some(diagnostics.diagnostic_callee_name(string_table)),
                 argument.span,
             )
             .into()),
@@ -776,12 +785,12 @@ fn classify_call_passing_mode(
 
         // Mutable argument passed to a shared parameter: never allowed.
         (CallAccessMode::Mutable, ExpectedAccessMode::Shared) => {
-            Err(CompilerDiagnostic::invalid_call_shape(
+            Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::MutableAccessNotAllowed {
                     parameter_name: expectation.name,
                     parameter_index: slot_index,
                 },
-                diagnostics.diagnostic_callee_name(string_table),
+                Some(diagnostics.diagnostic_callee_name(string_table)),
                 authored_marker_span(argument),
             )
             .into())
@@ -792,25 +801,25 @@ fn classify_call_passing_mode(
         (CallAccessMode::Mutable, ExpectedAccessMode::Mutable) => match source_state {
             // Fresh rvalues, including explicit `copy source`, are not places here, so the
             // authored marker is the mistake.
-            CallArgumentSourceState::Fresh => Err(CompilerDiagnostic::invalid_call_shape(
+            CallArgumentSourceState::Fresh => Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::MutableAccessOnNonPlace {
                     parameter_name: expectation.name,
                     parameter_index: slot_index,
                 },
-                diagnostics.diagnostic_callee_name(string_table),
+                Some(diagnostics.diagnostic_callee_name(string_table)),
                 authored_marker_span(argument),
             )
             .into()),
             // The authored `~` is the call-site source the author wrote, so the primary label
             // stays on the marker rather than the immutable binding declaration.
             CallArgumentSourceState::ImmutablePlace { binding_name } => {
-                Err(CompilerDiagnostic::invalid_call_shape(
+                Err(calls_data::invalid_call_shape(
                     InvalidCallShapeReason::MutableAccessOnImmutablePlace {
                         parameter_name: expectation.name,
                         parameter_index: slot_index,
                         binding_name,
                     },
-                    diagnostics.diagnostic_callee_name(string_table),
+                    Some(diagnostics.diagnostic_callee_name(string_table)),
                     authored_marker_span(argument),
                 )
                 .into())

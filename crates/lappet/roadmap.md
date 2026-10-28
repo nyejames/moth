@@ -8,15 +8,18 @@ available.
 
 ## Current state
 
-- Status: CLI separation delivered. The runtime crate remains dependency-free
-  and contains documentation only.
-- Current checkpoint: native binding and artefact handoff.
-- Blockers: the V1 host ABI is accepted. Approve the execution checkpoints
-  below, then consume the relevant delivered compiler APIs.
-- Next action: deliver the public custom-builder SDK and descriptor handoff
-  through the active
-  [native binding handoff plan](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md).
-  Package management remains deferred.
+- Status: CLI separation and the public `moth::builder` SDK prototype are
+  delivered. The `lappet` crate remains dependency-free and documentation-only,
+  with no native runtime or host adapter.
+- Current checkpoint: native binding and artefact handoff remains unfinished.
+- Blockers: none for Phase 2 SDK work. `.config(...)` and
+  `CompiledProject::settings` remain incomplete, as do `BuildArtifacts`
+  publication and `BuildContext::compile_wasm`. Native execution awaits the
+  compiler ABI prerequisites and Lappet's separate runtime milestone.
+- Next action: implement `.config(...)` and `CompiledProject::settings` through
+  the active [native binding handoff plan](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md),
+  then complete output publication and the native Wasm handoff. Package
+  management remains deferred.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/src/developer-docs/wasm-optimisation/overview.mtf)

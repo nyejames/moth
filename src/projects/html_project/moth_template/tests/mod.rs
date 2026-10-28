@@ -8,10 +8,15 @@ use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
-    InvalidConfigReason, SyntaxDiagnosticKind,
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_resolved_failure_for_test;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, dev_server::render_compilation_result_html,
+    terse::format_terse_diagnostic_reports,
 };
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -49,12 +54,24 @@ fn temp_project(files: &[(&str, &str)]) -> TempDir {
 }
 
 fn compile_ok(input: MothTemplateInput) -> MothTemplateCompileOutput {
-    let mut string_table = StringTable::new();
-    compile_moth_template(input, &mut string_table).expect("Moth template input should compile")
+    match compile_moth_template(input, &mut StringTable::new()) {
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("Moth template input should compile: {reports:?}")
+        }
+        Err(errors) => panic!("Moth template input failed operationally: {errors:?}"),
+    }
+}
+fn expect_diagnosed<T>(result: CompilationResult<T>, message: &str) -> DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => panic!("{message}"),
+        Err(errors) => panic!("{message}: operational failure: {errors:?}"),
+    }
 }
 
 #[test]
-fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
+fn warnings_only_travel_with_success_and_preserve_document_snapshots() {
     let first_source = "[$html: <script>first_snapshot()</script>]";
     let second_source = "[$html: <script>second_snapshot()</script>]";
     let temp_dir = temp_project(&[
@@ -73,44 +90,85 @@ fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
         }
         let mut string_table = StringTable::new();
         let result = compile_moth_template(MothTemplateInput::Files(inputs), &mut string_table);
-        let messages = if include_failure {
-            result.expect_err("the third document should fail preparation")
+        let (reports, succeeded) = if include_failure {
+            (
+                expect_diagnosed(result, "the third document should fail preparation"),
+                false,
+            )
         } else {
-            let output = result.expect("both HTML documents should fold with warnings");
-            let mut messages = CompilerMessages::from_diagnostics(output.warnings, string_table);
-            messages.install_source_contexts(output.warning_source_contexts, 0);
-            messages
+            match result {
+                Ok(CompilationOutcome::Success {
+                    value,
+                    warnings: Some(reports),
+                }) => {
+                    assert_eq!(value.documents.len(), 2);
+                    (reports, true)
+                }
+                Ok(CompilationOutcome::Success { warnings: None, .. }) => {
+                    panic!("both HTML documents should retain their warnings")
+                }
+                Ok(CompilationOutcome::Diagnosed(reports)) => {
+                    panic!("both HTML documents should compile: {reports:?}")
+                }
+                Err(errors) => panic!("template compilation failed operationally: {errors:?}"),
+            }
         };
 
-        let mut expected_kinds = vec![
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
-        ];
-        let mut expected_sources = vec![first_source, second_source];
-        if include_failure {
-            expected_kinds.push(DiagnosticKind::Syntax(
-                SyntaxDiagnosticKind::UnescapedImplicitTemplateClose,
-            ));
-            expected_sources.push("]");
-        }
+        let expected_codes = if include_failure {
+            vec!["MOTH-SYNTAX-0032"]
+        } else {
+            vec!["MOTH-SYNTAX-0005", "MOTH-SYNTAX-0005"]
+        };
         assert_eq!(
-            messages
-                .diagnostics()
-                .map(|diagnostic| diagnostic.kind)
+            reports
+                .iter()
+                .map(|(_, view)| view.descriptor().code)
                 .collect::<Vec<_>>(),
-            expected_kinds,
+            expected_codes,
         );
+        assert_eq!(
+            reports.counts().warnings,
+            if include_failure { 0 } else { 2 }
+        );
+        assert_eq!(reports.counts().errors, if include_failure { 1 } else { 0 });
+
+        let expected_source_lines = if include_failure {
+            vec!["]"]
+        } else {
+            vec![first_source, second_source]
+        };
+        for ((report, view), expected_source_line) in reports.iter().zip(expected_source_lines) {
+            let position = DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .expect("diagnostic primary source should resolve through its report owner");
+            assert_eq!(
+                position.line, expected_source_line,
+                "each diagnostic should retain its owning document snapshot",
+            );
+        }
 
         // Every document has the same logical filename in a separate source domain. A missing
-        // range shift or a substituted current-document context would show the wrong snapshot.
-        for (index, (diagnostic, expected_source)) in
-            messages.diagnostics().zip(expected_sources).enumerate()
-        {
-            let position = messages
-                .diagnostic_render_context(index)
-                .primary_position(diagnostic)
-                .expect("warning should retain its authored source span");
-            assert_eq!(position.line, expected_source);
+        // range shift or substituted current-document context would show the wrong snapshot.
+        let render_result: CompilationResult<()> = if succeeded {
+            Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: Some(reports),
+            })
+        } else {
+            Ok(CompilationOutcome::Diagnosed(reports))
+        };
+        let rendered = render_compilation_result_html(&render_result, temp_dir.path());
+        if include_failure {
+            assert!(rendered.contains(r#"<span class="source-line">]</span>"#));
+            assert!(!rendered.contains("first_snapshot"));
+            assert!(!rendered.contains("second_snapshot"));
+        } else {
+            assert!(rendered.contains(
+                r#"<span class="source-line">[$html: &lt;script&gt;first_snapshot()&lt;/script&gt;]</span>"#
+            ));
+            assert!(rendered.contains(
+                r#"<span class="source-line">[$html: &lt;script&gt;second_snapshot()&lt;/script&gt;]</span>"#
+            ));
         }
     }
 }
@@ -296,35 +354,31 @@ fn distinct_origins_claiming_one_direct_output_path_are_diagnosed() {
     ]);
     let mut string_table = StringTable::new();
 
-    let messages = compile_moth_template(
-        MothTemplateInput::Directory {
-            path: temp_dir.path().to_path_buf(),
-            recursive: true,
-        },
-        &mut string_table,
-    )
-    .expect_err("distinct origins claiming one output path should fail");
+    let messages = expect_diagnosed(
+        compile_moth_template(
+            MothTemplateInput::Directory {
+                path: temp_dir.path().to_path_buf(),
+                recursive: true,
+            },
+            &mut string_table,
+        ),
+        "distinct origins claiming one output path should fail",
+    );
 
-    let InvalidConfigReason::ResourceOutputPathCollision {
-        output_path,
-        existing_origin,
-        conflicting_origin,
-    } = invalid_config_reason(&messages)
-    else {
-        panic!("expected a resource output path collision reason");
-    };
-    assert_eq!(string_table.resolve(*output_path), "a/shared/logo.svg");
+    assert_eq!(
+        invalid_config_reason(&messages),
+        Some("invalid_config.resource_output_path_collision"),
+        "expected a resource output path collision reason",
+    );
+    let rendered = format_terse_diagnostic_reports(&messages).join("\n");
+    assert!(rendered.contains("a/shared/logo.svg"));
     assert!(
-        string_table.resolve(*existing_origin).contains("at 'a'/"),
-        "the first origin should name module a: {}",
-        string_table.resolve(*existing_origin)
+        rendered.contains("at 'a'/"),
+        "the first origin should name module a: {rendered}"
     );
     assert!(
-        string_table
-            .resolve(*conflicting_origin)
-            .contains("at 'a/shared'/"),
-        "the second origin should name module a/shared: {}",
-        string_table.resolve(*conflicting_origin)
+        rendered.contains("at 'a/shared'/"),
+        "the second origin should name module a/shared: {rendered}"
     );
 }
 
@@ -375,20 +429,22 @@ fn request_wide_conflict_leaves_every_source_unhashed() {
     let mut string_table = StringTable::new();
     let mut resource_inputs = ResourceInputRegistry::new();
 
-    let messages = super::compile::compile_moth_template_with_registry(
-        MothTemplateInput::Directory {
-            path: temp_dir.path().to_path_buf(),
-            recursive: true,
-        },
-        &mut string_table,
-        &mut resource_inputs,
-    )
-    .expect_err("distinct origins claiming one output path should fail");
+    let messages = expect_diagnosed(
+        super::compile::compile_moth_template_with_registry(
+            MothTemplateInput::Directory {
+                path: temp_dir.path().to_path_buf(),
+                recursive: true,
+            },
+            &mut string_table,
+            &mut resource_inputs,
+        ),
+        "distinct origins claiming one output path should fail",
+    );
 
-    assert!(matches!(
+    assert_eq!(
         invalid_config_reason(&messages),
-        InvalidConfigReason::ResourceOutputPathCollision { .. }
-    ));
+        Some("invalid_config.resource_output_path_collision"),
+    );
     assert!(
         !resource_inputs.records().is_empty(),
         "Stage 0 still registers colliding sources before the plan fails"
@@ -449,50 +505,39 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
     let temp_dir = temp_project(&[]);
     let mut string_table = StringTable::new();
 
-    let messages = compile_moth_template(
-        MothTemplateInput::Sources(vec![
-            MothTemplateSource {
-                display_path: PathBuf::from("memory/intro.mtf"),
-                source_text: "first".to_owned(),
-            },
-            MothTemplateSource {
-                display_path: temp_dir.path().join("absolute.mtf"),
-                source_text: "second".to_owned(),
-            },
-        ]),
-        &mut string_table,
-    )
-    .expect_err("mixed relative and absolute display paths have one portable basis");
-
-    assert_eq!(messages.error_count(), 1);
-    let diagnostic = messages
-        .diagnostics()
-        .next()
-        .expect("mixed-basis diagnostic should be present");
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor)
-    ));
-    let (first_path, second_path) = match &diagnostic.payload {
-        DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
-            first_path,
-            second_path,
-        } => (*first_path, *second_path),
-        payload => panic!("expected no-common-ancestor paths, got {payload:?}"),
-    };
-    let context = messages.diagnostic_render_context(0);
-    assert_eq!(
-        context.render_path(first_path),
-        "memory/intro.mtf",
-        "no-common-ancestor diagnostics should render their first actual input path",
+    let messages = expect_diagnosed(
+        compile_moth_template(
+            MothTemplateInput::Sources(vec![
+                MothTemplateSource {
+                    display_path: PathBuf::from("memory/intro.mtf"),
+                    source_text: "first".to_owned(),
+                },
+                MothTemplateSource {
+                    display_path: temp_dir.path().join("absolute.mtf"),
+                    source_text: "second".to_owned(),
+                },
+            ]),
+            &mut string_table,
+        ),
+        "mixed relative and absolute display paths have one portable basis",
     );
-    let second_rendered_path = messages
-        .diagnostic_render_context(0)
-        .render_path(second_path);
+
+    assert_eq!(messages.counts().errors, 1);
+    assert_eq!(
+        messages
+            .iter()
+            .map(|(_, view)| view.descriptor().code)
+            .collect::<Vec<_>>(),
+        ["MOTH-IMPORT-0029"],
+    );
+    let rendered = format_terse_diagnostic_reports(&messages).join("\n");
     assert!(
-        second_rendered_path.ends_with("absolute.mtf"),
-        "no-common-ancestor diagnostics should render their second actual input path, got \
-         {second_rendered_path:?}",
+        rendered.contains("memory/intro.mtf"),
+        "the diagnostic should render its first actual input path: {rendered}",
+    );
+    assert!(
+        rendered.contains("absolute.mtf"),
+        "the diagnostic should render its second actual input path: {rendered}",
     );
 }
 
@@ -534,14 +579,8 @@ fn document_with_relative_path<'a>(
         .unwrap_or_else(|| panic!("compiled output should include {relative}"))
 }
 
-fn invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
-    let diagnostic = messages
-        .first_error()
-        .expect("expected an error-severity diagnostic");
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidConfig { reason, .. } => reason,
-        _ => panic!("expected an invalid config diagnostic"),
-    }
+fn invalid_config_reason(reports: &DiagnosticReportSet) -> Option<&'static str> {
+    reports.iter().find_map(|(_, view)| view.reason_key())
 }
 
 #[test]
@@ -643,14 +682,13 @@ fn content_reference_onto_the_entry_reuses_its_registered_kind() {
         &mut string_table,
     );
 
-    if let Err(messages) = result {
-        let conflicts: Vec<_> = messages
-            .diagnostics()
-            .filter(|diagnostic| format!("{:?}", diagnostic.payload).contains("conflicting kinds"))
-            .collect();
+    if let Err(errors) = result {
+        let conflict = errors
+            .iter()
+            .any(|error| error.message.contains("conflicting kinds"));
         assert!(
-            conflicts.is_empty(),
-            "the entry's own canonical path must not be registered under a second kind: {conflicts:?}"
+            !conflict,
+            "the entry's own canonical path must not be registered under a second kind"
         );
     }
 }
@@ -720,7 +758,7 @@ fn content_source_preparation_failures_name_the_logical_source() {
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
         .expect("style directives should merge");
     let mut resource_inputs = ResourceInputRegistry::new();
-    let Err(messages) = prepare_file_value_bundle(
+    let Err(bundle_failure) = prepare_file_value_bundle(
         &mut units[0],
         &style_directives,
         &mut string_table,
@@ -728,82 +766,34 @@ fn content_source_preparation_failures_name_the_logical_source() {
     ) else {
         panic!("an unterminated string in a content source should fail preparation");
     };
+    let mut accumulator = BoundaryAccumulator::new();
+    bundle_failure.append_to_boundary(&mut accumulator);
+    let failure = accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("the preparation diagnostic should freeze");
 
-    let diagnostic = messages
-        .diagnostics()
+    let (report, view) = failure
+        .iter()
         .next()
         .expect("the preparation diagnostic should be present");
-    let source_database = messages
-        .source_database_for_diagnostic(0)
-        .expect("preparation diagnostics should retain their source database");
-    let span = diagnostic
-        .primary_span
-        .expect("the preparation diagnostic should retain its source span");
+    let primary_site = view.primary_site();
+    let span = match primary_site {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("the preparation diagnostic should retain its primary span"),
+    };
     assert_eq!(
-        source_database.retained_text(span.source()),
+        report.context().retained_text(span.source()),
         Some("# Broken\n\n[$insert(\"unterminated]\n"),
         "the diagnosed boundary should retain the exact content snapshot",
     );
-    let logical_path = source_database
-        .source_logical_path(span.source())
-        .expect("the diagnosed source should have a logical path");
-    let scope = messages
-        .diagnostic_render_context(0)
-        .render_path(logical_path);
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(primary_site)
+        .expect("the preparation diagnostic should retain its source span");
     assert_eq!(
-        scope, "docs/broken.mtf",
-        "the failure should name the logical content source, got {scope:?}"
-    );
-}
-
-/// A canonical content target can differ from the authored spelling when a symlink is involved.
-/// If that target fails before preparation, final registration still adds its logical path; the
-/// failure cause owner must retain that path in the same table as the discovery fork.
-#[cfg(unix)]
-#[test]
-fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
-    use std::os::unix::fs::symlink;
-
-    let temp_dir = temp_project(&[
-        ("page.mtf", "# Page\n\n[@alias.md]"),
-        ("real.md", "placeholder"),
-    ]);
-    let real_path = temp_dir.path().join("real.md");
-    fs::write(&real_path, [0xff]).expect("invalid UTF-8 should be written");
-    symlink(&real_path, temp_dir.path().join("alias.md"))
-        .expect("the authored alias should point at the unreadable target");
-
-    let mut string_table = StringTable::new();
-    let Err(messages) = compile_moth_template(
-        MothTemplateInput::File(temp_dir.path().join("page.mtf")),
-        &mut string_table,
-    ) else {
-        panic!("the unreadable canonical content target should fail discovery");
-    };
-
-    assert!(messages.has_infrastructure_error());
-    let source_database = messages
-        .infrastructure_errors()
-        .expect("the aborted walk should retain its infrastructure causes")
-        .source_database_for_cause(0)
-        .expect("the failure cause should retain its source database");
-    let canonical_real_path =
-        fs::canonicalize(&real_path).expect("the canonical target should resolve");
-    let source = source_database
-        .get_by_canonical_path(&canonical_real_path)
-        .expect("the canonical target should remain registered after failure");
-    assert!(
-        source_database.paths().contains(source.logical_path),
-        "the retained source logical path must belong to the finalized path table",
-    );
-    let rendered_path = source_database.paths().render_portable(
-        source.logical_path,
-        &messages.string_table,
-        &mut Vec::new(),
-    );
-    assert_eq!(
-        rendered_path, "real.md",
-        "the finalized source database should render the canonical target path",
+        position.path,
+        PathBuf::from("docs/broken.mtf"),
+        "the failure should name the logical content source, got {:?}",
+        position.path,
     );
 }
 
@@ -812,7 +802,8 @@ fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
 /// aligned with the final logical source as the bundle settles its identities.
 #[test]
 fn retained_resolution_diagnostics_name_the_final_logical_source() {
-    let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
+    const SOURCE: &str = "# Page\n\n[@absent.md]";
+    let temp_dir = temp_project(&[("page.mtf", SOURCE)]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut units = MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")])
@@ -830,6 +821,7 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
     )
     .expect("an unresolvable reference is a retained diagnostic, not a bundle failure");
 
+    let entry_source_id = bundle.prepared_entry.file_id;
     let diagnostic = bundle
         .resolved_file_references
         .iter()
@@ -838,11 +830,33 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
             _ => None,
         })
         .expect("a reference to an absent target should retain a diagnostic");
+    let compact = compact_resolved_failure_for_test(*diagnostic);
+    let view = compact
+        .first()
+        .expect("the emitted resolution diagnostic should compact");
+    let span = match view.primary_site() {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("the emitted diagnostic should retain its authored source span"),
+    };
+    assert_eq!(span.source(), entry_source_id);
 
-    assert!(
-        diagnostic.primary_span.is_some(),
-        "the retained resolution diagnostic should keep its authored source span",
-    );
+    let mut source_builder = bundle.source_files;
+    source_builder
+        .finish_source(entry_source_id)
+        .expect("the template source should finalize after preparation");
+    source_builder
+        .assemble_finalized_tables()
+        .expect("the finalized template source table should assemble");
+    let source_files = source_builder
+        .finish()
+        .expect("the already-finalized source database should validate");
+    assert_eq!(source_files.retained_text(entry_source_id), Some(SOURCE));
+    let range = span.byte_range(&source_files);
+    let expected_start = SOURCE
+        .find("@absent.md")
+        .expect("fixture should contain the absent target path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(range.end(), expected_start + "@absent.md".len() as u32);
 }
 
 #[test]
@@ -854,19 +868,70 @@ fn unreadable_content_value_surfaces_its_own_read_failure() {
     fs::write(&unreadable, [b'o', b'k', 0xff, b'\n']).expect("invalid UTF-8 should be written");
     let mut string_table = StringTable::new();
 
-    let messages = compile_moth_template(
+    let result = compile_moth_template(
         MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")]),
         &mut string_table,
-    )
-    .expect_err("an unreadable content source should fail the compile");
+    );
+    let CompilationOutcome::Diagnosed(reports) =
+        result.expect("invalid UTF-8 content is diagnosed")
+    else {
+        panic!("invalid UTF-8 content should diagnose rather than fail operationally");
+    };
+    assert_eq!(reports.counts().errors, 1);
+    let (_, diagnostic) = reports
+        .iter()
+        .next()
+        .expect("invalid UTF-8 content should diagnose once");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0040");
+}
 
-    // The read now happens before preparation, so the recorded failure must be replayed at the
-    // preparation boundary. Reporting the slot's own "no retained text" state instead would
-    // replace the user-facing read failure with an internal compiler error.
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("the read failure should be reported");
-    assert_eq!(error.error_type, ErrorType::File);
+/// A failed content producer keeps its own diagnostic when a sibling content source cannot be
+/// decoded. The walk pops `docs/broken.mtf` first, so the invalid UTF-8 `docs/legal.md` is only
+/// collected. Its read failure must not replace the producer's diagnostic.
+#[test]
+fn failed_content_producer_keeps_its_diagnostic_beside_an_undecodable_sibling() {
+    let temp_dir = temp_project(&[
+        (
+            "page.mtf",
+            "# Page\n\n[@docs/broken.mtf]\n\n[@docs/legal.md]",
+        ),
+        ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
+    ]);
+    fs::write(
+        temp_dir.path().join("docs/legal.md"),
+        [b'o', b'k', 0xff, b'\n'],
+    )
+    .expect("invalid UTF-8 should be written");
+    let mut string_table = StringTable::new();
+
+    let result = compile_moth_template(
+        MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")]),
+        &mut string_table,
+    );
+    let CompilationOutcome::Diagnosed(reports) =
+        result.expect("a failed content producer is diagnosed")
+    else {
+        panic!("a failed content producer should diagnose rather than fail operationally");
+    };
+    assert_eq!(reports.counts().errors, 1);
+    let (report, view) = reports
+        .iter()
+        .next()
+        .expect("the producer diagnostic should be present");
+    assert_eq!(
+        view.descriptor().code,
+        "MOTH-SYNTAX-0006",
+        "the undecodable sibling must not replace the producer's unterminated string",
+    );
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("the producer diagnostic should retain its source span");
+    assert_eq!(
+        position.path,
+        PathBuf::from("docs/broken.mtf"),
+        "the producer diagnostic should name its own content source, got {:?}",
+        position.path,
+    );
 }
 
 #[test]
@@ -1131,39 +1196,53 @@ fn duplicate_source_paths_are_diagnostics() {
     let path = temp_dir.path().join("intro.mtf");
     let mut string_table = StringTable::new();
 
-    let messages = compile_moth_template(
-        MothTemplateInput::Files(vec![path.clone(), path]),
-        &mut string_table,
-    )
-    .expect_err("duplicate input paths should fail");
-
-    assert_eq!(messages.error_count(), 1);
-    let diagnostic = messages
-        .diagnostics()
-        .next()
-        .expect("duplicate diagnostic should be present");
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath)
-    ));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
-    ));
-    let duplicate_path = match &diagnostic.payload {
-        DiagnosticPayload::DuplicateMothTemplateInputPath { path } => *path,
-        payload => panic!("expected duplicate path payload, got {payload:?}"),
-    };
-    let rendered_path = messages
-        .diagnostic_render_context(0)
-        .render_path(duplicate_path);
-    assert!(
-        rendered_path.ends_with("intro.mtf"),
-        "duplicate diagnostics should render the actual input path, got {rendered_path:?}",
+    let messages = expect_diagnosed(
+        compile_moth_template(
+            MothTemplateInput::Files(vec![path.clone(), path]),
+            &mut string_table,
+        ),
+        "duplicate input paths should fail",
     );
 
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Secondary);
+    assert_eq!(messages.counts().errors, 1);
+    let (_, diagnostic) = messages
+        .iter()
+        .next()
+        .expect("duplicate diagnostic should be present");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0028");
+    assert_eq!(diagnostic.durable_labels().count(), 1);
+    let rendered = format_terse_diagnostic_reports(&messages).join("\n");
+    assert!(
+        rendered.contains("intro.mtf"),
+        "duplicate diagnostics should render the actual input path: {rendered}",
+    );
+}
+
+#[test]
+fn ast_prepared_failure_keeps_type_names_and_source_snapshot() {
+    let source = "[:[true + 1]]";
+    let temp_dir = temp_project(&[("broken.mtf", source)]);
+    let mut string_table = StringTable::new();
+
+    let failure = expect_diagnosed(
+        compile_moth_template(
+            MothTemplateInput::File(temp_dir.path().join("broken.mtf")),
+            &mut string_table,
+        ),
+        "incompatible interpolation operands should fail AST folding",
+    );
+
+    assert_eq!(failure.counts().errors, 1);
+    let render_result: CompilationResult<()> = Ok(CompilationOutcome::Diagnosed(failure));
+    let rendered = render_compilation_result_html(&render_result, temp_dir.path());
+    assert!(
+        rendered.contains("Bool") && rendered.contains("I32"),
+        "the prepared AST diagnostic should retain its type display names: {rendered}",
+    );
+    assert!(
+        rendered.contains(r#"<span class="source-line">[:[true + 1]]</span>"#),
+        "the prepared AST diagnostic should retain its exact source snapshot: {rendered}",
+    );
 }
 
 #[test]

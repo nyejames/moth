@@ -7,12 +7,17 @@
 
 use super::*;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
+use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    UnexpectedTokenShape, UnexpectedTokenView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 #[cfg(test)]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
@@ -24,27 +29,27 @@ use unicode_width::UnicodeWidthStr;
 ///
 /// A label with a source span carries a root-relative path and one-based display coordinates;
 /// its message is empty when the label marks a location without prose. A spanless message carries
-/// no location. Labels with an unresolved source span are omitted by
-/// [`resolve_label_render_facts_from_root`].
+/// no location. A label whose source span cannot be resolved, or that has neither a location nor
+/// a message, is omitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedDiagnosticLabel {
-    pub(crate) style: DiagnosticLabelStyle,
     pub(crate) path: Option<String>,
     pub(crate) line: Option<i32>,
     pub(crate) column: Option<i32>,
     pub(crate) message: String,
 }
 
-/// Exact primary source position resolved from an attached source identity context.
+/// Exact primary source position resolved from an attached frozen identity context.
 ///
-/// A diagnostic source span is meaningful only while its owning frozen identity context or source
-/// database remains attached to the message set. The render boundary resolves the span's byte
-/// range through that owner and borrows the retained source line; no producer-side line/column
-/// representation is consulted.
+/// A diagnostic source span is meaningful only while its owning frozen identity context remains
+/// attached to the message set. The render boundary resolves the span's byte range through that
+/// owner and borrows the retained source line; no producer-side line/column representation is
+/// consulted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DiagnosticPrimaryPosition<'a> {
     pub(crate) source: SourceId,
     pub(crate) path: PathBuf,
+    pub(crate) byte_range: std::ops::Range<u32>,
     pub(crate) host_path: Option<&'a Path>,
     pub(crate) start: LinePosition,
     pub(crate) end: LinePosition,
@@ -53,8 +58,8 @@ pub(crate) struct DiagnosticPrimaryPosition<'a> {
 /// Source of complete-path identities used by diagnostic renderers.
 ///
 /// Mutable frontend diagnostics use a module-local fork; diagnostics retained past a merge use
-/// the frozen path table attached to their identity context. A renderer must never reconstruct a
-/// path through a legacy component-vector value.
+/// the frozen path table attached to their identity context. A renderer must never rebuild a
+/// path from its components; it resolves each identity through this context.
 #[derive(Clone, Copy)]
 pub(crate) enum DiagnosticPathContext<'a> {
     #[cfg(test)]
@@ -88,15 +93,12 @@ impl<'a> DiagnosticPathContext<'a> {
 /// Render-boundary data needed to turn diagnostic facts into user-facing text.
 ///
 /// WHAT: carries shared lookup tables by reference while diagnostics keep only stable IDs.
-/// WHY: type diagnostics should store semantic `TypeId`s, not rendered strings or owned
-/// `TypeEnvironment` snapshots. The render boundary decides how those IDs become names.
-/// Frozen identity rows are authoritative for retained source spans; the attached `SourceDatabase`
-/// is consulted only when no frozen identity context is attached.
+/// WHY: type spellings are frozen into snapshots at the owning boundary, while source identity
+/// rows remain available to renderers after diagnostics outlive their producer.
+/// Frozen identity rows are authoritative for retained source spans.
 #[derive(Clone, Copy)]
 pub(crate) struct DiagnosticRenderContext<'a> {
     pub(crate) string_table: &'a dyn StringTableResolver,
-    pub(crate) type_environment: Option<&'a TypeEnvironment>,
-    pub(crate) source_database: Option<&'a SourceDatabase>,
     pub(crate) frozen_identity: Option<&'a FrozenIdentityContext>,
     pub(crate) path_context: Option<DiagnosticPathContext<'a>>,
 }
@@ -105,11 +107,14 @@ impl<'a> DiagnosticRenderContext<'a> {
     pub(crate) fn new(string_table: &'a dyn StringTableResolver) -> Self {
         Self {
             string_table,
-            type_environment: None,
-            source_database: None,
             frozen_identity: None,
             path_context: None,
         }
+    }
+
+    /// The render context for one frozen report: its strings and its frozen identity rows.
+    pub(crate) fn for_report(report: &'a DiagnosticReport) -> Self {
+        Self::new(report.context().strings()).with_frozen_identity(report.context())
     }
 
     pub(crate) fn with_frozen_identity(
@@ -122,36 +127,6 @@ impl<'a> DiagnosticRenderContext<'a> {
         self
     }
 
-    pub(crate) fn with_optional_frozen_identity(
-        self,
-        frozen_identity: Option<&'a FrozenIdentityContext>,
-    ) -> Self {
-        match frozen_identity {
-            Some(frozen_identity) => self.with_frozen_identity(frozen_identity),
-            None => self,
-        }
-    }
-
-    pub(crate) fn with_optional_type_environment(
-        mut self,
-        type_environment: Option<&'a TypeEnvironment>,
-    ) -> Self {
-        self.type_environment = type_environment;
-        self
-    }
-
-    pub(crate) fn with_optional_source_database(
-        mut self,
-        source_database: Option<&'a SourceDatabase>,
-    ) -> Self {
-        self.source_database = source_database;
-        if self.path_context.is_none() {
-            self.path_context =
-                source_database.map(|database| DiagnosticPathContext::Table(database.paths()));
-        }
-        self
-    }
-
     #[cfg(test)]
     pub(crate) fn with_path_fork(mut self, path_fork: &'a PathInternerFork) -> Self {
         self.path_context = Some(DiagnosticPathContext::Fork(path_fork));
@@ -161,13 +136,6 @@ impl<'a> DiagnosticRenderContext<'a> {
     #[cfg(test)]
     pub(crate) fn with_path_table(mut self, path_table: &'a PathTable) -> Self {
         self.path_context = Some(DiagnosticPathContext::Table(path_table));
-        self
-    }
-
-    pub(crate) fn with_optional_path_table(mut self, path_table: Option<&'a PathTable>) -> Self {
-        if let Some(path_table) = path_table {
-            self.path_context = Some(DiagnosticPathContext::Table(path_table));
-        }
         self
     }
 
@@ -196,60 +164,22 @@ impl<'a> DiagnosticRenderContext<'a> {
         }
     }
 
-    /// Resolve a diagnostic's primary span through an attached source identity owner.
-    ///
-    /// SourceSpan ranges are half-open byte offsets. The owner supplies both the extended-span
-    /// table and the retained source snapshot, so line/column conversion and source text always
-    /// come from one identity context. Compilation-root spans and diagnostics without an
-    /// attached owner intentionally have no physical source position.
-    pub(crate) fn primary_position(
+    /// Resolve a compact site: a foreign site through its report-owned identity context, a local site through this
+    /// context, and an absent or unresolved foreign site to no position.
+    pub(crate) fn site_position<'site>(
         self,
-        diagnostic: &'a CompilerDiagnostic,
-    ) -> Option<DiagnosticPrimaryPosition<'a>> {
-        let span = diagnostic.primary_span?;
-        if let Some(frozen_identity_handle) = diagnostic.primary_frozen_identity_handle.as_ref() {
-            if let Some(frozen_identity) = frozen_identity_handle.get() {
-                return self.resolve_span_in_frozen(frozen_identity, span);
-            }
-
-            // A legacy handle without a stable domain may use the message's transitional source
-            // row. A donor-domain handle never authorizes requester-database fallback.
-            if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
-                return self.resolve_span_in_database(span);
-            }
-            return None;
-        }
-
-        self.resolve_span(span)
-    }
-
-    /// Resolve one secondary label span through its explicit owner when present.
-    ///
-    /// Ordinary labels remain compact and use the diagnostic context. A donor-owned label is
-    /// different: its source IDs belong to the handle's frozen context, so an uninstalled handle
-    /// returns no position rather than silently falling back to the requester context.
-    pub(crate) fn label_position<'label>(
-        self,
-        label: &'label DiagnosticLabel,
-    ) -> Option<DiagnosticPrimaryPosition<'label>>
+        site: SiteRef<'site>,
+    ) -> Option<DiagnosticPrimaryPosition<'site>>
     where
-        'a: 'label,
+        'a: 'site,
     {
-        let span = label.span?;
-        if let Some(frozen_identity_handle) = label.frozen_identity_handle.as_ref() {
-            if let Some(frozen_identity) = frozen_identity_handle.get() {
-                return self.resolve_span_in_frozen(frozen_identity, span);
+        match site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) => self.resolve_span(span),
+            SiteRef::Foreign { span, context } => {
+                context.and_then(|context| self.resolve_span_in_frozen(context, span))
             }
-
-            // A legacy handle without a stable domain may use the message's transitional source
-            // row. A donor-domain handle never authorizes requester-database fallback.
-            if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
-                return self.resolve_span_in_database(span);
-            }
-            return None;
         }
-
-        self.resolve_span(span)
     }
 
     fn resolve_span(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
@@ -257,11 +187,10 @@ impl<'a> DiagnosticRenderContext<'a> {
             return None;
         }
 
-        if let Some(frozen) = self.frozen_identity {
-            return self.resolve_span_in_frozen(frozen, span);
+        match self.frozen_identity {
+            Some(frozen) => self.resolve_span_in_frozen(frozen, span),
+            None => None,
         }
-
-        self.resolve_span_in_database(span)
     }
 
     fn resolve_span_in_frozen<'identity>(
@@ -283,35 +212,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         Some(DiagnosticPrimaryPosition {
             source,
             path,
-            host_path: slot.canonical_os_path.as_deref(),
-            start,
-            end,
-            line,
-        })
-    }
-
-    fn resolve_span_in_database(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
-        let source_database = self.source_database?;
-        let source = span.source();
-        let slot = source_database.get(source)?;
-        let line_index = source_database.line_index(source)?;
-        let range = span.byte_range(source_database);
-        let start = line_index.position(range.start())?;
-        let end = line_index.position(range.end())?;
-        let line = line_text_or_empty_file_eof(line_index, start)?;
-        let path_id = source_database.source_logical_path(source)?;
-        let mut scratch = Vec::new();
-        let path = PathBuf::from(
-            DiagnosticPathContext::Table(source_database.paths()).render(
-                path_id,
-                self.string_table,
-                &mut scratch,
-            ),
-        );
-
-        Some(DiagnosticPrimaryPosition {
-            source,
-            path,
+            byte_range: range.start()..range.end(),
             host_path: slot.canonical_os_path.as_deref(),
             start,
             end,
@@ -319,74 +220,59 @@ impl<'a> DiagnosticRenderContext<'a> {
         })
     }
 }
-/// Resolve secondary labels into facts consumed independently by terminal and HTML renderers.
+
+/// Build a resolved label from its source position and message.
 ///
-/// The path is made relative to `root`, while line and column remain one-based display
-/// coordinates. A label with a resolvable source span keeps its location even when it carries no
-/// message, which then stays empty. A spanless message is retained with no location; a label whose
-/// source span cannot be resolved, or that has neither a location nor a message, is omitted.
-pub(crate) fn resolve_label_render_facts_from_root(
-    diagnostic: &CompilerDiagnostic,
-    context: DiagnosticRenderContext<'_>,
+/// A positioned label keeps its location even when its message is empty. A spanless message keeps only
+/// non-empty text. Any other label has no usable fact and is omitted.
+pub(super) fn resolved_label_fact(
+    spanned: bool,
+    position: Option<DiagnosticPrimaryPosition<'_>>,
+    message: Option<String>,
     root: &Path,
-) -> Vec<ResolvedDiagnosticLabel> {
-    let mut labels = Vec::new();
-
-    for label in &diagnostic.labels {
-        let message = label
-            .message
-            .as_ref()
-            .map(|message| diagnostic_label_message_text(message, context));
-        let Some(position) = context.label_position(label) else {
-            // A spanless label carries only its message, and a message that renders empty leaves
-            // nothing to show. A label whose source span cannot be resolved has no usable global
-            // fact, so it keeps the existing omission policy.
-            if label.span.is_none()
-                && let Some(message) = message
-                && !message.is_empty()
-            {
-                labels.push(ResolvedDiagnosticLabel {
-                    style: label.style,
-                    path: None,
-                    line: None,
-                    column: None,
-                    message,
-                });
-            }
-            continue;
-        };
-
-        labels.push(ResolvedDiagnosticLabel {
-            style: label.style,
-            path: Some(relative_display_path_from_root(
-                position.path.as_path(),
-                root,
-            )),
-            line: Some(display_line_number(
-                i32::try_from(position.start.line).unwrap_or(i32::MAX),
-            )),
-            column: Some(display_column_number(
-                i32::try_from(position.start.column).unwrap_or(i32::MAX),
-            )),
-            message: message.unwrap_or_default(),
+) -> Option<ResolvedDiagnosticLabel> {
+    let Some(position) = position else {
+        let message = message.filter(|message| !message.is_empty())?;
+        return (!spanned).then_some(ResolvedDiagnosticLabel {
+            path: None,
+            line: None,
+            column: None,
+            message,
         });
-    }
+    };
 
-    labels
+    Some(ResolvedDiagnosticLabel {
+        path: Some(relative_display_path_from_root(
+            position.path.as_path(),
+            root,
+        )),
+        line: Some(display_line_number(
+            i32::try_from(position.start.line).unwrap_or(i32::MAX),
+        )),
+        column: Some(display_column_number(
+            i32::try_from(position.start.column).unwrap_or(i32::MAX),
+        )),
+        message: message.unwrap_or_default(),
+    })
 }
 
-fn diagnostic_label_message_text(
-    message: &DiagnosticLabelMessage,
+/// The message of one compact label. `None` is the message-less label, which marks a location
+/// without prose.
+pub(crate) fn compact_label_message_text(
+    message: DurableLabelMessage<'_>,
+    types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
-) -> String {
+) -> Option<String> {
     let string_table = context.string_table;
+    let type_text = |type_id| types.display_for_render(type_id, string_table, context.path_table());
 
-    match message {
-        DiagnosticLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
-        DiagnosticLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
-        DiagnosticLabelMessage::ValueMovedHere => "value moved here".to_owned(),
-        DiagnosticLabelMessage::RenderedText(text) => string_table.resolve(*text).to_owned(),
-        DiagnosticLabelMessage::ConfigInputOrigin { input_name, origin } => {
+    let text = match message {
+        DurableLabelMessage::None => return None,
+        DurableLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
+        DurableLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
+        #[cfg(test)]
+        DurableLabelMessage::ValueMovedHere => "value moved here".to_owned(),
+        DurableLabelMessage::ConfigInputOrigin { input_name, origin } => {
             let origin_text = match origin {
                 BuildConfigValueOrigin::ExplicitInput => "an explicit input",
                 BuildConfigValueOrigin::BuilderGlobal => "a builder-provided global",
@@ -395,53 +281,56 @@ fn diagnostic_label_message_text(
             };
             format!(
                 "configuration input `{}` resolved from {origin_text}",
-                string_table.resolve(*input_name)
+                string_table.resolve(input_name)
             )
         }
-        DiagnosticLabelMessage::GenericInstantiationBodySite => {
+        DurableLabelMessage::TraitRequirementSite => "trait requirement".to_owned(),
+        DurableLabelMessage::ReceiverMethodSite => "receiver method".to_owned(),
+        DurableLabelMessage::GenericInstantiationBodySite => {
             "generic body operation failed here".to_owned()
         }
-        DiagnosticLabelMessage::GenericInstantiationDeclarationSite => {
+        DurableLabelMessage::GenericInstantiationDeclarationSite => {
             "generic function declared here".to_owned()
         }
-        DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions } => {
+        DurableLabelMessage::GenericInstantiationSubstitutions(substitutions) => {
             let substitution_text = substitutions
                 .iter()
                 .map(|substitution| {
-                    let parameter_name = string_table.resolve(substitution.parameter_name);
-                    let concrete_type =
-                        diagnostic_type_name(substitution.concrete_type_id, context);
-                    format!("{parameter_name} = {concrete_type}")
+                    let parameter_name = string_table.resolve(substitution.parameter);
+                    format!("{parameter_name} = {}", type_text(substitution.concrete))
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
 
             format!("generic substitution: {substitution_text}")
         }
-        DiagnosticLabelMessage::GenericInferencePreviousEvidence => {
+        DurableLabelMessage::GenericInferencePreviousEvidence => {
             "previous generic inference evidence here".to_owned()
         }
-        DiagnosticLabelMessage::ImmutableBindingDeclaration => {
+        DurableLabelMessage::ImmutableBindingDeclaration => {
             "immutable binding declared here".to_owned()
         }
-        DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => {
-            let error_type = diagnostic_type_name(*error_type_id, context);
-            format!("`{error_type}!` failure produced here")
+        DurableLabelMessage::TypedFailureProducer { error_type } => {
+            format!("`{}!` failure produced here", type_text(error_type))
         }
-        DiagnosticLabelMessage::ImplicitFailureProducer => {
+        DurableLabelMessage::ImplicitFailureProducer => {
             "implicit built-in failure may escape here".to_owned()
         }
-        DiagnosticLabelMessage::BuiltinFailureCall => {
+        DurableLabelMessage::BuiltinFailureCall => {
             "implicit built-in failure propagates through this call".to_owned()
         }
-        DiagnosticLabelMessage::BuiltinFailureOrigin => {
+        DurableLabelMessage::BuiltinFailureOrigin => {
             "original failing numeric or range operation here".to_owned()
         }
-        DiagnosticLabelMessage::BuiltinWriteBackOrigin { target_type_id } => {
-            let target = diagnostic_type_name(*target_type_id, context);
-            format!("write-back into `{target}` here after the compound update")
+        DurableLabelMessage::BuiltinWriteBackOrigin { target_type } => {
+            format!(
+                "write-back into `{}` here after the compound update",
+                type_text(target_type)
+            )
         }
-    }
+    };
+
+    Some(text)
 }
 
 /// Return a validated retained line, allowing only the exact EOF position of an empty snapshot to
@@ -555,27 +444,6 @@ pub(crate) fn primary_underline_length(
         u32::MAX
     };
     caret_cells(line, position.start.column, end_column).1
-}
-
-pub(crate) fn diagnostic_type_name(
-    type_id: TypeId,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let Some(type_environment) = context.type_environment else {
-        return format!("TypeId({})", type_id.0);
-    };
-    let Some(path_table) = context.path_table() else {
-        return format!("TypeId({})", type_id.0);
-    };
-    if type_environment.get(type_id).is_none() {
-        return format!("TypeId({})", type_id.0);
-    }
-    crate::compiler_frontend::datatypes::display::display_type_with_resolver(
-        type_id,
-        type_environment,
-        context.string_table,
-        path_table,
-    )
 }
 
 pub(crate) fn value_receiver_context_name(
@@ -735,6 +603,32 @@ pub(crate) fn unexpected_token_message(
 ) -> String {
     let found = token_kind_name(found, string_table);
     format!("Unexpected token {found}.")
+}
+
+/// WHAT: renders an unexpected-token diagnostic from its compact shape.
+/// WHY: a plain token and a multi-bind misuse share one row, so the shape selects the prose.
+pub(crate) fn render_unexpected_token(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &UnexpectedTokenView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let message = match &view.shape {
+        UnexpectedTokenShape::Token(found) => unexpected_token_message(found, context.string_table),
+        UnexpectedTokenShape::MultiBind {
+            code,
+            target_name,
+            expected,
+            found,
+        } => invalid_multi_bind_message(
+            code.to_reason(*expected, *found),
+            *target_name,
+            context.string_table,
+        ),
+    };
+    RenderedPayload {
+        message,
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn unknown_name_message(

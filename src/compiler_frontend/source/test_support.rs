@@ -68,7 +68,7 @@ impl TestSourceContext {
     ///
     /// The returned `LexedSource` owns the canonical token arrays and the preparing path table;
     /// focused tests should pass those allocations to the same source-owner boundary as
-    /// production rather than recreating a compatibility token stream.
+    /// production rather than recreating a second token stream.
     pub(crate) fn tokenize(
         &mut self,
         source: &str,
@@ -106,9 +106,9 @@ impl TestSourceContext {
 
 /// Build a one-source database with `text` retained, for tests that resolve against a snapshot.
 ///
-/// WHY: line ranges, line text, span resolution and render bridges all need the same loaded
-/// record shape; sharing one constructor keeps those suites asserting behavior instead of
-/// rebuilding registration scaffolding.
+/// WHY: line ranges, line text, span resolution and source-position rendering all use a loaded
+/// record; a shared constructor keeps these suites asserting behavior instead of rebuilding
+/// registration scaffolding.
 pub(crate) fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {
     let source_path = PathBuf::from("/project/main.moth");
     let mut string_table = StringTable::new();

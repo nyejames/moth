@@ -1,16 +1,15 @@
 //! Database of registered source slots, loaded snapshots, and cold load failures for one frontend
 //! compilation lifetime.
 //!
-//! The database owns the ordered source-slot inventory, the dense array of loaded snapshots, and
-//! the cold array of load failures. Loaded records retain the exact UTF-8 source text plus
-//! line-start table for each successful load. Their extended-span table is installed once, after
-//! the final span-producing stage, and remains source-owned for frozen consumers.
+//! The database owns the ordered source-slot inventory, a dense array of loaded snapshots, and a
+//! cold array of load failures. Loaded records retain the exact UTF-8 source text plus line-start
+//! table for each successful load. Each source's extended-span table is installed at its final
+//! producer boundary.
 //!
-//! [`SourceDatabaseBuilder`] is the exclusive build-stage owner around one database. It registers
-//! and loads sources through the existing database surface, retains each loaded source's live
-//! [`ExtendedSpanBuilder`] in a dense array aligned to the database's private loaded-record
-//! indices, and either splits into an immutable database borrow plus a mutable builder view for
-//! lookup/mutation callers or finishes by installing every outstanding span table once.
+//! [`SourceDatabaseBuilder`] is the exclusive build-stage owner around one database. It retains
+//! each loaded source's live [`ExtendedSpanBuilder`] in a dense array aligned to the database's
+//! private loaded-record indices, and exposes split views for lookup/mutation. Its terminal finish
+//! checks lifecycle invariants without finalizing or moving any source's span table.
 
 use super::line_index::LineIndex;
 use super::record::{
@@ -20,7 +19,11 @@ use super::span::{ExtendedSpanBuilder, ExtendedSpanTable};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerBuilder, PathInternerFork, PathTable,
@@ -49,7 +52,7 @@ use std::sync::Arc;
 pub struct SourceDatabase {
     slots: Vec<SourceSlot>,
     loaded: Vec<SourceRecord>,
-    load_failures: Vec<CompilerError>,
+    load_failures: Vec<InfrastructureFailure>,
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
     path_interner: PathInternerBuilder,
 }
@@ -68,47 +71,99 @@ pub struct SourceDatabase {
 pub struct FrozenSourceDatabase {
     slots: Vec<SourceSlot>,
     loaded: Vec<SourceRecord>,
-    paths: PathTable,
+    paths: Arc<PathTable>,
 }
 #[cfg(feature = "data_layout_memory_probe")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SourceDatabaseRetentionMetrics {
     pub(crate) source_snapshot_bytes: usize,
+    pub(crate) source_text_capacity_bytes: usize,
+    pub(crate) source_line_start_rows: usize,
+    pub(crate) source_line_start_bytes: usize,
+    pub(crate) source_line_start_capacity_bytes: usize,
     pub(crate) extended_span_rows: usize,
+    pub(crate) extended_span_bytes: usize,
+    pub(crate) extended_span_duplicate_rows: usize,
     pub(crate) source_identity_slots: usize,
-}
-
-#[cfg(feature = "data_layout_memory_probe")]
-impl SourceDatabase {
-    /// Summarize the source allocations retained by this mutable boundary.
-    ///
-    /// The counters describe the exact storage that crosses the freeze boundary; construction-only
-    /// reverse lookup and load-failure state are intentionally excluded.
-    pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
-        source_retention_metrics(&self.loaded, self.slots.len())
-    }
+    pub(crate) source_identity_slot_capacity_bytes: usize,
+    pub(crate) source_provenance_field_bytes: usize,
+    pub(crate) compilation_root_slots: usize,
+    pub(crate) authored_physical_slots: usize,
+    pub(crate) canonical_os_path_bytes: usize,
+    pub(crate) loaded_source_records: usize,
+    pub(crate) loaded_source_record_capacity_bytes: usize,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
 impl FrozenSourceDatabase {
     pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
-        source_retention_metrics(&self.loaded, self.slots.len())
+        source_retention_metrics(
+            &self.loaded,
+            &self.slots,
+            self.loaded.capacity(),
+            self.slots.capacity(),
+        )
     }
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
 fn source_retention_metrics(
     loaded: &[SourceRecord],
-    source_identity_slots: usize,
+    slots: &[SourceSlot],
+    loaded_capacity: usize,
+    slot_capacity: usize,
 ) -> SourceDatabaseRetentionMetrics {
+    use super::span::ExtendedSpanTable;
+
     SourceDatabaseRetentionMetrics {
         source_snapshot_bytes: loaded.iter().map(|record| record.text.len()).sum(),
+        source_text_capacity_bytes: loaded.iter().map(|record| record.text.len()).sum(),
+        source_line_start_rows: loaded.iter().map(|record| record.line_starts.len()).sum(),
+        source_line_start_bytes: loaded
+            .iter()
+            .map(|record| record.line_starts.len() * std::mem::size_of::<u32>())
+            .sum(),
+        source_line_start_capacity_bytes: loaded
+            .iter()
+            .map(|record| record.line_starts.len() * std::mem::size_of::<u32>())
+            .sum(),
         extended_span_rows: loaded
             .iter()
             .filter_map(|record| record.extended_spans.as_ref())
             .map(ExtendedSpanTable::len)
             .sum(),
-        source_identity_slots,
+        extended_span_bytes: loaded
+            .iter()
+            .filter_map(|record| record.extended_spans.as_ref())
+            .map(ExtendedSpanTable::storage_bytes)
+            .sum(),
+        extended_span_duplicate_rows: loaded
+            .iter()
+            .filter_map(|record| record.extended_spans.as_ref())
+            .map(ExtendedSpanTable::repeated_rows)
+            .sum(),
+        source_identity_slots: slots.len(),
+        source_identity_slot_capacity_bytes: slot_capacity
+            .saturating_mul(std::mem::size_of::<SourceSlot>()),
+        source_provenance_field_bytes: slots
+            .len()
+            .saturating_mul(std::mem::size_of::<SourceProvenance>()),
+        compilation_root_slots: slots
+            .iter()
+            .filter(|slot| slot.provenance == SourceProvenance::CompilationRoot)
+            .count(),
+        authored_physical_slots: slots
+            .iter()
+            .filter(|slot| slot.provenance == SourceProvenance::AuthoredPhysical)
+            .count(),
+        canonical_os_path_bytes: slots
+            .iter()
+            .filter_map(|slot| slot.canonical_os_path.as_deref())
+            .map(|path| path.as_os_str().as_encoded_bytes().len())
+            .sum(),
+        loaded_source_records: loaded.len(),
+        loaded_source_record_capacity_bytes: loaded_capacity
+            .saturating_mul(std::mem::size_of::<SourceRecord>()),
     }
 }
 
@@ -134,9 +189,9 @@ impl SourceDatabase {
     /// This is the terminal source lifecycle operation. It moves the registration slots, loaded
     /// source snapshots, line-start tables, installed extended-span tables and path nodes without
     /// copying any of those allocations. Construction-only load failures and canonical-path lookup
-    /// state are dropped here. Callers must invoke this only after
-    /// [`SourceDatabaseBuilder::finish`] has installed every live span builder; a frozen owner has
-    /// no mutation path for completing that work.
+    /// state are dropped here. Callers invoke this only after [`SourceDatabaseBuilder::finish`]
+    /// has checked that every loaded source received its span table at the final producer
+    /// boundary.
     pub(crate) fn freeze(self) -> FrozenSourceDatabase {
         let SourceDatabase {
             slots,
@@ -149,7 +204,7 @@ impl SourceDatabase {
         FrozenSourceDatabase {
             slots,
             loaded,
-            paths: path_interner.freeze(),
+            paths: Arc::new(path_interner.freeze()),
         }
     }
 
@@ -304,10 +359,13 @@ impl SourceDatabase {
         for (canonical, kind, path_id) in interned_rows {
             if self.canonical_to_id.contains_key(&canonical) {
                 return Err(SourceDatabaseError::Infrastructure(
-                    CompilerError::compiler_error(format!(
-                        "Source identity inventory registered canonical source path {} more than once",
-                        canonical.display(),
-                    )),
+                    InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "Source identity inventory registered canonical source path {} more than once",
+                            canonical.display(),
+                        ),
+                    ),
                 ));
             }
 
@@ -335,21 +393,26 @@ impl SourceDatabase {
         self.path_interner.paths()
     }
 
-    /// Clone the registration prefix into a compilation-owned sibling builder.
+    /// Share the registration prefix with a compilation-owned sibling builder.
     ///
-    /// WHAT: copies the source-registration path nodes once so file preparation and module
-    ///       compilation can fork and merge `PathId` deltas without mutating the `Arc`-shared
-    ///       lookup database.
-    /// WHY: source logical `PathId`s are the identity prefix: the clone preserves their numeric
-    ///      identities, worker deltas append after them, and the sibling is adopted back before
-    ///      the freeze so the frozen table is the full build table. Cloning happens once per
-    ///      compilation boundary, never per intern.
-    pub(crate) fn clone_path_builder(&self) -> PathInternerBuilder {
-        self.path_interner.clone()
+    /// WHAT: seals the current path suffix into shared immutable storage and gives compilation a
+    ///       builder that appends its own local delta without mutating this database.
+    /// WHY: source logical `PathId`s remain the identity prefix, while module-local nodes append
+    ///      after them and are adopted back before freeze without copying the full path table.
+    pub(crate) fn fork_path_builder(&mut self) -> PathInternerBuilder {
+        self.path_interner.fork_with_shared_prefix()
+    }
+
+    /// Borrow the registration builder mutably for an append-only path-snapshot merge.
+    ///
+    /// WHAT: hands the source-path builder to a converter that merges a frozen path snapshot.
+    /// WHY: a converted diagnostic carries its own path IDs, so they must be remapped into this
+    ///      builder; the merge only appends, so existing source `PathId`s keep their numbers.
+    pub(crate) fn path_builder_mut(&mut self) -> &mut PathInternerBuilder {
+        &mut self.path_interner
     }
 
     /// Fork the registered logical-path table for one local frontend preparation wave.
-    #[cfg(test)]
     pub(crate) fn fork_path_interner(
         &self,
     ) -> crate::compiler_frontend::symbols::path_interner::PathInternerFork {
@@ -380,18 +443,24 @@ impl SourceDatabase {
         let logical_path = self
             .get(source)
             .ok_or_else(|| {
-                SourceDatabaseError::Infrastructure(CompilerError::compiler_error(format!(
-                    "source identity {} is absent while re-interning its logical path",
-                    source.index()
-                )))
+                SourceDatabaseError::Infrastructure(InfrastructureFailure::internal(
+                    CompilerStage::SourceLoading,
+                    format!(
+                        "source identity {} is absent while re-interning its logical path",
+                        source.index()
+                    ),
+                ))
             })?
             .logical_path;
         let table = self.paths();
         let depth = table.try_depth(logical_path).ok_or_else(|| {
-            SourceDatabaseError::Infrastructure(CompilerError::compiler_error(format!(
-                "source identity {} carries an invalid logical path",
-                source.index()
-            )))
+            SourceDatabaseError::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "source identity {} carries an invalid logical path",
+                    source.index()
+                ),
+            ))
         })?;
         let mut components = Vec::with_capacity(depth as usize);
         table.resolve_components(logical_path, &mut components);
@@ -400,6 +469,33 @@ impl SourceDatabase {
             .ok_or(SourceDatabaseError::Capacity(
                 SourceCapacityError::LogicalPathTableFull,
             ))
+    }
+
+    /// Names a rejected authored snapshot by its logical path.
+    ///
+    /// WHAT: an oversize snapshot becomes a source-span capacity draft named by the source's
+    ///       logical path, re-interned in `path_fork`. Every other rejection is returned unchanged.
+    /// WHY: only an authored file can exceed the snapshot limit, so the message must name it.
+    ///      The draft's path ID lives in `path_fork`, so callers must capture that fork's table.
+    pub(crate) fn snapshot_rejection_draft(
+        &self,
+        error: SourceDatabaseError,
+        source_id: SourceId,
+        path_fork: &mut PathInternerFork,
+    ) -> Result<DiagnosticDraft, SourceDatabaseError> {
+        match error {
+            SourceDatabaseError::Capacity(SourceCapacityError::SourceSnapshotTooLarge) => {
+                let path = self.logical_path_in_fork(source_id, path_fork)?;
+                Ok(token_lexical::source_span_capacity_named(
+                    0,
+                    u32::MAX,
+                    SourceSpanCapacityResource::SourceSnapshot,
+                    Some(path),
+                    None,
+                ))
+            }
+            other => Err(other),
+        }
     }
 
     /// Look up the exact source snapshot retained for a physical source identity.
@@ -414,15 +510,18 @@ impl SourceDatabase {
     ///
     /// The loaded array remains private to the database; callers address its record through the
     /// source identity carried by the corresponding registration slot.
+    #[cfg(test)]
     pub(crate) fn line_index(&self, id: SourceId) -> Option<LineIndex<'_>> {
         let record = self.loaded_record(id)?;
         Some(LineIndex::new(&record.text, &record.line_starts))
     }
 
-    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
+    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&InfrastructureFailure> {
         match &self.get(id)?.load {
             SourceLoadStatus::Failed(index) => self.load_failures.get(index.index()),
-            SourceLoadStatus::Pending | SourceLoadStatus::Loaded(_) => None,
+            SourceLoadStatus::Pending | SourceLoadStatus::NonUtf8 | SourceLoadStatus::Loaded(_) => {
+                None
+            }
         }
     }
 
@@ -431,41 +530,28 @@ impl SourceDatabase {
     /// A slot that already holds a snapshot or a load failure is a lifecycle violation, so the
     /// size policy is applied only to a slot that can still accept one. Otherwise an oversized
     /// second snapshot would report the user's file instead of the compiler's own mistake.
-    pub(crate) fn retain_text(&mut self, id: SourceId, text: String) -> Result<(), CompilerError> {
+    pub(crate) fn retain_text(
+        &mut self,
+        id: SourceId,
+        text: String,
+    ) -> Result<(), SourceDatabaseError> {
         let provenance = {
             let slot = self.source_slot_mut(id)?;
             if !matches!(slot.load, SourceLoadStatus::Pending) {
-                return Err(CompilerError::compiler_error(format!(
-                    "source text for source identity {} was retained more than once",
-                    id.index()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::SourceLoading,
+                    format!(
+                        "source text for source identity {} was retained more than once",
+                        id.index()
+                    ),
+                )
+                .into());
             }
             slot.provenance
         };
 
-        // Oversized snapshots are checked only on the failure path; normal loads carry the compact
-        // logical `PathId` without reconstructing a component vector.
-        if text.len() >= u32::MAX as usize {
-            let slot = self
-                .get(id)
-                .expect("source slot validated before retaining text");
-            let fit_result = ensure_source_snapshot_fits(
-                text.len(),
-                provenance,
-                slot.canonical_os_path.as_deref(),
-            );
-            if let Err(error) = fit_result {
-                // Authored snapshots that exceed the representable source range are source
-                // failures. Record the terminal slot state before returning so every caller,
-                // including discovery's fallible finalization path, leaves no authored slot
-                // pending. Compiler-produced oversize snapshots remain compiler failures and
-                // keep the slot untouched for invariant reporting.
-                if error.error_type == crate::compiler_frontend::compiler_errors::ErrorType::File {
-                    self.record_source_load_error(id, error.clone())?;
-                }
-                return Err(error);
-            }
-        }
+        // Reject before building line starts: the snapshot's offsets must be addressable by `u32`.
+        ensure_source_snapshot_fits(text.len(), provenance)?;
 
         let line_starts = super::line_index::line_start_offsets(&text);
         let loaded_index = LoadedSourceIndex::from_index(self.loaded.len());
@@ -488,35 +574,46 @@ impl SourceDatabase {
     ///
     /// Installation is monotonic: a pending or failed source never receives a table, and a
     /// loaded source can transition from absent to installed only once.
-    // The exclusive source owner installs the table after its final span-producing stage.
-    pub(crate) fn install_extended_spans(
+    // The exclusive source owner installs each table at its final producer boundary.
+    fn install_extended_spans(
         &mut self,
         id: SourceId,
         extended_spans: ExtendedSpanTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let loaded_index = {
             let slot = self.slots.get(id.index()).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "source identity {} is absent from the source database",
-                    id.index()
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::SourceLoading,
+                    format!(
+                        "source identity {} is absent from the source database",
+                        id.index()
+                    ),
+                )
             })?;
 
             if slot.provenance == SourceProvenance::CompilationRoot {
-                return Err(CompilerError::compiler_error(format!(
-                    "extended spans cannot be installed on compilation root source identity {}",
-                    id.index()
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::SourceLoading,
+                    format!(
+                        "extended spans cannot be installed on compilation root source identity {}",
+                        id.index()
+                    ),
+                ));
             }
 
             match slot.load {
                 SourceLoadStatus::Loaded(index) => index,
-                SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "extended spans for source identity {} were installed before its source \
+                SourceLoadStatus::Pending
+                | SourceLoadStatus::Failed(_)
+                | SourceLoadStatus::NonUtf8 => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "extended spans for source identity {} were installed before its source \
                          was loaded",
-                        id.index()
-                    )));
+                            id.index()
+                        ),
+                    ));
                 }
             }
         };
@@ -527,10 +624,13 @@ impl SourceDatabase {
             .expect("loaded source status points outside the loaded record array");
 
         if record.extended_spans.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "extended spans for source identity {} were installed more than once",
-                id.index()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "extended spans for source identity {} were installed more than once",
+                    id.index()
+                ),
+            ));
         }
 
         record.extended_spans = Some(extended_spans);
@@ -541,39 +641,64 @@ impl SourceDatabase {
     pub(crate) fn record_source_load_error(
         &mut self,
         id: SourceId,
-        error: CompilerError,
-    ) -> Result<(), CompilerError> {
-        {
-            let slot = self.source_slot_mut(id)?;
-            if !matches!(slot.load, SourceLoadStatus::Pending) {
-                return Err(CompilerError::compiler_error(format!(
-                    "source load status for source identity {} was recorded more than once",
-                    id.index()
-                )));
-            }
-        }
-
+        error: InfrastructureFailure,
+    ) -> Result<(), InfrastructureFailure> {
+        self.ensure_slot_pending(id)?;
         let failure_index = LoadFailureIndex::from_index(self.load_failures.len());
         self.load_failures.push(error);
-
-        let slot = self
-            .slots
-            .get_mut(id.index())
-            .expect("source slot validated before recording load error");
-        debug_assert!(matches!(slot.load, SourceLoadStatus::Pending));
-        slot.load = SourceLoadStatus::Failed(failure_index);
+        self.set_slot_load_status(id, SourceLoadStatus::Failed(failure_index));
         Ok(())
     }
 
-    fn source_slot_mut(&mut self, id: SourceId) -> Result<&mut SourceSlot, CompilerError> {
+    /// Record that a registered source's bytes were read but are not UTF-8.
+    ///
+    /// WHAT: moves the slot to the terminal `NonUtf8` status; the caller builds the diagnostic.
+    /// WHY: a slot left `Pending` would claim that loading was never attempted.
+    pub(crate) fn record_source_non_utf8(
+        &mut self,
+        id: SourceId,
+    ) -> Result<(), InfrastructureFailure> {
+        self.ensure_slot_pending(id)?;
+        self.set_slot_load_status(id, SourceLoadStatus::NonUtf8);
+        Ok(())
+    }
+
+    fn ensure_slot_pending(&mut self, id: SourceId) -> Result<(), InfrastructureFailure> {
+        let slot = self.source_slot_mut(id)?;
+        if !matches!(slot.load, SourceLoadStatus::Pending) {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "source load status for source identity {} was recorded more than once",
+                    id.index()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn set_slot_load_status(&mut self, id: SourceId, status: SourceLoadStatus) {
+        let slot = self
+            .slots
+            .get_mut(id.index())
+            .expect("source slot validated before recording load status");
+        debug_assert!(matches!(slot.load, SourceLoadStatus::Pending));
+        slot.load = status;
+    }
+
+    fn source_slot_mut(&mut self, id: SourceId) -> Result<&mut SourceSlot, InfrastructureFailure> {
         let slot = self.slots.get_mut(id.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "source identity {} is absent from the source database",
-                id.index()
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "source identity {} is absent from the source database",
+                    id.index()
+                ),
+            )
         })?;
         if slot.provenance == SourceProvenance::CompilationRoot {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
                 "source snapshots cannot be retained on the compilation root",
             ));
         }
@@ -584,7 +709,9 @@ impl SourceDatabase {
         let slot = self.get(id)?;
         let loaded_index = match slot.load {
             SourceLoadStatus::Loaded(index) => index,
-            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => return None,
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => {
+                return None;
+            }
         };
         self.loaded.get(loaded_index.index())
     }
@@ -596,14 +723,16 @@ impl SourceDatabase {
     /// and root identities remain compiler bugs at this boundary.
     pub(super) fn source_record(&self, id: SourceId) -> &SourceRecord {
         let slot = self.slots.get(id.index()).unwrap_or_else(|| {
-            panic!(
+            crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "source identity {} is absent from the source database; this is a compiler bug",
                 id.index()
             )
         });
 
         if slot.provenance == SourceProvenance::CompilationRoot {
-            panic!(
+            crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "source identity {} is the compilation root and has no loaded source record; \
                  the root resolves only the exact empty span range [0, 0) through the span \
                  module, never a record; this is a compiler bug",
@@ -613,8 +742,9 @@ impl SourceDatabase {
 
         let loaded_index = match slot.load {
             SourceLoadStatus::Loaded(index) => index,
-            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => {
-                panic!(
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => {
+                crate::compiler_bug!(
+                    CompilerStage::SourceLoading,
                     "source identity {} has no loaded source record; this is a compiler bug",
                     id.index()
                 )
@@ -622,7 +752,8 @@ impl SourceDatabase {
         };
 
         self.loaded.get(loaded_index.index()).unwrap_or_else(|| {
-            panic!(
+            crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "source identity {} points outside the loaded source records; this is a compiler \
                  bug",
                 id.index()
@@ -663,26 +794,32 @@ impl SourceDatabase {
                     self.paths()
                         .render_portable(path_id, string_table, &mut scratch);
                 return Err(SourceDatabaseError::Infrastructure(
-                    CompilerError::compiler_error(format!(
-                        "Source identity inventory registered canonical source path {} under \
+                    InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "Source identity inventory registered canonical source path {} under \
                          conflicting logical paths {} and {}",
-                        canonical_path.display(),
-                        existing_path,
-                        requested_path,
-                    )),
+                            canonical_path.display(),
+                            existing_path,
+                            requested_path,
+                        ),
+                    ),
                 ));
             }
             if let Some(stored_kind) = slot.kind
                 && stored_kind != kind
             {
                 return Err(SourceDatabaseError::Infrastructure(
-                    CompilerError::compiler_error(format!(
-                        "Source identity inventory registered canonical source path {} under \
+                    InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "Source identity inventory registered canonical source path {} under \
                          conflicting kinds {:?} and {:?}",
-                        canonical_path.display(),
-                        stored_kind,
-                        kind,
-                    )),
+                            canonical_path.display(),
+                            stored_kind,
+                            kind,
+                        ),
+                    ),
                 ));
             }
             return Ok(slot.id);
@@ -756,11 +893,23 @@ impl SourceDatabase {
     }
 
     /// Return the compact logical path identity assigned to one physical source.
+    #[cfg(test)]
     pub(crate) fn source_logical_path(&self, id: SourceId) -> Option<PathId> {
         self.get(id).map(|slot| slot.logical_path)
     }
 }
 impl FrozenSourceDatabase {
+    /// Builds a frozen database with no sources, so an unowned domain carries only its path trie.
+    ///
+    /// Every span it names misses the slot table and resolves to no position.
+    pub(crate) fn with_paths(paths: Arc<PathTable>) -> Self {
+        Self {
+            slots: Vec::new(),
+            loaded: Vec::new(),
+            paths,
+        }
+    }
+
     /// Resolve one physical source slot by its compact identity.
     ///
     /// The compilation-root identity is intentionally excluded: it owns no physical source
@@ -793,14 +942,15 @@ impl FrozenSourceDatabase {
     /// at this boundary, just as they are for the mutable database's frozen-span lookup.
     pub(crate) fn source_record(&self, id: SourceId) -> &SourceRecord {
         let slot = self.slots.get(id.index()).unwrap_or_else(|| {
-            panic!(
+            crate::compiler_bug!(CompilerStage::SourceLoading,
                 "source identity {} is absent from the frozen source database; this is a compiler bug",
                 id.index()
             )
         });
 
         if slot.provenance == SourceProvenance::CompilationRoot {
-            panic!(
+            crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "source identity {} is the compilation root and has no loaded source record; \
                  this is a compiler bug",
                 id.index()
@@ -809,8 +959,9 @@ impl FrozenSourceDatabase {
 
         let loaded_index = match slot.load {
             SourceLoadStatus::Loaded(index) => index,
-            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => {
-                panic!(
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => {
+                crate::compiler_bug!(
+                    CompilerStage::SourceLoading,
                     "source identity {} has no loaded source record in the frozen source \
                      database; this is a compiler bug",
                     id.index()
@@ -819,7 +970,8 @@ impl FrozenSourceDatabase {
         };
 
         self.loaded.get(loaded_index.index()).unwrap_or_else(|| {
-            panic!(
+            crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "source identity {} points outside the frozen source records; this is a \
                  compiler bug",
                 id.index()
@@ -831,7 +983,9 @@ impl FrozenSourceDatabase {
         let slot = self.get(id)?;
         let loaded_index = match slot.load {
             SourceLoadStatus::Loaded(index) => index,
-            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => return None,
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => {
+                return None;
+            }
         };
         self.loaded.get(loaded_index.index())
     }
@@ -856,17 +1010,25 @@ fn compilation_root_slot() -> SourceSlot {
 /// Span states use the database's private dense loaded-record index. Registration-only slots
 /// allocate no builder, and a split borrow lets producers read snapshots without sharing mutation.
 /// Semantic Stage 0 facts may hold private immutable snapshot handles during a call. All such
-/// handles must be released before finalization recovers exclusive ownership and installs tables.
+/// handles must be released before source-local finalization recovers exclusive ownership to
+/// install each table in its preassigned record.
 ///
 /// Construction state enters owned through [`SourceDatabaseBuilder::new`] and leaves owned
 /// through [`SourceDatabaseBuilder::finish`]. The interior `Arc` is only the transient share
 /// handle that boundary compilation clones for retained Stage 0 facts; every such clone is
-/// dropped before the freeze, and the terminal publish `Arc` is minted after the consume.
+/// dropped before the terminal publish `Arc` is minted after the consume.
 #[derive(Debug)]
 pub(crate) struct SourceDatabaseBuilder {
     sources: Arc<SourceDatabase>,
     live_builders: Vec<SpanBuilderState>,
-    pending_builders: FxHashMap<SourceId, ExtendedSpanBuilder>,
+    pending_builders: FxHashMap<SourceId, PendingSpanBuilder>,
+}
+
+#[derive(Debug)]
+enum PendingSpanBuilder {
+    CheckedOut,
+    Live(ExtendedSpanBuilder),
+    Finished(ExtendedSpanTable),
 }
 
 #[derive(Debug)]
@@ -874,8 +1036,9 @@ enum SpanBuilderState {
     Unprepared,
     CheckedOut,
     Live(ExtendedSpanBuilder),
+    Finished(ExtendedSpanTable),
+    Installed,
 }
-
 impl SourceDatabaseBuilder {
     /// Take exclusive construction ownership of one registered database.
     ///
@@ -916,22 +1079,121 @@ impl SourceDatabaseBuilder {
         self.split().1.retain_span_builder(source, builder);
     }
 
-    /// Move builders collected while discovery was loading selected source text into the
-    /// database's dense live-builder table.
+    /// Finalize one source's span table at its last producer boundary.
     ///
-    /// Discovery may tokenize a selected source before its snapshot is retained. Such a source
-    /// keeps its builder in the pending side table until the selected-text map installs the
-    /// snapshot; no producer may escape without being adopted before the next stage.
+    /// The builder state owns the frozen table until terminal container assembly, so this never
+    /// mutates the shared source database while compilation still borrows its snapshots.
+    pub(crate) fn finish_source(&mut self, source: SourceId) -> Result<(), InfrastructureFailure> {
+        self.split().1.finish_source(source)
+    }
+
+    /// Whether one source's span table has crossed its final producer boundary.
+    pub(crate) fn is_source_finalized(
+        &mut self,
+        source: SourceId,
+    ) -> Result<bool, InfrastructureFailure> {
+        self.split().1.is_source_finalized(source)
+    }
+
+    /// Move finalized tables into their preassigned records after every shared source view drops.
+    ///
+    /// This is a pure ownership transfer: it does not freeze builders or allocate replacement
+    /// tables. [`Self::finish`] remains invariant checking only.
+    pub(crate) fn assemble_finalized_tables(&mut self) -> Result<(), InfrastructureFailure> {
+        self.sync_loaded_records();
+        if !self.pending_builders.is_empty() {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                "pending span builders escaped source finalization",
+            ));
+        }
+
+        for slot_index in 0..self.sources.slots.len() {
+            let (source, loaded_index) = {
+                let slot = &self.sources.slots[slot_index];
+                let SourceLoadStatus::Loaded(loaded_index) = slot.load else {
+                    continue;
+                };
+                (slot.id, loaded_index)
+            };
+            let index = loaded_index.index();
+            match &self.live_builders[index] {
+                SpanBuilderState::Installed => {
+                    if self.sources.loaded[index].extended_spans.is_none() {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::SourceLoading,
+                            format!(
+                                "source identity {} was marked installed without an extended-span table",
+                                source.index()
+                            ),
+                        ));
+                    }
+                }
+                SpanBuilderState::Finished(_) => {
+                    let SpanBuilderState::Finished(table) = std::mem::replace(
+                        &mut self.live_builders[index],
+                        SpanBuilderState::Unprepared,
+                    ) else {
+                        crate::compiler_bug!(
+                            CompilerStage::SourceLoading,
+                            "finished span table changed during assembly"
+                        )
+                    };
+                    Arc::get_mut(&mut self.sources)
+                        .expect(
+                            "source context escaped before finalized table assembly; this is a compiler bug",
+                        )
+                        .install_extended_spans(source, table)?;
+                    self.live_builders[index] = SpanBuilderState::Installed;
+                }
+                SpanBuilderState::Unprepared => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} was not finalized before source table assembly",
+                            source.index()
+                        ),
+                    ));
+                }
+                SpanBuilderState::Live(_) => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} still owns a live span builder at source table assembly",
+                            source.index()
+                        ),
+                    ));
+                }
+                SpanBuilderState::CheckedOut => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} still has an outstanding span producer at source table assembly",
+                            source.index()
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Move builders collected while discovery was loading selected source text into the
+    /// database's dense source state.
+    ///
+    /// Discovery can finish a source-local table before retaining its selected snapshot. The
+    /// finished table stays in the pending side table until the snapshot is adopted.
     pub(crate) fn adopt_pending_span_builders(&mut self) {
         self.sync_loaded_records();
         let pending = std::mem::take(&mut self.pending_builders);
-        for (source, builder) in pending {
+        for (source, pending_builder) in pending {
             let slot = self
                 .sources
                 .get(source)
                 .expect("pending span producer source must be registered; this is a compiler bug");
             let SourceLoadStatus::Loaded(index) = slot.load else {
-                panic!(
+                crate::compiler_bug!(
+                    CompilerStage::SourceLoading,
                     "pending span producer source {} was not retained before adoption; this is a compiler bug",
                     source.index()
                 );
@@ -942,52 +1204,94 @@ impl SourceDatabaseBuilder {
                 "source {} already owns a live span builder during pending adoption; this is a compiler bug",
                 source.index()
             );
-            *live = SpanBuilderState::Live(builder);
+            *live = match pending_builder {
+                PendingSpanBuilder::CheckedOut => crate::compiler_bug!(
+                    CompilerStage::SourceLoading,
+                    "source {} still has an outstanding span producer during pending adoption; this is a compiler bug",
+                    source.index()
+                ),
+                PendingSpanBuilder::Live(builder) => SpanBuilderState::Live(builder),
+                PendingSpanBuilder::Finished(table) => SpanBuilderState::Finished(table),
+            };
         }
     }
-
-    /// Freeze every returned builder and consume construction state into lookup-only storage.
+    /// Check that every loaded source was assembled at its producer boundary and consume
+    /// construction state into lookup-only storage.
     ///
     /// WHY: the terminal publish `Arc` must be minted after this consume, never shared out of
-    /// the builder. The mutable database remains responsible for canonical-path lookup and load
-    /// failures during construction; [`SourceDatabase::freeze`] drops that construction-only state
+    /// the builder. Construction-only load failures and canonical-path lookup state are dropped
     /// before publishing finalized slots, snapshots and the path table. An outstanding transient
     /// share is an ownership bug.
-    pub(crate) fn finish(mut self) -> Result<SourceDatabase, CompilerError> {
-        self.sync_loaded_records();
-        let mut sources = Arc::try_unwrap(self.sources)
+    pub(crate) fn finish(self) -> Result<SourceDatabase, InfrastructureFailure> {
+        if !self.pending_builders.is_empty() {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                "pending span builders escaped source finalization",
+            ));
+        }
+        let sources = Arc::try_unwrap(self.sources)
             .expect("source context escaped before span finalization; this is a compiler bug");
-        for slot_index in 0..sources.slots.len() {
-            let slot = &sources.slots[slot_index];
+        if self.live_builders.len() != sources.loaded.len() {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                "source span-builder table is out of sync with loaded source records",
+            ));
+        }
+        for slot in &sources.slots {
             let SourceLoadStatus::Loaded(loaded_index) = slot.load else {
                 continue;
             };
-            let source = slot.id;
             let index = loaded_index.index();
-            if sources.loaded[index].extended_spans.is_some() {
-                assert!(
-                    matches!(&self.live_builders[index], SpanBuilderState::Unprepared),
-                    "finalized source {} still has a live span owner; this is a compiler bug",
-                    source.index()
-                );
-                continue;
+            match &self.live_builders[index] {
+                SpanBuilderState::Installed => {
+                    if sources.loaded[index].extended_spans.is_none() {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::SourceLoading,
+                            format!(
+                                "source identity {} was finalized without an extended-span table",
+                                slot.id.index()
+                            ),
+                        ));
+                    }
+                }
+                SpanBuilderState::Finished(_) => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} was finalized but not assembled before source database finish",
+                            slot.id.index()
+                        ),
+                    ));
+                }
+                SpanBuilderState::Unprepared => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} was not finalized before source database finish",
+                            slot.id.index()
+                        ),
+                    ));
+                }
+                SpanBuilderState::Live(_) => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} still owns a live span builder at source database finish",
+                            slot.id.index()
+                        ),
+                    ));
+                }
+                SpanBuilderState::CheckedOut => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} still has an outstanding span producer at source database finish",
+                            slot.id.index()
+                        ),
+                    ));
+                }
             }
-            let state =
-                std::mem::replace(&mut self.live_builders[index], SpanBuilderState::Unprepared);
-            let builder = match state {
-                SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
-                SpanBuilderState::Live(builder) => builder,
-                SpanBuilderState::CheckedOut => panic!(
-                    "source {} still has an outstanding span producer; this is a compiler bug",
-                    source.index()
-                ),
-            };
-            sources.install_extended_spans(source, builder.freeze())?;
         }
-        assert!(
-            self.pending_builders.is_empty(),
-            "pending span builders escaped source finalization; this is a compiler bug"
-        );
         Ok(sources)
     }
 
@@ -996,8 +1300,15 @@ impl SourceDatabaseBuilder {
             self.live_builders.len() <= self.sources.loaded.len(),
             "loaded source records were removed while builders were live; this is a compiler bug"
         );
+        let first_unsynced = self.live_builders.len();
         self.live_builders
-            .resize_with(self.sources.loaded.len(), || SpanBuilderState::Unprepared);
+            .extend(self.sources.loaded[first_unsynced..].iter().map(|record| {
+                if record.extended_spans.is_some() {
+                    SpanBuilderState::Installed
+                } else {
+                    SpanBuilderState::Unprepared
+                }
+            }));
     }
 }
 
@@ -1005,7 +1316,7 @@ impl SourceDatabaseBuilder {
 pub(crate) struct SourceSpanBuilders<'a> {
     sources: &'a SourceDatabase,
     live_builders: &'a mut [SpanBuilderState],
-    pending_builders: &'a mut FxHashMap<SourceId, ExtendedSpanBuilder>,
+    pending_builders: &'a mut FxHashMap<SourceId, PendingSpanBuilder>,
 }
 
 impl<'a> SourceSpanBuilders<'a> {
@@ -1014,27 +1325,198 @@ impl<'a> SourceSpanBuilders<'a> {
         self.sources
     }
 
+    pub(crate) fn is_source_finalized(
+        &self,
+        source: SourceId,
+    ) -> Result<bool, InfrastructureFailure> {
+        let slot = self.sources.get(source).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "source identity {} is absent from the source database",
+                    source.index()
+                ),
+            )
+        })?;
+        Ok(match slot.load {
+            SourceLoadStatus::Pending => matches!(
+                self.pending_builders.get(&source),
+                Some(PendingSpanBuilder::Finished(_))
+            ),
+            SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => false,
+            SourceLoadStatus::Loaded(index) => matches!(
+                &self.live_builders[index.index()],
+                SpanBuilderState::Finished(_) | SpanBuilderState::Installed
+            ),
+        })
+    }
+
+    /// Freeze one source's builder at the last producer boundary, keeping the table owner-local
+    /// until final container assembly.
+    pub(crate) fn finish_source(&mut self, source: SourceId) -> Result<(), InfrastructureFailure> {
+        if source == SourceId::COMPILATION_ROOT {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "source identity {} cannot be finalized before its source was loaded",
+                    source.index()
+                ),
+            ));
+        }
+        let slot = self.sources.get(source).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "source identity {} is absent from the source database",
+                    source.index()
+                ),
+            )
+        })?;
+        match slot.load {
+            SourceLoadStatus::Pending => match self.pending_builders.remove(&source) {
+                Some(PendingSpanBuilder::Live(builder)) => {
+                    self.pending_builders
+                        .insert(source, PendingSpanBuilder::Finished(builder.freeze()));
+                }
+                Some(PendingSpanBuilder::CheckedOut) => {
+                    self.pending_builders
+                        .insert(source, PendingSpanBuilder::CheckedOut);
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} still has an outstanding span producer",
+                            source.index()
+                        ),
+                    ));
+                }
+                Some(PendingSpanBuilder::Finished(table)) => {
+                    self.pending_builders
+                        .insert(source, PendingSpanBuilder::Finished(table));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::SourceLoading,
+                        format!(
+                            "source identity {} was finalized more than once",
+                            source.index()
+                        ),
+                    ));
+                }
+                None => {
+                    self.pending_builders.insert(
+                        source,
+                        PendingSpanBuilder::Finished(ExtendedSpanBuilder::new().freeze()),
+                    );
+                }
+            },
+            SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::SourceLoading,
+                    format!(
+                        "source identity {} cannot be finalized after its source failed to load",
+                        source.index()
+                    ),
+                ));
+            }
+            SourceLoadStatus::Loaded(loaded_index) => {
+                let index = loaded_index.index();
+                match &self.live_builders[index] {
+                    SpanBuilderState::Installed | SpanBuilderState::Finished(_) => {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::SourceLoading,
+                            format!(
+                                "source identity {} was finalized more than once",
+                                source.index()
+                            ),
+                        ));
+                    }
+                    SpanBuilderState::CheckedOut => {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::SourceLoading,
+                            format!(
+                                "source identity {} still has an outstanding span producer",
+                                source.index()
+                            ),
+                        ));
+                    }
+                    SpanBuilderState::Unprepared | SpanBuilderState::Live(_) => {}
+                }
+                let state =
+                    std::mem::replace(&mut self.live_builders[index], SpanBuilderState::Unprepared);
+                let builder = match state {
+                    SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
+                    SpanBuilderState::Live(builder) => builder,
+                    _ => crate::compiler_bug!(
+                        CompilerStage::SourceLoading,
+                        "span-builder state was checked before source finalization"
+                    ),
+                };
+                self.live_builders[index] = SpanBuilderState::Finished(builder.freeze());
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn take_span_builder(&mut self, source: SourceId) -> ExtendedSpanBuilder {
         let slot = self
             .sources
             .get(source)
             .expect("span producer source must be registered; this is a compiler bug");
         match slot.load {
-            SourceLoadStatus::Pending => self.pending_builders.remove(&source).unwrap_or_default(),
-            SourceLoadStatus::Failed(_) => panic!(
+            SourceLoadStatus::Pending => match self.pending_builders.remove(&source) {
+                Some(PendingSpanBuilder::Live(builder)) => {
+                    self.pending_builders
+                        .insert(source, PendingSpanBuilder::CheckedOut);
+                    builder
+                }
+                Some(PendingSpanBuilder::CheckedOut) => crate::compiler_bug!(
+                    CompilerStage::SourceLoading,
+                    "source {} already has an outstanding span producer; this is a compiler bug",
+                    source.index()
+                ),
+                Some(PendingSpanBuilder::Finished(table)) => {
+                    self.pending_builders
+                        .insert(source, PendingSpanBuilder::Finished(table));
+                    crate::compiler_bug!(
+                        CompilerStage::SourceLoading,
+                        "source {} was already finalized and cannot take another span builder; this is a compiler bug",
+                        source.index()
+                    )
+                }
+                None => {
+                    self.pending_builders
+                        .insert(source, PendingSpanBuilder::CheckedOut);
+                    ExtendedSpanBuilder::new()
+                }
+            },
+            SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "span producer source {} has a recorded load failure; this is a compiler bug",
                 source.index()
             ),
             SourceLoadStatus::Loaded(index) => {
+                match &self.live_builders[index.index()] {
+                    SpanBuilderState::Installed | SpanBuilderState::Finished(_) => {
+                        crate::compiler_bug!(
+                            CompilerStage::SourceLoading,
+                            "source {} was already finalized and cannot take another span builder; this is a compiler bug",
+                            source.index()
+                        )
+                    }
+                    SpanBuilderState::CheckedOut => crate::compiler_bug!(
+                        CompilerStage::SourceLoading,
+                        "source {} already has an outstanding span producer; this is a compiler bug",
+                        source.index()
+                    ),
+                    SpanBuilderState::Unprepared | SpanBuilderState::Live(_) => {}
+                }
                 match std::mem::replace(
                     &mut self.live_builders[index.index()],
                     SpanBuilderState::CheckedOut,
                 ) {
                     SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
                     SpanBuilderState::Live(builder) => builder,
-                    SpanBuilderState::CheckedOut => panic!(
-                        "source {} already has an outstanding span producer; this is a compiler bug",
-                        source.index()
+                    _ => crate::compiler_bug!(
+                        CompilerStage::SourceLoading,
+                        "span-builder state was checked before it was taken"
                     ),
                 }
             }
@@ -1048,25 +1530,52 @@ impl<'a> SourceSpanBuilders<'a> {
             .get(source)
             .expect("span producer source must be registered; this is a compiler bug");
         match slot.load {
-            SourceLoadStatus::Pending => {
-                assert!(
-                    self.pending_builders.insert(source, builder).is_none(),
-                    "source {} already owns a pending span builder; this is a compiler bug",
-                    source.index()
-                );
-            }
-            SourceLoadStatus::Failed(_) => panic!(
+            SourceLoadStatus::Pending => match self.pending_builders.entry(source) {
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(PendingSpanBuilder::Live(builder));
+                }
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if matches!(entry.get(), PendingSpanBuilder::Finished(_)) {
+                        crate::compiler_bug!(
+                            CompilerStage::SourceLoading,
+                            "source {} was already finalized and cannot retain another span builder; this is a compiler bug",
+                            source.index()
+                        );
+                    }
+                    if matches!(entry.get(), PendingSpanBuilder::Live(_)) {
+                        crate::compiler_bug!(
+                            CompilerStage::SourceLoading,
+                            "source {} already owns a pending span builder; this is a compiler bug",
+                            source.index()
+                        );
+                    }
+                    *entry.get_mut() = PendingSpanBuilder::Live(builder);
+                }
+            },
+            SourceLoadStatus::Failed(_) | SourceLoadStatus::NonUtf8 => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "span producer source {} has a recorded load failure; this is a compiler bug",
                 source.index()
             ),
             SourceLoadStatus::Loaded(index) => {
                 let live = &mut self.live_builders[index.index()];
-                assert!(
-                    !matches!(live, SpanBuilderState::Live(_)),
-                    "source {} already owns a live span builder; this is a compiler bug",
-                    source.index()
-                );
-                *live = SpanBuilderState::Live(builder);
+                match live {
+                    SpanBuilderState::Installed | SpanBuilderState::Finished(_) => {
+                        crate::compiler_bug!(
+                            CompilerStage::SourceLoading,
+                            "source {} was already finalized and cannot retain another span builder; this is a compiler bug",
+                            source.index()
+                        )
+                    }
+                    SpanBuilderState::Live(_) => crate::compiler_bug!(
+                        CompilerStage::SourceLoading,
+                        "source {} already owns a live span builder; this is a compiler bug",
+                        source.index()
+                    ),
+                    SpanBuilderState::Unprepared | SpanBuilderState::CheckedOut => {
+                        *live = SpanBuilderState::Live(builder);
+                    }
+                }
             }
         }
     }
@@ -1100,7 +1609,7 @@ fn logical_rows_for_registration_index(
     registration_index: &SourceRegistrationIndex<'_>,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
-) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, CompilerError> {
+) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, InfrastructureFailure> {
     let rows_iter = registration_index.rows();
     let mut rows = Vec::with_capacity(rows_iter.len());
     for (canonical, kind) in rows_iter {
@@ -1116,7 +1625,7 @@ fn logical_source_path(
     canonical_file: &Path,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
-) -> Result<LogicalSourcePath, CompilerError> {
+) -> Result<LogicalSourcePath, InfrastructureFailure> {
     let logical = match project_path_resolver {
         Some(resolver) => resolver.logical_path_for_canonical_file(canonical_file)?,
         None => {
@@ -1144,13 +1653,15 @@ fn logical_source_path(
 /// Authored exhaustion is deterministic user-facing rejection: the project supplied more
 /// logical-path nodes or source files than the four-byte identity table can address. The
 /// carrying boundary converts the resource into the typed capacity diagnostic batch; every
-/// other database failure stays an infrastructure [`CompilerError`].
+/// other database failure stays an infrastructure [`InfrastructureFailure`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SourceCapacityError {
     /// The build-lifetime logical-path node table cannot address another entry.
     LogicalPathTableFull,
     /// The source-slot identity table cannot address another registered source.
     SourceIdentityTableFull,
+    /// An authored physical snapshot cannot be addressed by u32 byte offsets.
+    SourceSnapshotTooLarge,
 }
 
 impl SourceCapacityError {
@@ -1164,6 +1675,9 @@ impl SourceCapacityError {
             Self::SourceIdentityTableFull => {
                 crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::SourceIdentity
             }
+            Self::SourceSnapshotTooLarge => {
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::SourceSnapshot
+            }
         }
     }
 }
@@ -1173,23 +1687,24 @@ impl SourceCapacityError {
 /// WHAT: separates authored compact-table exhaustion from every other registration,
 ///       load and lifecycle failure.
 /// WHY: capacity rejection must reach the typed user diagnostic batch unchanged, while
-///      remaining failures stay on the infrastructure `CompilerError` lane. Wrapping both
+///      remaining failures stay on the infrastructure `InfrastructureFailure` lane. Wrapping both
 ///      in one local sum keeps the three fallible construction APIs honest without
 ///      introducing a `source -> compiler_messages` module cycle.
 #[derive(Debug, Clone)]
 pub(crate) enum SourceDatabaseError {
     Capacity(SourceCapacityError),
-    Infrastructure(CompilerError),
+    Infrastructure(InfrastructureFailure),
 }
 
-impl From<CompilerError> for SourceDatabaseError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for SourceDatabaseError {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
 
-fn non_utf8_logical_path_error(logical_path: &Path) -> CompilerError {
-    CompilerError::file_error(
+fn non_utf8_logical_path_error(logical_path: &Path) -> InfrastructureFailure {
+    InfrastructureFailure::filesystem(
+        crate::compiler_frontend::compiler_messages::CompilerStage::SourceLoading,
         logical_path,
         format!(
             "Source file logical path {logical_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
@@ -1212,7 +1727,8 @@ fn map_path_intern_error(error: PathInternError) -> SourceDatabaseError {
             SourceDatabaseError::Capacity(SourceCapacityError::LogicalPathTableFull)
         }
         PathInternError::BaseMismatch { .. } => {
-            SourceDatabaseError::Infrastructure(CompilerError::compiler_error(
+            SourceDatabaseError::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
                 "logical path merge base is not a structural prefix of the destination table",
             ))
         }

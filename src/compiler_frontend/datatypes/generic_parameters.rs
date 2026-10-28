@@ -7,7 +7,7 @@
 use crate::compiler_frontend::builtins::error_type::{
     is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
+use crate::compiler_frontend::compiler_messages::InvalidDeclarationReason;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_camel_case_type_name;
@@ -17,12 +17,18 @@ use moth_lexical::identifier::is_reserved_dec_family_name;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Diagnostic result for generic-parameter scope validation.
+/// Semantic diagnostic input for generic-parameter scope validation.
 ///
-/// WHAT: keeps `from_parameter_list` on a small error boundary so the diagnostic value does not
-/// inflate every successful scope build.
-/// WHY: both declaration-syntax parsing and AST type-resolution use this shared boundary.
-type GenericParameterScopeResult<T> = Result<T, CompilerDiagnostic>;
+/// WHAT: preserves the reason and authored parameter span until the caller selects
+/// the final diagnostic site.
+/// WHY: AST and declaration parsing have distinct, established span-selection rules.
+#[derive(Debug)]
+pub(crate) struct GenericParameterScopeFailure {
+    pub(crate) reason: InvalidDeclarationReason,
+    pub(crate) parameter_span: Option<SourceSpan>,
+}
+
+type GenericParameterScopeResult<T> = Result<T, GenericParameterScopeFailure>;
 
 // -----------------------------------------------------------
 //  Generic Parameter Declarations
@@ -169,44 +175,40 @@ impl GenericParameterScope {
 
         for parameter in &parameter_list.parameters {
             if scope.parameters_by_name.contains_key(&parameter.name) {
-                return Err(CompilerDiagnostic::invalid_declaration(
-                    InvalidDeclarationReason::DuplicateGenericParameter {
+                return Err(GenericParameterScopeFailure {
+                    reason: InvalidDeclarationReason::DuplicateGenericParameter {
                         parameter_name: parameter.name,
                     },
-                    None,
-                    parameter.span,
-                ));
+                    parameter_span: parameter.span,
+                });
             }
 
             if forbidden_names.contains(&parameter.name) {
-                return Err(CompilerDiagnostic::invalid_declaration(
-                    InvalidDeclarationReason::GenericParameterNameCollision {
+                return Err(GenericParameterScopeFailure {
+                    reason: InvalidDeclarationReason::GenericParameterNameCollision {
                         parameter_name: parameter.name,
                     },
-                    None,
-                    parameter.span,
-                ));
+                    parameter_span: parameter.span,
+                });
             }
 
             let parameter_name = string_table.resolve(parameter.name);
             if is_reserved_generic_parameter_name(parameter_name) {
-                return Err(CompilerDiagnostic::invalid_declaration(
-                    InvalidDeclarationReason::ReservedGenericParameterName {
+                return Err(GenericParameterScopeFailure {
+                    reason: InvalidDeclarationReason::ReservedGenericParameterName {
                         parameter_name: parameter.name,
                     },
-                    None,
-                    parameter.span,
-                ));
+                    parameter_span: parameter.span,
+                });
             }
 
             if !is_generic_parameter_name(parameter_name) {
-                return Err(CompilerDiagnostic::invalid_declaration(
-                    InvalidDeclarationReason::InvalidGenericParameterName {
+                return Err(GenericParameterScopeFailure {
+                    reason: InvalidDeclarationReason::InvalidGenericParameterName {
                         parameter_name: parameter.name,
                     },
-                    None,
-                    parameter.span,
-                ));
+                    parameter_span: parameter.span,
+                });
             }
 
             scope.parameters_by_name.insert(
@@ -222,8 +224,8 @@ impl GenericParameterScope {
     ///
     /// WHAT: recreates the body-resolution view after signatures have already
     /// been canonicalized and stored in `TypeEnvironment`.
-    /// WHY: generic body parsing no longer has the parsed local parameter list at
-    /// hand, but local annotations still need to resolve names such as `T`.
+    /// WHY: generic body parsing resolves source names from canonical parameters in
+    /// `TypeEnvironment`, so local annotations can resolve names such as `T`.
     pub(crate) fn from_canonical_parameter_list(
         parameter_list: &crate::compiler_frontend::datatypes::environment::GenericParameterList,
     ) -> Self {
@@ -233,9 +235,8 @@ impl GenericParameterScope {
             scope.parameters_by_name.insert(
                 parameter.name,
                 ScopedGenericParameter {
-                    // The parsed local ID is no longer semantically relevant at
-                    // body-emission time. Keep a stable diagnostic placeholder
-                    // while canonical_id remains the source of type identity.
+                    // The local ID is only a diagnostic placeholder; `canonical_id` carries
+                    // type identity for body emission.
                     local_id: TypeParameterId(parameter.id.0),
                     canonical_id: Some(parameter.id),
                     name: parameter.name,

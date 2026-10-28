@@ -8,7 +8,8 @@
 //!      a flat key registry, so grouped `project` records, builder sections and entry-local
 //!      config can be validated recursively as they are introduced.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::borrow::Cow;
@@ -199,9 +200,10 @@ impl ConfigSchemas {
     }
 
     /// Checks that every schema is frozen and that each registry has unique non-reserved names.
-    pub fn validate(&self) -> Result<(), CompilerError> {
+    pub fn validate(&self) -> Result<(), InfrastructureFailure> {
         if !self.project.is_frozen() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "the project config schema must be frozen before use",
             ));
         }
@@ -215,27 +217,34 @@ impl ConfigSchemas {
 fn validate_section_registry(
     registry: &str,
     sections: &[NamedConfigSectionSchema],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut names: HashSet<&str> = HashSet::new();
     for section in sections {
         if !section.schema.is_frozen() {
-            return Err(CompilerError::compiler_error(format!(
-                "{registry} config schema section '{}' must be frozen before use",
-                section.name
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "{registry} config schema section '{}' must be frozen before use",
+                    section.name
+                ),
+            ));
         }
 
         if section.name == "project" {
-            return Err(CompilerError::compiler_error(format!(
-                "{registry} config section name 'project' is reserved"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!("{registry} config section name 'project' is reserved"),
+            ));
         }
 
         if !names.insert(section.name.as_ref()) {
-            return Err(CompilerError::compiler_error(format!(
-                "{registry} config section name '{}' is registered more than once",
-                section.name
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "{registry} config section name '{}' is registered more than once",
+                    section.name
+                ),
+            ));
         }
     }
 
@@ -266,7 +275,7 @@ impl ConfigSchema {
     }
 
     /// Validates construction invariants and seals the schema against further registration.
-    pub fn validate_and_freeze(&mut self) -> Result<(), CompilerError> {
+    pub fn validate_and_freeze(&mut self) -> Result<(), InfrastructureFailure> {
         self.ensure_mutable()?;
         self.validate_construction()?;
         self.frozen = true;
@@ -282,7 +291,7 @@ impl ConfigSchema {
         &mut self,
         name: &'static str,
         unknown_fields: UnknownFieldPolicy,
-    ) -> Result<ConfigSchemaNodeId, CompilerError> {
+    ) -> Result<ConfigSchemaNodeId, InfrastructureFailure> {
         self.ensure_mutable()?;
         let node_id = ConfigSchemaNodeId(self.nodes.len());
         self.nodes.push(ConfigSchemaNode {
@@ -298,13 +307,16 @@ impl ConfigSchema {
         &mut self,
         node: ConfigSchemaNodeId,
         field: ConfigSchemaField,
-    ) -> Result<ConfigSchemaFieldId, CompilerError> {
+    ) -> Result<ConfigSchemaFieldId, InfrastructureFailure> {
         self.ensure_mutable()?;
         if node.0 >= self.nodes.len() {
-            return Err(CompilerError::compiler_error(format!(
-                "config schema cannot register a field on unknown node {}",
-                node.0
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "config schema cannot register a field on unknown node {}",
+                    node.0
+                ),
+            ));
         }
 
         let field_id = ConfigSchemaFieldId(self.fields.len());
@@ -336,9 +348,10 @@ impl ConfigSchema {
         policies
     }
 
-    fn validate_construction(&self) -> Result<(), CompilerError> {
+    fn validate_construction(&self) -> Result<(), InfrastructureFailure> {
         if self.root.0 >= self.nodes.len() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "config schema root references an unknown node",
             ));
         }
@@ -347,18 +360,24 @@ impl ConfigSchema {
             let mut seen_names: HashSet<&str> = HashSet::new();
             for field_id in &node.fields {
                 if field_id.0 >= self.fields.len() {
-                    return Err(CompilerError::compiler_error(format!(
-                        "config schema node '{}' references an unknown field",
-                        node.name
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "config schema node '{}' references an unknown field",
+                            node.name
+                        ),
+                    ));
                 }
 
                 let field = &self.fields[field_id.0];
                 if !seen_names.insert(field.name.as_ref()) {
-                    return Err(CompilerError::compiler_error(format!(
-                        "config schema node '{}' declares duplicate field name '{}'",
-                        node.name, field.name
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "config schema node '{}' declares duplicate field name '{}'",
+                            node.name, field.name
+                        ),
+                    ));
                 }
 
                 validate_schema_field(self, field)?;
@@ -368,12 +387,11 @@ impl ConfigSchema {
         Ok(())
     }
 
-    fn ensure_mutable(&self) -> Result<(), CompilerError> {
+    fn ensure_mutable(&self) -> Result<(), InfrastructureFailure> {
         if self.frozen {
-            Err(CompilerError::new(
+            Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "a frozen config schema cannot register more nodes or fields",
-                None,
-                ErrorType::Compiler,
             ))
         } else {
             Ok(())
@@ -384,19 +402,25 @@ impl ConfigSchema {
 fn validate_schema_field(
     schema: &ConfigSchema,
     field: &ConfigSchemaField,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if field.required && field.default.is_some() {
-        return Err(CompilerError::compiler_error(format!(
-            "config schema field '{}' cannot be both required and have a default",
-            field.name
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "config schema field '{}' cannot be both required and have a default",
+                field.name
+            ),
+        ));
     }
 
     if field.allowed_strings.is_some() && !shape_accepts_closed_strings(&field.shape) {
-        return Err(CompilerError::compiler_error(format!(
-            "config schema field '{}' declares a closed string domain on a non-string shape",
-            field.name
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "config schema field '{}' declares a closed string domain on a non-string shape",
+                field.name
+            ),
+        ));
     }
 
     validate_shape_node_references(&field.shape, schema.nodes.len(), field.name.as_ref())?;
@@ -404,10 +428,13 @@ fn validate_schema_field(
     if let Some(default) = &field.default
         && !default_matches_shape(schema, default, &field.shape, field.allowed_strings)
     {
-        return Err(CompilerError::compiler_error(format!(
-            "config schema field '{}' default does not match its declared shape",
-            field.name
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "config schema field '{}' default does not match its declared shape",
+                field.name
+            ),
+        ));
     }
 
     Ok(())
@@ -429,14 +456,17 @@ fn validate_shape_node_references(
     shape: &ConfigFieldShape,
     node_count: usize,
     field_name: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match shape {
         ConfigFieldShape::Record(node_id) => {
             if node_id.0 >= node_count {
-                Err(CompilerError::compiler_error(format!(
-                    "config schema field '{}' references an unknown record node",
-                    field_name
-                )))
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "config schema field '{}' references an unknown record node",
+                        field_name
+                    ),
+                ))
             } else {
                 Ok(())
             }

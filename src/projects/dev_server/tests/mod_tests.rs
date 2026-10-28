@@ -1,91 +1,8 @@
 //! Tests for dev-server orchestration and entry-path validation.
 
 use super::{DevServerOptions, resolve_dev_runtime_paths, validate_dev_entry_path};
-use crate::build_system::build::{BackendBuilder, BuilderSelection, Project};
-use crate::builder_surface::BuilderSurface;
-use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidDependencyClauseReason,
-};
-#[cfg(unix)]
-use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
-use crate::compiler_frontend::style_directives::{
-    StyleDirectiveHandlerSpec, StyleDirectiveSpec, TemplateHeadCompatibility,
-};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
-use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use crate::projects::settings::{CONFIG_FILE_NAME, Config, ProjectConfigError};
+
 use std::fs;
-
-struct NoopBuilder;
-
-impl BackendBuilder for NoopBuilder {
-    fn build_backend(
-        &self,
-        _project_compilation: crate::build_system::build::ProjectCompilation,
-        _config: &Config,
-        _build_profile: crate::build_system::BuildProfile,
-        _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, crate::compiler_frontend::compiler_errors::CompilerMessages> {
-        panic!("build_backend should not run in dev-server output-dir tests");
-    }
-
-    fn validate_project_config(
-        &self,
-        _config: &Config,
-        _string_table: &mut StringTable,
-    ) -> Result<(), ProjectConfigError> {
-        Ok(())
-    }
-
-    fn frontend_surface(&self) -> BuilderSurface {
-        BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
-    }
-}
-
-struct ConflictingDirectiveBuilder;
-
-impl BackendBuilder for ConflictingDirectiveBuilder {
-    fn build_backend(
-        &self,
-        _project_compilation: crate::build_system::build::ProjectCompilation,
-        _config: &Config,
-        _build_profile: crate::build_system::BuildProfile,
-        _flags: &[Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, crate::compiler_frontend::compiler_errors::CompilerMessages> {
-        panic!("build_backend should not run in dev-server output-dir tests");
-    }
-
-    fn validate_project_config(
-        &self,
-        _config: &Config,
-        _string_table: &mut StringTable,
-    ) -> Result<(), ProjectConfigError> {
-        Ok(())
-    }
-
-    fn frontend_surface(&self) -> BuilderSurface {
-        BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        vec![StyleDirectiveSpec::handler(
-            "md",
-            TemplateBodyMode::Normal,
-            TemplateHeadCompatibility::fully_compatible_meaningful(),
-            StyleDirectiveHandlerSpec::no_op(),
-        )]
-    }
-}
 
 #[test]
 fn defaults_match_dev_server_contract() {
@@ -101,55 +18,15 @@ fn defaults_match_dev_server_contract() {
 
 #[test]
 fn entry_path_validation_accepts_moth_files() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let file = temp.path().join("main.moth");
+    fs::write(&file, "x = 1").expect("write Moth entry");
 
-    let file = root.join("main.moth");
-    fs::write(&file, "x = 1").expect("should write test file");
+    let validated = validate_dev_entry_path(file.to_str().expect("UTF-8 test path"))
+        .expect("valid Moth path should pass validation");
 
-    let validated = validate_dev_entry_path(
-        file.to_str()
-            .expect("temp path should be valid utf-8 for this test"),
-    )
-    .expect("valid moth path should pass validation");
-
+    assert!(validated.is_absolute());
     assert!(validated.ends_with("main.moth"));
-}
-
-#[test]
-fn entry_path_validation_preserves_missing_file_cause() {
-    let directory = tempfile::tempdir().expect("should create temp dir");
-    let missing_path = directory.path().join("missing.moth");
-    let messages = validate_dev_entry_path(
-        missing_path
-            .to_str()
-            .expect("temp path should be valid UTF-8"),
-    )
-    .expect_err("missing dev entry must fail at path validation");
-
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("missing entry should retain its filesystem failure");
-    assert_eq!(error.error_type, ErrorType::File);
-    assert_eq!(error.host_path.as_deref(), Some(missing_path.as_path()));
-    assert_eq!(messages.error_count(), 1);
-}
-
-#[test]
-fn entry_path_validation_accepts_directories() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-
-    let validated = validate_dev_entry_path(
-        root.to_str()
-            .expect("temp path should be valid utf-8 for this test"),
-    )
-    .expect("directories should be accepted");
-
-    assert_eq!(
-        validated,
-        root.canonicalize().expect("temp dir should canonicalize")
-    );
 }
 
 #[test]
@@ -163,137 +40,67 @@ fn empty_entry_path_uses_current_directory() {
 }
 
 #[test]
-fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
+fn entry_path_validation_preserves_missing_file_cause() {
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let missing_path = temp.path().join("missing.moth");
+    let error = validate_dev_entry_path(missing_path.to_str().expect("UTF-8 test path"))
+        .expect_err("missing dev entry must fail path validation");
 
-    fs::write(
-        root.join(CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n)\n",
-    )
-    .expect("should write config");
-
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
-    let resolved = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
-        .expect("directory output dir should resolve");
-
-    assert_eq!(resolved.output_dir, root.join("preview"));
-}
-
-#[cfg(unix)]
-#[test]
-fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
-    use std::os::unix::fs::symlink;
-
-    for (_case_name, target_name, expected_reason) in [
-        (
-            "sibling",
-            "outside",
-            InvalidOutputFolderReason::ResolvesOutsideProjectRoot,
-        ),
-        (
-            "entry",
-            "src",
-            InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
-        ),
-    ] {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let source_root = root.join("src");
-        let _temp1 = tempfile::tempdir().expect("should create temp dir");
-        let outside = _temp1.path().to_path_buf();
-        fs::create_dir_all(&source_root).expect("should create source root");
-        fs::create_dir_all(&outside).expect("should create outside root");
-        let output_root = root.join("dev");
-        if target_name == "src" {
-            symlink(&source_root, &output_root).expect("should create entry-root symlink");
-        } else {
-            symlink(&outside, &output_root).expect("should create sibling symlink");
-        }
-        fs::write(
-            root.join(CONFIG_FILE_NAME),
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-        )
-        .expect("should write config");
-
-        let builder = BuilderSelection::new(NoopBuilder);
-        let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
-            .expect_err("dev startup must reject symlinked output roots");
-        assert!(messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::InvalidOutputFolder {
-                        reason,
-                        ..
-                    },
-                    ..
-                } if *reason == expected_reason
-            )
-        }));
-
-        fs::remove_dir_all(&outside).expect("should remove target root");
-    }
+    assert_eq!(
+        error.kind,
+        crate::compiler_frontend::compiler_errors::InfrastructureFailureKind::Filesystem
+    );
+    assert_eq!(error.host_path.as_deref(), Some(missing_path.as_path()));
+    assert_eq!(&*error.message, "Path does not exist");
 }
 
 #[test]
-fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
+fn entry_path_validation_accepts_directories() {
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let validated = validate_dev_entry_path(temp.path().to_str().expect("UTF-8 test path"))
+        .expect("directories should be accepted");
 
-    fs::write(
-        root.join(CONFIG_FILE_NAME),
-        "html #= (\n    dev_output = \"\",\n)\n",
-    )
-    .expect("should write config");
-
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
-    let result = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new());
-
-    assert!(
-        result.is_err(),
-        "empty dev folder should be rejected at config validation"
+    assert_eq!(
+        validated,
+        temp.path().canonicalize().expect("canonical directory")
     );
 }
 
 #[test]
-fn resolve_dev_runtime_paths_return_config_load_failures() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
+fn initial_runtime_paths_watch_the_project_without_bootstrapping() {
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let root = temp
+        .path()
+        .canonicalize()
+        .expect("project root should canonicalize");
+    fs::write(root.join("config.moth"), "not valid Moth config")
+        .expect("write invalid config to exercise bootstrap-free startup paths");
 
-    fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
+    let resolved = resolve_dev_runtime_paths(&root);
 
-    let builder = BuilderSelection::new(NoopBuilder);
-    let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
-        .expect_err("bad config should fail directory bootstrap");
-
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(resolved.output_dir, root.join("dev"));
+    assert_eq!(resolved.watch_scope.output_dir, root.join("dev"));
     assert!(
-        matches!(
-            &diagnostics[0].payload,
-            DiagnosticPayload::InvalidDependencyClause {
-                reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostics[0].payload
+        resolved.watch_scope.watches_path(&root.join("config.moth")),
+        "initial watch scope must include config changes after a failed first build"
     );
 }
 
 #[test]
-fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
+fn single_file_runtime_paths_use_the_parent_dev_directory() {
+    let temp = tempfile::tempdir().expect("create temp directory");
+    let entry = temp.path().join("main.moth");
+    fs::write(&entry, "x = 1").expect("write Moth entry");
+    let entry = entry.canonicalize().expect("entry should canonicalize");
 
-    let builder = BuilderSelection::new(ConflictingDirectiveBuilder);
-    let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
-        .expect_err("conflicting directives should fail bootstrap");
+    let resolved = resolve_dev_runtime_paths(&entry);
 
-    assert_eq!(messages.error_count(), 1);
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("directive conflict should be wrapped for rendering");
-    assert!(error.msg.contains("cannot override") || error.msg.contains("already exists"));
+    assert_eq!(
+        resolved.output_dir,
+        entry.parent().expect("entry has a parent").join("dev")
+    );
+    assert!(
+        resolved.watch_scope.watches_path(&entry),
+        "single-file entry must be watched from the initial startup boundary"
+    );
 }

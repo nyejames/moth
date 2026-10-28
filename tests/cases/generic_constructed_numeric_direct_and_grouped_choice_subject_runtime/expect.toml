@@ -5,7 +5,7 @@ mode = "success"
 warnings = "forbid"
 rendered_output_exact = "direct-choice-subject direct=4294967309 grouped=4294967310 label=grouped concrete=4294967311"
 
-# The Wasm failure block at 12:34 is bg912-observed (constructor-third-wasm-gate.json) and unverified until the parent harness run.
+# The Wasm failure block at 12:34 pins the current Wasm rejection.
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"

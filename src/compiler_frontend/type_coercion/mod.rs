@@ -1,9 +1,8 @@
 //! Coercion policy for the Moth compiler frontend.
 //!
 //! WHAT: Compatibility and coercion policy are centralized here, but assignment-like frontend sites still apply those rules explicitly after parsing.
-//! WHY: coercion logic was previously scattered across datatypes, expression
-//! evaluation, declarations, returns, and templates — each maintaining its own
-//! mini-policy. This module is the single home for all of those decisions.
+//! WHY: one policy owner prevents assignment, expression, declaration, return and template sites
+//! from drifting.
 //!
 //! ## Module boundary
 //!

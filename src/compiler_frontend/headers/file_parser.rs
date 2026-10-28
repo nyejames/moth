@@ -5,12 +5,18 @@
 //! WHY: file-level control flow is different from declaration parsing, dependency recording, and hash
 //! item handling; this module keeps the high-level loop visible while delegated modules own details.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
+use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason, InvalidDeclarationReason,
+    CommonSyntaxMistakeReason, InvalidConfigReason, InvalidDeclarationReason,
     InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
@@ -53,7 +59,7 @@ use std::sync::Arc;
 
 type FileParserResult<T> = Result<T, HeaderParseFailure>;
 
-fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
+fn diagnostic_failure(diagnostic: DiagnosticDraft) -> HeaderParseFailure {
     HeaderParseFailure::Diagnostic(diagnostic)
 }
 /// Resolve one checked source-owned token at a canonical cursor index.
@@ -68,15 +74,17 @@ fn source_token_at_index<'a>(
 ) -> FileParserResult<TokenRef<'a>> {
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(format!(
-                "{owner} source token owner does not match its file identity"
-            )),
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("{owner} source token owner does not match its file identity"),
+            ),
         ));
     }
     canonical.token(index).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "{owner} token index exceeded its source token owner: {error:?}"
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("{owner} token index exceeded its source token owner: {error:?}"),
+        ))
     })
 }
 
@@ -124,7 +132,8 @@ fn parse_headers_in_file_inner(
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "header walk source token owner does not match its file identity",
             ),
         ));
@@ -136,7 +145,8 @@ fn parse_headers_in_file_inner(
     loop {
         let current_index = cursor.position();
         let current = cursor.current().ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "header cursor exceeded its source token owner",
             ))
         })?;
@@ -164,7 +174,8 @@ fn parse_headers_in_file_inner(
             continue;
         }
         let follower_index = current_index.index().checked_add(1).ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "header token follower index overflowed its source range",
             ))
         })?;
@@ -267,28 +278,34 @@ fn reject_non_block_export(
     // `export` is valid only as the module-root `export:` block.
     if !context.file_role.is_export_capable() || context.is_config_file {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::export_outside_module_root(Some(export_span)),
+            generics_traits_api::export_outside_module_root(Some(export_span)),
         ));
     }
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
     let found = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "export-block cursor exceeded its source token owner",
         ))
     })?;
     if found.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "export-block source token owner does not match its file identity",
             ),
         ));
     }
     Err(diagnostic_failure(
-        CompilerDiagnostic::expected_token_from_ref(
-            TokenTag::COLON,
-            Some(found),
+        token_lexical::expected_token_from_projections(
+            crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
+                TokenTag::COLON,
+            ),
+            Some(
+                crate::compiler_frontend::compiler_messages::DiagnosticToken::from_token_ref(found),
+            ),
             Some(export_span),
         ),
     ))
@@ -303,35 +320,43 @@ fn handle_export_block(
 ) -> FileParserResult<()> {
     if !context.file_role.is_export_capable() || context.is_config_file {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::export_outside_module_root(Some(export_span)),
+            generics_traits_api::export_outside_module_root(Some(export_span)),
         ));
     }
 
     if state.seen_export_block.is_some() {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::duplicate_export_block(Some(export_span)),
+            generics_traits_api::duplicate_export_block(Some(export_span)),
         ));
     }
 
     // The classifier only produces ExportBlock when the current token is `:`, but consume it
     // here so the item parser starts at the first ordinary top-level item.
     let colon = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "export-block cursor exceeded its source token owner",
         ))
     })?;
     if colon.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "export-block source token owner does not match its file identity",
             ),
         ));
     }
     if colon.tag() != TokenTag::COLON {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::expected_token_from_ref(
-                TokenTag::COLON,
-                Some(colon),
+            token_lexical::expected_token_from_projections(
+                crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
+                    TokenTag::COLON,
+                ),
+                Some(
+                    crate::compiler_frontend::compiler_messages::DiagnosticToken::from_token_ref(
+                        colon,
+                    ),
+                ),
                 Some(export_span),
             ),
         ));
@@ -342,7 +367,8 @@ fn handle_export_block(
 
     loop {
         let current = cursor.current().ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "export-block cursor exceeded its source token owner",
             ))
         })?;
@@ -357,7 +383,8 @@ fn handle_export_block(
 
         let current_index = current.index();
         let follower_index = current_index.index().checked_add(1).ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "export-block follower index overflowed its source range",
             ))
         })?;
@@ -385,31 +412,32 @@ fn handle_export_block(
                 .export_block_item_count
                 .checked_add(1)
                 .ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "export-block item count overflowed its source state",
                     ))
                 })?;
     }
 
     let current = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "export-block cursor exceeded its source token owner",
         ))
     })?;
     if current.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "export-block source token owner does not match its file identity",
             ),
         ));
     }
     if current.tag() == TokenTag::EOF {
-        return Err(diagnostic_failure(
-            CompilerDiagnostic::unexpected_end_of_file(
-                Some(context.string_table.intern(";")),
-                Some(current.source_span()),
-            ),
-        ));
+        return Err(diagnostic_failure(token_lexical::unexpected_end_of_file(
+            Some(context.string_table.intern(";")),
+            Some(current.source_span()),
+        )));
     }
 
     // The block terminator belongs to this parser mode and must not become an implicit start-body
@@ -419,7 +447,7 @@ fn handle_export_block(
 
     if state.export_block_item_count == 0 {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(Some(export_span)),
+            generics_traits_api::invalid_export_target(Some(export_span)),
         ));
     }
 
@@ -482,7 +510,7 @@ fn parse_export_block_item(
         }
 
         HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(Some(current_span)),
+            generics_traits_api::invalid_export_target(Some(current_span)),
         )),
 
         HeaderFileItem::Hash {
@@ -502,7 +530,7 @@ fn parse_export_block_item(
 
         HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => {
             Err(diagnostic_failure(
-                CompilerDiagnostic::invalid_export_target(Some(current_span)),
+                generics_traits_api::invalid_export_target(Some(current_span)),
             ))
         }
 
@@ -515,16 +543,14 @@ fn parse_export_block_item(
             }
 
             Err(diagnostic_failure(
-                CompilerDiagnostic::invalid_export_target(Some(current_span)),
+                generics_traits_api::invalid_export_target(Some(current_span)),
             ))
         }
 
-        HeaderFileItem::Eof => Err(diagnostic_failure(
-            CompilerDiagnostic::unexpected_end_of_file(
-                Some(context.string_table.intern(";")),
-                Some(current_span),
-            ),
-        )),
+        HeaderFileItem::Eof => Err(diagnostic_failure(token_lexical::unexpected_end_of_file(
+            Some(context.string_table.intern(";")),
+            Some(current_span),
+        ))),
     }
 }
 
@@ -540,9 +566,10 @@ struct LegacyDependencyStart {
 
 fn checked_legacy_index(index: usize, offset: usize, owner: &str) -> FileParserResult<usize> {
     index.checked_add(offset).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "{owner} token index overflowed its source range"
-        )))
+        crate::compiler_bug!(
+            CompilerStage::HeaderParsing,
+            "{owner} token index overflowed its source range",
+        )
     })
 }
 
@@ -581,11 +608,12 @@ fn recognize_legacy_dependency_start(
     {
         return Ok(None);
     }
-    let path_index = TokenIndex::try_from_index(index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+    let Some(path_index) = TokenIndex::try_from_index(index) else {
+        crate::compiler_bug!(
+            CompilerStage::HeaderParsing,
             "legacy dependency path index exceeded its checked domain",
-        ))
-    })?;
+        );
+    };
     Ok(Some(LegacyDependencyStart {
         import_index,
         path_index,
@@ -608,7 +636,8 @@ fn handle_symbol_item(
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "legacy dependency scan source token owner does not match its file identity",
             ),
         ));
@@ -655,7 +684,7 @@ fn legacy_dependency_clause_diagnostic(
     context: &mut HeaderParseContext<'_>,
     current_span: SourceSpan,
     start: LegacyDependencyStart,
-) -> Result<CompilerDiagnostic, HeaderParseFailure> {
+) -> Result<DiagnosticDraft, HeaderParseFailure> {
     let start_span = tokens
         .get(start.import_index.index())
         .map(|token| SourceSpan::new(source_id, token.span))
@@ -667,16 +696,18 @@ fn legacy_dependency_clause_diagnostic(
     let clause_span = start_span
         .join(end_span, context.span_builder)
         .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "legacy dependency clause span could not be joined: {error:?}"
-            )))
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("legacy dependency clause span could not be joined: {error:?}"),
+            ))
         })?;
 
     let replacement = if context.is_config_file {
         None
     } else {
         let path_syntax = path_syntax.ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "legacy dependency replacement is missing its path syntax table",
             ))
         })?;
@@ -690,7 +721,7 @@ fn legacy_dependency_clause_diagnostic(
         )?
         .map(|replacement| context.string_table.intern(&replacement))
     };
-    Ok(CompilerDiagnostic::legacy_dependency_clause(
+    Ok(project_config::legacy_dependency_clause(
         replacement,
         Some(clause_span),
     ))
@@ -706,22 +737,26 @@ fn legacy_dependency_clause_end(
     while let Some(token) = tokens.get(index) {
         match token.tag {
             TokenTag::OPEN_CURLY => {
-                brace_depth = brace_depth.checked_add(1).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                let Some(next_depth) = brace_depth.checked_add(1) else {
+                    crate::compiler_bug!(
+                        CompilerStage::HeaderParsing,
                         "legacy dependency brace depth overflowed its source range",
-                    ))
-                })?;
+                    );
+                };
+                brace_depth = next_depth;
             }
             TokenTag::CLOSE_CURLY => brace_depth = brace_depth.saturating_sub(1),
             TokenTag::NEWLINE if brace_depth == 0 => break,
             TokenTag::END | TokenTag::EOF => break,
             _ => {}
         }
-        last = Some(TokenIndex::try_from_index(index).ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        let Some(last_token_index) = TokenIndex::try_from_index(index) else {
+            crate::compiler_bug!(
+                CompilerStage::HeaderParsing,
                 "legacy dependency clause index exceeded its checked domain",
-            ))
-        })?);
+            );
+        };
+        last = Some(last_token_index);
         index = checked_legacy_index(index, 1, "legacy dependency clause")?;
     }
     Ok(last)
@@ -871,23 +906,25 @@ fn handle_symbol_item_with_export_mode(
         current_span,
         current_index,
     } = symbol;
-    let follower_index =
-        TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "symbol lookahead index exceeded its checked domain",
-            ))
-        })?;
+    let Some(follower_index) = TokenIndex::try_from_index(cursor.position().index()) else {
+        crate::compiler_bug!(
+            CompilerStage::HeaderParsing,
+            "symbol lookahead index exceeded its checked domain",
+        );
+    };
     let (follower_tag, starts_duplicate, starts_trait, starts_specialized) = {
         let canonical = cursor.source_tokens();
         if canonical.source() != file_id {
             return Err(HeaderParseFailure::Infrastructure(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "symbol lookahead source token owner does not match its file identity",
                 ),
             ));
         }
         let follower = canonical.token(follower_index).map_err(|_| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "symbol lookahead index exceeded its source token owner",
             ))
         })?;
@@ -901,7 +938,7 @@ fn handle_symbol_item_with_export_mode(
 
     if export_mode.is_public() && !starts_duplicate {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(Some(current_span)),
+            generics_traits_api::invalid_export_target(Some(current_span)),
         ));
     }
 
@@ -911,11 +948,7 @@ fn handle_symbol_item_with_export_mode(
 
         if !is_conformance_declaration && starts_duplicate {
             return Err(diagnostic_failure(
-                CompilerDiagnostic::duplicate_declaration(
-                    name_id,
-                    Some(*first_span),
-                    Some(current_span),
-                ),
+                names_declarations::duplicate_declaration(name_id, Some(current_span)).with_label(Some(*first_span), Some(crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage::PreviousDeclaration)),
             ));
         }
 
@@ -948,8 +981,9 @@ fn handle_symbol_item_with_export_mode(
         .path_fork
         .try_intern_child(source_file, name_id)
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "path table exhausted while interning declaration path",
+            HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                Some(current_span),
             ))
         })?;
     let header = create_header(
@@ -972,7 +1006,7 @@ fn handle_symbol_item_with_export_mode(
         )
     {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(Some(current_span)),
+            generics_traits_api::invalid_export_target(Some(current_span)),
         ));
     }
 
@@ -981,7 +1015,7 @@ fn handle_symbol_item_with_export_mode(
         && is_receiver_method_candidate(signature, context.string_table, context.path_fork)
     {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_receiver_declaration(
+            generics_traits_api::invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
                 Some(current_span),
             ),
@@ -1038,27 +1072,31 @@ fn handle_runtime_template_item(
     // order by entry start(). The runtime fragment count lets later const fragments record their
     // insertion point relative to already-seen runtime fragments.
     let opening_index = cursor.position().index().checked_sub(1).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "runtime template opening preceded the source token index",
         ))
     })?;
     let opening_index = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "runtime template opening exceeded the source token index space",
         ))
     })?;
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "runtime template source token owner does not match its file identity",
             ),
         ));
     }
     let opening = canonical.token(opening_index).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "runtime template opening exceeded its source token owner: {error:?}",
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("runtime template opening exceeded its source token owner: {error:?}",),
+        ))
     })?;
     let range =
         capture_runtime_template_range_from_cursor(opening, cursor, file_id, context.string_table)?;
@@ -1068,7 +1106,8 @@ fn handle_runtime_template_item(
     if context.file_role == FileRole::ActiveModuleRoot {
         state.runtime_fragment_count =
             state.runtime_fragment_count.checked_add(1).ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "runtime fragment count overflowed its source state",
                 ))
             })?;
@@ -1082,22 +1121,25 @@ fn find_config_marker_in_start_ranges(
     file_id: SourceId,
     string_table: &StringTable,
     span_builder: &crate::compiler_frontend::source::ExtendedSpanBuilder,
-) -> Result<Option<(SourceSpan, bool)>, CompilerError> {
+) -> Result<Option<(SourceSpan, bool)>, InfrastructureFailure> {
     if canonical.source() != file_id {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "start-body config scan source token owner does not match its file identity",
         ));
     }
     for range in &state.start_body_ranges {
         if range.source() != file_id {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "start-body config scan encountered a foreign source range",
             ));
         }
         let cursor = canonical.cursor(*range).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "start-body config scan exceeded source token bounds: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("start-body config scan exceeded source token bounds: {error:?}"),
+            )
         })?;
         if let Some(marker) =
             find_config_qualifier_marker_in_cursor(cursor, string_table, span_builder)
@@ -1128,13 +1170,13 @@ pub(super) fn finish_file_output(
         .map_err(FileFrontendPrepareFailure::Infrastructure)?
     {
         let diagnostic = if adjacent {
-            CompilerDiagnostic::invalid_config_reason(
+            project_config::invalid_config_reason(
                 None,
                 InvalidConfigReason::ConfigQualifierInvalidPlacement,
                 Some(marker_span),
             )
         } else {
-            CompilerDiagnostic::common_syntax_mistake(
+            token_lexical::common_syntax_mistake(
                 CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
                 Some(marker_span),
             )
@@ -1165,7 +1207,7 @@ pub(super) fn finish_file_output(
             .first_executable_start_body_span()
             .expect("non-trivial start body has an executable token span");
         return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
-            CompilerDiagnostic::invalid_top_level_runtime_statement(Some(span)),
+            names_declarations::invalid_top_level_runtime_statement(Some(span)),
         )));
     }
 
@@ -1180,16 +1222,15 @@ pub(super) fn finish_file_output(
             )
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
-        state
-            .into_non_entry_output(owner, source_file, path_syntax, context.file_role)
-            .map_err(FileFrontendPrepareFailure::Infrastructure)?
+        state.into_non_entry_output(owner, source_file, path_syntax, context.file_role)
     };
     let canonical_owner = output
         .source_token_stream
         .as_ref()
         .map(Arc::clone)
         .ok_or_else(|| {
-            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(
+            FileFrontendPrepareFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "prepared file output is missing its canonical source token owner",
             ))
         })?;
@@ -1217,12 +1258,13 @@ fn attach_structural_file_facts(
     canonical: &SourceTokens,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let is_config_file = path_fork
         .component(output.source_file)
         .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
     if canonical.source() != output.file_id {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "source token owner does not match its file stream identity",
         ));
     }
@@ -1237,12 +1279,12 @@ fn attach_structural_file_facts(
         output: &mut Vec<crate::compiler_frontend::paths::path_syntax::PathSyntaxId>,
         canonical: &SourceTokens,
         range: Option<TokenRange>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(range) = range else {
             return Ok(());
         };
         let cursor = canonical.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "retained declaration range could not be resolved for path collection: {error:?}"
             ))
         })?;
@@ -1265,7 +1307,8 @@ fn attach_structural_file_facts(
 
     for header in &output.headers {
         if header.tokens.source() != output.file_id {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained header range does not match its source token owner",
             ));
         }
@@ -1273,26 +1316,29 @@ fn attach_structural_file_facts(
             &header.kind,
             HeaderKind::Constant { declaration } if declaration.config_qualifier.is_some()
         );
-        let body_cursor = if let Some(sequence) = header.token_sequence {
-            let view = canonical.token_sequence(sequence).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "retained header token sequence could not be resolved: {error:?}"
-                ))
-            })?;
-            Some(view.cursor().map_err(|error| {
-                CompilerError::compiler_error(format!(
+        let body_cursor =
+            if let Some(sequence) = header.token_sequence {
+                let view = canonical.token_sequence(sequence).map_err(|error| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        format!("retained header token sequence could not be resolved: {error:?}"),
+                    )
+                })?;
+                Some(view.cursor().map_err(|error| {
+                InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                     "retained header token sequence cursor could not be constructed: {error:?}"
                 ))
             })?)
-        } else if header.tokens.is_empty() {
-            None
-        } else {
-            Some(canonical.cursor(header.tokens).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "retained header token range could not be resolved: {error:?}"
-                ))
-            })?)
-        };
+            } else if header.tokens.is_empty() {
+                None
+            } else {
+                Some(canonical.cursor(header.tokens).map_err(|error| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        format!("retained header token range could not be resolved: {error:?}"),
+                    )
+                })?)
+            };
         let body_has_config_marker = body_cursor
             .is_some_and(|cursor| source_cursor_contains_config_marker(cursor, string_table));
         let declaration_has_config_marker = if declaration_owned_marker {
@@ -1437,7 +1483,7 @@ fn dependency_generic_parameter_collision(
     dependency_selections: &[DependencySelection],
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     let forbidden_names = dependency_generic_parameter_forbidden_names(
         dependency_clauses,
         dependency_selections,
@@ -1461,7 +1507,7 @@ fn dependency_generic_parameter_collision(
 
         for parameter in &generic_parameters.parameters {
             if forbidden_names.contains(&parameter.name) {
-                return Some(CompilerDiagnostic::invalid_declaration(
+                return Some(names_declarations::invalid_declaration(
                     InvalidDeclarationReason::GenericParameterNameCollision {
                         parameter_name: parameter.name,
                     },

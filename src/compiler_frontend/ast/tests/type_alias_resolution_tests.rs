@@ -6,16 +6,13 @@
 //! producer contract that generic materialisation later freezes.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, NameNamespace,
-};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeConstructor, TypeConstructor, TypeId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -213,39 +210,17 @@ Holder = |
 
 #[test]
 fn unknown_alias_target_is_a_user_diagnostic() {
-    let diagnostic = parse_single_file_ast_diagnostic("Missing as Unknown\n");
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::UnknownName {
-                namespace: NameNamespace::Type,
-                ..
-            }
-        ),
-        "expected unknown type diagnostic, got {:?}",
-        diagnostic.payload
-    );
+    let failure = parse_single_file_ast_diagnostic("Missing as Unknown\n");
+    assert_ast_diagnostic(&failure, "MOTH-RULE-0035", None);
 }
 
 #[test]
 fn alias_cycle_remains_circular_dependency() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 A as B
 B as A
 "#,
     );
-
-    assert!(
-        matches!(
-            diagnostic,
-            CompilerDiagnostic {
-                payload: DiagnosticPayload::CircularDependency { .. },
-                ..
-            }
-        ),
-        "expected circular dependency, got {:?}",
-        diagnostic.payload
-    );
+    assert_ast_diagnostic(&failure, "MOTH-RULE-0033", None);
 }

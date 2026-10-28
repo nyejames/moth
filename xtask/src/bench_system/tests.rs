@@ -183,7 +183,6 @@ fn test_load_or_create_system_record_then_check_reuses() {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let toml_path = temp.path().join("system.toml");
 
-    // Record mode creates the file
     let record_result = load_or_create_system_at(&toml_path, SystemIdentityMode::CreateIfMissing);
     let system_from_record = record_result.unwrap().unwrap();
 

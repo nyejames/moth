@@ -3,6 +3,7 @@
 //! This child owns the immutable boundary/task contexts and canonical readiness-wave compiler.
 //! The parent module retains package/project inventory orchestration and publication contracts.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::timing_scope_attributed;
 
 use crate::builder_surface::BuilderSurface;
@@ -12,10 +13,15 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionIndex,
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    SuccessfulWarningBoundary, SuccessfulWarningSink,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
-    PremergeFailure,
+    DiagnosticBag, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -71,18 +77,14 @@ struct DirectoryModuleTaskResult {
 }
 
 enum DirectoryModuleTaskOutcome {
-    Success(Box<ModuleSemanticResult>),
-    Diagnosed(ModuleDiagnostics),
+    Success(Box<ModuleSemanticResult>, DiagnosticBag, Vec<DiagnosticBag>),
+    Diagnosed(PreparedDiagnosticBatch),
     /// A transient check-only unit whose required canonical provider already failed.
     ///
     /// Check-only units have no graph slot, so this outcome is intentionally not retained in the
     /// final boundary. The provider's own diagnosed/blocked record remains authoritative.
     Blocked,
     Infrastructure(Box<InfrastructureErrors>),
-    Mixed {
-        batch: PremergeDiagnosticBatch,
-        error: Box<InfrastructureErrors>,
-    },
 }
 
 /// Immutable inputs shared by one project or source-package boundary compilation.
@@ -236,13 +238,14 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
 /// provider binding or AST reachability, enforces the package boundary for every declaration.
 fn facade_project_globals_dependency(
     prepared: &PreparedModule,
-) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
     let active_origin = prepared
         .semantic
         .source_module_origins
         .origin_for(prepared.semantic.active_root_file_id)?
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "facade dependency validation found no owning origin for the active root",
             )
         })?;
@@ -263,7 +266,7 @@ fn facade_project_globals_dependency(
                 &prepared.semantic.path_fork,
                 &prepared.semantic.string_table,
             ) {
-                let diagnostic = CompilerDiagnostic::invalid_dependency_clause(
+                let diagnostic = project_config::invalid_dependency_clause(
                     clause.binding.clause_kind(),
                     InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
                     Some(clause.dependency.span),
@@ -290,7 +293,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         check_only_source_package_dependencies: Option<
             &[module_inventory::CheckOnlySourcePackageDependency],
         >,
-    ) -> Result<SourceProviderDependencySet<'boundary>, CompilerError> {
+    ) -> Result<SourceProviderDependencySet<'boundary>, InfrastructureFailure> {
         let check_only = check_only_provider_bindings.is_some()
             || check_only_source_package_dependencies.is_some();
         let mut transient_provider_index: FxHashMap<DependencyShellId, ModuleId> =
@@ -303,11 +306,14 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     .insert(binding.dependency_shell_id, binding.provider_module_id)
                     .is_some()
                 {
-                    return Err(CompilerError::compiler_error(format!(
-                        "check-only ModuleId {} resolved dependency shell {:?} to more than one provider module",
-                        consumer_module_id.index(),
-                        binding.dependency_shell_id
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "check-only ModuleId {} resolved dependency shell {:?} to more than one provider module",
+                            consumer_module_id.index(),
+                            binding.dependency_shell_id
+                        ),
+                    ));
                 }
             }
         }
@@ -321,11 +327,14 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                         )
                         .is_some()
                 {
-                    return Err(CompilerError::compiler_error(format!(
-                        "check-only ModuleId {} resolved dependency shell {:?} to more than one provider",
-                        consumer_module_id.index(),
-                        dependency.dependency_shell_id
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "check-only ModuleId {} resolved dependency shell {:?} to more than one provider",
+                            consumer_module_id.index(),
+                            dependency.dependency_shell_id
+                        ),
+                    ));
                 }
             }
         }
@@ -346,10 +355,13 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     &prepared.semantic.string_table,
                 ) {
                     let Some(project_globals) = self.boundary.project_globals else {
-                        return Err(CompilerError::compiler_error(format!(
-                            "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
-                            consumer_module_id.index()
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
+                                consumer_module_id.index()
+                            ),
+                        ));
                     };
                     dependencies.push(SourceProviderDependency {
                         kind: ProviderDependencyKind::Authored { shell: shell_id },
@@ -365,7 +377,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                             .provider_store
                             .interface(provider_module_id)?
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
+                                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                     "Check-only ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
                                     consumer_module_id.index(),
                                     provider_module_id.index()
@@ -385,7 +397,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                             .completed_packages
                             .by_prefix(dependency_prefix)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
+                                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                     "Check-only ModuleId {} started semantic binding before source package @{} completed",
                                     consumer_module_id.index(),
                                     dependency_prefix
@@ -414,7 +426,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                         .provider_store
                         .interface(binding.provider_module_id)?
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(format!(
+                            InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                 "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
                                 consumer_module_id.index(),
                                 binding.provider_module_id.index()
@@ -440,7 +452,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     .completed_packages
                     .by_prefix(package_dependency.dependency_prefix.as_str())
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                             "ModuleId {} started semantic binding before source package @{} completed",
                             consumer_module_id.index(),
                             package_dependency.dependency_prefix
@@ -473,7 +485,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                         interface,
                     })
                 })
-                .collect::<Result<_, CompilerError>>()?;
+                .collect::<Result<_, InfrastructureFailure>>()?;
 
             dependencies.extend(implicit_provider_dependencies);
         }
@@ -486,13 +498,13 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     /// Check-only units have no graph slot of their own. A diagnosed or blocked provider therefore
     /// suppresses the dependent unit instead of letting interface lookup turn the provider's
     /// authoritative diagnostic into a secondary infrastructure error. An unavailable slot is
-    /// still an internal scheduling failure: canonical publication should have completed first.
+    /// still a compiler bug: canonical publication should have completed first.
     fn check_only_blocked_provider(
         &self,
         consumer_module_id: ModuleId,
         provider_bindings: &[module_inventory::CheckOnlyProviderBinding],
         source_package_dependencies: &[module_inventory::CheckOnlySourcePackageDependency],
-    ) -> Result<Option<BlockedProvider>, CompilerError> {
+    ) -> Result<Option<BlockedProvider>, InfrastructureFailure> {
         for binding in provider_bindings {
             match self.provider_store.slot(binding.provider_module_id)? {
                 ProviderSlot::Successful(_) => {}
@@ -500,11 +512,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     return Ok(Some(BlockedProvider::Module(binding.provider_module_id)));
                 }
                 ProviderSlot::Unavailable => {
-                    return Err(CompilerError::compiler_error(format!(
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
                         "Check-only ModuleId {} became ready before provider ModuleId {} completed",
                         consumer_module_id.index(),
                         binding.provider_module_id.index()
-                    )));
+                    );
                 }
             }
         }
@@ -514,13 +527,14 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 .boundary
                 .completed_packages
                 .by_prefix(dependency.dependency_prefix.as_str())
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                .unwrap_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
                         "Check-only ModuleId {} depends on unindexed source package @{}",
                         consumer_module_id.index(),
                         dependency.dependency_prefix
-                    ))
-                })?;
+                    )
+                });
             let package = self.boundary.completed_packages.package(package_id)?;
             match package.root_slot()? {
                 ProviderSlot::Successful(_) => {}
@@ -530,11 +544,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     )));
                 }
                 ProviderSlot::Unavailable => {
-                    return Err(CompilerError::compiler_error(format!(
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
                         "Check-only ModuleId {} became ready before source package @{} completed its facade",
                         consumer_module_id.index(),
                         package.package_prefix()
-                    )));
+                    );
                 }
             }
         }
@@ -553,6 +568,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             string_table_base_len: base_len,
             path_base_len,
             prepared,
+            preparation_warnings,
             #[cfg(feature = "timers")]
             timing_module_key,
             ..
@@ -571,6 +587,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 path_base_len,
                 global_path_table,
                 prepared,
+                preparation_warnings,
                 known_generated,
                 None,
                 None,
@@ -588,6 +605,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 path_base_len,
                 global_path_table,
                 prepared,
+                preparation_warnings,
                 known_generated,
                 None,
                 None,
@@ -608,6 +626,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         path_base_len: usize,
         global_path_table: &PathTable,
         prepared: PreparedModule,
+        preparation_warnings: Vec<DiagnosticDraft>,
         known_generated: KnownGeneratedFunctions<'_>,
         build_config_values_override: Option<&ResolvedBuildConfigMap>,
         check_only_provider_bindings: Option<&[module_inventory::CheckOnlyProviderBinding]>,
@@ -623,10 +642,21 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 // Move the prepared table into the batch; the facade diagnostic aborts this
                 // module, so the prepared payload is discarded and no clone is needed.
                 let PreparedModule { mut semantic, .. } = prepared;
-                let table = std::mem::take(&mut semantic.string_table);
-                let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-                let outcome = match ModuleDiagnostics::from_batch(batch) {
-                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                let path_table = Arc::new(semantic.path_fork.shared_table());
+                let table = semantic.string_table.take_for_handoff();
+                let mut diagnostics = DiagnosticBag::new();
+                diagnostics.push(diagnostic);
+                let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                    diagnostics,
+                    table,
+                    None,
+                    || Some(Arc::clone(&path_table)),
+                );
+                let outcome = match batch {
+                    Ok(batch) => match batch.classify_premerge() {
+                        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
+                    },
                     Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 };
                 return DirectoryModuleTaskResult {
@@ -701,7 +731,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         };
 
         // The typed semantic boundary already classified user diagnostics from infrastructure
-        // failures, so the task outcome carries the retained `ModuleDiagnostics` unchanged.
+        // failures, so the task outcome carries the prepared batch unchanged.
         timing_scope_attributed!(
             timing_guard_frontend_module_semantic_total_2,
             crate::timing::TimingMetric::FrontendModuleSemanticTotal,
@@ -711,17 +741,25 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         let semantic_result = compile_module(
             &compile_context,
             prepared.semantic,
+            preparation_warnings,
             known_generated,
             module_context,
         );
         #[cfg(not(feature = "timers"))]
-        let semantic_result = compile_module(&compile_context, prepared.semantic, known_generated);
+        let semantic_result = compile_module(
+            &compile_context,
+            prepared.semantic,
+            preparation_warnings,
+            known_generated,
+        );
         #[cfg(feature = "timers")]
         timing_guard_frontend_module_semantic_total_2.finish();
         let outcome = match semantic_result {
-            Ok(ModuleCompilationOutcome::Success(compiled)) => {
-                DirectoryModuleTaskOutcome::Success(compiled)
-            }
+            Ok(ModuleCompilationOutcome::Success {
+                compiled,
+                warnings,
+                sidecar_warnings,
+            }) => DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings),
             Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)) => {
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics)
             }
@@ -751,7 +789,7 @@ fn compile_check_only_job(
         external_packages,
         external_dependency_resolution_table,
         mut prepared,
-        ..
+        preparation_warnings,
     } = job;
     match compile_context.check_only_blocked_provider(
         module_id,
@@ -802,15 +840,12 @@ fn compile_check_only_job(
                 fallback_span,
                 &mut prepared.semantic.string_table,
             ) {
-                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
+                PreparedFailure::Diagnosed(batch) => match batch.classify_premerge() {
                     Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
                     Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 },
-                PremergeFailure::Infrastructure(error) => {
+                PreparedFailure::Infrastructure(error) => {
                     DirectoryModuleTaskOutcome::Infrastructure(error)
-                }
-                PremergeFailure::Mixed { batch, error } => {
-                    DirectoryModuleTaskOutcome::Mixed { batch, error }
                 }
             };
             return DirectoryModuleTaskResult {
@@ -830,6 +865,7 @@ fn compile_check_only_job(
             path_base_len,
             global_path_table,
             prepared,
+            preparation_warnings,
             known_generated,
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
@@ -847,6 +883,7 @@ fn compile_check_only_job(
             path_base_len,
             global_path_table,
             prepared,
+            preparation_warnings,
             known_generated,
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
@@ -856,7 +893,6 @@ fn compile_check_only_job(
         )
     }
 }
-
 #[allow(
     clippy::too_many_arguments,
     reason = "check-only compilation keeps boundary context, provider/generated/materialisation stores, owned jobs, provider/package edges and their indexes, build-config index and mutable string/path tables separate"
@@ -872,13 +908,12 @@ pub(super) fn compile_check_only_batches(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
-    string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
-) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
+    string_table: &StringTable,
+    path_interner: &PathInternerBuilder,
+) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
-    // Only their diagnostics/warnings cross the frontend result boundary. Failures stay in the
-    // premerge lane; the outer wrapper owns the single vessel conversion.
+    // Their prepared diagnostics and warnings stay in the premerge lane until final source pairing.
     add_frontend_counter(
         FrontendCounter::ModuleCompilationSerialCount,
         check_only_jobs.len(),
@@ -894,7 +929,7 @@ pub(super) fn compile_check_only_batches(
                 provider_binding_index,
                 source_package_dependencies,
                 source_package_dependency_index,
-                &*string_table,
+                string_table,
             );
             compile_check_only_job(
                 &compile_context,
@@ -906,27 +941,24 @@ pub(super) fn compile_check_only_batches(
         };
         let path_base_len = outcome.path_base_len;
         match outcome.outcome {
-            DirectoryModuleTaskOutcome::Success(compiled) => {
+            DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
                 debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
-                if let Some(batch) = check_only_success_batch(*compiled)? {
-                    transient_batches.push(batch);
-                }
+                transient_batches.extend(check_only_success_batch(
+                    *compiled,
+                    warnings,
+                    sidecar_warnings,
+                )?);
             }
             DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
-                // Retain the local table without a premerge remap; the final tail owns
-                // the single merge. No `CompilerMessages` vessel is built here.
-                let batch = diagnostics.into_batch()?;
-                transient_batches.push(batch);
+                // The module boundary already captured these diagnostics after final path pairing.
+                transient_batches.push(diagnostics);
             }
             DirectoryModuleTaskOutcome::Blocked => {
                 // The failed canonical provider's own diagnostics remain authoritative; a
                 // dependent check-only unit contributes no cascade diagnostics.
             }
             DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                return Err(PremergeFailure::Infrastructure(error));
-            }
-            DirectoryModuleTaskOutcome::Mixed { batch, error } => {
-                return Err(PremergeFailure::Mixed { batch, error });
+                return Err(PreparedFailure::Infrastructure(error));
             }
         }
     }
@@ -935,19 +967,15 @@ pub(super) fn compile_check_only_batches(
 
 /// Build the transient warning batch one successful check-only unit contributes.
 ///
-/// WHAT: collects the unit's own warnings plus every generated sidecar warning exactly as the
-///       canonical check-only success arm does, keeps the module-local string table on the
-///       batch, and attaches the issuing path fork's snapshot so warning `PathId`s issued
-///       against the check-only fork keep a table that renders them after the final render
-///       tail's component remap. A table whose components the batch's string table cannot
-///       resolve is a pairing invariant failure and returns an infrastructure error instead of
-///       silently dropping the path context.
-/// WHY: the only crossing state for a check-only unit is its diagnostics; keeping the
-///      construction in one production helper lets the regression test route through the real
-///      branch instead of re-implementing the path-table attachment.
+/// WHAT: captures the module's warnings and each generated sidecar's warnings against their
+///       respective live type environments, preserving module-then-sidecar order in one batch.
+/// WHY: the only crossing state for a check-only unit is its diagnostics; keeping construction
+///      here lets the regression test exercise the production path.
 pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
-) -> Result<Option<PremergeDiagnosticBatch>, PremergeFailure> {
+    warnings: DiagnosticBag,
+    sidecar_warnings: Vec<DiagnosticBag>,
+) -> Result<Option<PreparedDiagnosticBatch>, PreparedFailure> {
     let ModuleSemanticResult {
         module,
         generated_delta,
@@ -955,28 +983,60 @@ pub(super) fn check_only_success_batch(
         path_fork,
         ..
     } = compiled;
-    let mut warnings = module.metadata.warnings;
-    warnings.extend(
-        generated_delta
-            .records()
-            .iter()
-            .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
-    );
-    if warnings.is_empty() {
+    let mut owner_diagnostics = Vec::new();
+    let module_diagnostics = warnings.into_diagnostics();
+    if !module_diagnostics.is_empty() {
+        owner_diagnostics.push((module_diagnostics, module.executable.type_environment));
+    }
+    let generated_records = generated_delta.into_records();
+    if generated_records.len() != sidecar_warnings.len() {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            "check-only generated sidecar warning count disagrees with its completed records",
+        )
+        .into());
+    }
+    for (record, sidecar_warnings) in generated_records.into_iter().zip(sidecar_warnings) {
+        let sidecar_environment = record.sidecar.module.executable.type_environment;
+        let sidecar_diagnostics = sidecar_warnings.into_diagnostics();
+        if !sidecar_diagnostics.is_empty() {
+            owner_diagnostics.push((sidecar_diagnostics, sidecar_environment));
+        }
+    }
+    if owner_diagnostics.is_empty() {
         return Ok(None);
     }
-    // Retain the module-local table; the final render tail merges it exactly once via
-    // `append_messages_preserving_context`.
-    let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
-    if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
-        return Err(PremergeFailure::from(error));
+    let has_errors = owner_diagnostics
+        .iter()
+        .flat_map(|(diagnostics, _)| diagnostics)
+        .any(|diagnostic| {
+            diagnostic.severity()
+                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+        });
+    if has_errors {
+        for (diagnostics, _) in &mut owner_diagnostics {
+            diagnostics.retain(|diagnostic| {
+                diagnostic.severity()
+                    == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+            });
+        }
     }
-    Ok(Some(batch))
+
+    let owner_diagnostics = owner_diagnostics
+        .iter_mut()
+        .map(|(diagnostics, environment)| (std::mem::take(diagnostics), &*environment));
+    Ok(Some(
+        PreparedDiagnosticBatch::capture_with_required_paths_for_owners(
+            owner_diagnostics,
+            module_string_table,
+            || Some(Arc::new(path_fork.shared_table())),
+        )?,
+    ))
 }
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "wave compilation keeps owned boundary context and graph, canonical waves and check-only jobs, provider/package edges and mutable resource/string/path owners separate"
+    reason = "wave compilation keeps owned boundary context and graph, canonical waves and check-only jobs, provider/package edges, mutable resource/string/path owners and the command warning sink/order separate"
 )]
 pub(super) fn compile_module_waves_in_premerge_lane(
     context: BoundaryCompilationContext<'_>,
@@ -988,7 +1048,9 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<(CompiledGraphBoundary, Vec<PremergeDiagnosticBatch>), PremergeFailure> {
+    mut warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
+    warning_boundary: SuccessfulWarningBoundary,
+) -> Result<(CompiledGraphBoundary, Vec<PreparedDiagnosticBatch>), PreparedFailure> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
     // The compiler resolves declaring generic templates through this registry, so it never reads a
@@ -998,11 +1060,9 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         seed_completed_package_materialisations(context.completed_packages())?;
     // One direct lookup index per boundary so module binding never scans every provider edge,
     // source-package dependency or completed package for each retained dependency shell.
-    let provider_binding_index = build_provider_binding_index(provider_bindings)?;
-    let source_package_dependency_index = build_source_package_dependency_index(
-        &provider_binding_index,
-        source_package_dependencies,
-    )?;
+    let provider_binding_index = build_provider_binding_index(provider_bindings);
+    let source_package_dependency_index =
+        build_source_package_dependency_index(&provider_binding_index, source_package_dependencies);
     // Canonical fact ownership is indexed once per boundary. Transient units borrow this index
     // instead of cloning and concatenating the canonical fact vector for every unit.
     let build_config_index = context.build_config_resolution_index();
@@ -1012,7 +1072,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     let module_package_dependencies = build_module_package_dependency_index(
         source_package_dependencies,
         context.completed_packages(),
-    )?;
+    );
     let mut diagnosed = Vec::new();
     let mut blocked = Vec::new();
     for wave in module_waves {
@@ -1028,11 +1088,14 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                         break;
                     }
                     ProviderSlot::Unavailable => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "ModuleId {} became ready before provider ModuleId {} completed",
-                            job.module_id.index(),
-                            provider_id.index()
-                        ))
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "ModuleId {} became ready before provider ModuleId {} completed",
+                                job.module_id.index(),
+                                provider_id.index()
+                            ),
+                        )
                         .into());
                     }
                 }
@@ -1054,7 +1117,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                         }
                         ProviderSlot::Unavailable => {
                             return Err(
-                                CompilerError::compiler_error(format!(
+                                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                     "ModuleId {} became ready before source package @{} completed its facade",
                                     job.module_id.index(),
                                     package.package_prefix()
@@ -1080,9 +1143,9 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         for job in ready {
             // This owner publishes each successful module transaction before starting the next
             // ModuleId, so duplicate requests in one ready wave materialise exactly once. File
-            // preparation remains parallel inside each module. Semantic module-wave parallelism
-            // remains a separate future phase because generated deltas currently commit
-            // deterministically through this serial publication owner.
+            // preparation remains parallel inside each module. Semantic module-wave parallelism is
+            // not implemented: generated deltas commit deterministically through this serial
+            // publication owner.
             let outcome = {
                 let compile_context = DirectoryModuleCompileContext::new(
                     &context,
@@ -1101,7 +1164,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 )
             };
             match outcome.outcome {
-                DirectoryModuleTaskOutcome::Success(compiled) => {
+                DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
                     publish_compiled_module(
                         &mut provider_store,
                         &mut generated_store,
@@ -1110,36 +1173,36 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                         outcome.module_id,
                         graph.node(outcome.module_id).stable_origin(),
                         *compiled,
+                        warnings,
+                        sidecar_warnings,
                         outcome.string_table_base_len,
                         outcome.path_base_len,
                         string_table,
                         path_interner,
+                        warning_sink.as_deref_mut(),
+                        warning_boundary,
                     )?;
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                     provider_store.mark_diagnosed(outcome.module_id)?;
-                    // Retain the local table without a premerge remap; the final tail owns
-                    // the single merge via `append_messages_preserving_context`.
-                    // then classify back without round-tripping through the final vessel.
-                    let batch = diagnostics.into_batch()?;
-                    let diagnostics = ModuleDiagnostics::from_batch(batch)?;
+                    // The module boundary prepared the diagnostics after its final path pairing.
                     diagnosed.push(DiagnosedModule {
                         module_id: outcome.module_id,
                         diagnostics,
                     });
                 }
                 DirectoryModuleTaskOutcome::Blocked => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "canonical ModuleId {} unexpectedly became transient-blocked",
-                        outcome.module_id.index()
-                    ))
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "canonical ModuleId {} unexpectedly became transient-blocked",
+                            outcome.module_id.index()
+                        ),
+                    )
                     .into());
                 }
                 DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                    return Err(PremergeFailure::Infrastructure(error));
-                }
-                DirectoryModuleTaskOutcome::Mixed { batch, error } => {
-                    return Err(PremergeFailure::Mixed { batch, error });
+                    return Err(PreparedFailure::Infrastructure(error));
                 }
             }
         }
@@ -1166,10 +1229,13 @@ pub(super) fn compile_module_waves_in_premerge_lane(
             .iter()
             .any(|package| !package.boundary.diagnosed.is_empty());
     if !blocked.is_empty() && !diagnosed_provider_exists {
-        return Err(CompilerError::compiler_error(format!(
-            "Graph retained {} blocked modules without a diagnosed provider",
-            blocked.len()
-        ))
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Graph retained {} blocked modules without a diagnosed provider",
+                blocked.len()
+            ),
+        )
         .into());
     }
 
@@ -1185,12 +1251,12 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         diagnosed,
         blocked,
     };
-    // Cloning keeps the caller's builder intact: the directory tail later adopts this same
-    // builder into the source database (`adopt_path_builder`), so the install must not move it.
-    let frozen_path_table = path_interner.clone().freeze();
+    // Seal the mutable suffix into shared path storage while keeping the builder available for
+    // adoption into the source database after publication.
+    let frozen_path_table = path_interner.shared_table();
     boundary.install_boundary_identity(
         Arc::new(frozen_path_table),
-        Arc::new(string_table.clone().freeze()),
+        Arc::new(string_table.freeze_snapshot()),
     );
     let boundary = boundary.finish()?;
     Ok((boundary, transient_batches))

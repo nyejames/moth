@@ -519,7 +519,7 @@ fn execute_html_in_node(
                         RenderHarnessError::artifact(format!(
                             "rendered_output: failed to read deferred JavaScript artifact \
                              '{relative_path}': {}",
-                            error.msg
+                            error.message
                         ))
                     })?;
                 workspace.write_relative(Path::new(relative_path), source)?;

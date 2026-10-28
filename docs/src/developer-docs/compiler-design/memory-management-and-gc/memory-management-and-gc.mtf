@@ -318,7 +318,7 @@ they become memory-planning inputs.
 - missing boundary or lifecycle metadata
 - a missing physical strategy after successful topology validation
 
-Source failures use structured diagnostics. Missing compiler-owned metadata or a missing physical strategy uses `CompilerError`.
+Source failures use structured diagnostics. Missing compiler-owned metadata or a missing physical strategy uses `InfrastructureFailure`.
 
 ## Roadmap and current status
 

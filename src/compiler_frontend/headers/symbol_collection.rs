@@ -10,10 +10,10 @@ use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::builtins::error_type::{
     is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol, register_builtin_error_types,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, ReservedNameOwner,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, ReservedNameOwner};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
@@ -38,7 +38,7 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 pub(super) fn build_module_symbols(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+    capture: &mut impl FnMut(SourceId, &mut DiagnosticDraft) -> Result<(), InfrastructureFailure>,
     path_fork: &mut PathInternerFork,
 ) -> Result<ModuleSymbols, HeaderPreparationFailure> {
     let mut module_symbols = ModuleSymbols::empty();
@@ -120,7 +120,7 @@ fn validate_declared_name(
     file_role: FileRole,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     let symbol_name = path_fork.component(header.declaration_path)?;
 
     let symbol_name_text = string_table.resolve(symbol_name);
@@ -132,14 +132,14 @@ fn validate_declared_name(
     }
 
     if is_reserved_parameter_contract_symbol(symbol_name_text) {
-        return Some(CompilerDiagnostic::reserved_name_collision(
+        return Some(names_declarations::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::ParameterContract,
             header.name_span,
         ));
     }
     if is_reserved_builtin_symbol(symbol_name_text) {
-        return Some(CompilerDiagnostic::reserved_name_collision(
+        return Some(names_declarations::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::BuiltinType,
             header.name_span,
@@ -147,7 +147,7 @@ fn validate_declared_name(
     }
 
     if is_core_cast_trait_name(symbol_name_text) {
-        return Some(CompilerDiagnostic::reserved_name_collision(
+        return Some(names_declarations::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::CoreTrait,
             header.name_span,
@@ -158,7 +158,7 @@ fn validate_declared_name(
         && !matches!(&header.kind, HeaderKind::StartFunction)
         && symbol_name_text == IMPLICIT_START_FUNC_NAME
     {
-        return Some(CompilerDiagnostic::reserved_name_collision(
+        return Some(names_declarations::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::ImplicitStart,
             header.name_span,

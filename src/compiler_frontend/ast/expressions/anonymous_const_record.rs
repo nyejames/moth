@@ -23,7 +23,9 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -47,11 +49,11 @@ pub(super) fn parse_parenthesized_anonymous_const_record_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<OwnedExpr, ExpressionParseError> {
-    let record_span = current_span(token_stream);
+    let record_span = token_stream.current_span();
 
     let receiving_context = CallArgumentReceivingContext::with_policies(
         CallArgumentDiagnosticContext::from_syntax(CallArgumentSyntax::AnonymousConstRecord)
-            .with_opening_span(record_span),
+            .with_opening_span(Some(record_span)),
         CallArgumentNamingPolicy::NamedOnly,
         CallArgumentValuePolicy::ConstRequired,
     );
@@ -71,7 +73,8 @@ pub(super) fn parse_parenthesized_anonymous_const_record_expression(
     let mut fields = Vec::with_capacity(arguments.len());
     for argument in arguments {
         let field_name = argument.target_param.ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "named-only anonymous record argument had no field name",
             )
         })?;
@@ -80,7 +83,7 @@ pub(super) fn parse_parenthesized_anonymous_const_record_expression(
             .map_err(ExpressionParseError::from)?;
 
         if argument.access_mode != CallAccessMode::Shared {
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            return Err(token_lexical::unexpected_token_from_tag(
                 DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
                 argument.marker_span.or(argument.span),
             )
@@ -89,7 +92,7 @@ pub(super) fn parse_parenthesized_anonymous_const_record_expression(
 
         let field_id = path_fork
             .try_intern_child(PathId::ROOT, field_name)
-            .expect("anonymous record field path table exhausted");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
         let value = resolve_const_expression_content(
             argument.value.id(),
             expression_builder,
@@ -105,7 +108,7 @@ pub(super) fn parse_parenthesized_anonymous_const_record_expression(
     }
     finish_record(
         fields,
-        record_span,
+        Some(record_span),
         type_interner,
         expression_builder,
         const_values,
@@ -133,9 +136,4 @@ fn finish_record(
         .to_completed_input(expression_builder)?;
     input.classification.const_record_state = ConstRecordState::ConstRecord;
     Ok(expression_builder.commit_replacement(input)?)
-}
-
-fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    // Record spans are token-local facts on the canonical cursor view.
-    Some(token_stream.current_span())
 }

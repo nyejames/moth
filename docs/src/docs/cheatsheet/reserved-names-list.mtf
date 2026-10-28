@@ -1,0 +1,64 @@
+## Reserved names and directives
+
+Moth reserves words for syntax, builtin types and compiler-owned symbols. Keywords are case-sensitive in source, but user identifiers can't
+reclaim reserved words by changing ASCII case or adding leading underscores.
+
+### Keywords
+
+- **Control flow:** `if`, `else`, `then`, `loop`, `to`, `by`, `break`, `continue`, `return`, `catch`, `assert`
+- **Declarations and types:** `export`, `type`, `of`, `as`, `copy`, `cast`, `must`, `this`, `This`
+- **Reserved for future syntax:** `async`, `yield`, `checked`
+- **Word operators:** `is`, `not`, `and`, `or`
+- **Literals:** `true`, `false`, `none`
+
+`this` and `This` are distinct source words. `return!` is an attached form of `return`. The accepted `into` spelling places
+allocations in declared regions, although it isn't yet in the compiler's shared reserved-word inventory.
+
+### Builtin types
+
+- **Basic:** `Bool`, `String`, `Char`, `Byte`, `None`, `True`, `False`
+- **Integers:** `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`
+- **Binary floats:** `F16`, `F32`, `F64`
+- **Decimals:** `Dec`, `Dec0` through `Dec256`
+
+All spellings of `Dec` followed by ASCII digits are reserved, even invalid types such as `Dec01` and `Dec257`.
+
+### Other compiler-owned names
+
+- `Error` - builtin error type.
+- `Wire`, `Route` - function parameter-contract heads.
+- `io` - prelude namespace for `@core/io`.
+- `CASTABLE_TO_T`, `TRY_CASTABLE_TO_T` - builtin cast-trait families, replacing `T` with one of:
+  `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64`, `BOOL`, `STRING`, `CHAR`, `ERROR`.
+
+The `@project` dependency root is reserved for project globals.
+
+### Core template directives
+
+- `$children` - wrap each direct child.
+- `$fresh` - bypass the parent's child wrapper.
+- `$slot` - declare a template slot.
+- `$insert` - contribute content to a named slot.
+- `$note`, `$todo` - discard template comments.
+- `$doc` - mark documentation content.
+- `$raw` - preserve unformatted template content.
+- `$md` - format Moth Markdown.
+
+### HTML builder template directives
+
+- `$html` - HTML content.
+- `$css` - CSS checking and formatting, with optional `$css("inline")`.
+- `$escape_html` - escape HTML-sensitive content.
+- `$code` - code blocks with optional highlighting, such as `$code("moth")`.
+
+### General and HTML project directives
+
+- `$config` - mark a compile-time declaration as a build input (compiler).
+- `$project` - declare project settings in the project config (compiler).
+- `$html_builder` - configure the HTML builder.
+- `$page` - declare an HTML page root and its metadata.
+
+These four general directives are accepted language design and are queued for implementation. The template directives above
+are already registered by the compiler or HTML builder.
+
+See @../directives (Directives) and @../templates/#template-directives (Template directives) for their syntax and use.

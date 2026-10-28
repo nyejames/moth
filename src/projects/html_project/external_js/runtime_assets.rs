@@ -8,7 +8,7 @@
 
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
@@ -34,7 +34,7 @@ pub(crate) fn js_runtime_asset_identity(
     logical_source_path: &PortableResourcePath,
     canonical_source_path: PathBuf,
     source_span: Option<SourceSpan>,
-) -> Result<RuntimeAssetIdentity, CompilerError> {
+) -> Result<RuntimeAssetIdentity, InfrastructureFailure> {
     let declared_output_path = js_runtime_asset_output_path(logical_source_path);
     let logical_path = PortableResourcePath::from_relative_logical_path(&declared_output_path)?;
 
@@ -60,7 +60,7 @@ pub(crate) fn js_runtime_asset_identity(
 pub(crate) fn register_js_runtime_asset_sources(
     plan: &HtmlExternalRuntimeEmissionPlan,
     resource_inputs: &mut ResourceInputRegistry,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut associations = Vec::with_capacity(plan.js_assets().len());
 
     for asset in plan.js_assets().values() {

@@ -29,7 +29,7 @@ fn identifier_shape_uses_unicode_alphabetic_and_alphanumeric_rules() {
 #[test]
 fn reserved_user_names_ignore_case_and_leading_underscores() {
     for reserved in [
-        "_true", "FALSE", "__LoOp", "Fn", "CONFIG", "_Config", "u8", "_U8", "Byte", "F64", "this",
+        "_true", "FALSE", "__LoOp", "CONFIG", "_Config", "u8", "_U8", "Byte", "F64", "this",
         "THIS", "dec", "Dec0", "Dec2", "Dec256", "dec01", "DEC257", "_Dec9", "__dEc2",
     ] {
         assert!(
@@ -43,6 +43,9 @@ fn reserved_user_names_ignore_case_and_leading_underscores() {
 fn reserved_user_names_reject_whole_word_near_misses() {
     for ordinary in [
         "truth",
+        "fn",
+        "Fn",
+        "_fn",
         "fnx",
         "DecBox",
         "Dec1a",

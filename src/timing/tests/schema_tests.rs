@@ -93,8 +93,7 @@ fn schema_version_is_v2_and_levels_are_well_formed() {
     }
 }
 
-/// The registry count and Basic/Detailed split match the plan's Phase 3
-/// schema-v2 closeout record (49 metrics, 34 Basic + 15 Detailed).
+/// Timing schema v2 contains 49 metrics, split into 34 Basic and 15 Detailed.
 #[test]
 fn registry_size_matches_plan_closeout() {
     assert_eq!(TimingMetric::ALL.len(), 49);

@@ -81,7 +81,7 @@ pub(crate) use dependency_bindings::{
 // Pre-AST projection construction stays frontend-internal: the completed `PublicSemanticInterface`
 // is the documented handoff, building one is not.
 pub(in crate::compiler_frontend) use direct_projection::{
-    PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput,
+    PublicInterfaceDraftBuildFailure, PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput,
 };
 #[cfg(test)]
 pub(crate) use export_projection::DirectExportSeed;

@@ -10,33 +10,16 @@
 
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ValueDeclarationRef};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCollectionTypeReason,
-};
+use crate::compiler_frontend::ast::type_resolution::context::TypeResolutionFailureKind;
+use crate::compiler_frontend::compiler_messages::InvalidCollectionTypeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::source::SourceSpan;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-pub(crate) type CollectionCapacityResult<T> = Result<T, CollectionCapacityDiagnostic>;
-
-pub(crate) struct CollectionCapacityDiagnostic(CompilerDiagnostic);
-
-impl CollectionCapacityDiagnostic {
-    pub(crate) fn as_diagnostic(&self) -> &CompilerDiagnostic {
-        &self.0
-    }
-
-    pub(crate) fn into_diagnostic(self) -> CompilerDiagnostic {
-        self.0
-    }
-}
-
-impl From<CompilerDiagnostic> for CollectionCapacityDiagnostic {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
-        Self(diagnostic)
-    }
-}
+pub(crate) type CollectionCapacityResult<T> = Result<T, DiagnosticDraft>;
 
 /// Fold a parsed collection capacity into a canonical `usize`.
 ///
@@ -56,6 +39,23 @@ pub(crate) fn fold_collection_capacity(
     type_environment: &mut TypeEnvironment,
     const_values: &ConstValueStore,
 ) -> CollectionCapacityResult<usize> {
+    let mut failure_kind = TypeResolutionFailureKind::Other;
+    fold_collection_capacity_with_failure_kind(
+        capacity,
+        scope_context,
+        type_environment,
+        const_values,
+        &mut failure_kind,
+    )
+}
+
+pub(crate) fn fold_collection_capacity_with_failure_kind(
+    capacity: &ParsedCollectionCapacity,
+    scope_context: Option<&ScopeContext>,
+    type_environment: &mut TypeEnvironment,
+    const_values: &ConstValueStore,
+    failure_kind: &mut TypeResolutionFailureKind,
+) -> CollectionCapacityResult<usize> {
     let span = match capacity {
         ParsedCollectionCapacity::Literal { span, .. }
         | ParsedCollectionCapacity::BareConstant { span, .. } => *span,
@@ -66,19 +66,11 @@ pub(crate) fn fold_collection_capacity(
 
         ParsedCollectionCapacity::BareConstant { name, .. } => {
             let Some(scope_context) = scope_context else {
-                return Err(CompilerDiagnostic::invalid_collection_type(
-                    InvalidCollectionTypeReason::CapacityNotConstant,
-                    span,
-                )
-                .into());
+                return Err(capacity_not_constant(failure_kind, span));
             };
 
             let Some(declaration_ref) = scope_context.get_value_reference(name, span)? else {
-                return Err(CompilerDiagnostic::invalid_collection_type(
-                    InvalidCollectionTypeReason::CapacityNotConstant,
-                    span,
-                )
-                .into());
+                return Err(capacity_not_constant(failure_kind, span));
             };
 
             let declaration = match &declaration_ref {
@@ -87,49 +79,37 @@ pub(crate) fn fold_collection_capacity(
                 // An unresolved body-local numeric binding has no declaration or folded value
                 // yet, so it can never satisfy the capacity constant contract.
                 ValueDeclarationRef::PendingNumeric { .. } => {
-                    return Err(CompilerDiagnostic::invalid_collection_type(
-                        InvalidCollectionTypeReason::CapacityNotConstant,
-                        span,
-                    )
-                    .into());
+                    return Err(capacity_not_constant(failure_kind, span));
                 }
             };
 
             if !scope_context.is_explicit_compile_time_constant(declaration) {
-                return Err(CompilerDiagnostic::invalid_collection_type(
-                    InvalidCollectionTypeReason::CapacityNotConstant,
-                    span,
-                )
-                .into());
+                return Err(capacity_not_constant(failure_kind, span));
             }
-
             // Capacity syntax needs authored `#` provenance plus an already folded exact `I32`
             // payload. Template const classification cannot strengthen either part of that proof.
             if type_environment.fixed_scalar(declaration.type_id) != Some(FixedScalar::I32) {
-                return Err(CompilerDiagnostic::invalid_collection_type(
+                return Err(calls_data::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,
-                )
-                .into());
+                ));
             }
 
             let Some(ConstValuePayload::FixedScalar(value)) = const_values
                 .value_for_path(&declaration.id)
                 .and_then(|id| const_values.payload(id))
             else {
-                return Err(CompilerDiagnostic::invalid_collection_type(
+                return Err(calls_data::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,
-                )
-                .into());
+                ));
             };
 
             let Some(value) = value.as_i64() else {
-                return Err(CompilerDiagnostic::invalid_collection_type(
+                return Err(calls_data::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,
-                )
-                .into());
+                ));
             };
 
             validate_capacity_value(value, span)
@@ -137,42 +117,43 @@ pub(crate) fn fold_collection_capacity(
     }
 }
 
+fn capacity_not_constant(
+    failure_kind: &mut TypeResolutionFailureKind,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    *failure_kind = TypeResolutionFailureKind::CapacityNotConstant;
+    calls_data::invalid_collection_type(InvalidCollectionTypeReason::CapacityNotConstant, span)
+}
+
 fn validate_capacity_value(
     value: i64,
     span: Option<SourceSpan>,
 ) -> CollectionCapacityResult<usize> {
     if value < 0 {
-        return Err(CompilerDiagnostic::invalid_collection_type(
+        return Err(calls_data::invalid_collection_type(
             InvalidCollectionTypeReason::NegativeCapacity,
             span,
-        )
-        .into());
+        ));
     }
 
     if value == 0 {
-        return Err(CompilerDiagnostic::invalid_collection_type(
+        return Err(calls_data::invalid_collection_type(
             InvalidCollectionTypeReason::ZeroCapacity,
             span,
-        )
-        .into());
+        ));
     }
 
     // Header parsing materialises capacity literals at `Bits64` as the widest lossless
     // carrier, so a literal above the exact `I32` capacity domain is rejected here with the
     // closest existing overflow diagnostic.
     if FixedScalarValue::signed(FixedScalar::I32, value).is_none() {
-        return Err(CompilerDiagnostic::invalid_collection_type(
+        return Err(calls_data::invalid_collection_type(
             InvalidCollectionTypeReason::CapacityOverflow,
             span,
-        )
-        .into());
+        ));
     }
 
     usize::try_from(value).map_err(|_| {
-        CompilerDiagnostic::invalid_collection_type(
-            InvalidCollectionTypeReason::CapacityOverflow,
-            span,
-        )
-        .into()
+        calls_data::invalid_collection_type(InvalidCollectionTypeReason::CapacityOverflow, span)
     })
 }

@@ -15,9 +15,6 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
-use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
-};
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
@@ -32,7 +29,10 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node, reference_expr_with_type_id, test_if_branch_metadata,
 };
-use crate::compiler_frontend::tests::type_id_fixture_support::loop_binding_with_type_id as loop_binding;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    assert_no_placeholder_terminators, build_ast_with_registered_types,
+    loop_binding_with_type_id as loop_binding, lower_ast,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -58,7 +58,7 @@ fn range_loop_spec(
 /// Builds one range-loop spec with an explicit header-selected iteration domain.
 ///
 /// WHY: the domain is a header fact, so a fixture can pin it independently of the operand
-///      result types that originally selected it.
+///      result types that normally select it.
 fn range_loop_spec_with_domain(
     start: ExprId,
     end: ExprId,

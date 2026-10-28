@@ -7,7 +7,7 @@
 
 use super::NonUtf8PathComponent;
 use super::builder::{PathInternError, PathInternerBuilder, PathNode};
-use super::frozen::PathTable;
+use super::frozen::{PathTable, PathTableBase};
 use super::id::PathId;
 use super::remap::PathIdRemap;
 use crate::compiler_frontend::instrumentation::{
@@ -20,59 +20,57 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Immutable prefix shared by every path fork in one parallel wave.
+type PathLookup = FxHashMap<(PathId, StringId), PathId>;
+
+/// One immutable path prefix and the reusable reverse-lookup layers issued with it.
 #[derive(Debug)]
-struct PathTableBase {
-    nodes: Box<[PathNode]>,
-    depths: Box<[u32]>,
-    lookup: FxHashMap<(PathId, StringId), PathId>,
+struct PathInternerBase {
+    table: Arc<PathTableBase>,
+    lookup_layers: Box<[Arc<PathLookup>]>,
 }
 
-/// Reusable source for cheap module-local path forks that share one inherited prefix.
+impl PathInternerBase {
+    fn child(&self, key: &(PathId, StringId)) -> Option<PathId> {
+        self.lookup_layers
+            .iter()
+            .rev()
+            .find_map(|layer| layer.get(key).copied())
+    }
+}
+
+/// Reusable source for cheap module-local path forks that all share one inherited prefix.
 #[derive(Debug, Clone)]
 pub struct PathInternerForkSource {
-    base: Arc<PathTableBase>,
+    base: Arc<PathInternerBase>,
 }
 
 impl PathInternerForkSource {
-    /// Construct a standalone empty path fork for legacy frontend callers that do not
-    /// participate in a boundary path table.
+    /// Construct a standalone empty path fork for callers that do not participate in a
+    /// boundary path table.
     pub fn empty() -> PathInternerFork {
-        Self::new(
-            vec![PathNode {
-                parent: None,
-                component: StringId::from_index(0),
-            }]
-            .into_boxed_slice(),
-            vec![0].into_boxed_slice(),
-            FxHashMap::default(),
-        )
-        .fork_for_module()
+        let table = PathTable::new().shared_base();
+        Self::new(table, Vec::new()).fork_for_module()
     }
-    pub(super) fn new(
-        nodes: Box<[PathNode]>,
-        depths: Box<[u32]>,
-        lookup: FxHashMap<(PathId, StringId), PathId>,
-    ) -> Self {
+
+    pub(super) fn new(table: Arc<PathTableBase>, lookup_layers: Vec<Arc<PathLookup>>) -> Self {
         Self {
-            base: Arc::new(PathTableBase {
-                nodes,
-                depths,
-                lookup,
+            base: Arc::new(PathInternerBase {
+                table,
+                lookup_layers: lookup_layers.into_boxed_slice(),
             }),
         }
     }
 
     /// Return the number of inherited path nodes shared by every fork.
     pub fn base_len(&self) -> usize {
-        self.base.nodes.len()
+        self.base.table.len()
     }
 
     /// Create one worker delta that starts with an empty local suffix.
     pub fn fork_for_module(&self) -> PathInternerFork {
         PathInternerFork {
             base: Arc::clone(&self.base),
-            base_len: self.base.nodes.len(),
+            base_len: self.base.table.len(),
             nodes: Vec::new(),
             depths: Vec::new(),
             lookup: FxHashMap::default(),
@@ -87,11 +85,11 @@ impl PathInternerForkSource {
 /// the root builder before the consuming freeze.
 #[derive(Debug)]
 pub struct PathInternerFork {
-    base: Arc<PathTableBase>,
+    base: Arc<PathInternerBase>,
     base_len: usize,
     nodes: Vec<PathNode>,
     depths: Vec<u32>,
-    lookup: FxHashMap<(PathId, StringId), PathId>,
+    lookup: PathLookup,
 }
 
 impl PathInternerFork {
@@ -134,18 +132,20 @@ impl PathInternerFork {
     /// a typed error instead of indexing unmapped suffix rows.
     #[cfg(test)]
     pub(super) fn with_local_nodes_for_test(base_len: usize, nodes: Vec<PathNode>) -> Self {
+        let table = Arc::new(PathTableBase::from_parts(
+            vec![
+                PathNode {
+                    parent: None,
+                    component: StringId::from_index(0),
+                };
+                base_len
+            ],
+            vec![0; base_len],
+        ));
         Self {
-            base: Arc::new(PathTableBase {
-                nodes: vec![
-                    PathNode {
-                        parent: None,
-                        component: StringId::from_index(0),
-                    };
-                    base_len
-                ]
-                .into_boxed_slice(),
-                depths: vec![0; base_len].into_boxed_slice(),
-                lookup: FxHashMap::default(),
+            base: Arc::new(PathInternerBase {
+                table,
+                lookup_layers: Vec::new().into_boxed_slice(),
             }),
             base_len,
             depths: vec![0; nodes.len()],
@@ -157,22 +157,18 @@ impl PathInternerFork {
     /// Return the parent path, or `None` for the root.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
         let index = path.index();
-
         if index < self.base_len {
-            return self.base.nodes[index].parent;
+            return self.base.table.node(index)?.parent;
         }
-
         self.nodes[index - self.base_len].parent
     }
 
     /// Return the parent path, or `None` for the root and for foreign IDs.
     pub fn try_parent(&self, path: PathId) -> Option<PathId> {
         let index = path.index();
-
         if index < self.base_len {
-            return self.base.nodes.get(index)?.parent;
+            return self.base.table.node(index)?.parent;
         }
-
         self.nodes.get(index - self.base_len)?.parent
     }
 
@@ -181,13 +177,10 @@ impl PathInternerFork {
         if path == PathId::ROOT {
             return None;
         }
-
         let index = path.index();
-
         if index < self.base_len {
-            return Some(self.base.nodes[index].component);
+            return Some(self.base.table.node(index)?.component);
         }
-
         Some(self.nodes[index - self.base_len].component)
     }
 
@@ -196,35 +189,32 @@ impl PathInternerFork {
         if path == PathId::ROOT {
             return None;
         }
-
         let index = path.index();
-
         if index < self.base_len {
-            return Some(self.base.nodes.get(index)?.component);
+            return Some(self.base.table.node(index)?.component);
         }
-
         Some(self.nodes.get(index - self.base_len)?.component)
     }
 
     /// Return the number of components in `path`.
     pub fn depth(&self, path: PathId) -> u32 {
         let index = path.index();
-
         if index < self.base_len {
-            return self.base.depths[index];
+            return self
+                .base
+                .table
+                .depth(index)
+                .expect("path ID is addressable");
         }
-
         self.depths[index - self.base_len]
     }
 
     /// Return the depth, or `None` when `path` was not issued by this fork.
     pub fn try_depth(&self, path: PathId) -> Option<u32> {
         let index = path.index();
-
         if index < self.base_len {
-            return self.base.depths.get(index).copied();
+            return self.base.table.depth(index);
         }
-
         self.depths.get(index - self.base_len).copied()
     }
 
@@ -390,7 +380,7 @@ impl PathInternerFork {
             return Some(existing);
         }
 
-        if let Some(&existing) = self.base.lookup.get(&(parent, component)) {
+        if let Some(existing) = self.base.child(&(parent, component)) {
             return Some(existing);
         }
         #[cfg(test)]
@@ -495,71 +485,61 @@ impl PathInternerFork {
 
         Ok(path)
     }
-    /// Snapshot this fork's full table (inherited prefix plus local delta) into a reusable
-    /// source for sub-forks, such as file-preparation chunks forked from one module-local fork.
+    /// Snapshot this fork's full table into a reusable source for sub-forks.
+    ///
+    /// The inherited prefix stays shared; only this fork's producer-local suffix is added to
+    /// the immutable base.
     pub fn fork_source(&self) -> PathInternerForkSource {
-        let node_rows = self.base.nodes.len() + self.nodes.len();
-        let copied_bytes = node_rows
-            .saturating_mul(std::mem::size_of::<PathNode>())
-            .saturating_add(
-                (self.base.depths.len() + self.depths.len())
-                    .saturating_mul(std::mem::size_of::<u32>()),
-            );
-        record_path_table_copy(node_rows, copied_bytes);
-        let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
-        nodes.extend_from_slice(&self.base.nodes);
-        nodes.extend_from_slice(&self.nodes);
-        let mut depths = Vec::with_capacity(self.base.depths.len() + self.depths.len());
-        depths.extend_from_slice(&self.base.depths);
-        depths.extend_from_slice(&self.depths);
-        let mut lookup = self.base.lookup.clone();
-        lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
-        PathInternerForkSource::new(nodes.into_boxed_slice(), depths.into_boxed_slice(), lookup)
+        let table = if self.nodes.is_empty() {
+            Arc::clone(&self.base.table)
+        } else {
+            self.base
+                .table
+                .snapshot_with_suffix(&self.nodes, &self.depths)
+        };
+        let mut lookup_layers = self.base.lookup_layers.to_vec();
+        if !self.lookup.is_empty() {
+            lookup_layers.push(Arc::new(self.lookup.clone()));
+        }
+        PathInternerForkSource::new(table, lookup_layers)
     }
+
+    /// Capture this fork's table while sharing its inherited immutable prefix.
+    ///
+    /// The returned table owns only a copy of this producer's local delta, so it can outlive the
+    /// fork without duplicating source-registration paths.
+    pub fn shared_table(&self) -> PathTable {
+        PathTable::from_shared_parts(
+            Arc::clone(&self.base.table),
+            self.nodes.clone(),
+            self.depths.clone(),
+        )
+    }
+
     /// Snapshot this fork's complete path table for standalone consumers.
     ///
-    /// A fork normally merges into its owning builder before freezing. Standalone fixtures and
-    /// direct backend callers have no boundary builder, so they can snapshot the same inherited
-    /// and local nodes without reconstructing a path component vector.
+    /// Tests and direct table consumers can request a flat owned table. Production diagnostic
+    /// capture uses [`Self::shared_table`] instead.
     pub fn snapshot_table(&self) -> PathTable {
-        let node_rows = self.base.nodes.len() + self.nodes.len();
+        let node_rows = self.len();
         let copied_bytes = node_rows
             .saturating_mul(std::mem::size_of::<PathNode>())
-            .saturating_add(
-                (self.base.depths.len() + self.depths.len())
-                    .saturating_mul(std::mem::size_of::<u32>()),
-            );
+            .saturating_add(node_rows.saturating_mul(std::mem::size_of::<u32>()));
         record_path_table_copy(node_rows, copied_bytes);
-        let mut nodes = Vec::with_capacity(self.base.nodes.len() + self.nodes.len());
-        nodes.extend_from_slice(&self.base.nodes);
+        let mut nodes = Vec::with_capacity(node_rows);
+        let mut depths = Vec::with_capacity(node_rows);
+        self.base.table.copy_into(&mut nodes, &mut depths);
         nodes.extend_from_slice(&self.nodes);
-        let mut depths = Vec::with_capacity(self.base.depths.len() + self.depths.len());
-        depths.extend_from_slice(&self.base.depths);
         depths.extend_from_slice(&self.depths);
         PathTable::from_parts(nodes, depths)
     }
-    /// Clone this fork's complete identity domain into a mutable builder.
-    ///
-    /// The resulting builder retains the exact numeric IDs already issued by the
-    /// fork, including its inherited prefix and local suffix.
-    pub(crate) fn clone_path_builder(&self) -> PathInternerBuilder {
-        let source = self.fork_source();
-        let mut lookup = source.base.lookup.clone();
-        lookup.extend(self.lookup.iter().map(|(key, value)| (*key, *value)));
-        let node_rows = source.base.nodes.len();
-        let copied_bytes = node_rows
-            .saturating_mul(std::mem::size_of::<PathNode>())
-            .saturating_add(
-                source
-                    .base
-                    .depths
-                    .len()
-                    .saturating_mul(std::mem::size_of::<u32>()),
-            );
-        record_path_table_copy(node_rows, copied_bytes);
-        PathInternerBuilder::from_parts(
-            PathTable::from_parts(source.base.nodes.to_vec(), source.base.depths.to_vec()),
-            lookup,
+
+    /// Fork this identity domain into a mutable builder without copying its shared prefix.
+    pub(crate) fn fork_path_builder(&self) -> PathInternerBuilder {
+        PathInternerBuilder::from_shared_parts(
+            self.shared_table(),
+            self.base.lookup_layers.to_vec(),
+            self.lookup.clone(),
         )
     }
 

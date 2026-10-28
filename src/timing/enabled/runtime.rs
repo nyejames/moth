@@ -6,6 +6,8 @@
 //! for every stage, and disabled channels must avoid both clock reads and
 //! collector locks while preserving the production expression.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+
 #[cfg(feature = "benchmark_counters")]
 use crate::timing::CounterOutputMode;
 use std::sync::OnceLock;
@@ -526,7 +528,7 @@ fn command_from_code(code: u8) -> Option<TimingCommandKind> {
         1 => Some(TimingCommandKind::Build),
         2 => Some(TimingCommandKind::Check),
         3 => Some(TimingCommandKind::Dev),
-        _ => unreachable!("invalid active timing command code"),
+        _ => crate::compiler_bug!(CompilerStage::Timing, "invalid active timing command code"),
     }
 }
 

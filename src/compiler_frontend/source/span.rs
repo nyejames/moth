@@ -18,6 +18,7 @@ use super::span_encoding::{
     store_logical,
 };
 use super::{FrozenIdentityContext, FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use std::mem::size_of;
 use std::num::NonZeroU32;
@@ -119,6 +120,13 @@ pub enum SpanCapacityReason {
     /// The source's extended table cannot address another entry. Exhaustion is terminal for
     /// the producing stage; the failing exact range must surface in the mapped diagnostic.
     ExtendedTableFull,
+}
+
+impl SpanCapacityReason {
+    /// Whether this packing failure belongs on the source-capacity diagnostic lane.
+    pub(crate) const fn reports_as_source_diagnostic(self) -> bool {
+        matches!(self, Self::ExtendedTableFull)
+    }
 }
 
 /// Failure to join two global spans.
@@ -233,6 +241,13 @@ impl LocalSpan {
     pub(super) fn logical_word(self) -> u32 {
         load_logical(self.0)
     }
+    #[cfg(test)]
+    pub(crate) fn is_extended(self) -> bool {
+        matches!(
+            decode_logical(self.logical_word()),
+            DecodedSpan::Extended { .. }
+        )
+    }
 
     fn resolve_from_record(
         self,
@@ -318,13 +333,15 @@ impl SourceSpan {
                 start: 0,
                 length: 0,
             } => ResolvedByteRange::from_start_length(0, 0),
-            DecodedSpan::Inline { start, length } => panic!(
+            DecodedSpan::Inline { start, length } => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "span on compilation root source identity {} resolves only the exact empty \
                  range [0, 0), not [{start}, {}); this is a compiler bug",
                 self.source.index(),
                 start + length
             ),
-            DecodedSpan::Extended { index } => panic!(
+            DecodedSpan::Extended { index } => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "span on compilation root source identity {} names extended row {index}, but the \
                  root owns no extended-span table; only the exact empty range [0, 0) resolves on \
                  the root; this is a compiler bug",
@@ -368,13 +385,15 @@ impl SourceSpan {
     fn reject_foreign_resolver(self, resolver: ExtendedSpanResolver<'_>) {
         match resolver.source_identity {
             Some(identity) if identity == self.source => {}
-            Some(identity) => panic!(
+            Some(identity) => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "span from source identity {} cannot resolve through source identity {}; \
                  this is a compiler bug",
                 self.source.index(),
                 identity.index()
             ),
-            None => panic!(
+            None => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "span from source identity {} resolved through an unqualified resolver; \
                  global spans require resolver_for(source); this is a compiler bug",
                 self.source.index()
@@ -402,7 +421,7 @@ impl ExtendedSpanBuilder {
     ///
     /// WHY: a builder belongs to one source while it produces spans; qualifying at the builder
     /// names that source once instead of at every operation. Producers resolve their own local
-    /// spans, so the qualified form first reaches compilation with the consumer migrations.
+    /// spans, so the qualified form identifies the producer's source at every source-boundary check.
     #[cfg(test)]
     pub fn resolver_for(&self, source: SourceId) -> ExtendedSpanResolver<'_> {
         self.resolver().for_source(source)
@@ -430,6 +449,18 @@ impl ExtendedSpanBuilder {
 impl ExtendedSpanTable {
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.entries.len().saturating_mul(size_of::<ExtendedSpan>())
+    }
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn repeated_rows(&self) -> usize {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(index, entry)| self.entries[..*index].contains(entry))
+            .count()
     }
 
     /// The bare resolver for this table's own source-local work.
@@ -461,12 +492,14 @@ impl<'a> ExtendedSpanResolver<'a> {
         };
 
         match self.entries {
-            Some(entries) => panic!(
+            Some(entries) => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "extended span index {index} is outside the {} extended spans of {source}; \
                  this is a compiler bug",
                 entries.len()
             ),
-            None => panic!(
+            None => crate::compiler_bug!(
+                CompilerStage::SourceLoading,
                 "extended span builder for {source} was never installed; this is a compiler bug"
             ),
         }

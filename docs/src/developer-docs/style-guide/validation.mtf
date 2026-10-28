@@ -116,8 +116,8 @@ If a suitable release build is not available, run the same operations through
 Cargo from the repository root:
 
 [codeblock, $code("bash"):
-    cargo run --quiet -- check docs --terse
-    cargo run --quiet -- build docs --release
+    cargo run --quiet -p moth-cli --bin moth -- check docs --terse
+    cargo run --quiet -p moth-cli --bin moth -- build docs --release
 ]
 
 ### Shared Cargo defaults
@@ -323,7 +323,7 @@ require that full run.
 
     [td:
         [: Documentation check]
-        [: `cargo run --quiet -- check docs --terse`]
+        [: `cargo run --quiet -p moth-cli --bin moth -- check docs --terse`]
         [: Moth docs-source checking inside the routine gate]
     ]
 
@@ -747,7 +747,7 @@ The direct release-binary form is:
 ]
 
 If no suitable release build is available, use
-`cargo run --quiet -- build docs --release` instead.
+`cargo run --quiet -p moth-cli --bin moth -- build docs --release` instead.
 
 Then:
 
@@ -974,8 +974,8 @@ Audit that:
 
 - stage ownership remains narrow
 - AST and HIR type representation still respect `TypeEnvironment` and `TypeId`
-- diagnosed failures remain plain `CompilerDiagnostic` values
-- internal and infrastructure failures remain in the typed `CompilerError` lane
+- User-facing failures are produced and accumulated as `DiagnosticDraft` values, then frozen into compact report stores and views; no legacy diagnostic model or adapter remains.
+- Expected and unproven operational/internal failures remain typed `InfrastructureFailure` causes in ordered `InfrastructureErrors`; proven invariants use `compiler_bug!` and never become user diagnostics.
 - no obsolete API or duplicated path remains
 - no backend reparses source syntax
 - no analysis mutates HIR when its contract is side-table based

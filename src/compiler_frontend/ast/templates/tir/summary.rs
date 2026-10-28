@@ -8,6 +8,7 @@
 //! Unresolved structural slots (`slot_count`) are separate from runtime slot
 //! sites (`runtime_slot_site_count`). `has_slots()` is derived from `slot_count`.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use rustc_hash::FxHashSet;
 
 use crate::compiler_frontend::ast::templates::tir::ids::{
@@ -15,7 +16,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
 };
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 // -------------------------
 //  Template IR Summary
@@ -134,7 +135,7 @@ impl Default for TemplateIrSummary {
 pub(crate) fn summarize_existing_root(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
-) -> Result<TemplateIrSummary, CompilerError> {
+) -> Result<TemplateIrSummary, InfrastructureFailure> {
     let mut summary = TemplateIrSummary::empty();
     let mut visiting_nodes = Vec::new();
     let mut visiting_templates = FxHashSet::default();
@@ -157,12 +158,13 @@ pub(crate) fn summarize_runtime_slot_representation(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
     plan: TemplateSlotPlanId,
-) -> Result<TemplateIrSummary, CompilerError> {
+) -> Result<TemplateIrSummary, InfrastructureFailure> {
     let plan_roots = {
         let slot_plan = store.get_slot_plan(plan).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR summary cannot read missing or uncommitted slot plan {plan}."
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR summary cannot read missing or uncommitted slot plan {plan}."),
+            )
         })?;
         slot_plan
             .contribution_sources
@@ -218,19 +220,21 @@ fn accumulate_nodes(
     visiting_nodes: &mut Vec<TemplateIrNodeId>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
     completed_templates: &mut FxHashSet<TemplateIrId>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for &node_id in node_ids {
         if visiting_nodes.contains(&node_id) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR summary encountered a node cycle at {node_id:?}"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR summary encountered a node cycle at {node_id:?}"),
+            ));
         }
         visiting_nodes.push(node_id);
 
         let Some(node) = store.get_node(node_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR summary requested missing node {node_id}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR summary requested missing node {node_id}."),
+            ));
         };
 
         if depth > summary.max_depth {
@@ -350,18 +354,22 @@ fn validate_child_template(
     depth: usize,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
     completed_templates: &mut FxHashSet<TemplateIrId>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(child_template) = store.get_template(child_template_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "TIR summary referenced missing child template {child_template_id}."
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("TIR summary referenced missing child template {child_template_id}."),
+        ));
     };
 
     if store.get_node(child_template.root).is_none() {
-        return Err(CompilerError::compiler_error(format!(
-            "TIR summary found child template {child_template_id} with missing root node {}.",
-            child_template.root
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "TIR summary found child template {child_template_id} with missing root node {}.",
+                child_template.root
+            ),
+        ));
     }
 
     if completed_templates.contains(&child_template_id) {
@@ -369,9 +377,10 @@ fn validate_child_template(
     }
 
     if !visiting_templates.insert(child_template_id) {
-        return Err(CompilerError::compiler_error(format!(
-            "TIR summary encountered a template cycle at {child_template_id:?}"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("TIR summary encountered a template cycle at {child_template_id:?}"),
+        ));
     }
 
     let child_root = child_template.root;
@@ -390,8 +399,11 @@ fn validate_child_template(
     Ok(())
 }
 
-fn child_depth(depth: usize) -> Result<usize, CompilerError> {
+fn child_depth(depth: usize) -> Result<usize, InfrastructureFailure> {
     depth.checked_add(1).ok_or_else(|| {
-        CompilerError::compiler_error("TIR summary depth overflowed usize; this is a compiler bug.")
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "TIR summary depth overflowed usize; this is a compiler bug.",
+        )
     })
 }

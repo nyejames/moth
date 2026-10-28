@@ -24,10 +24,12 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
@@ -39,7 +41,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
-use crate::compiler_frontend::hir::hir_builder::lower_module;
+use crate::compiler_frontend::hir::hir_builder::lower_module_with_owner;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::FrontendOptions;
@@ -209,9 +211,10 @@ fn source_identity_facts(
     let record = source_files
         .get_by_canonical_path(source_path)
         .ok_or_else(|| {
-            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "source {source_path:?} was not registered before frontend preparation"
-            )))
+            FileFrontendPrepareFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!("source {source_path:?} was not registered before frontend preparation"),
+            ))
         })?;
     let source_id = record.id;
     let logical_path = source_files
@@ -222,8 +225,13 @@ fn source_identity_facts(
             // the typed source-capacity diagnostic lane instead of the infrastructure lane.
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: Vec::new(),
-                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    warnings: DiagnosticBag::new(),
+                    diagnostic: token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
                 })
             }
             SourceDatabaseError::Infrastructure(error) => {
@@ -241,18 +249,26 @@ fn source_identity_facts_for_id(
     path_fork: &mut PathInternerFork,
 ) -> Result<PathId, FileFrontendPrepareFailure> {
     source_files.get(source_id).ok_or_else(|| {
-        FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "source identity {} was not registered before frontend preparation",
-            source_id.index()
-        )))
+        FileFrontendPrepareFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::SourceLoading,
+            format!(
+                "source identity {} was not registered before frontend preparation",
+                source_id.index()
+            ),
+        ))
     })?;
     source_files
         .logical_path_in_fork(source_id, path_fork)
         .map_err(|error| match error {
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: Vec::new(),
-                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    warnings: DiagnosticBag::new(),
+                    diagnostic: token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
                 })
             }
             SourceDatabaseError::Infrastructure(error) => {
@@ -271,26 +287,37 @@ fn source_identity_facts_for_owner(
     let source_id = owner.source_id();
     if source_id != expected_source_id {
         return Err(FileFrontendPrepareFailure::Infrastructure(
-            CompilerError::compiler_error(format!(
-                "canonical Moth token owner identity {} does not match its preparation slot {}",
-                source_id.index(),
-                expected_source_id.index(),
-            )),
+            InfrastructureFailure::internal(
+                CompilerStage::SourceLoading,
+                format!(
+                    "canonical Moth token owner identity {} does not match its preparation slot {}",
+                    source_id.index(),
+                    expected_source_id.index(),
+                ),
+            ),
         ));
     }
     source_files.get(source_id).ok_or_else(|| {
-        FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "canonical Moth token owner {} was not registered before frontend preparation",
-            source_id.index()
-        )))
+        FileFrontendPrepareFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::SourceLoading,
+            format!(
+                "canonical Moth token owner {} was not registered before frontend preparation",
+                source_id.index()
+            ),
+        ))
     })?;
     source_files
         .logical_path_in_fork(source_id, path_fork)
         .map_err(|error| match error {
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: Vec::new(),
-                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    warnings: DiagnosticBag::new(),
+                    diagnostic: token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
                 })
             }
             SourceDatabaseError::Infrastructure(error) => {
@@ -365,7 +392,8 @@ impl CompilerFrontend<'static> {
         .map_err(FileFrontendPrepareFailure::from_tokenization)?;
         if tokenized.logical_path != logical_path || tokenized.file_id != source_id {
             return Err(FileFrontendPrepareFailure::Infrastructure(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::Tokenization,
                     "lexer source identity does not match its registered preparation identity",
                 ),
             ));
@@ -440,7 +468,10 @@ impl CompilerFrontend<'static> {
                 let tokenizer_entry_mode =
                     match TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate) {
                         Some(mode) => mode,
-                        None => unreachable!("Moth template has a tokenizer entry mode"),
+                        None => crate::compiler_bug!(
+                            CompilerStage::Tokenization,
+                            "Moth template has a tokenizer entry mode"
+                        ),
                     };
                 let (owner, path_syntax) = Self::tokenize_source_with_identity(
                     context.style_directives,
@@ -480,7 +511,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         headers: BoundModuleHeaders,
         resolved_file_references: &ResolvedFileReferenceTable,
-    ) -> Result<SortedHeaders, PremergeFailure> {
+    ) -> Result<SortedHeaders, PreparedFailure> {
         // Content-source ordering edges resolve through Stage 0's canonical targets, which this
         // compiler instance already retains as the module source identities.
         let content_source_targets = ContentSourceTargets::from_resolved_references(
@@ -502,7 +533,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         request: AstBuildRequest<'_>,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<AstBuildResult, CompilerMessages> {
+    ) -> Result<AstBuildResult, PreparedFailure> {
         let AstBuildRequest {
             sorted,
             entry_file_path,
@@ -517,10 +548,13 @@ impl<'a> CompilerFrontend<'a> {
         let entry_dir = match self.source_files.get_by_canonical_path(entry_file_path) {
             Some(identity) => identity.logical_path,
             None => {
-                let error = CompilerError::compiler_error(format!(
-                    "entry file {entry_file_path:?} was not registered before AST construction"
-                ));
-                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                let error = InfrastructureFailure::internal(
+                    CompilerStage::SourceLoading,
+                    format!(
+                        "entry file {entry_file_path:?} was not registered before AST construction"
+                    ),
+                );
+                return Err(PreparedFailure::Infrastructure(error.into()));
             }
         };
 
@@ -579,15 +613,35 @@ impl<'a> CompilerFrontend<'a> {
     // -----------------------------
     //  HIR GENERATION
     // -----------------------------
+    #[cfg(test)]
     pub(in crate::compiler_frontend) fn generate_hir(
         &mut self,
         ast: Ast,
         function_origin_lookup: HirFunctionOriginLookup,
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
         capacity_estimate: FrontendArenaCapacityEstimate,
-    ) -> Result<HirLoweringResult, CompilerMessages> {
+    ) -> Result<HirLoweringResult, PreparedFailure> {
+        self.generate_hir_with_owner(
+            ast,
+            function_origin_lookup,
+            module_resources,
+            capacity_estimate,
+            None,
+            None,
+        )
+    }
+
+    pub(in crate::compiler_frontend) fn generate_hir_with_owner(
+        &mut self,
+        ast: Ast,
+        function_origin_lookup: HirFunctionOriginLookup,
+        module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+        capacity_estimate: FrontendArenaCapacityEstimate,
+        frozen_identity_handle: Option<&FrozenIdentityHandle>,
+        prior_diagnostics: Option<&mut DiagnosticBag>,
+    ) -> Result<HirLoweringResult, PreparedFailure> {
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
-        let mut result = lower_module(
+        let mut result = lower_module_with_owner(
             ast,
             &mut self.string_table,
             &mut self.path_fork,
@@ -595,6 +649,8 @@ impl<'a> CompilerFrontend<'a> {
             module_resources,
             capacity_estimate,
             self.external_package_registry.as_ref(),
+            frozen_identity_handle,
+            prior_diagnostics,
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
@@ -602,24 +658,24 @@ impl<'a> CompilerFrontend<'a> {
                     == Some(function_path))
                 .then_some(function.id)
             }) else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
+                return Err(PreparedFailure::from(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
                         "Static configuration provenance has no lowered HIR function for path {:?}",
                         function_path
-                    )),
-                    &self.string_table,
-                ));
+                    ),
+                )));
             };
             let Some(existing_provenance) =
                 result.hir_module.function_provenance.get_mut(&function_id)
             else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
+                return Err(PreparedFailure::from(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!(
                         "HIR function {:?} is missing its provenance fact while applying static configuration provenance",
                         function_id
-                    )),
-                    &self.string_table,
-                ));
+                    ),
+                )));
             };
             existing_provenance.merge(&provenance);
         }
@@ -632,8 +688,10 @@ impl<'a> CompilerFrontend<'a> {
     pub(in crate::compiler_frontend) fn check_borrows_premerge(
         &mut self,
         hir_module: &HirModule,
+        type_environment: &TypeEnvironment,
+        prior_diagnostics: &mut DiagnosticBag,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
-    ) -> Result<BorrowCheckReport, PremergeFailure> {
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
@@ -641,17 +699,28 @@ impl<'a> CompilerFrontend<'a> {
             &self.string_table,
         ) {
             Ok(report) => Ok(report),
-            Err(BorrowCheckError::Diagnostic(diagnostic)) => {
-                let mut batch = PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
-                    diagnostic,
-                    std::mem::take(&mut self.string_table),
-                ));
+            Err(BorrowCheckError::Diagnostic(mut diagnostic)) => {
                 if let Some(handle) = frozen_identity_handle {
-                    batch.set_frozen_identity_handle_if_missing(handle.clone());
+                    diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
                 }
-                Err(batch)
+                for warning in prior_diagnostics.iter_mut() {
+                    if let Some(handle) = frozen_identity_handle {
+                        warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                    }
+                }
+                prior_diagnostics.push(diagnostic);
+                // The borrow diagnostic and preceding warnings carry no type-display facts, so only a
+                // rendered path fact retains the issuing fork's snapshot.
+                let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                    std::mem::take(prior_diagnostics),
+                    self.string_table.take_for_handoff(),
+                    Some(type_environment),
+                    || Some(Arc::new(self.path_fork.shared_table())),
+                )
+                .map_err(PreparedFailure::from)?;
+                Err(PreparedFailure::Diagnosed(batch))
             }
-            Err(BorrowCheckError::Infrastructure(error)) => Err(PremergeFailure::from(*error)),
+            Err(BorrowCheckError::Infrastructure(error)) => Err(PreparedFailure::from(*error)),
         }
     }
 
@@ -659,7 +728,7 @@ impl<'a> CompilerFrontend<'a> {
     pub(in crate::compiler_frontend) fn check_borrows(
         &self,
         hir_module: &HirModule,
-    ) -> Result<BorrowCheckReport, CompilerMessages> {
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
@@ -667,12 +736,14 @@ impl<'a> CompilerFrontend<'a> {
             &self.string_table,
         ) {
             Ok(report) => Ok(report),
-            Err(error) => match error.into_diagnostic_or_infrastructure() {
-                Ok(diagnostic) => Err(CompilerMessages::from_diagnostic_ref(
-                    diagnostic,
-                    &self.string_table,
+            Err(error) => match error.into_draft_or_infrastructure() {
+                Ok(diagnostic) => Err(PreparedFailure::capture_diagnosed(
+                    DiagnosticBag::from(diagnostic),
+                    self.string_table.clone(),
+                    None,
+                    Some(Arc::new(self.path_fork.snapshot_table())),
                 )),
-                Err(error) => Err(CompilerMessages::from_error_ref(error, &self.string_table)),
+                Err(error) => Err(PreparedFailure::from(error)),
             },
         }
     }

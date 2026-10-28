@@ -16,7 +16,8 @@ use crate::compiler_frontend::ast::ast_nodes::{
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionStore, ExpressionView,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -37,7 +38,6 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::return_hir_transformation_error;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 
 /// Jump targets of the range-loop CFG pipeline. These are destinations only. The module header
@@ -134,18 +134,18 @@ impl<'a> HirBuilder<'a> {
         span: Option<SourceSpan>,
         emit_body: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
     ) -> Result<(), HirConstructionFailure> {
-        let parent_region = self.current_region_or_error(span_ref)?;
+        let parent_region = self.current_region_or_error()?;
 
-        let header_block = self.create_block(parent_region, span_ref, "while-header")?;
+        let header_block = self.create_block(parent_region, span_ref, "while-header");
         let body_region = self.create_child_region(parent_region);
-        let body_block = self.create_block(body_region, span_ref, "while-body")?;
-        let exit_block = self.create_block(parent_region, span_ref, "while-exit")?;
+        let body_block = self.create_block(body_region, span_ref, "while-body");
+        let exit_block = self.create_block(parent_region, span_ref, "while-exit");
 
         self.emit_jump_from_current_block(header_block, span_ref, "while.enter")?;
 
-        self.set_current_block(header_block, span_ref)?;
+        self.set_current_block(header_block)?;
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
-        let condition_block = self.current_block_id_or_error(span_ref)?;
+        let condition_block = self.current_block_id_or_error()?;
 
         self.emit_terminator_with_span(
             condition_block,
@@ -161,15 +161,15 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(condition_block, body_block, "while.true");
         self.log_control_flow_edge(condition_block, exit_block, "while.false");
 
-        self.set_current_block(body_block, span_ref)?;
+        self.set_current_block(body_block)?;
         self.push_loop_targets(exit_block, header_block);
         let body_result = emit_body(self);
         self.pop_loop_targets();
         body_result?;
 
-        let body_tail_block = self.current_block_id_or_error(span_ref)?;
-        if !self.block_has_explicit_terminator(body_tail_block, span_ref)? {
-            let backedge_block = self.create_block(parent_region, span_ref, "while-backedge")?;
+        let body_tail_block = self.current_block_id_or_error()?;
+        if !self.block_has_explicit_terminator(body_tail_block)? {
+            let backedge_block = self.create_block(parent_region, span_ref, "while-backedge");
             self.emit_jump_to(
                 body_tail_block,
                 backedge_block,
@@ -177,11 +177,11 @@ impl<'a> HirBuilder<'a> {
                 "while.body.backedge",
             )?;
 
-            self.set_current_block(backedge_block, span_ref)?;
+            self.set_current_block(backedge_block)?;
             self.emit_jump_to(backedge_block, header_block, span_ref, "while.backedge")?;
         }
 
-        Ok(self.set_current_block(exit_block, span_ref)?)
+        Ok(self.set_current_block(exit_block)?)
     }
 
     pub(super) fn lower_range_loop_statement_impl(
@@ -235,9 +235,9 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         // Build a CFG pipeline so each update is checked only if a next item remains:
         // zero-step guard -> magnitude normalization -> bounds-safe candidate update.
-        let parent_region = self.current_region_or_error(span_ref)?;
-        let blocks = self.create_range_loop_blocks(parent_region, span_ref)?;
-        let types = self.resolve_range_loop_types(range, span_ref)?;
+        let parent_region = self.current_region_or_error()?;
+        let blocks = self.create_range_loop_blocks(parent_region, span_ref);
+        let types = self.resolve_range_loop_types(range);
         let locals = self.allocate_range_loop_locals(types)?;
         let runtime = RangeLoopRuntime {
             blocks,
@@ -263,66 +263,62 @@ impl<'a> HirBuilder<'a> {
         if step_block_is_reachable {
             self.emit_range_loop_step(runtime, range.end_kind, span_ref, &step_span)?;
         } else {
-            self.discard_unreachable_range_step_blocks(blocks, span_ref)?;
+            self.discard_unreachable_range_step_blocks(blocks)?;
         }
 
-        Ok(self.set_current_block(runtime.blocks.exit, span_ref)?)
+        Ok(self.set_current_block(runtime.blocks.exit)?)
     }
 
     fn create_range_loop_blocks(
         &mut self,
         parent_region: RegionId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<RangeLoopBlocks, HirConstructionFailure> {
-        let step_zero_check = self.create_block(parent_region, span_ref, "for-step-zero-check")?;
-        let step_zero_failure =
-            self.create_block(parent_region, span_ref, "for-step-zero-failure")?;
-        let step_abs_check = self.create_block(parent_region, span_ref, "for-step-abs-check")?;
-        let step_abs_negate = self.create_block(parent_region, span_ref, "for-step-abs-negate")?;
-        let header_selector = self.create_block(parent_region, span_ref, "for-header-selector")?;
-        let header_ascending =
-            self.create_block(parent_region, span_ref, "for-header-ascending")?;
-        let header_descending =
-            self.create_block(parent_region, span_ref, "for-header-descending")?;
+    ) -> RangeLoopBlocks {
+        let step_zero_check = self.create_block(parent_region, span_ref, "for-step-zero-check");
+        let step_zero_failure = self.create_block(parent_region, span_ref, "for-step-zero-failure");
+        let step_abs_check = self.create_block(parent_region, span_ref, "for-step-abs-check");
+        let step_abs_negate = self.create_block(parent_region, span_ref, "for-step-abs-negate");
+        let header_selector = self.create_block(parent_region, span_ref, "for-header-selector");
+        let header_ascending = self.create_block(parent_region, span_ref, "for-header-ascending");
+        let header_descending = self.create_block(parent_region, span_ref, "for-header-descending");
         let body_region = self.create_child_region(parent_region);
-        let body = self.create_block(body_region, span_ref, "for-body")?;
-        let step = self.create_block(parent_region, span_ref, "for-step")?;
+        let body = self.create_block(body_region, span_ref, "for-body");
+        let step = self.create_block(parent_region, span_ref, "for-step");
         let step_ascending_check =
-            self.create_block(parent_region, span_ref, "for-step-ascending-check")?;
+            self.create_block(parent_region, span_ref, "for-step-ascending-check");
         let step_descending_check =
-            self.create_block(parent_region, span_ref, "for-step-descending-check")?;
+            self.create_block(parent_region, span_ref, "for-step-descending-check");
         let step_ascending_distance =
-            self.create_block(parent_region, span_ref, "for-step-ascending-distance")?;
+            self.create_block(parent_region, span_ref, "for-step-ascending-distance");
         let step_descending_distance =
-            self.create_block(parent_region, span_ref, "for-step-descending-distance")?;
+            self.create_block(parent_region, span_ref, "for-step-descending-distance");
         let step_distance_check =
-            self.create_block(parent_region, span_ref, "for-step-distance-check")?;
+            self.create_block(parent_region, span_ref, "for-step-distance-check");
         let step_candidate_direction =
-            self.create_block(parent_region, span_ref, "for-step-candidate-direction")?;
+            self.create_block(parent_region, span_ref, "for-step-candidate-direction");
         let step_candidate_ascending =
-            self.create_block(parent_region, span_ref, "for-step-candidate-ascending")?;
+            self.create_block(parent_region, span_ref, "for-step-candidate-ascending");
         let step_candidate_descending =
-            self.create_block(parent_region, span_ref, "for-step-candidate-descending")?;
+            self.create_block(parent_region, span_ref, "for-step-candidate-descending");
         let step_candidate_check =
-            self.create_block(parent_region, span_ref, "for-step-candidate-check")?;
+            self.create_block(parent_region, span_ref, "for-step-candidate-check");
         let step_candidate_ascending_check = self.create_block(
             parent_region,
             span_ref,
             "for-step-candidate-ascending-check",
-        )?;
+        );
         let step_candidate_descending_check = self.create_block(
             parent_region,
             span_ref,
             "for-step-candidate-descending-check",
-        )?;
-        let step_stall_check =
-            self.create_block(parent_region, span_ref, "for-step-stall-check")?;
+        );
+        let step_stall_check = self.create_block(parent_region, span_ref, "for-step-stall-check");
         let step_stall_failure =
-            self.create_block(parent_region, span_ref, "for-step-stall-failure")?;
-        let step_commit = self.create_block(parent_region, span_ref, "for-step-commit")?;
-        let exit = self.create_block(parent_region, span_ref, "for-exit")?;
+            self.create_block(parent_region, span_ref, "for-step-stall-failure");
+        let step_commit = self.create_block(parent_region, span_ref, "for-step-commit");
+        let exit = self.create_block(parent_region, span_ref, "for-exit");
 
-        Ok(RangeLoopBlocks {
+        RangeLoopBlocks {
             step_zero_check,
             step_zero_failure,
             step_abs_check,
@@ -347,13 +343,12 @@ impl<'a> HirBuilder<'a> {
             step_stall_failure,
             step_commit,
             exit,
-        })
+        }
     }
 
     fn discard_unreachable_range_step_blocks(
         &mut self,
         blocks: RangeLoopBlocks,
-        span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         for block in [
             blocks.step_ascending_check,
@@ -371,11 +366,11 @@ impl<'a> HirBuilder<'a> {
             blocks.step_stall_failure,
             blocks.step_commit,
         ] {
-            if !self.discard_unreachable_empty_block(block, span_ref)? {
-                return_hir_transformation_error!(
+            if !self.discard_unreachable_empty_block(block)? {
+                return Err(InfrastructureFailure::hir_transformation(
                     "Unreachable range-loop step block was not empty and unowned",
-                    self.hir_error_location(span_ref)
-                );
+                )
+                .into());
             }
         }
 
@@ -390,27 +385,23 @@ impl<'a> HirBuilder<'a> {
     /// WHY: domain selection consumes the operands' canonical types, which exist only at AST
     ///      construction. Reusing that selected fact keeps HIR from re-deriving the same domain
     ///      from operand result types.
-    fn resolve_range_loop_types(
-        &mut self,
-        range: &RangeLoopSpec,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<RangeLoopTypes, HirConstructionFailure> {
+    fn resolve_range_loop_types(&mut self, range: &RangeLoopSpec) -> RangeLoopTypes {
         let domain = range.domain;
         if matches!(domain, NumericScalar::Number(_)) {
-            return_hir_transformation_error!(
+            crate::compiler_bug!(
+                CompilerStage::HirConstruction,
                 "Range-loop Dec item bindings are unsupported",
-                self.hir_error_location(span_ref)
             );
         }
 
-        Ok(RangeLoopTypes {
+        RangeLoopTypes {
             binding: domain.type_id(&self.type_environment),
             domain,
             bool_type: builtin_type_ids::BOOL,
             // The automatically supplied iteration index uses the language's exact I32
             // positional-index identity; it never follows the range counter's domain.
             int_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        })
+        }
     }
 
     fn allocate_range_loop_locals(
@@ -485,8 +476,7 @@ impl<'a> HirBuilder<'a> {
         let lowered_start =
             self.lower_expression_value_to_current_block(expressions.view(range.start)?)?;
         let lowered_start = self.snapshot_range_loop_operand(lowered_start)?;
-        let lowered_start =
-            self.convert_numeric_operand_to_domain(lowered_start, types.domain, span_ref)?;
+        let lowered_start = self.convert_numeric_operand_to_domain(lowered_start, types.domain)?;
         self.emit_statement_kind(
             HirStatementKind::Write {
                 target: HirWriteTarget::DefineLocal(locals.current),
@@ -498,8 +488,7 @@ impl<'a> HirBuilder<'a> {
         let lowered_end =
             self.lower_expression_value_to_current_block(expressions.view(range.end)?)?;
         let lowered_end = self.snapshot_range_loop_operand(lowered_end)?;
-        let lowered_end =
-            self.convert_numeric_operand_to_domain(lowered_end, types.domain, span_ref)?;
+        let lowered_end = self.convert_numeric_operand_to_domain(lowered_end, types.domain)?;
         self.emit_statement_kind(
             HirStatementKind::Write {
                 target: HirWriteTarget::DefineLocal(locals.end),
@@ -514,7 +503,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_expression_value_to_current_block(expressions.view(*step_expression)?)?;
             let lowered_step = self.snapshot_range_loop_operand(lowered_step)?;
             let lowered_step =
-                self.convert_numeric_operand_to_domain(lowered_step, types.domain, span_ref)?;
+                self.convert_numeric_operand_to_domain(lowered_step, types.domain)?;
 
             self.emit_statement_kind(
                 HirStatementKind::Write {
@@ -524,7 +513,7 @@ impl<'a> HirBuilder<'a> {
                 span_ref,
             )?;
         } else {
-            let step_region = self.current_region_or_error(span_ref)?;
+            let step_region = self.current_region_or_error()?;
             let default_step = self.range_loop_unit_literal(types, span_ref, step_region)?;
 
             self.emit_statement_kind(
@@ -535,7 +524,7 @@ impl<'a> HirBuilder<'a> {
                 span_ref,
             )?;
         }
-        let pre_header_region = self.current_region_or_error(span_ref)?;
+        let pre_header_region = self.current_region_or_error()?;
         let zero_index = self.make_expression(
             span_ref,
             HirExpressionKind::FixedScalar(
@@ -599,8 +588,8 @@ impl<'a> HirBuilder<'a> {
             locals,
             types,
         } = runtime;
-        self.set_current_block(blocks.step_zero_check, span_ref)?;
-        let zero_check_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_zero_check)?;
+        let zero_check_region = self.current_region_or_error()?;
         let step_for_zero_check = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(locals.step)),
@@ -640,7 +629,7 @@ impl<'a> HirBuilder<'a> {
             "for.step.non_zero",
         );
 
-        self.set_current_block(blocks.step_zero_failure, span_ref)?;
+        self.set_current_block(blocks.step_zero_failure)?;
         self.emit_range_step_failure(RangeStepFailureCause::ZeroStep, span_ref)
     }
 
@@ -657,8 +646,8 @@ impl<'a> HirBuilder<'a> {
             types,
         } = runtime;
 
-        self.set_current_block(blocks.step_abs_check, span_ref)?;
-        let abs_check_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_abs_check)?;
+        let abs_check_region = self.current_region_or_error()?;
         let step_for_abs_check = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(locals.step)),
@@ -688,8 +677,8 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         // Normalize explicit negative steps to magnitude first.
-        self.set_current_block(blocks.step_abs_negate, span_ref)?;
-        let abs_negate_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_abs_negate)?;
+        let abs_negate_region = self.current_region_or_error()?;
         let abs_step_current = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(locals.step)),
@@ -726,8 +715,8 @@ impl<'a> HirBuilder<'a> {
             types,
         } = runtime;
 
-        self.set_current_block(blocks.header_selector, span_ref)?;
-        let header_selector_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.header_selector)?;
+        let header_selector_region = self.current_region_or_error()?;
         let ascending_for_header = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(locals.ascending)),
@@ -756,8 +745,8 @@ impl<'a> HirBuilder<'a> {
         );
 
         // `to` (exclusive) vs `to &` (inclusive) become strict vs inclusive comparators per direction branch.
-        self.set_current_block(blocks.header_ascending, span_ref)?;
-        let header_ascending_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.header_ascending)?;
+        let header_ascending_region = self.current_region_or_error()?;
         let asc_current_value = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(locals.current)),
@@ -803,8 +792,8 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(blocks.header_ascending, blocks.body, "for.asc.true");
         self.log_control_flow_edge(blocks.header_ascending, blocks.exit, "for.asc.false");
 
-        self.set_current_block(blocks.header_descending, span_ref)?;
-        let header_descending_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.header_descending)?;
+        let header_descending_region = self.current_region_or_error()?;
         let desc_current_value = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(locals.current)),
@@ -865,8 +854,8 @@ impl<'a> HirBuilder<'a> {
             types,
         } = runtime;
 
-        self.set_current_block(blocks.body, span_ref)?;
-        let body_region_id = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.body)?;
+        let body_region_id = self.current_region_or_error()?;
         let mut visible_bindings = Vec::new();
 
         if let Some(item_binding) = &bindings.item {
@@ -911,12 +900,12 @@ impl<'a> HirBuilder<'a> {
         self.pop_loop_targets();
         body_result?;
 
-        let body_tail_block = self.current_block_id_or_error(span_ref)?;
-        if !self.block_has_explicit_terminator(body_tail_block, span_ref)? {
+        let body_tail_block = self.current_block_id_or_error()?;
+        if !self.block_has_explicit_terminator(body_tail_block)? {
             self.emit_jump_to(body_tail_block, blocks.step, span_ref, "for.body.step")?;
         }
 
-        Ok(!self.discard_unreachable_empty_block(blocks.step, span_ref)?)
+        Ok(!self.discard_unreachable_empty_block(blocks.step)?)
     }
 
     fn emit_range_loop_step(
@@ -934,12 +923,12 @@ impl<'a> HirBuilder<'a> {
 
         if uses_float_range_candidate(types.domain) {
             self.emit_float_range_candidate_update(runtime, end_kind, span_ref)?;
-            self.discard_float_range_precheck_blocks(blocks, end_kind, span_ref)?;
+            self.discard_float_range_precheck_blocks(blocks, end_kind)?;
         } else {
             self.emit_range_loop_distance_candidate_precheck(runtime, end_kind, span_ref)?;
         }
-        self.set_current_block(blocks.step_stall_check, span_ref)?;
-        let stall_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_stall_check)?;
+        let stall_region = self.current_region_or_error()?;
         let current =
             self.range_loop_local(locals.current, types.binding, span_ref, stall_region)?;
         let candidate =
@@ -961,11 +950,11 @@ impl<'a> HirBuilder<'a> {
             "for.step.advances",
         )?;
 
-        self.set_current_block(blocks.step_stall_failure, span_ref)?;
+        self.set_current_block(blocks.step_stall_failure)?;
         self.emit_range_step_failure(RangeStepFailureCause::NoProgress, step_span)?;
 
-        self.set_current_block(blocks.step_commit, span_ref)?;
-        let commit_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_commit)?;
+        let commit_region = self.current_region_or_error()?;
         let candidate = self.make_expression(
             span_ref,
             HirExpressionKind::Copy(HirPlace::local(locals.next_value)),
@@ -1022,12 +1011,13 @@ impl<'a> HirBuilder<'a> {
         } = runtime;
 
         let distance_local = locals.distance.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
                 "Range-loop distance lowering is missing its distance local",
             )
         })?;
-        self.set_current_block(blocks.step, span_ref)?;
-        let step_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step)?;
+        let step_region = self.current_region_or_error()?;
         let ascending =
             self.range_loop_local(locals.ascending, types.bool_type, span_ref, step_region)?;
         self.emit_range_loop_branch(
@@ -1044,8 +1034,8 @@ impl<'a> HirBuilder<'a> {
         self.emit_range_loop_distance_update(runtime, true, span_ref)?;
         self.emit_range_loop_distance_update(runtime, false, span_ref)?;
 
-        self.set_current_block(blocks.step_distance_check, span_ref)?;
-        let distance_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_distance_check)?;
+        let distance_region = self.current_region_or_error()?;
         let step_value =
             self.range_loop_local(locals.step, types.binding, span_ref, distance_region)?;
         let distance_value =
@@ -1071,8 +1061,8 @@ impl<'a> HirBuilder<'a> {
             "for.step.done",
         )?;
 
-        self.set_current_block(blocks.step_candidate_direction, span_ref)?;
-        let candidate_direction_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_candidate_direction)?;
+        let candidate_direction_region = self.current_region_or_error()?;
         let ascending = self.range_loop_local(
             locals.ascending,
             types.bool_type,
@@ -1091,8 +1081,8 @@ impl<'a> HirBuilder<'a> {
         self.emit_range_loop_candidate_update(runtime, true, span_ref)?;
         self.emit_range_loop_candidate_update(runtime, false, span_ref)?;
 
-        self.set_current_block(blocks.step_candidate_check, span_ref)?;
-        let candidate_check_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(blocks.step_candidate_check)?;
+        let candidate_check_region = self.current_region_or_error()?;
         let ascending = self.range_loop_local(
             locals.ascending,
             types.bool_type,
@@ -1125,9 +1115,9 @@ impl<'a> HirBuilder<'a> {
             locals,
             types,
         } = runtime;
-        self.set_current_block(blocks.step, span_ref)?;
+        self.set_current_block(blocks.step)?;
         if matches!(end_kind, RangeEndKind::Inclusive) {
-            let step_region = self.current_region_or_error(span_ref)?;
+            let step_region = self.current_region_or_error()?;
             let current =
                 self.range_loop_local(locals.current, types.binding, span_ref, step_region)?;
             let end = self.range_loop_local(locals.end, types.binding, span_ref, step_region)?;
@@ -1147,10 +1137,10 @@ impl<'a> HirBuilder<'a> {
                 "for.step.inclusive-end",
                 "for.step.before-inclusive-end",
             )?;
-            self.set_current_block(blocks.step_candidate_check, span_ref)?;
+            self.set_current_block(blocks.step_candidate_check)?;
         }
 
-        let candidate_region = self.current_region_or_error(span_ref)?;
+        let candidate_region = self.current_region_or_error()?;
         let current =
             self.range_loop_local(locals.current, types.binding, span_ref, candidate_region)?;
         let step = self.range_loop_local(locals.step, types.binding, span_ref, candidate_region)?;
@@ -1162,7 +1152,8 @@ impl<'a> HirBuilder<'a> {
             candidate_region,
         )?;
         let in_range_result = locals.candidate_in_range.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
                 "Binary-float range candidate lowering is missing its Bool result local",
             )
         })?;
@@ -1197,7 +1188,6 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         blocks: RangeLoopBlocks,
         end_kind: RangeEndKind,
-        span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         for block in [
             blocks.step_ascending_check,
@@ -1211,21 +1201,21 @@ impl<'a> HirBuilder<'a> {
             blocks.step_candidate_ascending_check,
             blocks.step_candidate_descending_check,
         ] {
-            if !self.discard_unreachable_empty_block(block, span_ref)? {
-                return_hir_transformation_error!(
+            if !self.discard_unreachable_empty_block(block)? {
+                return Err(InfrastructureFailure::hir_transformation(
                     "Unused float range-loop distance block was not empty and unowned",
-                    self.hir_error_location(span_ref)
-                );
+                )
+                .into());
             }
         }
 
         if matches!(end_kind, RangeEndKind::Exclusive)
-            && !self.discard_unreachable_empty_block(blocks.step_candidate_check, span_ref)?
+            && !self.discard_unreachable_empty_block(blocks.step_candidate_check)?
         {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Unused float range-loop distance block was not empty and unowned",
-                self.hir_error_location(span_ref)
-            );
+            )
+            .into());
         }
 
         Ok(())
@@ -1251,8 +1241,8 @@ impl<'a> HirBuilder<'a> {
             )
         };
 
-        self.set_current_block(block, span_ref)?;
-        let region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(block)?;
+        let region = self.current_region_or_error()?;
         let crosses_zero = if matches!(
             types.domain,
             NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::UnsignedInteger
@@ -1335,7 +1325,8 @@ impl<'a> HirBuilder<'a> {
             types,
         } = runtime;
         let distance_local = locals.distance.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
                 "Range-loop distance lowering is missing its distance local",
             )
         })?;
@@ -1344,8 +1335,8 @@ impl<'a> HirBuilder<'a> {
         } else {
             blocks.step_descending_distance
         };
-        self.set_current_block(block, span_ref)?;
-        let region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(block)?;
+        let region = self.current_region_or_error()?;
         let current = self.range_loop_local(locals.current, types.binding, span_ref, region)?;
         let end = self.range_loop_local(locals.end, types.binding, span_ref, region)?;
         let (left, right) = if ascending {
@@ -1383,8 +1374,8 @@ impl<'a> HirBuilder<'a> {
         } else {
             blocks.step_candidate_descending
         };
-        self.set_current_block(block, span_ref)?;
-        let region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(block)?;
+        let region = self.current_region_or_error()?;
         let current = self.range_loop_local(locals.current, types.binding, span_ref, region)?;
         let step = self.range_loop_local(locals.step, types.binding, span_ref, region)?;
         let operator = if ascending {
@@ -1427,8 +1418,8 @@ impl<'a> HirBuilder<'a> {
         } else {
             blocks.step_candidate_descending_check
         };
-        self.set_current_block(block, span_ref)?;
-        let region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(block)?;
+        let region = self.current_region_or_error()?;
         let candidate =
             self.range_loop_local(locals.next_value, types.binding, span_ref, region)?;
         let end = self.range_loop_local(locals.end, types.binding, span_ref, region)?;
@@ -1497,7 +1488,7 @@ impl<'a> HirBuilder<'a> {
         then_label: &str,
         else_label: &str,
     ) -> Result<(), HirConstructionFailure> {
-        let source_block = self.current_block_id_or_error(span_ref)?;
+        let source_block = self.current_block_id_or_error()?;
         self.emit_terminator(
             source_block,
             HirTerminator::If {
@@ -1530,7 +1521,10 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::FixedScalar(zero)
             }
             NumericScalar::Number(_) => {
-                unreachable!("Number range domains are rejected by resolve_range_loop_types")
+                crate::compiler_bug!(
+                    CompilerStage::HirConstruction,
+                    "Number range domains are rejected by resolve_range_loop_types"
+                )
             }
         };
         self.make_expression(span_ref, kind, types.binding, ValueKind::Const, region)
@@ -1554,7 +1548,10 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::FixedScalar(one)
             }
             NumericScalar::Number(_) => {
-                unreachable!("Number range domains are rejected by resolve_range_loop_types")
+                crate::compiler_bug!(
+                    CompilerStage::HirConstruction,
+                    "Number range domains are rejected by resolve_range_loop_types"
+                )
             }
         };
         self.make_expression(span_ref, kind, types.binding, ValueKind::Const, region)
@@ -1607,15 +1604,15 @@ impl<'a> HirBuilder<'a> {
         // Generated collection spills: the iterable/length/index temps, the length
         // call, and step/jump edges are compiler scaffolding and stay spanless.
         // Only the header bounds check below carries the authored `for` span.
-        let parent_region = self.current_region_or_error(span_ref)?;
+        let parent_region = self.current_region_or_error()?;
 
-        let header_block = self.create_block(parent_region, span_ref, "loop-collection-header")?;
+        let header_block = self.create_block(parent_region, span_ref, "loop-collection-header");
         let body_region = self.create_child_region(parent_region);
-        let body_block = self.create_block(body_region, span_ref, "loop-collection-body")?;
-        let step_block = self.create_block(parent_region, span_ref, "loop-collection-step")?;
-        let exit_block = self.create_block(parent_region, span_ref, "loop-collection-exit")?;
+        let body_block = self.create_block(body_region, span_ref, "loop-collection-body");
+        let step_block = self.create_block(parent_region, span_ref, "loop-collection-step");
+        let exit_block = self.create_block(parent_region, span_ref, "loop-collection-exit");
 
-        let (iterable_type, element_type) = self.collection_iteration_types(iterable, span_ref)?;
+        let (iterable_type, element_type) = self.collection_iteration_types(iterable)?;
 
         let bool_ty = builtin_type_ids::BOOL;
         // Collection lengths and positional indices use the language's exact I32 identity.
@@ -1633,7 +1630,7 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        let pre_header_region = self.current_region_or_error(span_ref)?;
+        let pre_header_region = self.current_region_or_error()?;
         let zero_index = self.make_expression(
             span_ref,
             HirExpressionKind::FixedScalar(
@@ -1674,8 +1671,8 @@ impl<'a> HirBuilder<'a> {
 
         self.emit_jump_from_current_block(header_block, span_ref, "loop.collection.enter")?;
 
-        self.set_current_block(header_block, span_ref)?;
-        let header_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(header_block)?;
+        let header_region = self.current_region_or_error()?;
         let current_index = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(iteration_index_local)),
@@ -1717,8 +1714,8 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(header_block, body_block, "loop.collection.true");
         self.log_control_flow_edge(header_block, exit_block, "loop.collection.false");
 
-        self.set_current_block(body_block, span_ref)?;
-        let body_region_id = self.current_region_or_error(span_ref)?;
+        self.set_current_block(body_block)?;
+        let body_region_id = self.current_region_or_error()?;
         let mut visible_bindings = Vec::new();
 
         if let Some(item_binding) = &bindings.item {
@@ -1775,8 +1772,8 @@ impl<'a> HirBuilder<'a> {
         self.pop_loop_targets();
         body_result?;
 
-        let body_tail_block = self.current_block_id_or_error(span_ref)?;
-        if !self.block_has_explicit_terminator(body_tail_block, span_ref)? {
+        let body_tail_block = self.current_block_id_or_error()?;
+        if !self.block_has_explicit_terminator(body_tail_block)? {
             self.emit_jump_to(
                 body_tail_block,
                 step_block,
@@ -1785,12 +1782,12 @@ impl<'a> HirBuilder<'a> {
             )?;
         }
 
-        if self.discard_unreachable_empty_block(step_block, span_ref)? {
-            return Ok(self.set_current_block(exit_block, span_ref)?);
+        if self.discard_unreachable_empty_block(step_block)? {
+            return Ok(self.set_current_block(exit_block)?);
         }
 
-        self.set_current_block(step_block, span_ref)?;
-        let step_region = self.current_region_or_error(span_ref)?;
+        self.set_current_block(step_block)?;
+        let step_region = self.current_region_or_error()?;
         let step_current = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(iteration_index_local)),
@@ -1819,7 +1816,7 @@ impl<'a> HirBuilder<'a> {
         )?;
         self.emit_jump_from_current_block(header_block, span_ref, "loop.collection.backedge")?;
 
-        Ok(self.set_current_block(exit_block, span_ref)?)
+        Ok(self.set_current_block(exit_block)?)
     }
 
     fn register_loop_binding_local(
@@ -1835,17 +1832,15 @@ impl<'a> HirBuilder<'a> {
         if self.locals_by_name.contains_key(&binding.id)
             || visible_bindings.iter().any(|(path, _)| path == &binding.id)
         {
-            return_hir_transformation_error!(
-                format!(
-                    "Local '{}' is already declared in this function scope",
-                    self.symbol_name_for_diagnostics(&binding.id)
-                ),
-                self.hir_error_location(span_ref)
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Local '{}' is already declared in this function scope",
+                self.symbol_name_for_diagnostics(&binding.id)
+            ))
+            .into());
         }
 
-        let region = self.current_region_or_error(span_ref)?;
-        let block_id = self.current_block_id_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
+        let block_id = self.current_block_id_or_error()?;
         let local_id = self.allocate_local_id();
         // Authored loop binding uses the explicit `Declaration.binding_span`
         // (the binding-name anchor), never an initializer span.
@@ -1858,7 +1853,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.side_table.map_local_source(&local);
-        self.register_local_in_block(block_id, local, span_ref)?;
+        self.register_local_in_block(block_id, local)?;
         self.side_table.bind_local_name(local_id, binding.id);
         self.side_table
             .bind_local_origin(local_id, HirLocalOriginKind::User, None, None);
@@ -1883,18 +1878,17 @@ impl<'a> HirBuilder<'a> {
     fn collection_iteration_types(
         &mut self,
         iterable: ExpressionView<'_>,
-        span_ref: &Option<SourceSpan>,
     ) -> Result<(TypeId, TypeId), HirConstructionFailure> {
         // Frontend type resolution canonicalizes reference wrappers, so collection loops
         // accept either direct collections or shared references to collections uniformly.
-        let iterable_type = self.lower_type_id(iterable.value_type_id()?, span_ref)?;
+        let iterable_type = self.lower_type_id(iterable.value_type_id()?)?;
         let element = match self.type_environment.collection_element_type(iterable_type) {
             Some(element) => element,
             None => {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Collection loop iterable did not lower to a collection HIR type",
-                    self.hir_error_location(span_ref)
-                );
+                )
+                .into());
             }
         };
 

@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::member_rules::BuiltinArgumentSlots;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -186,12 +186,10 @@ fn materialised_builtin_expectations(
         slots.push(match &expectation.expected_type {
             ExpectedParameterType::Known(type_id) => ExpectedParameterType::Known(*type_id),
             ExpectedParameterType::UnknownExternal => ExpectedParameterType::UnknownExternal,
-            ExpectedParameterType::GenericParameter(_) => {
-                return Err(CompilerError::compiler_error(
-                    "a builtin member expectation carried a generic template parameter",
-                )
-                .into());
-            }
+            ExpectedParameterType::GenericParameter(_) => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a builtin member expectation carried a generic template parameter",
+            ),
             ExpectedParameterType::ConstructionShape(shape) => ExpectedParameterType::Known(
                 materialise_builtin_shape(context, type_interner, *shape)?,
             ),

@@ -10,10 +10,13 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::numeric_construction::PendingChoicePattern;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
+    DeferredFeatureReason, DiagnosticToken, InvalidMatchPatternReason,
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -33,8 +36,8 @@ use super::types::{
 
 /// Typed result for choice-pattern parsing.
 ///
-/// Authored syntax failures remain `CompilerDiagnostic`; retained-table and other compiler
-/// invariant failures travel through the infrastructure lane without being reclassified.
+/// Diagnosed failures travel as drafts; retained-table and other compiler invariant failures
+/// travel through the infrastructure lane without being reclassified.
 type ChoicePatternResult<T> = Result<T, ExpressionParseError>;
 
 /// Resolve a choice variant pattern to its deterministic variant index.
@@ -67,9 +70,9 @@ pub fn parse_choice_variant_pattern(
     )?;
 
     if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(deferred_feature_reason_diagnostic(
+        return Err(names_declarations::deferred_feature_reason(
             DeferredFeatureReason::CaptureTaggedPattern,
-            current_span(token_stream),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -116,7 +119,8 @@ pub(in crate::compiler_frontend::ast::statements) fn finish_pending_choice_patte
         .variants_for(subject_type_id)
         .and_then(|variants| variants.iter().find(|variant| variant.tag == pattern.tag))
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a pending choice arm resumed against a subject without that variant",
             )
         })?;
@@ -130,7 +134,8 @@ pub(in crate::compiler_frontend::ast::statements) fn finish_pending_choice_patte
             ChoiceVariantPayloadDefinition::Unit => None,
         }
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a pending choice capture names a field its variant lacks",
             )
         })?;
@@ -162,11 +167,11 @@ fn parse_choice_pattern_captures(
     match &variant.payload {
         ChoiceVariantPayload::Unit => {
             if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::UnitVariantHasPayload,
                     Some(variant.id),
                     None,
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -176,11 +181,11 @@ fn parse_choice_pattern_captures(
 
         ChoiceVariantPayload::Record { fields } => {
             if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::PayloadVariantNeedsBindings,
                     Some(variant.id),
                     None,
-                    current_span(token_stream),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -198,10 +203,10 @@ fn parse_choice_pattern_captures(
                     break;
                 }
 
-                let capture_span = current_span(token_stream);
-                // Wildcards are not yet supported in choice payload position.
+                let capture_span = Some(token_stream.current_span());
+                // Wildcards are not supported in choice payload position.
                 if token_stream.current_tag() == TokenTag::WILDCARD {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::WildcardNotSupported,
                         None,
                         None,
@@ -211,7 +216,7 @@ fn parse_choice_pattern_captures(
                 }
 
                 if token_stream.current_tag() != TokenTag::SYMBOL {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::CaptureBindingMustBeFieldName,
                         None,
                         None,
@@ -222,7 +227,8 @@ fn parse_choice_pattern_captures(
                 let field_name = token_stream
                     .current_string_id_in(string_table)?
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "choice payload field symbol had no string payload",
                         )
                     })?;
@@ -233,12 +239,13 @@ fn parse_choice_pattern_captures(
 
                 if token_stream.current_tag() == TokenTag::AS {
                     token_stream.advance();
-                    binding_span = current_span(token_stream);
+                    binding_span = Some(token_stream.current_span());
                     binding_name = match token_stream.current_tag() {
                         TokenTag::SYMBOL => token_stream
                             .current_string_id_in(string_table)?
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::AstConstruction,
                                     "choice payload alias symbol had no string payload",
                                 )
                             })?,
@@ -246,7 +253,7 @@ fn parse_choice_pattern_captures(
                         | TokenTag::EOF
                         | TokenTag::CLOSE_PARENTHESIS
                         | TokenTag::COMMA => {
-                            return Err(CompilerDiagnostic::invalid_match_pattern(
+                            return Err(choices_control_flow::invalid_match_pattern(
                                 InvalidMatchPatternReason::ExpectedLocalBindingAfterAs,
                                 None,
                                 None,
@@ -255,7 +262,7 @@ fn parse_choice_pattern_captures(
                             .into());
                         }
                         _ => {
-                            return Err(CompilerDiagnostic::invalid_match_pattern(
+                            return Err(choices_control_flow::invalid_match_pattern(
                                 InvalidMatchPatternReason::AliasMustBeLocalBinding,
                                 None,
                                 None,
@@ -270,16 +277,16 @@ fn parse_choice_pattern_captures(
                 }
 
                 if token_stream.current_tag() == TokenTag::ASSIGN {
-                    return Err(deferred_feature_reason_diagnostic(
+                    return Err(names_declarations::deferred_feature_reason(
                         DeferredFeatureReason::NamedPayloadPatternAssignment,
-                        current_span(token_stream),
+                        Some(token_stream.current_span()),
                     )
                     .into());
                 }
 
                 // Check duplicate capture binding name (uses the local alias when present).
                 if seen_names.contains_key(&binding_name) {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::DuplicateCaptureBinding,
                         Some(variant.id),
                         None,
@@ -292,7 +299,7 @@ fn parse_choice_pattern_captures(
                 // Validate capture position and name against declaration metadata.
                 let field_index = captures.len();
                 let Some(field_decl) = fields.get(field_index) else {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::TooManyCaptureBindings,
                         Some(variant.id),
                         None,
@@ -304,7 +311,7 @@ fn parse_choice_pattern_captures(
                 let expected_field_name =
                     choice_payload_field_name(field_decl, path_fork, string_table)?;
                 if field_name != expected_field_name {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::CaptureBindingNameMismatch,
                         Some(variant.id),
                         None,
@@ -333,9 +340,9 @@ fn parse_choice_pattern_captures(
                         break;
                     }
                     TokenTag::OPEN_PARENTHESIS => {
-                        return Err(deferred_feature_reason_diagnostic(
+                        return Err(names_declarations::deferred_feature_reason(
                             DeferredFeatureReason::NestedPayloadPattern,
-                            current_span(token_stream),
+                            Some(token_stream.current_span()),
                         )
                         .into());
                     }
@@ -343,15 +350,15 @@ fn parse_choice_pattern_captures(
                         let found = token_stream
                             .current_diagnostic_token(string_table)
                             .map_err(|error| {
-                                CompilerDiagnostic::token_view_invariant_error(
-                                    error,
+                                InfrastructureFailure::malformed_token_projection(
                                     "choice payload separator diagnostic",
+                                    error,
                                 )
                             })?;
-                        return Err(CompilerDiagnostic::expected_token_from_tags(
-                            TokenTag::COMMA,
+                        return Err(token_lexical::expected_token_from_projections(
+                            DiagnosticToken::from_static_tag(TokenTag::COMMA),
                             found,
-                            current_span(token_stream),
+                            Some(token_stream.current_span()),
                         )
                         .into());
                     }
@@ -360,7 +367,7 @@ fn parse_choice_pattern_captures(
 
             // Check for too few captures.
             if captures.len() != fields.len() {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::TooFewCaptureBindings,
                     Some(variant.id),
                     None,
@@ -384,10 +391,13 @@ fn choice_payload_field_name(
 ) -> ChoicePatternResult<StringId> {
     path_fork.component(field.id).ok_or_else(|| {
         ExpressionParseError::Infrastructure(
-            CompilerError::compiler_error(format!(
-                "Choice payload field '{}' has no leaf name during match-pattern parsing",
-                path_fork.render_portable(field.id, string_table, &mut Vec::new())
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Choice payload field '{}' has no leaf name during match-pattern parsing",
+                    path_fork.render_portable(field.id, string_table, &mut Vec::new())
+                ),
+            )
             .into(),
         )
     })
@@ -410,16 +420,19 @@ fn parse_variant_name(
             let first_name = token_stream
                 .current_string_id_in(string_table)?
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("choice variant symbol had no string payload")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "choice variant symbol had no string payload",
+                    )
                 })?;
-            let first_span = current_span(token_stream);
+            let first_span = Some(token_stream.current_span());
             token_stream.advance();
 
             if token_stream.current_tag() == TokenTag::DOUBLE_COLON {
                 if let Some(gap) = token_stream.current_choice_variant_separator_gap() {
-                    return Err(CompilerDiagnostic::invalid_choice_variant_spacing(
+                    return Err(token_lexical::invalid_choice_variant_spacing(
                         gap,
-                        current_span(token_stream),
+                        Some(token_stream.current_span()),
                     )
                     .into());
                 }
@@ -433,7 +446,7 @@ fn parse_variant_name(
                         choice_nominal_path,
                     )?
                 {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
                         None,
                         expected_choice_name,
@@ -445,22 +458,23 @@ fn parse_variant_name(
                 token_stream.advance();
 
                 if token_stream.current_tag() != TokenTag::SYMBOL {
-                    return Err(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::ExpectedVariantNameAfterQualifier,
                         None,
                         None,
-                        current_span(token_stream),
+                        Some(token_stream.current_span()),
                     )
                     .into());
                 }
                 let qualified_variant_name = token_stream
                     .current_string_id_in(string_table)?
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "qualified choice variant symbol had no string payload",
                         )
                     })?;
-                let qualified_span = current_span(token_stream);
+                let qualified_span = Some(token_stream.current_span());
                 token_stream.advance();
                 Ok((qualified_variant_name, qualified_span))
             } else {
@@ -473,19 +487,18 @@ fn parse_variant_name(
         | TokenTag::BOOL_LITERAL
         | TokenTag::CHAR_LITERAL
         | TokenTag::STRING_SLICE_LITERAL
-        | TokenTag::NEGATIVE => Err(CompilerDiagnostic::invalid_match_pattern(
+        | TokenTag::NEGATIVE => Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::MustUseVariantNamesNotLiterals,
             None,
             None,
-            current_span(token_stream),
+            Some(token_stream.current_span()),
         )
         .into()),
-
-        _ => Err(CompilerDiagnostic::invalid_match_pattern(
+        _ => Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::MustStartWithVariantName,
             None,
             None,
-            current_span(token_stream),
+            Some(token_stream.current_span()),
         )
         .into()),
     }
@@ -522,7 +535,7 @@ fn resolve_variant_to_tag(
         .iter()
         .position(|variant| variant.id == variant_name)
     else {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::UnknownVariant,
             Some(variant_name),
             path_fork.component(*choice_nominal_path),
@@ -532,9 +545,6 @@ fn resolve_variant_to_tag(
     };
 
     Ok(variant_index)
-}
-fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
 }
 fn choice_display_name(
     choice_nominal_path: &PathId,

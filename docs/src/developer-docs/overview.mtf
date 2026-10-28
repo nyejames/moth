@@ -58,7 +58,7 @@ Keep detailed contracts in `docs/compiler-design-overview.md` and `docs/build-sy
 
 ## Core architectural rules
 
-- User-facing source, syntax, import, type, rule, borrow, config and deferred-feature failures use `CompilerDiagnostic`. `CompilerError` is for internal compiler, filesystem, backend, dev-server and tooling failures.
+- User-authored source, syntax, import, type, rule, borrow, config and deferred-feature failures use typed `DiagnosticDraft` values. `InfrastructureFailure` is for internal compiler, filesystem, backend, dev-server and tooling failures.
 - Stage 0 builds one canonical module graph, assigns file ownership and compiles each module once in dependency order.
 - Each module owns one local `TypeEnvironment`. Use local `TypeId` equality for module-local decisions and canonical project identities across module interfaces.
 - Header parsing owns top-level declaration discovery and declaration shells. AST consumes sorted headers and header-built visibility.

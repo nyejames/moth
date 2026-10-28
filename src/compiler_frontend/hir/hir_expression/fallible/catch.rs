@@ -4,6 +4,7 @@
 //! previous continuation is restored before lowering that handler, so its failures go outward.
 
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::{
     CatchHandlerTarget, HirBuilder, ValueBlockTarget,
@@ -12,7 +13,6 @@ use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 use super::super::LoweredResults;
 use super::{EmittedFallibleResults, FallibleBranchingContext};
@@ -34,21 +34,21 @@ impl<'a> HirBuilder<'a> {
             err_type,
             span,
         } = context;
-        let source_block = self.current_block_id_or_error(span)?;
-        let region = self.current_region_or_error(span)?;
+        let source_block = self.current_block_id_or_error()?;
+        let region = self.current_region_or_error()?;
         let error_region = self.create_child_region(region);
-        let error_block = self.create_block(error_region, span, "fallible-handled-err")?;
-        let merge_block = self.create_block(region, span, "fallible-handled-merge")?;
+        let error_block = self.create_block(error_region, span, "fallible-handled-err");
+        let merge_block = self.create_block(region, span, "fallible-handled-merge");
         // Edge destinations belong to their target blocks, not the protected predecessor.
-        self.set_current_block(error_block, span)?;
+        self.set_current_block(error_block)?;
         let error_local = self.allocate_temp_local(err_type, None)?;
-        self.set_current_block(merge_block, span)?;
+        self.set_current_block(merge_block)?;
         let mut result_locals = Vec::with_capacity(result_type_ids.len());
         for type_id in result_type_ids {
-            let result_type = self.lower_type_id(*type_id, span)?;
+            let result_type = self.lower_type_id(*type_id)?;
             result_locals.push(self.allocate_temp_local(result_type, None)?);
         }
-        self.set_current_block(source_block, span)?;
+        self.set_current_block(source_block)?;
 
         let lowered = self.with_active_catch_handler(
             CatchHandlerTarget {
@@ -59,7 +59,7 @@ impl<'a> HirBuilder<'a> {
             emit_protected,
         )?;
         for statement in lowered.prelude {
-            self.emit_statement_to_current_block(statement, span)?;
+            self.emit_statement_to_current_block(statement)?;
         }
 
         // The merge edge transfers each slot only after all protected work succeeds.
@@ -67,13 +67,13 @@ impl<'a> HirBuilder<'a> {
         for (destination, value) in result_locals.iter().copied().zip(lowered.values) {
             let ty = self.module.expressions.expression(value).ty;
             let source = self.allocate_temp_local(ty, None)?;
-            self.emit_write_statement(HirWriteTarget::DefineLocal(source), value, span)?;
+            self.emit_write_statement(HirWriteTarget::DefineLocal(source), value)?;
             args.push(HirJumpArgument {
                 source,
                 destination,
             });
         }
-        let success_tail = self.current_block_id_or_error(span)?;
+        let success_tail = self.current_block_id_or_error()?;
         self.emit_terminator(
             success_tail,
             HirTerminator::Jump {
@@ -84,7 +84,7 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         // The enclosing handler is active again here, never this catch's own handler.
-        self.set_current_block(error_block, span)?;
+        self.set_current_block(error_block)?;
         match handling {
             FallibleHandling::Handler { error, body } => {
                 if let Some(error_binding) = error {
@@ -103,7 +103,6 @@ impl<'a> HirBuilder<'a> {
                     self.emit_write_statement(
                         HirWriteTarget::DefineLocal(handler_error_local),
                         error_payload,
-                        span,
                     )?;
                 }
                 if result_locals.is_empty() {
@@ -117,13 +116,10 @@ impl<'a> HirBuilder<'a> {
                         |builder| builder.lower_statement_sequence(expressions, body),
                     )?;
                 }
-                let error_tail = self.current_block_id_or_error(span)?;
-                if !self.block_has_explicit_terminator(error_tail, span)? {
+                let error_tail = self.current_block_id_or_error()?;
+                if !self.block_has_explicit_terminator(error_tail)? {
                     if !result_locals.is_empty() {
-                        return_hir_transformation_error!(
-                            "Catch handler reached HIR fallthrough while a value continuation is required",
-                            self.hir_error_location(span)
-                        );
+                        return Err(InfrastructureFailure::hir_transformation("Catch handler reached HIR fallthrough while a value continuation is required").into());
                     }
                     self.emit_jump_to(
                         error_tail,
@@ -133,13 +129,15 @@ impl<'a> HirBuilder<'a> {
                     )?;
                 }
             }
-            FallibleHandling::Propagate => return_hir_transformation_error!(
-                "Propagation handling unexpectedly reached fallible branching lowering",
-                self.hir_error_location(span)
-            ),
+            FallibleHandling::Propagate => {
+                return Err(InfrastructureFailure::hir_transformation(
+                    "Propagation handling unexpectedly reached fallible branching lowering",
+                )
+                .into());
+            }
         }
 
-        self.set_current_block(merge_block, span)?;
+        self.set_current_block(merge_block)?;
         let values =
             self.value_block_result_expressions(&result_locals, result_type_ids, span, region)?;
         Ok(LoweredResults {
@@ -155,18 +153,18 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<Vec<HirValueId>, HirConstructionFailure> {
         let Some(handler) = self.active_catch_handler else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Producer lowered without an active catch",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
         if handler.error_type != results.err_type {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Producer error type does not match catch",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         }
-        self.set_current_block(results.error_block, span)?;
+        self.set_current_block(results.error_block)?;
         self.emit_terminator(
             results.error_block,
             HirTerminator::Jump {
@@ -187,6 +185,6 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let values = self.lower_results_to_active_catch_success_values(results, span)?;
-        self.single_result_value(values, span)
+        self.single_result_value(values)
     }
 }

@@ -1,5 +1,5 @@
 -- Both operands are concrete I8 with in-range values, so the completed
--- addition stays I8 under D15 and cannot overflow. The exact I32 receiver
+-- addition stays I8 and cannot overflow. The exact I32 receiver
 -- rejects it; no hidden widening is inserted.
 left I8 = 1
 right I8 = 2

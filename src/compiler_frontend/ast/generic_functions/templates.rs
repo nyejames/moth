@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
@@ -74,10 +75,11 @@ impl MaterialisedDonorContext {
     /// already passed through here.
     fn validate_identity_pair(
         &self,
-    ) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<(), crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
         if self.source_path_table.is_some() && self.source_string_table.is_none() {
             return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "materialised generic body has an incomplete source identity table pair",
                 ),
             );
@@ -103,8 +105,10 @@ impl BodyParseOwner<'_> {
     /// Borrow this body's parser cursor and the source identity its spans belong to.
     pub(crate) fn cursor(
         &self,
-    ) -> Result<(AstCursor<'_>, SourceId), crate::compiler_frontend::compiler_errors::CompilerError>
-    {
+    ) -> Result<
+        (AstCursor<'_>, SourceId),
+        crate::compiler_frontend::compiler_errors::InfrastructureFailure,
+    > {
         let cursor = match self.token_sequence {
             Some(sequence) => AstCursor::from_source_sequence(self.owner, sequence)?,
             None => AstCursor::from_source_tokens(self.owner, self.token_range)?,
@@ -123,7 +127,7 @@ impl GenericFunctionBody {
         token_range: TokenRange,
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
-    ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Self, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
         validate_source_owner(
             &source_owner,
             token_range,
@@ -144,7 +148,7 @@ impl GenericFunctionBody {
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
         donor_context: MaterialisedDonorContext,
-    ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Self, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
         donor_context.validate_identity_pair()?;
         validate_source_owner(
             &source_owner,
@@ -197,9 +201,7 @@ impl GenericFunctionBody {
     /// Source bodies and materialised bodies both borrow their retained canonical owner and
     /// checked range/sequence. Materialised bodies additionally carry the frozen donor identity
     /// through `TokenPayloadOrigin`; payloads are translated only when a parser consumes them.
-    pub(crate) fn parse_owner(
-        &self,
-    ) -> Result<BodyParseOwner<'_>, crate::compiler_frontend::compiler_errors::CompilerError> {
+    pub(crate) fn parse_owner(&self) -> BodyParseOwner<'_> {
         let (source_owner, token_range, token_sequence) = self.canonical_view();
         let payload_origin = match self {
             Self::Materialised {
@@ -210,12 +212,12 @@ impl GenericFunctionBody {
             }),
             Self::Source { .. } | Self::Materialised { .. } => None,
         };
-        Ok(BodyParseOwner {
+        BodyParseOwner {
             owner: source_owner,
             token_range,
             token_sequence,
             payload_origin,
-        })
+        }
     }
 
     pub(crate) fn token_range(&self) -> TokenRange {
@@ -287,24 +289,27 @@ pub(crate) fn validate_source_owner(
     token_range: TokenRange,
     token_sequence: Option<TokenSequenceId>,
     role: &str,
-) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+) -> Result<(), crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
     if token_range.source() != source_owner.source() {
         return Err(
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                "{role} token range has a foreign source identity"
-            )),
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!("{role} token range has a foreign source identity"),
+            ),
         );
     }
     source_owner.cursor(token_range).map_err(|error| {
-        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-            "{role} token range is outside its canonical source owner: {error:?}"
-        ))
+        crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            format!("{role} token range is outside its canonical source owner: {error:?}"),
+        )
     })?;
     if let Some(sequence) = token_sequence {
         source_owner.token_sequence(sequence).map_err(|error| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                "{role} token sequence is outside its canonical source owner: {error:?}"
-            ))
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!("{role} token sequence is outside its canonical source owner: {error:?}"),
+            )
         })?;
     }
     Ok(())
@@ -320,20 +325,23 @@ pub(crate) fn body_cursor<'tokens>(
     token_range: TokenRange,
     token_sequence: Option<TokenSequenceId>,
     role: &str,
-) -> Result<TokenCursor<'tokens>, crate::compiler_frontend::compiler_errors::CompilerError> {
+) -> Result<TokenCursor<'tokens>, crate::compiler_frontend::compiler_errors::InfrastructureFailure>
+{
     match token_sequence {
         Some(sequence) => source_owner
             .token_sequence(sequence)
             .and_then(TokenSequenceView::cursor)
             .map_err(|error| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                    "{role} token sequence is outside its canonical source owner: {error:?}"
-                ))
+                crate::compiler_bug!(
+                    CompilerStage::GenericMaterialisation,
+                    "{role} token sequence is outside its canonical source owner: {error:?}",
+                )
             }),
         None => source_owner.cursor(token_range).map_err(|error| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                "{role} token range is outside its canonical source owner: {error:?}"
-            ))
+            crate::compiler_bug!(
+                CompilerStage::GenericMaterialisation,
+                "{role} token range is outside its canonical source owner: {error:?}",
+            )
         }),
     }
 }

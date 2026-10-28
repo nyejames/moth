@@ -41,7 +41,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
 use crate::compiler_frontend::datatypes::definitions::{ChoiceTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
@@ -386,7 +386,7 @@ fn expression_row<'a>(builder: &'a HirBuilder<'_>, value: HirValueId) -> &'a Hir
     row
 }
 
-fn expect_infrastructure_error(failure: HirConstructionFailure) -> CompilerError {
+fn expect_infrastructure_error(failure: HirConstructionFailure) -> InfrastructureFailure {
     match failure {
         HirConstructionFailure::Infrastructure(error) => error,
         HirConstructionFailure::Diagnosed(diagnostic) => {
@@ -500,9 +500,9 @@ fn escaped_slot_insert_helpers_fail_when_they_reach_hir_runtime_lowering() {
             .expect_err("escaped helper templates should be rejected in HIR"),
     );
 
-    assert_eq!(err.error_type, ErrorType::HirTransformation);
+    assert_eq!(err.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        err.msg
+        err.message
             .contains("Raw template reached HIR runtime-template lowering")
     );
 }
@@ -533,9 +533,9 @@ fn escaped_slot_definition_helpers_fail_when_they_reach_hir_runtime_lowering() {
             .expect_err("escaped slot definition helpers should be rejected in HIR"),
     );
 
-    assert_eq!(err.error_type, ErrorType::HirTransformation);
+    assert_eq!(err.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        err.msg
+        err.message
             .contains("Raw template reached HIR runtime-template lowering")
     );
 }
@@ -564,9 +564,9 @@ fn runtime_template_without_handoff_reports_compiler_bug() {
             .expect_err("runtime templates without an owned handoff should fail"),
     );
 
-    assert_eq!(err.error_type, ErrorType::HirTransformation);
+    assert_eq!(err.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        err.msg
+        err.message
             .contains("Raw template reached HIR runtime-template lowering")
     );
 }
@@ -1198,7 +1198,7 @@ fn expression_function_call_uses_success_shape_for_single_return() {
     );
 
     let expected_int = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32))
         .expect("fixed I32 TypeId should lower in test context");
     let lowered = builder
         .lower_expression(call_view)
@@ -1280,10 +1280,10 @@ fn expression_function_call_uses_success_shape_for_multi_return() {
         )
         .expect("multi-return call lowering should retain the expression success slots");
     let int_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32))
         .expect("fixed I32 TypeId should lower in test context");
     let bool_type = builder
-        .lower_type_id(builtin_type_ids::BOOL, &span)
+        .lower_type_id(builtin_type_ids::BOOL)
         .expect("builtin Bool TypeId should lower in test context");
     assert_eq!(lowered.values.len(), 2);
     assert_eq!(expression_row(&builder, lowered.values[0]).ty, int_type);
@@ -1366,7 +1366,7 @@ fn expression_host_call_uses_success_shape() {
     );
 
     let expected_int = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32))
         .expect("fixed I32 TypeId should lower in test context");
     let lowered = builder
         .lower_expression(call_view)
@@ -1383,10 +1383,10 @@ fn expression_handled_fallible_call_fallback_uses_success_shape() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let ok_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32))
         .expect("fixed I32 TypeId should lower in test context");
     let err_type = builder
-        .lower_type_id(builtin_type_ids::STRING, &span)
+        .lower_type_id(builtin_type_ids::STRING)
         .expect("builtin String TypeId should lower in test context");
     builder.test_register_function_with_returns(
         function_name,
@@ -3132,8 +3132,8 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
             .expect_err("unregistered full-path symbol should not resolve by leaf name"),
     );
 
-    assert_eq!(err.error_type, ErrorType::HirTransformation);
-    assert!(err.msg.contains("Unresolved local"));
+    assert_eq!(err.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(err.message.contains("Unresolved local"));
 }
 
 #[test]
@@ -3239,10 +3239,10 @@ fn rejects_const_record_struct_instance_runtime_lowering() {
             .expect_err("const record should not lower as a runtime struct construct"),
     );
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Const record reached runtime HIR struct lowering")
     );
 }
@@ -3299,8 +3299,8 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
             .expect_err("compiler temp local should not resolve through locals_by_name"),
     );
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved local"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved local"));
 }
 
 #[test]
@@ -4023,7 +4023,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
 /// `HirExpressionKind::VariantConstruct` with the correct tag index, and that the result type is
 /// registered as a choice in `TypeEnvironment`.
 ///
-/// WHY: this is the core contract of the Choice Hardening refactor — choice values must not
+/// WHY: this is the core contract for choice values: they must not
 /// masquerade as `HirExpressionKind::FixedScalar` in HIR.
 #[test]
 fn lowers_choice_variant_expression_to_hir_variant_construct() {
@@ -4050,7 +4050,7 @@ fn lowers_choice_variant_expression_to_hir_variant_construct() {
         },
     ];
     let choice_type_id = builder.test_register_nominal_choice_type(status_path, &choice_variants);
-    builder.register_choice_id(&status_path, &span).unwrap();
+    builder.register_choice_id(&status_path).unwrap();
 
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let choice_expr = choice_construct_expr(
@@ -4222,7 +4222,7 @@ fn external_float_call_emits_validate_float_in_current_block() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64))
         .expect("fixed F64 TypeId should lower in test context");
 
     let mut expressions = AstExpressionBuilder::new().unwrap();
@@ -4274,7 +4274,7 @@ fn external_fixed_f64_call_allocates_and_validates_its_exact_type() {
     let f64_type_id =
         builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::F64);
     let f64_type = builder
-        .lower_type_id(f64_type_id, &span)
+        .lower_type_id(f64_type_id)
         .expect("fixed F64 TypeId should lower in test context");
 
     let mut expressions = AstExpressionBuilder::new().unwrap();
@@ -4333,10 +4333,10 @@ fn external_float_call_in_builtin_error_function_validates_through_invoke() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64))
         .expect("fixed F64 TypeId should lower in test context");
     let int_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32))
         .expect("fixed I32 TypeId should lower in test context");
     let error_type = builder.test_register_builtin_error_type();
     builder.test_register_function_with_returns(
@@ -4429,7 +4429,7 @@ fn external_fallible_float_call_propagation_validates_success() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64))
         .expect("fixed F64 TypeId should lower in test context");
     let error_type = builder.test_register_builtin_error_type();
     builder.test_register_function_with_returns(
@@ -4504,7 +4504,7 @@ fn external_fallible_float_call_catch_validates_success() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64))
         .expect("fixed F64 TypeId should lower in test context");
     let error_type = builder.test_register_builtin_error_type();
     builder.test_register_function_with_returns(
@@ -4621,7 +4621,7 @@ fn coerced_numeric_promotion_lowers_to_explicit_infallible_cast() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64))
         .expect("fixed F64 TypeId should lower in test context");
 
     let mut expressions = AstExpressionBuilder::new().unwrap();

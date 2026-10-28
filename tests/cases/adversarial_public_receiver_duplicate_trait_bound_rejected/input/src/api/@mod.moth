@@ -1,0 +1,7 @@
+export:
+    Box type T = |value T|
+;
+
+duplicate_bound type T is CASTABLE_TO_STRING and CASTABLE_TO_STRING |this Box of T| -> String:
+    return "duplicate bound"
+;

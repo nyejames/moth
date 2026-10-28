@@ -484,9 +484,12 @@ and keeps running after a failing lane so the whole matrix is visible.
 - Ordinary source/config/import/type/rule/borrow failures should assert stable `diagnostic_codes`.
 - `diagnostic_codes` is an exact unordered multiset by default. Repeat a code when the diagnostic
   must occur more than once.
-- Add rendered message fragments only when wording or rendered labels are part of the contract.
-- Infrastructure-boundary tests may assert infrastructure `ErrorType`.
+- Add rendered message fragments only when wording or related-site text is part of the contract.
+- Infrastructure-boundary tests may assert each `InfrastructureFailureKind` and stage, ordered cause aggregation when relevant, and that infrastructure causes do not enter diagnostics.
+- Compiler-bug tests catch the panic and assert the `CompilerBugReport` stage and message.
 - Preserve source location assertions where location behavior is important.
+- Tests of family construction and freezing should inspect typed family-view facts, stable code, severity, exact primary/related sites and report-owned identity where those are the contract.
+- Lifetime-boundary tests should prove a frozen report remains renderable after its worker and source database have been dropped when that is the ownership contract; failed worker state never returns to the host.
 - Do not use full rendered diagnostic snapshots when a stable code and structured assertion are sufficient.
 - Do not weaken a diagnostic case into a generic "must fail" assertion.
 
@@ -516,13 +519,13 @@ its exact multiplicity.
     line = 2
 ]
 
-- Reason keys come from the compiler payload identity. The runner must not invent a parallel
+- Reason keys come from the diagnostic family schema and typed family view. The runner must not invent a parallel
   reason taxonomy or derive identity from rendered text.
 - Paths are normalized relative to the owning fixture and lines are one-based display lines.
 - Assert columns only when exact token-span precision is the contract.
 - A secondary-label occurrence is one-based among that diagnostic's secondary labels in emitted
-  order. Assert only the labels whose location or ordering is the behaviour owner.
-- Keep `message_contains` only when rendered wording or label prose is itself contractual.
+  order. Assert only the related sites whose location or ordering is the behaviour owner.
+- Keep `message_contains` only when rendered wording or related-site prose is itself contractual.
 
 Use `diagnostic_match = "contains"` only when intentional independent recovery or cascades make
 additional diagnostics part of the accepted current behaviour. Every contains-mode block needs a

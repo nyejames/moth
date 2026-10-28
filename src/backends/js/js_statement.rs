@@ -10,7 +10,9 @@ use crate::backends::js::numeric_carrier::{
 };
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
@@ -36,7 +38,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_block_statements(
         &mut self,
         block: &crate::compiler_frontend::hir::blocks::HirBlock,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for statement in &block.statements {
             self.emit_statement(statement)?;
         }
@@ -44,7 +46,10 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    pub(crate) fn emit_statement(&mut self, statement: &HirStatement) -> Result<(), CompilerError> {
+    pub(crate) fn emit_statement(
+        &mut self,
+        statement: &HirStatement,
+    ) -> Result<(), InfrastructureFailure> {
         match &statement.kind {
             HirStatementKind::Write { target, value } => {
                 self.emit_write(*target, *value)?;
@@ -168,7 +173,7 @@ impl<'hir> JsEmitter<'hir> {
         receiver: HirValueId,
         args: HirValueRange,
         result: &Option<HirLocalDestination>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let call = self.lower_map_operation(op, receiver, args)?;
         if let Some(result) = result {
             self.emit_value_destination(*result, &call)?;
@@ -183,7 +188,7 @@ impl<'hir> JsEmitter<'hir> {
         op: HirMapOp,
         receiver: HirValueId,
         args: HirValueRange,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let args = hir.expressions.values(args);
         // Lower the receiver map first so helper-call argument order mirrors HIR order.
@@ -201,11 +206,12 @@ impl<'hir> JsEmitter<'hir> {
 
         // Guard against arity mismatch between HIR and the backend.
         if args.len() != expected_arity {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "JS backend received MapOp::{op:?} with {actual} args instead of {expected}",
                 actual = args.len(),
                 expected = expected_arity,
-            )));
+            );
         }
 
         // Lower each HIR argument to a JS expression.
@@ -240,7 +246,7 @@ impl<'hir> JsEmitter<'hir> {
         operands: &HirNumericOperands,
         result: HirLocalDestination,
         statement: HirNodeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let (value, proven) = self.lower_numeric_operation(op, operands, statement)?;
         if proven {
             self.emit_value_destination(result, &value)
@@ -254,14 +260,15 @@ impl<'hir> JsEmitter<'hir> {
         op: HirNumericOp,
         operands: &HirNumericOperands,
         statement: HirNodeId,
-    ) -> Result<(String, bool), CompilerError> {
+    ) -> Result<(String, bool), InfrastructureFailure> {
         // Guard against arity mismatch between HIR and the backend.
         let is_unary = op.is_unary();
         let operands_are_unary = matches!(operands, HirNumericOperands::Unary { .. });
         if is_unary != operands_are_unary {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "JS backend received NumericOp::{op} with operand arity that does not match the operation"
-            )));
+            );
         }
 
         // Lower each HIR operand to a JS expression once, in source order.
@@ -272,12 +279,13 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+        let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "JS backend has no numeric carrier for {:?}",
                 op.domain
-            ))
-        })?;
+            )
+        });
 
         // A proof removes only checked helper machinery, never the Invoke's failure edge.
         if self.numeric_proofs.integer_operation_is_safe(statement)
@@ -287,7 +295,7 @@ impl<'hir> JsEmitter<'hir> {
             return Ok((proven_expression, true));
         }
 
-        let (helper_name, bounds) = js_numeric_helper_for_op(op)?;
+        let (helper_name, bounds) = js_numeric_helper_for_op(op);
         if let NumericScalar::Number(scale) = op.domain
             && matches!(
                 op.operator,
@@ -375,13 +383,13 @@ impl<'hir> JsEmitter<'hir> {
         policy: BuiltinCastPolicyId,
         value: &str,
         statement: HirNodeId,
-    ) -> Result<Option<String>, CompilerError> {
+    ) -> Option<String> {
         if !self.integer_narrowing_is_proven(statement, policy) {
-            return Ok(None);
+            return None;
         }
 
         let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
-            return Ok(None);
+            return None;
         };
         let conversion = JsNumericConversion::classify(source, target)
             .expect("proven narrowing policy must classify");
@@ -391,7 +399,7 @@ impl<'hir> JsEmitter<'hir> {
             .proven_safe_integer_narrowing(source_carrier)
             .expect("proven narrowing applies to checked integer conversions");
 
-        Ok(Some(proven.expression(value, source, target)))
+        Some(proven.expression(value, source, target))
     }
 
     /// Whether one Invoke cast's numeric conversion is a proven-safe integer narrowing.
@@ -427,18 +435,19 @@ impl<'hir> JsEmitter<'hir> {
         domain: NumericScalar,
         candidate_result: HirLocalDestination,
         in_range_result: HirLocalDestination,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let [current, step, end, ascending] = expressions;
 
         let current_expr = self.lower_expr(current)?;
         let step_expr = self.lower_expr(step)?;
         let end_expr = self.lower_expr(end)?;
         let ascending_expr = self.lower_expr(ascending)?;
-        let precision = domain.binary_float_precision().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+        let precision = domain.binary_float_precision().unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "JS backend received a non-float range candidate domain {domain:?}"
-            ))
-        })?;
+            )
+        });
 
         let direction_name = self.next_temp_identifier("__float_range_ascending");
         let candidate_name = self.next_temp_identifier("__float_range_candidate");
@@ -446,7 +455,7 @@ impl<'hir> JsEmitter<'hir> {
         let unrounded_candidate = format!(
             "({direction_name} ? ({current_expr} + {step_expr}) : ({current_expr} - {step_expr}))"
         );
-        // D15: an F16 range step completes at F16 at each candidate, so the selected domain
+        // An F16 range step completes at F16 at each candidate, so the selected domain
         // keeps its precision instead of widening to F32.
         let candidate_expr = match precision {
             BinaryFloatPrecision::Binary16 => format!("Math.f16round({unrounded_candidate})"),
@@ -487,9 +496,9 @@ impl<'hir> JsEmitter<'hir> {
         failure_mode: NumericFailureMode,
         source: HirValueId,
         result: HirLocalDestination,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let source_expr = self.lower_expr(source)?;
-        let (scalar, precision) = self.float_source_scalar(source, "FormatFloat")?;
+        let (scalar, precision) = self.float_source_scalar(source, "FormatFloat");
         let helper_call = format!(
             "__moth_format_float({source_expr}, {}, \"{scalar}\")",
             binary_float_precision_bits(precision)
@@ -508,9 +517,9 @@ impl<'hir> JsEmitter<'hir> {
         failure_mode: NumericFailureMode,
         source: HirValueId,
         result: HirLocalDestination,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let source_expr = self.lower_expr(source)?;
-        let (_scalar, precision) = self.float_source_scalar(source, "binary-float validation")?;
+        let (_scalar, precision) = self.float_source_scalar(source, "binary-float validation");
         let helper_call = format!(
             "__moth_float_validate({source_expr}, {})",
             binary_float_precision_bits(precision)
@@ -528,22 +537,23 @@ impl<'hir> JsEmitter<'hir> {
         &self,
         source: HirValueId,
         statement_name: &'static str,
-    ) -> Result<(NumericScalar, BinaryFloatPrecision), CompilerError> {
+    ) -> (NumericScalar, BinaryFloatPrecision) {
         let source_type = self.hir.expressions.expression(source).ty;
-        let scalar = NumericScalar::from_type_id(source_type, self.type_environment).ok_or_else(
-            || {
-                CompilerError::compiler_error(format!(
+        let scalar = NumericScalar::from_type_id(source_type, self.type_environment)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "JS backend received {statement_name} source with non-binary-float type {source_type:?}"
-                ))
-            },
-        )?;
-        let precision = scalar.binary_float_precision().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+                )
+            });
+        let precision = scalar.binary_float_precision().unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "JS backend received {statement_name} source with non-binary-float type {source_type:?}"
-            ))
-        })?;
+            )
+        });
 
-        Ok((scalar, precision))
+        (scalar, precision)
     }
 
     /// Runtime helpers return ABI envelopes; trap statements consume them immediately.
@@ -552,7 +562,7 @@ impl<'hir> JsEmitter<'hir> {
         helper_call: String,
         failure_mode: NumericFailureMode,
         result: HirLocalDestination,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let assigned_value = match failure_mode {
             NumericFailureMode::Trap | NumericFailureMode::Infallible => {
                 format!("__moth_numeric_trap({helper_call})")
@@ -566,7 +576,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         destination: HirLocalDestination,
         value: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let local_name = self.local_name(destination.local())?.to_owned();
         match destination {
             HirLocalDestination::Define(_) => {
@@ -584,7 +594,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         target: HirWriteTarget,
         value: HirValueId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match target {
             HirWriteTarget::DefineLocal(local) => self.emit_local_definition(local, value),
             HirWriteTarget::AssignPlace(place) => self.emit_place_assignment(place, value),
@@ -595,15 +605,16 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         local: LocalId,
         value: HirValueId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let local_name = self.local_name(local)?.to_owned();
         let value_expression = self.hir.expressions.expression(value);
         match value_expression.value_kind {
             ValueKind::Place => {
                 let HirExpressionKind::Load(place) = &value_expression.kind else {
-                    return Err(CompilerError::compiler_error(
-                        "JavaScript backend received a place-valued definition without a direct place load",
-                    ));
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JavaScript backend received a place-valued definition without a direct place load"
+                    );
                 };
                 let source = self.lower_place(place)?;
                 self.emit_line(&format!("{local_name} = __moth_alias_binding({source});"));
@@ -621,7 +632,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         target: HirPlace,
         value: HirValueId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self
             .hir
             .expressions
@@ -633,9 +644,10 @@ impl<'hir> JsEmitter<'hir> {
             match value_expression.value_kind {
                 ValueKind::Place => {
                     let HirExpressionKind::Load(source_place) = &value_expression.kind else {
-                        return Err(CompilerError::compiler_error(
-                            "JavaScript backend received a place-valued update without a direct place load",
-                        ));
+                        crate::compiler_bug!(
+                            CompilerStage::BackendLowering,
+                            "JavaScript backend received a place-valued update without a direct place load"
+                        );
                     };
                     let source = self.lower_place(source_place)?;
                     self.emit_line(&format!("__moth_assign_borrow({local_name}, {source});"));
@@ -663,7 +675,7 @@ impl<'hir> JsEmitter<'hir> {
         operation: &HirFallibleOperation,
         success_results: &[LocalId],
         error_result: LocalId,
-    ) -> Result<(String, bool), CompilerError> {
+    ) -> Result<(String, bool), InfrastructureFailure> {
         let (value, proven) = match operation {
             HirFallibleOperation::Call { target, args } => {
                 (self.lower_call_expression(target, *args)?, false)
@@ -676,7 +688,7 @@ impl<'hir> JsEmitter<'hir> {
             }
             HirFallibleOperation::CastOp { policy, source } => {
                 let source = self.lower_expr(*source)?;
-                if let Some(value) = self.proven_narrowing_expression(*policy, &source, id)? {
+                if let Some(value) = self.proven_narrowing_expression(*policy, &source, id) {
                     (value, true)
                 } else {
                     (js_cast_expression_for_policy(*policy, &source)?, false)
@@ -695,7 +707,7 @@ impl<'hir> JsEmitter<'hir> {
             }
             HirFallibleOperation::FormatFloat { source } => {
                 let value = self.lower_expr(*source)?;
-                let (scalar, precision) = self.float_source_scalar(*source, "FormatFloat")?;
+                let (scalar, precision) = self.float_source_scalar(*source, "FormatFloat");
                 (
                     format!(
                         "__moth_format_float({value}, {}, \"{scalar}\")",
@@ -706,7 +718,7 @@ impl<'hir> JsEmitter<'hir> {
             }
             HirFallibleOperation::ValidateFloat { source } => {
                 let value = self.lower_expr(*source)?;
-                let (_, precision) = self.float_source_scalar(*source, "ValidateFloat")?;
+                let (_, precision) = self.float_source_scalar(*source, "ValidateFloat");
                 (
                     format!(
                         "__moth_float_validate({value}, {})",
@@ -732,7 +744,7 @@ impl<'hir> JsEmitter<'hir> {
         captured: &str,
         proven: bool,
         results: &[LocalId],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for (index, result) in results.iter().enumerate() {
             let value = if proven {
                 captured.to_owned()
@@ -750,7 +762,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         captured: &str,
         result: LocalId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.emit_value_destination(
             HirLocalDestination::Define(result),
             &format!("{captured}.value"),
@@ -760,29 +772,36 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_return_terminator(
         &mut self,
         values: HirValueRange,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let hir = self.hir;
         let expressions = hir.expressions.values(values);
-        let function_id = self.current_function.ok_or_else(|| {
-            CompilerError::compiler_error("JavaScript backend: Return outside a function")
-        })?;
+        let function_id = self.current_function.unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: Return outside a function"
+            )
+        });
         let function = self
             .hir
             .functions
             .iter()
             .find(|function| function.id == function_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error("JavaScript backend: missing current function")
-            })?;
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JavaScript backend: missing current function"
+                )
+            });
         if expressions.len() != function.returns.len()
             || expressions
                 .iter()
                 .zip(function.returns.iter())
                 .any(|(value, ty)| self.hir.expressions.expression(*value).ty != *ty)
         {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend: Return slots mismatch",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: Return slots mismatch"
+            );
         }
         let fallible = function.error_return.is_some();
         let values = expressions
@@ -807,31 +826,35 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_error_return_terminator(
         &mut self,
         expression: HirValueId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(function_id) = self.current_function else {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend: ReturnError emitted outside a function",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: ReturnError emitted outside a function"
+            );
         };
         let function = self
             .hir
             .functions
             .iter()
             .find(|function| function.id == function_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "JavaScript backend: current function {function_id:?} is missing"
-                ))
-            })?;
+                )
+            });
         let Some(error_type) = function.error_return else {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend: ReturnError emitted in a non-fallible function",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: ReturnError emitted in a non-fallible function"
+            );
         };
         if self.hir.expressions.expression(expression).ty != error_type {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend: ReturnError value type does not match function error slot",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: ReturnError value type does not match function error slot"
+            );
         }
 
         let value = self.lower_expr(expression)?;
@@ -843,7 +866,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         message: HirValueId,
         message_evaluation: HirAssertionMessageEvaluation,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.used_assertions = true;
         if matches!(message_evaluation, HirAssertionMessageEvaluation::Default) {
             self.emit_line("throw __moth_assertion_error(\"assertion failed\");");
@@ -860,20 +883,15 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    pub(crate) fn emit_runtime_failure_terminator(
-        &mut self,
-        message: &str,
-    ) -> Result<(), CompilerError> {
+    pub(crate) fn emit_runtime_failure_terminator(&mut self, message: &str) {
         self.emit_line(&format!("throw new Error({});", escape_js_string(message)));
-
-        Ok(())
     }
 
     pub(crate) fn emit_dispatcher_for_function(
         &mut self,
         function: &HirFunction,
         reachable_blocks: &[BlockId],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let state_identifier = self.next_temp_identifier("__bb");
 
         self.emit_line(&format!("let {state_identifier} = {};", function.entry.0));
@@ -930,7 +948,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         state_identifier: &str,
         terminator: &HirTerminator,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match terminator {
             HirTerminator::Jump { target, args } => {
                 self.emit_jump_argument_transfer(args)?;
@@ -987,10 +1005,13 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirTerminator::Match { scrutinee, arms } => {
+                // Unreachable: `enforce_match_exhaustiveness` rejects a match with no arms and
+                // no `else`, so HIR never emits an empty `Match` terminator.
                 if arms.is_empty() {
-                    return Err(CompilerError::compiler_error(
-                        "JavaScript backend: Match terminator has no arms",
-                    ));
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JavaScript backend: Match terminator has no arms"
+                    );
                 }
                 let scrutinee_type = self.hir.expressions.expression(*scrutinee).ty;
                 let scrutinee = self.lower_expr(*scrutinee)?;
@@ -1062,13 +1083,14 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirTerminator::Uninitialized => {
-                return Err(CompilerError::compiler_error(
-                    "Uninitialized terminator reached JS backend lowering",
-                ));
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "Uninitialized terminator reached JS backend lowering"
+                );
             }
 
             HirTerminator::RuntimeFailure { message, .. } => {
-                self.emit_runtime_failure_terminator(message)?;
+                self.emit_runtime_failure_terminator(message);
             }
 
             HirTerminator::AssertFailure {
@@ -1087,7 +1109,7 @@ impl<'hir> JsEmitter<'hir> {
         scrutinee_expression: &str,
         scrutinee_type: TypeId,
         arm: &HirMatchArm,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let pattern_condition = match &arm.pattern {
             HirPattern::Literal(value) => {
                 let value_type = self.hir.expressions.expression(*value).ty;
@@ -1158,15 +1180,14 @@ impl<'hir> JsEmitter<'hir> {
 }
 
 /// Selects the checked JS helper family and domain bounds for one HIR numeric operation.
-fn js_numeric_helper_for_op(
-    op: HirNumericOp,
-) -> Result<(String, Option<(String, String)>), CompilerError> {
-    let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
+fn js_numeric_helper_for_op(op: HirNumericOp) -> (String, Option<(String, String)>) {
+    let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
             "JS backend has no numeric carrier for {:?}",
             op.domain
-        ))
-    })?;
+        )
+    });
 
     let operation = match (carrier, op.operator) {
         (
@@ -1218,21 +1239,15 @@ fn js_numeric_helper_for_op(
         (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Remainder) => "mod",
         (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Power) => "pow",
         (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Negate) => "neg",
-        _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "JS backend received unreachable numeric operation {op}"
-            )));
-        }
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "JS backend received unreachable numeric operation {op}"
+        ),
     };
-    let family = carrier.helper_family().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "JS backend received unreachable numeric operation domain {:?}",
-            op.domain
-        ))
-    })?;
+    let family = carrier.helper_family();
 
-    Ok((
+    (
         format!("__moth_{family}_{operation}"),
         carrier.integer_bounds_js(),
-    ))
+    )
 }

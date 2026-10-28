@@ -4,8 +4,8 @@
 Change since initial benchmark: case set changed: avg +1ms on 4/74 shared cases; 0 slower, 0 faster; workload changed: 36 cases (speed_test_check, speed_test_build, docs_check, template_stress_check, code_highlighter_stress_check, type_stress_check, fold_stress_check, pattern_stress_check, collection_stress_check, environment_stress_check, nominal_scaling_40_check, nominal_scaling_80_check, nominal_scaling_160_check, nominal_scaling_320_check, generic_scaling_20_check, generic_scaling_40_check, generic_scaling_80_check, generic_scaling_160_check, one_module_kitchen_sink_check, deep_scope_churn_check, template_render_plan_churn_check, constant_dag_churn_check, expression_rpn_churn_check, generic_trait_churn_check, collection_map_borrow_churn_check, module_graph_check, module_graph_build, import_fanout_check, import_fanout_build, external_js_imports_check, external_js_imports_build, module_root_stress_check, module_root_stress_build, import_external_churn_check, import_external_churn_build, borrow_stress_check)
 Timing schema: 2
 Initial: all ~23ms, Core ~23ms, Docs ~201ms, Stress ~21ms, Module ~12ms, Borrow ~9ms
-Latest: all ~22ms, Core ~15ms, Docs ~157ms, Stress ~22ms, Module ~11ms, Borrow ~9ms
-Case spread latest: ~34ms
+Latest: all ~22ms, Core ~15ms, Docs ~160ms, Stress ~22ms, Module ~11ms, Borrow ~9ms
+Case spread latest: ~33ms
 
 ## Frontend phases / macOS Apple Silicon (6D851D)
 Change since initial benchmark: no measurable change: avg -2ms; 42/42 cases
@@ -98,3 +98,9 @@ Timing schema: 2
 case set changed: avg +1ms on 4/74 shared cases; 0 slower, 0 faster; workload changed: 36 cases (speed_test_check, speed_test_build, docs_check, template_stress_check, code_highlighter_stress_check, type_stress_check, fold_stress_check, pattern_stress_check, collection_stress_check, environment_stress_check, nominal_scaling_40_check, nominal_scaling_80_check, nominal_scaling_160_check, nominal_scaling_320_check, generic_scaling_20_check, generic_scaling_40_check, generic_scaling_80_check, generic_scaling_160_check, one_module_kitchen_sink_check, deep_scope_churn_check, template_render_plan_churn_check, constant_dag_churn_check, expression_rpn_churn_check, generic_trait_churn_check, collection_map_borrow_churn_check, module_graph_check, module_graph_build, import_fanout_check, import_fanout_build, external_js_imports_check, external_js_imports_build, module_root_stress_check, module_root_stress_build, import_external_churn_check, import_external_churn_build, borrow_stress_check)
 Avg: all ~22ms, Core ~15ms, Docs ~157ms, Stress ~22ms, Module ~11ms, Borrow ~9ms
 Stage movement: boundary compile +2ms, module semantics +2ms, AST +2ms
+
+# End-to-end CLI / macOS Apple Silicon (6D851D): October 27th - 13:00
+Timing schema: 2
+**0ms avg**; 1 faster, 0 slower; 73/74 cases; workload changed: 1 case (docs_check)
+Avg: all ~22ms, Core ~15ms, Docs ~160ms, Stress ~22ms, Module ~11ms, Borrow ~9ms
+Stage movement: check total -27ms, frontend -27ms, single-file frontend -27ms

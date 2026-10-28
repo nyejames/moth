@@ -9,13 +9,13 @@ use crate::backends::wasm::runtime::memory::WasmMemoryPlan;
 pub(crate) struct WasmLirModule {
     /// Lowered function bodies (including export wrappers).
     pub functions: Vec<WasmLirFunction>,
-    /// Planned imports required by lowered calls/runtime ops.
+    /// Imports required by lowered calls and runtime ops.
     pub imports: Vec<WasmImport>,
     /// External exports requested by builder policy.
     pub exports: Vec<WasmExport>,
     /// Interned static byte segments.
     pub static_data: Vec<WasmStaticData>,
-    /// Planned linear-memory layout for future Wasm emission.
+    /// Linear-memory layout consumed by Wasm emission.
     pub memory_plan: WasmMemoryPlan,
 }
 

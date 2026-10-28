@@ -6,7 +6,9 @@
 use crate::backends::js::JsEmitter;
 use crate::backends::js::identifiers::{is_js_reserved, sanitize_identifier};
 use crate::compiler_frontend::builtins::error_type::{ERROR_FIELD_CODE, ERROR_FIELD_MESSAGE};
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 
 /// Deterministic JS field name for the builtin `Error.message` field.
 ///
@@ -23,7 +25,7 @@ pub(crate) fn builtin_error_code_js_field_name(release_build: bool) -> String {
 }
 
 impl<'hir> JsEmitter<'hir> {
-    pub(crate) fn build_symbol_maps(&mut self) -> Result<(), CompilerError> {
+    pub(crate) fn build_symbol_maps(&mut self) -> Result<(), InfrastructureFailure> {
         self.build_function_symbols();
         self.build_local_symbols();
         self.build_field_symbols()?;
@@ -116,7 +118,7 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn build_field_symbols(&mut self) -> Result<(), CompilerError> {
+    fn build_field_symbols(&mut self) -> Result<(), InfrastructureFailure> {
         let mut field_specs = Vec::new();
         let release_symbol_names = self.use_release_symbol_names();
 
@@ -129,7 +131,7 @@ impl<'hir> JsEmitter<'hir> {
                     .and_then(|path| self.path_table.component(path))
                     .map(|component| self.string_table.resolve(component))
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::BackendLowering, format!(
                             "JavaScript field symbol generation has no source name for FieldId({})",
                             field.id.0
                         ))

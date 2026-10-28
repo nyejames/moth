@@ -7,18 +7,16 @@
 //! WHY:
 //! - HTML-specific safety heuristics are output-policy concerns owned by the HTML project builder.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::FormatterInput;
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
 
-use crate::compiler_frontend::compiler_messages::{
-    HtmlTemplateWarning, MalformedTemplateReason, SyntaxDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::{HtmlTemplateWarning, MalformedTemplateReason};
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::styles::validation::{PassThroughFormatterInput, SourceWarning};
 use std::sync::Arc;
 
@@ -46,13 +44,12 @@ impl TemplateFormatter for HtmlValidationTemplateFormatter {
     fn format(
         &self,
         input: FormatterInput,
-        string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages> {
-        let flattened_input = PassThroughFormatterInput::from_input(input, string_table);
-        let warnings = flattened_input.map_warnings(
-            validate_html_source(&flattened_input.flattened_source),
-            SyntaxDiagnosticKind::MalformedHtmlTemplate,
-        );
+        diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    ) -> Result<FormatterResult, TemplateError> {
+        let flattened_input =
+            PassThroughFormatterInput::from_input(input, diagnostic_strings.strings());
+        let warnings =
+            flattened_input.map_warnings(validate_html_source(&flattened_input.flattened_source));
 
         Ok(flattened_input.into_formatter_result(warnings))
     }

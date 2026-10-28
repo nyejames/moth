@@ -2,7 +2,8 @@
 use super::stable_types::{
     StableFunctionSignature, StableFunctionTarget, StableGenericParameter, StableReceiverKey,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::CanonicalBindingSymbolIdentity;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -190,7 +191,7 @@ impl StableFileVisibility {
         record: &NamespaceRecord,
         external_package_registry: &ExternalPackageRegistry,
         string_table: &StringTable,
-    ) -> Result<StableNamespaceRecord, CompilerError> {
+    ) -> Result<StableNamespaceRecord, InfrastructureFailure> {
         let record_source = match &record.record_source {
             NamespaceRecordSource::SourceFile(path) => {
                 StableNamespaceRecordSource::SourceFile(*path)
@@ -225,7 +226,7 @@ impl StableFileVisibility {
                             identity: external_package_registry
                                 .canonical_symbol_identity(*symbol_id)
                                 .ok_or_else(|| {
-                                    CompilerError::compiler_error(
+                                    InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                         "Materialisation namespace value has no canonical external identity",
                                     )
                                 })?,
@@ -234,7 +235,7 @@ impl StableFileVisibility {
                 };
                 Ok((visible_name, member))
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         value_members.sort_by(|left, right| left.0.cmp(&right.0));
 
         let mut type_members = record
@@ -261,7 +262,7 @@ impl StableFileVisibility {
                             identity: external_package_registry
                                 .canonical_symbol_identity(*symbol_id)
                                 .ok_or_else(|| {
-                                    CompilerError::compiler_error(
+                                    InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                         "Materialisation namespace type has no canonical external identity",
                                     )
                                 })?,
@@ -270,7 +271,7 @@ impl StableFileVisibility {
                 };
                 Ok((visible_name, member))
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         type_members.sort_by(|left, right| left.0.cmp(&right.0));
 
         let mut child_namespaces = record
@@ -286,7 +287,7 @@ impl StableFileVisibility {
                     )?,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         child_namespaces.sort_by(|left, right| left.visible_name.cmp(&right.visible_name));
 
         Ok(StableNamespaceRecord {
@@ -309,7 +310,7 @@ impl StableFileVisibility {
         record: &StableNamespaceRecord,
         external_package_registry: &ExternalPackageRegistry,
         string_table: &mut StringTable,
-    ) -> Result<NamespaceRecord, CompilerError> {
+    ) -> Result<NamespaceRecord, InfrastructureFailure> {
         let record_source = match &record.record_source {
             StableNamespaceRecordSource::SourceFile(path) => {
                 NamespaceRecordSource::SourceFile(*path)
@@ -342,7 +343,7 @@ impl StableFileVisibility {
                     let symbol_id = external_package_registry
                         .resolve_canonical_symbol(identity)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                                 "Materialisation namespace value is absent from the active registry",
                             )
                         })?;
@@ -376,7 +377,8 @@ impl StableFileVisibility {
                     let symbol_id = external_package_registry
                         .resolve_canonical_symbol(identity)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::GenericMaterialisation,
                                 "Materialisation namespace type is absent from the active registry",
                             )
                         })?;
@@ -404,7 +406,7 @@ impl StableFileVisibility {
         external_package_registry: &ExternalPackageRegistry,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         string_table: &mut StringTable,
-    ) -> Result<FileVisibility, CompilerError> {
+    ) -> Result<FileVisibility, InfrastructureFailure> {
         let mut visibility = FileVisibility::default();
 
         // The declaration gate is built alongside the name maps and installed once at the end,
@@ -451,7 +453,8 @@ impl StableFileVisibility {
             let symbol_id = external_package_registry
                 .resolve_canonical_symbol(&binding.identity)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialisation external binding is absent from the active registry",
                     )
                 })?;

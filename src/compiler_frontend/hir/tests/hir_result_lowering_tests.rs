@@ -26,7 +26,6 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::hir::numeric::HirNumericOp;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
@@ -38,8 +37,8 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     param_with_type_id, reference_expr_with_type_id, success_return_slot,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    error_return_slot, multi_bind_target, runtime_expr, runtime_handled_function_call_item,
-    runtime_operand_item, runtime_operator_item,
+    build_ast_with_registered_types, error_return_slot, lower_ast, multi_bind_target, runtime_expr,
+    runtime_handled_function_call_item, runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};

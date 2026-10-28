@@ -60,11 +60,17 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow, generics_traits_api, names_declarations, token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
-    InvalidFieldAccessReason, InvalidMultiBindReason, InvalidStandaloneStatementReason,
-    InvalidThisUsageReason, ReservedNameOwner, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidDeclarationReason, InvalidFieldAccessReason,
+    InvalidMultiBindReason, InvalidStandaloneStatementReason, InvalidThisUsageReason,
+    ReservedNameOwner, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -117,7 +123,7 @@ fn push_accessed_symbol_statement(
         view.operation(),
         ExpressionOperationView::FieldAccess { .. }
     ) {
-        return Err(CompilerDiagnostic::invalid_standalone_statement(
+        return Err(choices_control_flow::invalid_standalone_statement(
             InvalidStandaloneStatementReason::FieldRead,
             Some(token_stream.current_span()),
         )
@@ -125,7 +131,7 @@ fn push_accessed_symbol_statement(
     }
 
     // Any other accessed expression is also not a valid standalone statement.
-    Err(CompilerDiagnostic::invalid_standalone_statement(
+    Err(choices_control_flow::invalid_standalone_statement(
         InvalidStandaloneStatementReason::Expression,
         Some(token_stream.current_span()),
     )
@@ -146,10 +152,8 @@ fn push_retained_accessed_symbol_statement(
     expressions: &AstExpressionBuilder,
 ) -> Result<(), ExpressionParseError> {
     if token_stream.current_tag().is_assignment_operator() {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        return Err(names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::TemporaryNotAssignable,
-            None,
-            None,
             None,
             None,
             None,
@@ -201,14 +205,17 @@ pub(crate) fn parse_this_statement(
     let this_declaration = this_reference
         .ready_declaration()
         .ok_or_else(|| {
-            CompilerError::compiler_error("`this` resolved to a pending numeric binding")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "`this` resolved to a pending numeric binding",
+            )
         })?
         .to_owned();
 
     match token_stream.peek_next_tag() {
         // Direct reassignment of `this` is never allowed.
         Some(next_tag) if next_tag.is_assignment_operator() => {
-            Err(CompilerDiagnostic::invalid_this_usage(
+            Err(generics_traits_api::invalid_this_usage(
                 InvalidThisUsageReason::Reassignment,
                 Some(token_stream.current_span()),
             )
@@ -246,14 +253,11 @@ pub(crate) fn parse_this_statement(
                 let Some(target) =
                     place_expression_from_expression(expression_builder, accessed_node)?
                 else {
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
+                    expression_builder
+                        .view_owned(accessed_node)?
+                        .require_single(ValueReceiverContext::ReceiverBase)?;
+                    return Err(names_declarations::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                        None,
-                        Some(
-                            expression_builder
-                                .view_owned(accessed_node)?
-                                .require_single(ValueReceiverContext::ReceiverBase)?,
-                        ),
                         None,
                         None,
                         None,
@@ -330,8 +334,8 @@ pub(crate) struct PendingNumericMemberAccess {
 pub(crate) fn pending_member_access_diagnostic(
     occurrence: &PendingNumericMemberAccess,
     receiver_type_id: TypeId,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_field_access(
+) -> DiagnosticDraft {
+    calls_data::invalid_field_access(
         InvalidFieldAccessReason::UnknownMember,
         Some(occurrence.member_name),
         Some(receiver_type_id),
@@ -352,7 +356,8 @@ fn pending_binding_reference_item(
     span: Option<SourceSpan>,
 ) -> Result<ExpressionRpnItem, ExpressionParseError> {
     let value_mode = context.pending_numeric_value_mode(binding).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a pending numeric binding reference had no live row in its own construction domain",
         )
     })?;
@@ -547,21 +552,27 @@ fn retain_pending_mutation(
     // it must not read or mutate the target whose value does not exist yet.
     let rhs_context = context.with_pending_catch_assignment_targets(&[target_name]);
     let value_mode = context.pending_numeric_value_mode(binding).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a mutation target named a pending numeric binding with no live construction row",
         )
     })?;
     if !value_mode.is_mutable() {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        let diagnostic = names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::ImmutableBinding,
             Some(target_name),
             None,
             None,
-            None,
-            declaration_span,
             span,
-        )
-        .into());
+        );
+        let diagnostic = match declaration_span {
+            Some(span) => diagnostic.with_label(
+                Some(span),
+                Some(LabelDraftMessage::ImmutableBindingDeclaration),
+            ),
+            None => diagnostic,
+        };
+        return Err(diagnostic.into());
     }
     let target = DeferredAssignmentTarget::Pending(PendingPlaceTarget {
         binding,
@@ -617,7 +628,8 @@ fn retain_pending_mutation(
     }
 
     let Some((operator, _label)) = compound_assignment_operator_for_tag(operator_tag) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a mutation target carried an assignment operator with no arithmetic operator",
         )
         .into());
@@ -715,7 +727,8 @@ fn retain_pending_member_mutation(
     // must not read or mutate it before the write, exactly as for a pending binding target.
     let rhs_context = context.with_pending_catch_assignment_targets(&[root_name]);
     let value_mode = context.pending_numeric_value_mode(root).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a member mutation named a pending numeric root with no live construction row",
         )
     })?;
@@ -724,23 +737,29 @@ fn retain_pending_member_mutation(
     {
         // The root is this statement's own write place, so an immutable root rejects the member
         // write before its right-hand side is parsed, as the ready field path does.
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        let diagnostic = names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::ImmutableFieldRoot,
-            None,
             None,
             Some(field_name),
             Some(root_name),
-            root_span,
             span,
-        )
-        .into());
+        );
+        let diagnostic = match root_span {
+            Some(span) => diagnostic.with_label(
+                Some(span),
+                Some(LabelDraftMessage::ImmutableBindingDeclaration),
+            ),
+            None => diagnostic,
+        };
+        return Err(diagnostic.into());
     }
 
     let operator = if operator_tag == TokenTag::ASSIGN {
         None
     } else {
         let Some((operator, _label)) = compound_assignment_operator_for_tag(operator_tag) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a member mutation carried an assignment operator with no arithmetic operator",
             )
             .into());
@@ -898,12 +917,8 @@ fn reject_numeric_dependency_in_multi_bind(error: ExpressionParseError) -> Expre
                     .first()
                     .and_then(ExpressionRpnItem::authored_span)
             });
-            CompilerDiagnostic::invalid_multi_bind(
-                InvalidMultiBindReason::UnsupportedRhs,
-                None,
-                span,
-            )
-            .into()
+            calls_data::invalid_multi_bind(InvalidMultiBindReason::UnsupportedRhs, None, span)
+                .into()
         }
         other => other,
     }
@@ -924,10 +939,9 @@ pub(crate) fn parse_symbol_statement(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let Some(symbol_id) = token_stream.current_string_id_in(string_table)? else {
-        return Err(CompilerDiagnostic::expected_symbol_statement(Some(
-            token_stream.current_span(),
-        ))
-        .into());
+        return Err(
+            token_lexical::expected_symbol_statement(Some(token_stream.current_span())).into(),
+        );
     };
     // Declaration shape takes precedence over visible-name expression dispatch.
     if matches!(
@@ -944,7 +958,8 @@ pub(crate) fn parse_symbol_statement(
             string_table,
             path_fork,
         )?;
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a module-only declaration header escaped executable-body placement validation",
         )
         .into());
@@ -957,7 +972,7 @@ pub(crate) fn parse_symbol_statement(
 
     // Built-in type names cannot be used as value-level symbols.
     if is_reserved_builtin_symbol(string_table.resolve(symbol_id)) {
-        return Err(CompilerDiagnostic::reserved_name_collision(
+        return Err(names_declarations::reserved_name_collision(
             symbol_id,
             ReservedNameOwner::BuiltinType,
             Some(token_stream.current_span()),
@@ -967,11 +982,9 @@ pub(crate) fn parse_symbol_statement(
 
     // Assignment targets are forbidden while recovering inside a catch block.
     if context.is_assignment_target_unavailable(symbol_id) {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        return Err(names_declarations::invalid_assignment_target(
             InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
             Some(symbol_id),
-            None,
-            None,
             None,
             None,
             Some(token_stream.current_span()),
@@ -1028,7 +1041,7 @@ pub(crate) fn parse_symbol_statement(
                 let declaration = existing_reference
                     .ready_declaration()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "a mutation target reference had neither a declaration nor a pending binding",
                         )
                     })?
@@ -1114,7 +1127,7 @@ pub(crate) fn parse_symbol_statement(
                 let declaration = existing_reference
                     .ready_declaration()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "a member-access receiver had neither a declaration nor a pending binding",
                         )
                     })?
@@ -1146,14 +1159,11 @@ pub(crate) fn parse_symbol_statement(
                     let Some(target) =
                         place_expression_from_expression(expression_builder, accessed_node)?
                     else {
-                        return Err(CompilerDiagnostic::invalid_assignment_target(
+                        expression_builder
+                            .view_owned(accessed_node)?
+                            .require_single(ValueReceiverContext::ReceiverBase)?;
+                        return Err(names_declarations::invalid_assignment_target(
                             InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                            None,
-                            Some(
-                                expression_builder
-                                    .view_owned(accessed_node)?
-                                    .require_single(ValueReceiverContext::ReceiverBase)?,
-                            ),
                             None,
                             None,
                             None,
@@ -1194,11 +1204,13 @@ pub(crate) fn parse_symbol_statement(
             // A type keyword after an existing symbol means the user is trying to
             // redeclare it with an explicit type, which is a shadowing error.
             Some(tag) if tag.is_builtin_scalar_type_name() || tag == TokenTag::MUTABLE => {
-                let diagnostic = CompilerDiagnostic::shadowed_name(
-                    symbol_id,
-                    existing_reference.binding_span(),
-                    Some(token_stream.current_span()),
-                );
+                let diagnostic =
+                    names_declarations::shadowed_name(symbol_id, Some(token_stream.current_span()));
+                let diagnostic = if let Some(span) = existing_reference.binding_span() {
+                    diagnostic.with_label(Some(span), Some(LabelDraftMessage::PreviousDeclaration))
+                } else {
+                    diagnostic
+                };
                 return Err(diagnostic.into());
             }
 
@@ -1268,7 +1280,7 @@ pub(crate) fn parse_symbol_statement(
         }
 
         if context.lookup_visible_external_type(symbol_id).is_some() {
-            return Err(CompilerDiagnostic::invalid_declaration(
+            return Err(names_declarations::invalid_declaration(
                 InvalidDeclarationReason::ExternalTypeLiteralConstruction,
                 Some(symbol_id),
                 Some(token_stream.current_span()),
@@ -1276,7 +1288,7 @@ pub(crate) fn parse_symbol_statement(
             .into());
         }
 
-        return Err(CompilerDiagnostic::unknown_value_name(
+        return Err(names_declarations::unknown_value_name(
             symbol_id,
             Some(token_stream.current_span()),
         )

@@ -8,11 +8,13 @@
 //! compiled-module boundary. HIR nodes store compact frontend `TypeId`s and do not own a separate
 //! semantic type table.
 //!
-//! Non-HIR compiler metadata — warnings and resolved documentation fragments — is extracted by
-//! HIR lowering into `HirLoweringMetadata` and assembled into `ModuleCompilerMetadata` on the
-//! build-system module payload. `HirModule` carries only executable/semantic HIR state.
+//! Successful warnings are retained in a sibling `DiagnosticBag` on `ModuleSemanticResult`;
+//! HIR lowering extracts resolved documentation fragments into `HirLoweringMetadata`, which is
+//! assembled into `ModuleCompilerMetadata` on the build-system module payload. `HirModule` carries
+//! only executable/semantic HIR state.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -135,7 +137,7 @@ pub struct HirModule {
     /// WHAT: records which declarations are compile-time constants, their scope,
     ///       source, value kind, and source location.
     /// WHY: provides metadata for later borrow-checker and lowering optimizations
-    ///      without changing HIR semantics today.
+    ///      without changing HIR semantics.
     pub const_facts: HirConstFacts,
 
     /// Direct synthetic compile-time interface provenance for every local function.
@@ -146,7 +148,7 @@ pub struct HirModule {
     /// read-only fact and does not alter HIR control flow.
     /// WHY: the per-function link-fact lane described in the compiler design overview needs stable,
     /// deterministic direct provenance. HIR validation rejects missing, extra or out-of-range
-    /// coverage as `CompilerError`.
+    /// coverage as `InfrastructureFailure`.
     pub function_provenance: FxHashMap<FunctionId, SyntheticInterfaceProvenance>,
 
     /// Construction-only provenance grouped by the HIR block that lowered each expression.
@@ -228,7 +230,7 @@ impl HirModule {
     ///      constructed modules that never used the projection keep their own facts.
     pub(crate) fn refresh_function_provenance_from_blocks(
         &mut self,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         if self.function_provenance_by_block.is_empty() && !self.function_provenance_projection_used
         {
             return Ok(false);
@@ -241,9 +243,10 @@ impl HirModule {
             .collect::<FxHashMap<_, _>>();
         for ((function_id, _), provenance) in &self.function_provenance_by_block {
             let Some(function_provenance) = provenance_by_function.get_mut(function_id) else {
-                return Err(CompilerError::compiler_error(format!(
-                    "HIR block provenance references unknown function {function_id:?}"
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    format!("HIR block provenance references unknown function {function_id:?}"),
+                ));
             };
             function_provenance.merge(provenance);
         }
@@ -261,7 +264,7 @@ impl HirModule {
     ///      be added again.
     pub(crate) fn finalize_function_provenance_after_rewrites(
         &mut self,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         let changed = self.refresh_function_provenance_from_blocks()?;
         self.function_provenance_by_block = FxHashMap::default();
         Ok(changed)
@@ -346,11 +349,15 @@ impl HirModule {
         self.const_facts.remap_string_ids(remap);
     }
 
-    pub(crate) fn require_start_function(&self, owner: &str) -> Result<FunctionId, CompilerError> {
+    pub(crate) fn require_start_function(
+        &self,
+        owner: &str,
+    ) -> Result<FunctionId, InfrastructureFailure> {
         self.start_function.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "{owner} requires a normal module with an implicit start function"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                format!("{owner} requires a normal module with an implicit start function"),
+            )
         })
     }
 }

@@ -931,7 +931,8 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     merged_table.intern("preexisting-name");
     let remap = merged_table.merge_from(&local_table);
 
-    env.remap_string_ids(&remap);
+    let mut remap_cache = TypeEnvironmentRemapCache::default();
+    env.remap_string_ids_with_cache(&remap, &mut remap_cache);
 
     let remapped_box_path = box_path;
     assert_eq!(
@@ -1839,25 +1840,21 @@ fn collection_shape_queries_work() {
     let growable = env.intern_collection(int, None);
     let fixed_64 = env.intern_collection(int, Some(64));
 
-    // Growable shape
     let shape = env
         .collection_shape(growable)
         .expect("growable should have a shape");
     assert_eq!(shape.element_type, int);
     assert_eq!(shape.fixed_capacity, None);
 
-    // Fixed shape
     let shape = env
         .collection_shape(fixed_64)
         .expect("fixed should have a shape");
     assert_eq!(shape.element_type, int);
     assert_eq!(shape.fixed_capacity, Some(64));
 
-    // element_type query
     assert_eq!(env.collection_element_type(growable), Some(int));
     assert_eq!(env.collection_element_type(fixed_64), Some(int));
 
-    // fixed_capacity query
     assert_eq!(env.collection_fixed_capacity(growable), None);
     assert_eq!(env.collection_fixed_capacity(fixed_64), Some(64));
 

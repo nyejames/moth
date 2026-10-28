@@ -902,7 +902,7 @@ fn duplicate_numeric_intake_registration_preserves_the_original_record() {
             fragment.suffix,
         )
         .expect_err("the same position cannot own a second intake");
-    assert!(error.msg.contains("registered twice"));
+    assert!(error.message.contains("registered twice"));
     assert_eq!(store.numeric_template_intakes.len(), 1);
     let pending = store.take_pending_numeric_intakes(domain);
     assert_eq!(

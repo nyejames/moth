@@ -10,6 +10,7 @@
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeEndKind, RangeLoopSpec};
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
@@ -42,10 +43,12 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTemplateStructureReason,
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
@@ -268,7 +271,11 @@ fn fold_final_view_fixture(
     )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         return Err(TemplateError::Infrastructure(
-            CompilerError::compiler_error("test view was not foldable").into(),
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "test view was not foldable",
+            )
+            .into(),
         ));
     }
     let mut fold_context = build_test_fold_context(string_table, expressions, const_values);
@@ -1413,9 +1420,9 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains("TIR preparation: node"),
+        error.message.contains("TIR preparation: node"),
         "expected a stable preparation node error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1621,14 +1628,17 @@ fn assert_non_progressing_bounds_diagnostic(error: TemplateError, context: &str)
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("{context} must stay on the source diagnostic lane");
     };
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
-            *reason,
-            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "{context} must report non-progressing bounds"
-        ),
-        payload => panic!("expected invalid template structure payload, found {payload:?}"),
-    }
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let facts = diagnostic
+        .first()
+        .expect("non-progressing bounds error should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("non-progressing bounds error should retain typed structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::TemplateLoopRangeBoundsNotConst,
+        "{context} must report non-progressing bounds"
+    );
 }
 
 #[test]
@@ -1997,9 +2007,9 @@ fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains("TIR preparation: node"),
+        error.message.contains("TIR preparation: node"),
         "expected a stable aggregate-wrapper authority error, got: {}",
-        error.msg
+        error.message
     );
 }
 

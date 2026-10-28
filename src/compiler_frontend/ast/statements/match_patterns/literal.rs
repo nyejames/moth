@@ -16,10 +16,12 @@ use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionSuffix, DeferredNumericExpression, RetainedPattern,
     deferred_numeric_expression,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidMatchPatternReason, TypeMismatchContext,
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, token_lexical, types_borrows_targets,
 };
+use crate::compiler_frontend::compiler_messages::{InvalidMatchPatternReason, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::numeric_text::parse::{materialize_fixed_scalar, materialize_number};
@@ -62,7 +64,7 @@ fn materialize_numeric_literal(
     };
     let value =
         materialize_fixed_scalar(token, token.sign, scalar, string_table).map_err(|reason| {
-            ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+            ExpressionParseError::from(token_lexical::invalid_number_literal(
                 token.source_text,
                 reason,
                 span,
@@ -126,7 +128,8 @@ pub fn parse_non_choice_pattern(
             const_values,
         ),
         MatchSubject::PendingChoice(_) | MatchSubject::PendingOption { .. } => {
-            Err(CompilerError::compiler_error(
+            Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a pending choice or option subject reached the non-choice pattern parser",
             )
             .into())
@@ -174,7 +177,7 @@ fn parse_pending_non_choice_pattern(
         }
 
         TokenTag::NONE_LITERAL => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::NonePatternRequiresOptionalScrutinee,
                 None,
                 None,
@@ -184,7 +187,7 @@ fn parse_pending_non_choice_pattern(
         }
 
         _ => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::LiteralTypeUnsupported,
                 None,
                 None,
@@ -215,7 +218,7 @@ pub(super) fn parse_pending_numeric_literal_pattern(
         TokenTag::NEGATIVE => {
             token_stream.advance();
             if token_stream.current_tag() != TokenTag::NUMERIC_LITERAL {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::NegativeLiteralNotNumeric,
                     None,
                     None,
@@ -229,7 +232,7 @@ pub(super) fn parse_pending_numeric_literal_pattern(
         // Only a relational operand can reach this arm (the plain literal dispatch checks the lead
         // token first), and a non-numeric operand is an authored mistake, not an invariant break.
         _ => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::LiteralTypeUnsupported,
                 None,
                 None,
@@ -288,7 +291,7 @@ pub(crate) fn ensure_pattern_compatible_with_subject(
     let value_type = value.type_id;
 
     if !is_type_compatible(subject_value_type_id, value_type, type_environment) {
-        return Err(CompilerDiagnostic::type_mismatch(
+        return Err(types_borrows_targets::type_mismatch(
             subject_value_type_id,
             value_type,
             TypeMismatchContext::MatchPattern,
@@ -300,11 +303,14 @@ pub(crate) fn ensure_pattern_compatible_with_subject(
     Ok(())
 }
 
-fn malformed_literal_payload(token_stream: &AstCursor) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "literal pattern token {:?} has a malformed payload",
-        token_stream.current_tag()
-    ))
+fn malformed_literal_payload(token_stream: &AstCursor) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!(
+            "literal pattern token {:?} has a malformed payload",
+            token_stream.current_tag()
+        ),
+    )
 }
 
 #[allow(
@@ -328,7 +334,7 @@ fn materialize_current_numeric_literal(
         if let Some(scale) = type_environment.number_scale(subject_type_id) {
             let value =
                 materialize_number(&token, sign, scale, string_table).map_err(|reason| {
-                    ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                    ExpressionParseError::from(token_lexical::invalid_number_literal(
                         token.source_text,
                         reason,
                         span,
@@ -350,7 +356,7 @@ fn materialize_current_numeric_literal(
         {
             let value =
                 materialize_fixed_scalar(&token, sign, scalar, string_table).map_err(|reason| {
-                    ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                    ExpressionParseError::from(token_lexical::invalid_number_literal(
                         token.source_text,
                         reason,
                         span,
@@ -387,7 +393,7 @@ fn current_string_literal(
     string_table: &mut StringTable,
 ) -> Result<
     Option<crate::compiler_frontend::symbols::string_interning::StringId>,
-    crate::compiler_frontend::compiler_errors::CompilerError,
+    crate::compiler_frontend::compiler_errors::InfrastructureFailure,
 > {
     if token_stream.current().is_none() {
         return Ok(None);
@@ -425,7 +431,10 @@ fn typed_literal_expression(
                 .ok_or_else(|| malformed_literal_payload(token_stream))?;
             expression_builder.string_slice(const_values, value, span, ValueMode::ImmutableOwned)?
         }
-        _ => unreachable!("caller checked the bool/char/string literal lead token"),
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "caller checked the bool/char/string literal lead token"
+        ),
     };
     token_stream.advance();
     Ok(expression.id())
@@ -496,7 +505,7 @@ pub(super) fn parse_literal_pattern(
             let minus_sign_span = Some(token_stream.current_span());
             token_stream.advance();
             if token_stream.current_tag() != TokenTag::NUMERIC_LITERAL {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::NegativeLiteralNotNumeric,
                     None,
                     None,
@@ -519,7 +528,7 @@ pub(super) fn parse_literal_pattern(
         }
         // Patterns that are never valid as literal matches.
         TokenTag::NONE_LITERAL => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::NonePatternRequiresOptionalScrutinee,
                 None,
                 None,
@@ -528,7 +537,7 @@ pub(super) fn parse_literal_pattern(
             .into());
         }
         _ => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::LiteralTypeUnsupported,
                 None,
                 None,
@@ -548,7 +557,7 @@ pub(super) fn parse_literal_pattern(
         pattern_view.value_type_id()?,
         type_environment,
     ) {
-        return Err(CompilerDiagnostic::type_mismatch(
+        return Err(types_borrows_targets::type_mismatch(
             subject_type_id,
             pattern_view.value_type_id()?,
             TypeMismatchContext::MatchPattern,

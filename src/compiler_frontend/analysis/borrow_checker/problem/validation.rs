@@ -1,6 +1,7 @@
 //! Atomic validation for normalized BorrowProblem input.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use super::LoanId;
 use super::RebindValue;
@@ -12,21 +13,21 @@ use super::{PlaceId, PointId, ValueOriginId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
-fn compiler_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(message)
+fn internal_failure(message: impl Into<Box<str>>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(CompilerStage::BorrowChecking, message)
 }
 
 fn validate_dense_ids<T>(
     rows: &[T],
     kind: &str,
     id: impl Fn(&T) -> u32,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for (index, row) in rows.iter().enumerate() {
         let expected = u32::try_from(index)
-            .map_err(|_| compiler_error(format!("{kind} table is larger than u32::MAX rows")))?;
+            .map_err(|_| internal_failure(format!("{kind} table is larger than u32::MAX rows")))?;
         let actual = id(row);
         if actual != expected {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "{kind} IDs must be dense: row {index} has ID {actual}, expected {expected}"
             )));
         }
@@ -39,20 +40,23 @@ fn require_index(
     len: usize,
     kind: &str,
     raw: u32,
-) -> Result<usize, CompilerError> {
+) -> Result<usize, InfrastructureFailure> {
     let index = id();
     if index >= len {
-        return Err(compiler_error(format!(
+        return Err(internal_failure(format!(
             "{kind} ID {raw} is outside the {len}-row problem table"
         )));
     }
     Ok(index)
 }
 
-fn validate_sorted_unique<T: Ord + Debug>(values: &[T], owner: &str) -> Result<(), CompilerError> {
+fn validate_sorted_unique<T: Ord + Debug>(
+    values: &[T],
+    owner: &str,
+) -> Result<(), InfrastructureFailure> {
     for pair in values.windows(2) {
         if pair[0] >= pair[1] {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "{owner} references must be strictly sorted and unique: {:?} then {:?}",
                 pair[0], pair[1]
             )));
@@ -65,7 +69,7 @@ fn validate_origin_set(
     origins: &[ValueOriginId],
     origin_count: usize,
     owner: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_sorted_unique(origins, owner)?;
     for origin in origins {
         require_index(
@@ -76,20 +80,24 @@ fn validate_origin_set(
         )?;
     }
     if origins.is_empty() {
-        return Err(compiler_error(format!(
+        return Err(internal_failure(format!(
             "{owner} must name at least one value origin"
         )));
     }
     Ok(())
 }
 
-fn validate_point(point: PointId, point_count: usize, owner: &str) -> Result<(), CompilerError> {
+fn validate_point(
+    point: PointId,
+    point_count: usize,
+    owner: &str,
+) -> Result<(), InfrastructureFailure> {
     require_index(|| point.index(), point_count, "program-point", point.raw())
         .map(|_| ())
-        .map_err(|error| compiler_error(format!("{owner}: {}", error.msg)))
+        .map_err(|error| internal_failure(format!("{owner}: {}", error.message)))
 }
 
-pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
+pub(super) fn validate(problem: &BorrowProblem) -> Result<(), InfrastructureFailure> {
     let flow = problem.control_flow();
     let bindings = problem.bindings();
     let points = problem.points();
@@ -102,12 +110,12 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     let blocks = &flow.blocks;
 
     if blocks.is_empty() {
-        return Err(compiler_error(
+        return Err(internal_failure(
             "a borrow problem must contain at least one CFG block",
         ));
     }
     if points.is_empty() {
-        return Err(compiler_error(
+        return Err(internal_failure(
             "a borrow problem must contain at least one program point",
         ));
     }
@@ -129,7 +137,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         flow.entry.raw(),
     )?;
     if flow.exits.is_empty() {
-        return Err(compiler_error(
+        return Err(internal_failure(
             "a borrow problem must declare at least one CFG exit block",
         ));
     }
@@ -155,7 +163,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         incoming[to] += 1;
     }
     if incoming[entry] != 0 {
-        return Err(compiler_error(
+        return Err(internal_failure(
             "the CFG entry block must not have an incoming edge",
         ));
     }
@@ -165,13 +173,13 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         let exit_index =
             require_index(|| exit.index(), blocks.len(), "CFG exit block", exit.raw())?;
         if !exit_seen.insert(*exit) {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "CFG exit block {:?} is listed more than once",
                 exit
             )));
         }
         if outgoing[exit_index] != 0 {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "CFG exit block {:?} must not have an outgoing edge",
                 exit
             )));
@@ -179,7 +187,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     }
     for block in blocks {
         if outgoing[block.id.index()] == 0 && !exit_seen.contains(&block.id) {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "terminal CFG block {:?} must be listed as an exit",
                 block.id
             )));
@@ -195,7 +203,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         )?;
         let block = &blocks[block_index];
         if block.id != point.block {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "program point {:?} names block {:?}, but that block row has ID {:?}",
                 point.id, point.block, block.id
             )));
@@ -218,13 +226,13 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             block.exit.raw(),
         )?];
         if entry_point.block != block.id || exit_point.block != block.id {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "CFG block {:?} entry and exit points must belong to that block",
                 block.id
             )));
         }
         if entry_point.ordinal > exit_point.ordinal {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "CFG block {:?} entry point must precede its exit point",
                 block.id
             )));
@@ -240,7 +248,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 event_id.raw(),
             )?;
             if event_seen[event_index] {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "event {:?} appears in more than one CFG block",
                     event_id
                 )));
@@ -255,13 +263,13 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 event.point.raw(),
             )?];
             if point.block != block.id {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "event {:?} is listed in block {:?} but belongs to block {:?}",
                     event.id, block.id, point.block
                 )));
             }
             if previous_ordinal.is_some_and(|previous| point.ordinal < previous) {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "events in CFG block {:?} are not ordered by program point",
                     block.id
                 )));
@@ -272,21 +280,21 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     for point in points {
         let (entry_ordinal, exit_ordinal) = block_ranges[point.block.index()];
         if point.ordinal < entry_ordinal || point.ordinal > exit_ordinal {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "program point {:?} lies outside the entry/exit range of CFG block {:?}",
                 point.id, point.block
             )));
         }
     }
     if event_seen.iter().any(|seen| !seen) {
-        return Err(compiler_error(
+        return Err(internal_failure(
             "every normalized event must belong to exactly one CFG block",
         ));
     }
 
     for block in blocks {
         let event_id = block.events.last().ok_or_else(|| {
-            compiler_error(format!(
+            internal_failure(format!(
                 "CFG block {:?} must end in a terminator event",
                 block.id
             ))
@@ -310,7 +318,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 | TerminatorEventKind::AssertFailure => BTreeSet::new(),
             },
             _ => {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "CFG block {:?} must end in a terminator event",
                     block.id
                 )));
@@ -327,14 +335,14 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 }
             )
         {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "exit CFG block {:?} must end in a terminal terminator",
                 block.id
             )));
         }
         expected.retain(|target| actual.contains(target));
         if expected != actual || expected.len() != outgoing_targets[block.id.index()].len() {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "terminator targets for CFG block {:?} do not match its outgoing edges",
                 block.id
             )));
@@ -350,13 +358,13 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             use_row.place.raw(),
         )?;
         if use_row.definition && !use_row.kind.is_write() {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "use {:?} is marked as a definition but is not a write",
                 use_row.id
             )));
         }
         if use_row.definition && !places[place_index].projections.is_empty() {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "use {:?} marks projected place {:?} as a binding definition",
                 use_row.id, use_row.place
             )));
@@ -402,7 +410,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             OriginKind::CallResult { call, provenance } => {
                 require_index(|| call.index(), calls.len(), "origin call", call.raw())?;
                 let owners = call_result_owners.get(&origin.id).ok_or_else(|| {
-                    compiler_error(format!(
+                    internal_failure(format!(
                         "call-result origin {:?} is not attached to a CallEffect result",
                         origin.id
                     ))
@@ -412,7 +420,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         .iter()
                         .any(|owner| owner.1 != *call || owner.0 != owners[0].0)
                 {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "call-result origin {:?} has inconsistent call ownership",
                         origin.id
                     )));
@@ -433,7 +441,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         // call result pose as an independent fresh generation downstream.
                         if parameter_indices.is_empty() {
                             let (event_id, _, result_place) = owners[0];
-                            return Err(compiler_error(format!(
+                            return Err(internal_failure(format!(
                                 "call-result origin {:?} for call {:?} at CallEffect event {:?} \
                                  with result place {:?} has an empty AliasParams index list; \
                                  an alias-parameters summary must reference at least one call \
@@ -449,7 +457,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                             _ => None,
                         });
                         let Some(argument_count) = argument_count else {
-                            return Err(compiler_error(format!(
+                            return Err(internal_failure(format!(
                                 "call-result origin {:?} has no matching CallEffect",
                                 origin.id
                             )));
@@ -458,7 +466,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                             .iter()
                             .any(|parameter_index| *parameter_index >= argument_count)
                         {
-                            return Err(compiler_error(format!(
+                            return Err(internal_failure(format!(
                                 "call-result origin {:?} references an argument outside call {:?}",
                                 origin.id, call
                             )));
@@ -480,7 +488,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
         )?;
         validate_origin_set(&loan.origins, origins.len(), "loan origins")?;
         if loan.holders.is_empty() {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "loan {:?} must have at least one holder",
                 loan.id
             )));
@@ -532,7 +540,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     .insert(effect.call, effect.arguments.clone())
                     .is_some() =>
             {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "call {:?} has more than one CallEffect event",
                     effect.call
                 )));
@@ -543,7 +551,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     for (call, effect_arguments) in &call_effect_arguments {
         if effect_arguments.is_empty() {
             if granular_arguments.contains_key(call) {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "call {:?} has granular argument events but no CallEffect arguments",
                     call
                 )));
@@ -551,14 +559,14 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             continue;
         }
         let Some(arguments) = granular_arguments.get_mut(call) else {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "call {:?} has CallEffect arguments but no granular argument events",
                 call
             )));
         };
         arguments.sort_by_key(|(_, _, event_id)| event_locations[event_id]);
         if arguments.len() != effect_arguments.len() {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "granular argument events for call {:?} do not exactly match its CallEffect",
                 call
             )));
@@ -567,25 +575,25 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             matches!(&event.kind, EventKind::CallEffect(effect) if effect.call == *call)
                 .then_some(event_locations[&event.id])
         }) else {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "call {:?} has no located CallEffect event",
                 call
             )));
         };
         for (expected_index, (index, argument, event_id)) in arguments.iter().enumerate() {
             let expected_index = u32::try_from(expected_index)
-                .map_err(|_| compiler_error("granular call argument index exceeds u32::MAX"))?;
+                .map_err(|_| internal_failure("granular call argument index exceeds u32::MAX"))?;
             if *index != expected_index
                 || effect_arguments.get(expected_index as usize) != Some(argument)
             {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "granular argument events for call {:?} do not exactly match its CallEffect",
                     call
                 )));
             }
             let (argument_block, argument_index) = event_locations[event_id];
             if argument_block != effect_block || argument_index >= effect_index {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "granular argument event for call {:?} must precede its CallEffect",
                     call
                 )));
@@ -594,7 +602,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     }
     for call in granular_arguments.keys() {
         if !call_effect_arguments.contains_key(call) {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "call {:?} has granular argument events but no CallEffect event",
                 call
             )));
@@ -697,19 +705,19 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 )?;
                 validate_place(argument.place, places.len(), "call argument place")?;
                 let use_row = uses.get(argument.use_id.index()).ok_or_else(|| {
-                    compiler_error(format!(
+                    internal_failure(format!(
                         "call argument use {:?} is outside the use table",
                         argument.use_id
                     ))
                 })?;
                 if argument.access != use_row.kind.access_kind() {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "call argument use {:?} has an access kind inconsistent with its event",
                         argument.use_id
                     )));
                 }
                 if use_row.point != event.point || use_row.place != argument.place {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "call argument use {:?} must match its event point and place",
                         argument.use_id
                     )));
@@ -736,7 +744,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     if !granular_call_uses.contains(&argument.use_id)
                         && (use_row.point != event.point || use_row.place != argument.place)
                     {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "call argument use {:?} must match its event point and place",
                             argument.use_id
                         )));
@@ -748,7 +756,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 let mut destinations = BTreeSet::new();
                 for result in &effect.results {
                     if !destinations.insert(result.destination.place()) {
-                        return Err(compiler_error("call has duplicate result destinations"));
+                        return Err(internal_failure("call has duplicate result destinations"));
                     }
                     validate_binding_destination(result.destination, places, "call result")?;
                     validate_origin(result.origin, origins.len(), "call result origin")?;
@@ -758,13 +766,13 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         provenance,
                     } = &origin.kind
                     else {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "call result origin {:?} must be a CallResult origin",
                             result.origin
                         )));
                     };
                     if *origin_call != effect.call {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "call result origin {:?} belongs to call {:?}, not {:?}",
                             result.origin, origin_call, effect.call
                         )));
@@ -772,7 +780,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     if let CallResultProvenance::AliasParams(parameter_indices) = provenance {
                         for parameter_index in parameter_indices {
                             if effect.arguments.get(*parameter_index).is_none() {
-                                return Err(compiler_error(format!(
+                                return Err(internal_failure(format!(
                                     "call result origin {:?} references argument index {} outside call {:?}",
                                     result.origin, parameter_index, effect.call
                                 )));
@@ -812,13 +820,13 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                             "jump destination",
                         )?;
                         if !argument.destination.defines() {
-                            return Err(compiler_error(format!(
+                            return Err(internal_failure(format!(
                                 "jump destination {:?} must define a fresh binding",
                                 destination
                             )));
                         }
                         if !destinations.insert(destination) {
-                            return Err(compiler_error(format!(
+                            return Err(internal_failure(format!(
                                 "jump destination {:?} is defined more than once",
                                 destination
                             )));
@@ -826,7 +834,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         if !places[destination.index()].projections.is_empty()
                             || !places[argument.source.index()].projections.is_empty()
                         {
-                            return Err(compiler_error(
+                            return Err(internal_failure(
                                 "jump arguments must capture and define root local bindings",
                             ));
                         }
@@ -861,7 +869,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 let use_index =
                     require_index(|| use_id.index(), uses.len(), "access use", use_id.raw())?;
                 if uses[use_index].point != event.point {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "access use {:?} must match its event point",
                         use_id
                     )));
@@ -873,7 +881,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     require_index(|| loan.index(), loans.len(), "loan issue event", loan.raw())?;
                 let row = &loans[loan_index];
                 if row.issued_at != event.point {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "loan {:?} issue event point does not match its loan row",
                         loan
                     )));
@@ -884,7 +892,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 let loan_index =
                     require_index(|| loan.index(), loans.len(), "loan kill event", loan.raw())?;
                 if !loans[loan_index].kills.contains(&event.point) {
-                    return Err(compiler_error(format!(
+                    return Err(internal_failure(format!(
                         "loan {:?} kill event is absent from its declared kill points",
                         loan
                     )));
@@ -896,7 +904,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
 
     for (index, owners) in use_owners.iter().enumerate() {
         if *owners != 1 {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "use {:?} must be owned by exactly one normalized event, found {owners}",
                 super::UseId::new(index as u32)
             )));
@@ -905,7 +913,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     validate_binding_write_accesses(blocks, events, uses)?;
     for (index, issues) in loan_issues.iter().enumerate() {
         if *issues != 1 {
-            return Err(compiler_error(format!(
+            return Err(internal_failure(format!(
                 "loan {:?} must have exactly one issue event, found {issues}",
                 LoanId::new(index as u32)
             )));
@@ -914,7 +922,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     for loan in loans {
         for kill in loan.kills.iter() {
             if !loan_kills.contains(&(loan.id, *kill)) {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "loan {:?} declares kill point {:?} without a kill event",
                     loan.id, kill
                 )));
@@ -929,7 +937,7 @@ fn validate_binding_write_accesses(
     blocks: &[super::CfgBlock],
     events: &[super::Event],
     uses: &[super::Use],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for block in blocks {
         let jump_write_start = match block
             .events
@@ -948,7 +956,7 @@ fn validate_binding_write_accesses(
                     terminator_index
                         .checked_sub(arguments.len())
                         .ok_or_else(|| {
-                            compiler_error(format!(
+                            internal_failure(format!(
                                 "jump in CFG block {:?} is missing binding-write accesses",
                                 block.id
                             ))
@@ -957,7 +965,7 @@ fn validate_binding_write_accesses(
                     let event_id = block.events[write_start + offset];
                     let event = &events[event_id.index()];
                     let EventKind::Access { use_id } = &event.kind else {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "jump in CFG block {:?} must read all sources before writing destinations",
                             block.id
                         )));
@@ -966,14 +974,14 @@ fn validate_binding_write_accesses(
                     if use_row.kind.binding_destination() != Some(argument.destination)
                         || use_row.place != argument.destination.place()
                     {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "jump in CFG block {:?} must have one binding-write access per edge definition",
                             block.id
                         )));
                     }
                 }
                 let source_start = write_start.checked_sub(arguments.len()).ok_or_else(|| {
-                    compiler_error(format!(
+                    internal_failure(format!(
                         "jump in CFG block {:?} is missing source-read accesses",
                         block.id
                     ))
@@ -982,14 +990,14 @@ fn validate_binding_write_accesses(
                     let event_id = block.events[source_start + offset];
                     let event = &events[event_id.index()];
                     let EventKind::Access { use_id } = &event.kind else {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "jump in CFG block {:?} must read all sources before writing destinations",
                             block.id
                         )));
                     };
                     let use_row = &uses[use_id.index()];
                     if use_row.kind != super::UseKind::Read || use_row.place != argument.source {
-                        return Err(compiler_error(format!(
+                        return Err(internal_failure(format!(
                             "jump source {:?} must be read before any edge destination is defined",
                             argument.source
                         )));
@@ -1010,7 +1018,7 @@ fn validate_binding_write_accesses(
                 continue;
             };
             if destination.place() != use_row.place {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "binding-write use {:?} destination does not match its access place",
                     use_id
                 )));
@@ -1048,7 +1056,7 @@ fn validate_binding_write_accesses(
                 + usize::from(jump_matches)
                 != 1
             {
-                return Err(compiler_error(format!(
+                return Err(internal_failure(format!(
                     "binding-write use {:?} is not paired with exactly one normalized writer",
                     use_id
                 )));
@@ -1077,7 +1085,7 @@ fn validate_place(
     place: super::PlaceId,
     place_count: usize,
     owner: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     require_index(|| place.index(), place_count, owner, place.raw()).map(|_| ())
 }
 
@@ -1085,10 +1093,10 @@ fn validate_binding_destination(
     destination: super::BindingDestination,
     places: &[super::Place],
     owner: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_place(destination.place(), places.len(), owner)?;
     if destination.defines() && !places[destination.place().index()].projections.is_empty() {
-        return Err(compiler_error(format!(
+        return Err(internal_failure(format!(
             "{owner} cannot define projected place {:?}",
             destination.place()
         )));
@@ -1100,6 +1108,6 @@ fn validate_origin(
     origin: ValueOriginId,
     origin_count: usize,
     owner: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     require_index(|| origin.index(), origin_count, owner, origin.raw()).map(|_| ())
 }

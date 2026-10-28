@@ -172,7 +172,6 @@ impl<'a> ExportScanner<'a> {
     fn read_export_statement(&mut self) {
         let export_start_byte = self.pos;
 
-        // Consume `export`
         self.advance_chars("export".len());
         self.skip_whitespace_and_comments();
 

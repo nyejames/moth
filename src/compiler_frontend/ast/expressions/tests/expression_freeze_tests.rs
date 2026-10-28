@@ -589,7 +589,7 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
 }
 
 #[test]
-fn malformed_root_returns_compiler_error_before_rewriting_roots() {
+fn malformed_root_returns_infrastructure_failure_before_rewriting_roots() {
     let builder = AstExpressionBuilder::new().unwrap();
     let mut roots = Roots {
         expressions: vec![ExprId::at(99)],

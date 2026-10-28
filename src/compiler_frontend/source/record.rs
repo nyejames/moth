@@ -4,9 +4,11 @@
 //! candidates that never load. A [`SourceRecord`] is only created after a snapshot loads, so it
 //! unconditionally owns the exact text and line-start table used by compilation.
 
+use super::database::{SourceCapacityError, SourceDatabaseError};
 use super::span::ExtendedSpanTable;
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use std::path::Path;
 
@@ -75,8 +77,8 @@ impl LoadFailureIndex {
 
 /// Load status stored by the registration slot rather than by a loaded record.
 ///
-/// WHAT: keeps pending and failed candidates out of the loaded array, while a loaded slot points
-///       at exactly one [`SourceRecord`].
+/// WHAT: keeps pending, failed, and non-UTF-8 candidates out of the loaded array, while a loaded
+///       slot points at exactly one [`SourceRecord`].
 /// WHY: a read failure is rare and 192 bytes wide, so it lives in a cold database-owned failure
 ///      store while the dense registration row keeps only which candidate failed.
 #[derive(Debug)]
@@ -87,6 +89,9 @@ pub(super) enum SourceLoadStatus {
     Loaded(LoadedSourceIndex),
     /// The structured read failure for this candidate; no loaded record exists for this slot.
     Failed(LoadFailureIndex),
+    /// The read completed but its bytes are not UTF-8; the path-named diagnostic is the outcome,
+    /// and the slot keeps no snapshot and no failure payload.
+    NonUtf8,
 }
 
 /// One dense row per registered candidate: identity, cold metadata and load status.
@@ -124,39 +129,30 @@ pub struct SourceRecord {
 
 /// Reject a snapshot that `u32` byte offsets cannot address.
 ///
-/// WHY: a physical source too large to address is the user's file, so it fails in the file lane
-/// carrying its canonical host path when one exists. Every other provenance is compiler-produced,
-/// so its own oversized snapshot is a compiler bug.
+/// WHY: an authored physical source too large to address is the user's file. Its diagnostic must
+/// name the portable logical path, which only the discovery boundary that owns the source's slot
+/// can supply, so this check reports the typed capacity and leaves the naming to that boundary.
+/// Every other provenance is compiler-produced, so its own oversized snapshot is a compiler bug.
 pub(super) fn ensure_source_snapshot_fits(
     byte_length: usize,
     provenance: SourceProvenance,
-    canonical_os_path: Option<&Path>,
-) -> Result<(), CompilerError> {
+) -> Result<(), SourceDatabaseError> {
     let limit = u32::MAX as usize;
     if byte_length < limit {
         return Ok(());
     }
 
     match provenance {
-        SourceProvenance::AuthoredPhysical => {
-            let message = format!(
-                "source file {} is {byte_length} bytes; a source must be shorter than {limit} bytes",
-                canonical_os_path
-                    .map_or_else(|| "<unknown>".to_owned(), |path| path.display().to_string(),),
-            );
-            let error = match canonical_os_path {
-                Some(path) => CompilerError::file_error(path, message),
-                None => CompilerError::new(message, None, ErrorType::File),
-            };
-            Err(error)
-        }
-        SourceProvenance::CompilationRoot => Err(CompilerError::new(
+        SourceProvenance::AuthoredPhysical => Err(SourceDatabaseError::Capacity(
+            SourceCapacityError::SourceSnapshotTooLarge,
+        )),
+        SourceProvenance::CompilationRoot => Err(InfrastructureFailure::internal(
+            CompilerStage::SourceLoading,
             format!(
                 "compiler-produced source snapshot is {byte_length} bytes; \
                  a source must be shorter than {limit} bytes",
             ),
-            None,
-            ErrorType::Compiler,
-        )),
+        )
+        .into()),
     }
 }

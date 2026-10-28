@@ -31,8 +31,10 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOperationView,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidReturnShapeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::source::SourceSpan;
 /// Policy that decides whether a function body must be terminal on all paths.
 ///
@@ -88,7 +90,7 @@ pub(crate) fn validate_function_body_terminality(
     span: Option<SourceSpan>,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
-) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
     match policy {
         FunctionTerminalityPolicy::AllowImplicitUnit
         | FunctionTerminalityPolicy::EntryStartImplicitReturn => Ok(None),
@@ -97,7 +99,7 @@ pub(crate) fn validate_function_body_terminality(
             if body_is_all_paths_terminal(body, expressions, const_values)? {
                 Ok(None)
             } else {
-                Ok(Some(CompilerDiagnostic::invalid_return_shape(
+                Ok(Some(calls_data::invalid_return_shape(
                     InvalidReturnShapeReason::FunctionMayFallThrough,
                     span,
                 )))
@@ -115,7 +117,7 @@ fn body_is_all_paths_terminal(
     body: &[AstNode],
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     for statement in body {
         if statement_is_all_paths_terminal(statement, expressions, const_values)? {
             return Ok(true);
@@ -135,7 +137,7 @@ fn statement_is_all_paths_terminal(
     statement: &AstNode,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     match &statement.kind {
         NodeKind::Return(_) | NodeKind::ReturnError(_) => Ok(true),
 

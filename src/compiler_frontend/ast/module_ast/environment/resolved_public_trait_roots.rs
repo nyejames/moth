@@ -14,7 +14,8 @@
 
 use crate::compiler_frontend::ast::module_ast::environment::resolved_public_type_roots::ResolvedPublicTypeRootTable;
 use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -146,7 +147,7 @@ pub(crate) struct AstPublicInterfaceProjectionInput {
 /// [`ResolvedPublicTraitRoot`] with its owning `this_type`, ordered requirement facts and the
 /// publicly-authored incompatible trait ids for that trait. A trait header that passes the
 /// active-root public declaration gate must resolve to exactly one definition; a missing
-/// definition or a missing `this_type` is a `CompilerError` rather than a silent omission. The
+/// definition or a missing `this_type` is an `InfrastructureFailure` rather than a silent omission. The
 /// requirement order is preserved exactly as the trait definition records it. Private traits,
 /// non-active-root/imported traits and compiler-owned core traits are excluded because they do
 /// not pass the active-root public declaration gate. The incompatible trait ids come from the
@@ -160,7 +161,7 @@ pub(crate) fn build_resolved_public_trait_roots(
     reexport_target_paths: &FxHashSet<PathId>,
     trait_environment: &TraitEnvironment,
     string_table: &StringTable,
-) -> Result<Vec<ResolvedPublicTraitRoot>, CompilerError> {
+) -> Result<Vec<ResolvedPublicTraitRoot>, InfrastructureFailure> {
     let mut trait_roots = Vec::new();
 
     for header in sorted_headers {
@@ -197,39 +198,48 @@ fn is_active_root_public_trait_declaration(header: &Header) -> bool {
 /// then copies its owning `this_type` and its ordered requirements into location-free
 /// transient facts. A trait header that passes the active-root public declaration gate must
 /// resolve to exactly one definition; a missing definition or a missing `this_type` is a
-/// `CompilerError` rather than a silent omission. The requirement order is preserved exactly
+/// `InfrastructureFailure` rather than a silent omission. The requirement order is preserved exactly
 /// as the trait definition records it.
 fn build_trait_root(
     canonical_path: &PathId,
     trait_environment: &TraitEnvironment,
     _string_table: &StringTable,
-) -> Result<ResolvedPublicTraitRoot, CompilerError> {
+) -> Result<ResolvedPublicTraitRoot, InfrastructureFailure> {
     let Some(trait_id) = trait_environment.id_for_path(canonical_path) else {
-        return Err(CompilerError::compiler_error(format!(
-            "resolved public trait-root construction: a public active-root trait '{:?}' has no \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "resolved public trait-root construction: a public active-root trait '{:?}' has no \
              registered TraitEnvironment definition",
-            canonical_path.to_owned()
-        )));
+                canonical_path.to_owned()
+            ),
+        ));
     };
 
     let Some(definition) = trait_environment.get(trait_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "resolved public trait-root construction: TraitId({}) for trait '{:?}' has no resolved \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "resolved public trait-root construction: TraitId({}) for trait '{:?}' has no resolved \
              definition",
-            trait_id.0,
-            canonical_path.to_owned(),
-        )));
+                trait_id.0,
+                canonical_path.to_owned(),
+            ),
+        ));
     };
 
     // Compiler-owned core traits are never authored as source declarations and must not
     // enter the public trait-root vector. A header that resolves to a core trait is
     // malformed transient AST data.
     if matches!(definition.visibility, TraitVisibility::Core) {
-        return Err(CompilerError::compiler_error(format!(
-            "resolved public trait-root construction: a public active-root trait '{:?}' resolved \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "resolved public trait-root construction: a public active-root trait '{:?}' resolved \
              to a compiler-owned core trait; core traits are not authored source declarations",
-            canonical_path.to_owned(),
-        )));
+                canonical_path.to_owned(),
+            ),
+        ));
     }
 
     let requirements = definition

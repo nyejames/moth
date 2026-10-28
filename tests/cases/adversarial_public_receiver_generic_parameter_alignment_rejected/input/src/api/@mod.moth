@@ -1,0 +1,7 @@
+export:
+    Pair type T, U = |first T, second U|
+;
+
+mismatch type U, T |this Pair of U, T, item U, other T| -> U:
+    return item
+;

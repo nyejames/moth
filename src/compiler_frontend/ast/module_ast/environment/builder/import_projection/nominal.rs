@@ -1,6 +1,10 @@
 //! Reachability-driven nominal shell and member projection.
 
 use super::*;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 
 fn collect_semantic_type_origins(
     semantics: &PublicDeclarationSemantics,
@@ -132,7 +136,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_nominal_declarations(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<(), Box<InfrastructureErrors>> {
+    ) -> Result<(), ExpressionParseError> {
         let reachable_origins = self.reachable_imported_type_origins();
         let mut imported_nominals = self
             .binding_environment
@@ -154,12 +158,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         imported_nominals.sort_by(|left, right| left.0.cmp(&right.0));
 
         for (origin, record) in &imported_nominals {
-            let nominal_path = imported_nominal_path(origin, string_table, self.path_fork);
+            let nominal_path = imported_nominal_path(origin, string_table, self.path_fork)?;
             let generic_parameters = match &record.semantics {
                 PublicDeclarationSemantics::Struct(semantics) => &semantics.generic_parameters,
                 PublicDeclarationSemantics::Choice(semantics) => &semantics.generic_parameters,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported nominal projection received a non-nominal declaration",
                     )
                     .into());
@@ -191,7 +196,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .1
                 }
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported nominal projection received a non-nominal declaration",
                     )
                     .into());
@@ -216,7 +222,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.project_imported_choice_members(type_id, semantics, string_table)?;
                 }
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported nominal member projection received a non-nominal declaration",
                     )
                     .into());
@@ -267,7 +274,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .nominal_path(type_id)
                     .cloned()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Imported generic nominal has no canonical local path",
                         )
                     })?;
@@ -279,7 +287,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .get(&internal_path)
                         .cloned()
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
                                 "Imported generic struct has no projected field template",
                             )
                         })?;
@@ -287,7 +296,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .insert(local_path, fields);
                 }
             }
-            Rc::make_mut(&mut self.declaration_table)
+            Self::unique_declaration_table_mut(&mut self.declaration_table)?
                 .append_for_construction(
                     Declaration {
                         id: local_path,
@@ -297,7 +306,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         value: DeclarationValue::Shell(match &record.semantics {
                             PublicDeclarationSemantics::Struct(_) => DeclarationShell::Struct,
                             PublicDeclarationSemantics::Choice(_) => DeclarationShell::Choice,
-                            _ => unreachable!("only nominal declarations reach shell projection"),
+                            _ => crate::compiler_bug!(
+                                CompilerStage::AstConstruction,
+                                "only nominal declarations reach shell projection"
+                            ),
                         }),
                         binding_span: None,
                         config_qualifier: None,
@@ -305,7 +317,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.path_fork,
                 )
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported nominal declaration path was registered more than once",
                     )
                 })?;
@@ -391,7 +404,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<
         Option<crate::compiler_frontend::datatypes::ids::GenericParameterListId>,
-        CompilerError,
+        InfrastructureFailure,
     > {
         if parameters.is_empty() {
             return Ok(None);
@@ -420,7 +433,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .get(&TypeParameterId(index as u32))
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported generic parameter registration omitted a local parameter",
                     )
                 })?;
@@ -428,7 +442,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .type_environment
                 .type_id_for_generic_parameter(local_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported generic parameter registration omitted its canonical type",
                     )
                 })?;
@@ -451,12 +466,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_id: TypeId,
         semantics: &PublicStructSemantics,
         string_table: &mut StringTable,
-    ) -> Result<(), Box<InfrastructureErrors>> {
+    ) -> Result<(), ExpressionParseError> {
         let nominal_path = self
             .type_environment
             .struct_definition_for(type_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Imported struct shell was unavailable during member projection",
                 )
             })?
@@ -470,7 +486,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .path_fork
                 .try_intern_child(nominal_path, string_table.intern(&field.name))
                 .ok_or_else(|| {
-                    CompilerError::compiler_error("Imported field path table exhausted")
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Imported field path table exhausted",
+                    )
                 })?;
             fields.push(FieldDefinition {
                 name: field_path,
@@ -512,12 +531,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_id: TypeId,
         semantics: &PublicChoiceSemantics,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), ExpressionParseError> {
         let nominal_path = self
             .type_environment
             .choice_definition_for(type_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Imported choice shell was unavailable during member projection",
                 )
             })?
@@ -537,7 +557,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             .path_fork
                             .try_intern_child(nominal_path, string_table.intern(&field.name))
                             .ok_or_else(|| {
-                                CompilerError::compiler_error("Imported field path table exhausted")
+                                InfrastructureFailure::internal(
+                                    CompilerStage::AstConstruction,
+                                    "Imported field path table exhausted",
+                                )
                             })?,
                         type_id: field_type_id,
                         span: None,
@@ -573,7 +596,7 @@ pub(crate) fn imported_nominal_path(
     origin: &OriginTypeId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> PathId {
+) -> Result<PathId, DiagnosticDraft> {
     // Angle brackets cannot occur in a source identifier, so this namespace is structurally
     // disjoint from every authored nominal path rather than relying on a reserved spelling.
     let package_origin = match origin.module_origin().package().origin() {
@@ -600,8 +623,8 @@ pub(crate) fn imported_nominal_path(
         if !component.is_empty() {
             path = path_fork
                 .try_intern_child(path, string_table.intern(component))
-                .expect("imported nominal path table exhausted");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
         }
     }
-    path
+    Ok(path)
 }

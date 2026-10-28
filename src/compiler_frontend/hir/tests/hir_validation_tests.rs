@@ -14,7 +14,8 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -35,10 +36,7 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField,
     OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
-use crate::compiler_frontend::hir::hir_builder::{
-    HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
-    validate_module_for_tests,
-};
+use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::{
     BlockId, ChoiceId, FieldId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
@@ -65,6 +63,9 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, param_with_type_id,
+};
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
 };
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -171,7 +172,7 @@ fn install_entry_self_jump(module: &mut HirModule, args: Vec<HirJumpArgument>) -
 
 fn validation_error_for_injected_local_type(
     build_type: impl FnOnce(&mut StringTable, &mut TypeEnvironment) -> TypeId,
-) -> CompilerError {
+) -> InfrastructureFailure {
     let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let local_type_id = build_type(&mut string_table, &mut type_environment);
 
@@ -437,8 +438,7 @@ fn validator_rejects_field_projection_owned_by_another_nominal_type() {
     )
     .expect_err("a same-typed field from another nominal type must be rejected");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert_eq!(error.source_span, Some(span));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -529,8 +529,7 @@ fn validator_rejects_field_projection_owned_by_another_generic_instance() {
     )
     .expect_err("a field from Box<String> must not be accepted on Box<I32>");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert_eq!(error.source_span, Some(span));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -708,8 +707,7 @@ fn validator_rejects_foreign_field_after_index_projection() {
     )
     .expect_err("an indexed Element place cannot use a field owned by Foreign");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert_eq!(error.source_span, Some(span));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -733,8 +731,8 @@ fn validator_rejects_place_classification_for_non_load_values() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("a literal cannot carry Place value provenance");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("ValueKind::Place is only valid"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("ValueKind::Place is only valid"));
 }
 
 #[test]
@@ -800,8 +798,8 @@ fn validator_accepts_rvalue_load_and_checks_load_copy_place_types() {
             &ExternalPackageRegistry::new(),
         )
         .expect_err("Load and Copy rows must retain their resolved place type");
-        assert_eq!(error.error_type, ErrorType::HirTransformation);
-        assert!(error.msg.contains(expected_message));
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+        assert!(error.message.contains(expected_message));
     }
 }
 
@@ -809,14 +807,14 @@ fn validate_numeric_op_for_test(
     op: HirNumericOp,
     operand_types: &[TypeId],
     result_type: TypeId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_numeric_op_for_test_with_types(op, |_| (operand_types.to_vec(), result_type))
 }
 
 fn validate_numeric_op_for_test_with_types(
     op: HirNumericOp,
     build_types: impl FnOnce(&mut TypeEnvironment) -> (Vec<TypeId>, TypeId),
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let (operand_types, result_type) = build_types(&mut type_environment);
     let span = None;
@@ -890,7 +888,7 @@ fn validate_number_numeric_op_for_test(
     operator: NumericOperator,
     scale: NumberScale,
     right_domain: Option<NumericScalar>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_numeric_op_for_test_with_types(
         HirNumericOp {
             operator,
@@ -936,7 +934,7 @@ fn validate_cast_op_for_test(
     source_type: TypeId,
     result_success_type: TypeId,
     result_error_override: Option<TypeId>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let builtin_error_type = builtin_error_type_id(&mut type_environment);
     install_cast_invoke_for_test(
@@ -1021,7 +1019,7 @@ fn numeric_scalar_type_for_test(
 fn validate_number_cast_op_for_test(
     source_scalar: NumericScalar,
     target_scalar: NumericScalar,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let source_type = numeric_scalar_type_for_test(&mut type_environment, source_scalar);
     let target_type = numeric_scalar_type_for_test(&mut type_environment, target_scalar);
@@ -1052,7 +1050,7 @@ fn validate_comparison_for_test(
     left_type: TypeId,
     right_type: TypeId,
     op: HirBinOp,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
@@ -1106,7 +1104,7 @@ fn validate_comparison_for_test(
 fn validate_number_comparison_for_test(
     integer_domain: NumericScalar,
     explicitly_converted: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let scale = NumberScale::new(2).expect("test Dec scale is valid");
     let number_type = type_environment.intern_number(scale);
@@ -1217,7 +1215,7 @@ fn validator_rejects_numeric_ops_with_invalid_fixed_domains() {
     for (op, operand_types, result_type) in cases {
         let error = validate_numeric_op_for_test(op, &operand_types, result_type)
             .expect_err("validator should reject NumericOp domains unsupported by the operator");
-        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     }
 }
 
@@ -1235,7 +1233,7 @@ fn validator_rejects_fixed_numeric_op_operand_type_mismatch() {
     )
     .expect_err("validator should reject operands not converted to the NumericOp domain");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1330,7 +1328,7 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
         uint_type,
     )
     .expect_err("U32 division must leave the U32 domain before NumericOp");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     let error = validate_numeric_op_for_test(
         HirNumericOp {
@@ -1341,7 +1339,7 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
         uint_type,
     )
     .expect_err("mixed U32/I32 operands must be converted before NumericOp");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     let error = validate_numeric_op_for_test(
         HirNumericOp {
@@ -1352,7 +1350,7 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
         uint_type,
     )
     .expect_err("U32 negation has no operator domain");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1422,7 +1420,7 @@ fn validator_rejects_number_operator_scale_and_operand_mismatches() {
     ] {
         let error = validate_number_numeric_op_for_test(operator, scale, None)
             .expect_err("invalid Dec scale/operator pair should be rejected");
-        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     }
 
     let error = validate_number_numeric_op_for_test(
@@ -1431,7 +1429,7 @@ fn validator_rejects_number_operator_scale_and_operand_mismatches() {
         Some(NumericScalar::Number(scale_two)),
     )
     .expect_err("Dec power must not scale its exponent to Dec");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     let error = validate_number_numeric_op_for_test(
         NumericOperator::Add,
@@ -1439,7 +1437,7 @@ fn validator_rejects_number_operator_scale_and_operand_mismatches() {
         Some(NumericScalar::Fixed(FixedScalar::I32)),
     )
     .expect_err("mixed integer operands must be explicitly converted before NumericOp");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     let error = validate_number_numeric_op_for_test(
         NumericOperator::Add,
@@ -1447,7 +1445,7 @@ fn validator_rejects_number_operator_scale_and_operand_mismatches() {
         Some(NumericScalar::Number(scale_three)),
     )
     .expect_err("NumericOp operands must share the result scale");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1466,7 +1464,7 @@ fn validator_rejects_unregistered_number_domain_without_panicking() {
     )
     .expect_err("an unregistered Dec scale cannot form a valid HIR numeric domain");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1490,7 +1488,7 @@ fn validator_distinguishes_fallible_number_cast_pairs() {
         NumericScalar::Number(scale_four),
     )
     .expect_err("an infallible Dec widening must not be represented by CastOp");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     for (source, target) in [
         (
@@ -1512,7 +1510,7 @@ fn validator_distinguishes_fallible_number_cast_pairs() {
     ] {
         let error = validate_number_cast_op_for_test(source, target)
             .expect_err("unsupported Dec cast pair must have no HIR policy row");
-        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     }
 }
 
@@ -1529,7 +1527,7 @@ fn validator_rejects_numeric_conversion_cast_source_policy_mismatch() {
     )
     .expect_err("validator should reject a CastOp source that disagrees with its policy");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1545,7 +1543,7 @@ fn validator_rejects_numeric_conversion_cast_success_slot_type_mismatch() {
     )
     .expect_err("validator should reject a CastOp success slot with the wrong type");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1561,7 +1559,7 @@ fn validator_rejects_numeric_conversion_cast_error_slot_type_mismatch() {
     )
     .expect_err("validator should reject a CastOp with a non-builtin error slot");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1582,7 +1580,7 @@ fn validator_uses_numeric_comparison_compatibility_and_keeps_same_type_other_val
         HirBinOp::Eq,
     )
     .expect_err("incompatible numeric comparison should be rejected");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1594,7 +1592,7 @@ fn validator_requires_explicit_integer_to_number_comparison_conversion() {
 
     let error = validate_number_comparison_for_test(NumericScalar::Fixed(FixedScalar::I32), false)
         .expect_err("mixed Dec and I32 comparison must be converted in HIR");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1673,11 +1671,11 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject a stale assertion message evaluation fact");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("evaluation fact"),
+        error.message.contains("evaluation fact"),
         "expected evaluation-fact mismatch, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1726,10 +1724,10 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
     )
     .expect_err("validator should reject mismatched NumericOp arity");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("operand shape does not match the operation arity")
     );
 }
@@ -1782,7 +1780,7 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
     )
     .expect_err("validator should reject NumericOp operands outside the domain type");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -1831,8 +1829,8 @@ fn validator_rejects_integer_divide_on_float_domain() {
     )
     .expect_err("validator should reject IntegerDivide on an F64 domain");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("operator does not match the domain"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("operator does not match the domain"));
 }
 
 fn append_expression_for_validation(
@@ -1929,7 +1927,7 @@ fn validator_rejects_string_append_with_non_string_result() {
     .expect_err("StringAppend with a non-String result should fail validation");
     assert!(
         error
-            .msg
+            .message
             .contains("StringAppend must produce a String from a String accumulator")
     );
 }
@@ -1963,7 +1961,7 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
     .expect_err("StringAppend with a non-String accumulator should fail validation");
     assert!(
         error
-            .msg
+            .message
             .contains("StringAppend must produce a String from a String accumulator")
     );
 }
@@ -2006,10 +2004,10 @@ fn validator_rejects_plain_numeric_unary_op() {
     )
     .expect_err("validator should reject plain numeric UnaryOp");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Plain HirUnaryOp::Neg must be lowered through HirStatementKind::NumericOp")
     );
 }
@@ -2209,7 +2207,7 @@ fn validator_rejects_validate_float_result_type_mismatch() {
     )
     .expect_err("validator should reject a result local that erodes the validated type");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -2249,7 +2247,7 @@ fn validator_rejects_validate_float_with_non_float_source() {
     )
     .expect_err("validator should reject a non-float ValidateFloat source");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -2278,10 +2276,10 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
     )
     .expect_err("validator should reject FormatFloat Trap with non-String result local");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("FormatFloat Trap result local has the wrong success type")
     );
 }
@@ -2328,11 +2326,11 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
             &ExternalPackageRegistry::new(),
         )
         .expect_err("validator should reject Infallible on float statements");
-        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
         assert!(
-            error.msg.contains(expected_message),
+            error.message.contains(expected_message),
             "unexpected rejection message: {}",
-            error.msg
+            error.message
         );
     }
 
@@ -2367,13 +2365,13 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject Infallible on RangeStepFailure");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("RangeStepFailure cannot use the discharged numeric mode"),
         "unexpected rejection message: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -2425,8 +2423,8 @@ fn validator_rejects_invalid_jump_target() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject invalid jump target");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unknown HIR block id"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unknown HIR block id"));
 }
 
 #[test]
@@ -2487,8 +2485,8 @@ fn validator_rejects_jump_with_unknown_source_or_destination_local() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("edge source must name a registered local");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unknown HIR local id"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unknown HIR local id"));
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
@@ -2513,8 +2511,8 @@ fn validator_rejects_jump_with_unknown_source_or_destination_local() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("edge destination must name a registered local");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unknown HIR local id"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unknown HIR local id"));
 }
 
 #[test]
@@ -2548,8 +2546,8 @@ fn validator_rejects_mismatched_and_duplicate_jump_destinations() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("edge source and destination types must match");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("have different types"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("have different types"));
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
@@ -2582,8 +2580,8 @@ fn validator_rejects_mismatched_and_duplicate_jump_destinations() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("one edge cannot define its target local more than once");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("defines destination"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("defines destination"));
 }
 
 #[test]
@@ -2619,8 +2617,8 @@ fn validator_requires_jump_destinations_to_belong_to_the_target_block() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("edge destination must be declared in the target block");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("not a local owned by target block"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("not a local owned by target block"));
 }
 
 #[test]
@@ -2675,10 +2673,10 @@ fn validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity()
         &ExternalPackageRegistry::new(),
     )
     .expect_err("an If edge with no transfers must agree with its Jump predecessor");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("disagree on explicit destination set or arity")
     );
 
@@ -2757,10 +2755,10 @@ fn validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity()
         &ExternalPackageRegistry::new(),
     )
     .expect_err("equal-arity predecessors must define the same destination locals");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("disagree on explicit destination set or arity")
     );
 }
@@ -2929,8 +2927,8 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("edge source must belong to the current function");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("belongs to function"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("belongs to function"));
 }
 
 #[test]
@@ -2960,8 +2958,8 @@ fn validator_requires_parameters_to_be_defined_in_the_entry_block() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("function parameters must be defined in the function entry block");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("not defined in its entry block"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("not defined in its entry block"));
 }
 
 #[test]
@@ -2998,8 +2996,8 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("ordinary Write cannot redefine a function ABI parameter");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("ABI parameter local"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("ABI parameter local"));
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
@@ -3021,8 +3019,8 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("dedicated operation cannot define over a function ABI parameter");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("ABI parameter local"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("ABI parameter local"));
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
@@ -3068,8 +3066,8 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("a CFG edge cannot define a function ABI parameter");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("ABI parameter local"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("ABI parameter local"));
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
@@ -3189,8 +3187,8 @@ fn validator_rejects_non_literal_match_pattern() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject non-literal match pattern");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Match literal pattern"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Match literal pattern"));
 }
 
 #[test]
@@ -3261,13 +3259,12 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("the shared literal must be checked against its match subject type");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Match pattern value type does not match the direct scrutinee type")
     );
-    assert_eq!(error.source_span, Some(match_span));
 }
 
 fn inject_fixed_scalar_match_pattern(
@@ -3338,8 +3335,8 @@ fn validator_rejects_fixed_match_literal_type_different_from_scrutinee() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject a pattern with a different type from its scrutinee");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("direct scrutinee type"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("direct scrutinee type"));
 }
 
 #[test]
@@ -3363,8 +3360,8 @@ fn validator_rejects_fixed_match_relational_type_different_from_scrutinee() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject a relational pattern with the wrong scalar type");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("direct scrutinee type"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("direct scrutinee type"));
 }
 
 #[test]
@@ -3387,8 +3384,8 @@ fn validator_rejects_option_labelled_fixed_scalar_match_pattern() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject a fixed payload labelled with the option type");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("direct scrutinee type"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("direct scrutinee type"));
 }
 
 #[test]
@@ -3453,8 +3450,8 @@ fn validator_rejects_missing_side_table_mappings() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject missing side-table mappings");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("side-table mapping"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("side-table mapping"));
 }
 
 #[test]
@@ -3513,8 +3510,8 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter TypeIds");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3529,8 +3526,8 @@ fn validator_rejects_collection_containing_generic_parameter() {
         )
     });
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3543,8 +3540,15 @@ fn validator_rejects_option_containing_generic_parameter() {
                 Box::new([generic_type_id]),
             )
         });
-    assert_eq!(option_error.error_type, ErrorType::HirTransformation);
-    assert!(option_error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(
+        option_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
+    assert!(
+        option_error
+            .message
+            .contains("Unresolved generic parameter")
+    );
 }
 
 #[test]
@@ -3563,8 +3567,8 @@ fn validator_rejects_generic_nominal_instance_containing_generic_parameter() {
         type_environment.intern_generic_instance(nominal_id, Box::new([generic_type_id]))
     });
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3578,8 +3582,8 @@ fn validator_rejects_function_type_containing_generic_parameter() {
         })
     });
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3637,8 +3641,8 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter in HIR field types");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3659,8 +3663,8 @@ fn validator_rejects_function_return_type_containing_generic_parameter() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter in return types");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3680,8 +3684,8 @@ fn validator_rejects_function_error_type_containing_generic_parameter() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter in error types");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3738,8 +3742,8 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter in parameter locals");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3767,8 +3771,8 @@ fn validator_rejects_choice_payload_type_containing_generic_parameter() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter in choice payloads");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3804,8 +3808,8 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject unresolved generic parameter in expression types");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Unresolved generic parameter"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Unresolved generic parameter"));
 }
 
 #[test]
@@ -3813,13 +3817,13 @@ fn validator_rejects_anonymous_const_record_marker_on_local() {
     let error = validation_error_for_injected_local_type(|_, type_environment| {
         type_environment.anonymous_const_record_type()
     });
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("compile-time-only anonymous const-record marker"),
         "unexpected error: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -3855,10 +3859,10 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject the compile-time marker on an expression");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("compile-time-only anonymous const-record marker")
     );
 }
@@ -3879,10 +3883,10 @@ fn validator_rejects_anonymous_const_record_marker_on_function_return() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject the compile-time marker on a function return");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("compile-time-only anonymous const-record marker")
     );
 }
@@ -3897,7 +3901,7 @@ fn classify_hir_type_rejects_anonymous_const_record_marker() {
     .expect_err("the marker must not classify as a runtime ABI type");
     assert!(
         error
-            .msg
+            .message
             .contains("compile-time-only anonymous const-record marker")
     );
 }
@@ -3947,8 +3951,8 @@ fn validator_rejects_placeholder_terminator() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject placeholder terminators");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("placeholder terminator"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("placeholder terminator"));
 }
 
 #[test]
@@ -3992,8 +3996,8 @@ fn validator_rejects_region_cycle() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject cyclic region parents");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("cycle"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("cycle"));
 }
 
 #[test]
@@ -4097,8 +4101,12 @@ fn validator_rejects_cycle_in_expression_id_graph() {
     )
     .expect_err("validator should reject cyclic expression IDs");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("HIR expression graph contains a cycle"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error
+            .message
+            .contains("HIR expression graph contains a cycle")
+    );
 }
 
 #[test]
@@ -4145,8 +4153,12 @@ fn validator_rejects_cycle_after_consecutive_not_rows() {
     )
     .expect_err("validator should reject a cycle after entering multiple Not rows");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("HIR expression graph contains a cycle"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error
+            .message
+            .contains("HIR expression graph contains a cycle")
+    );
 }
 
 #[test]
@@ -4181,8 +4193,8 @@ fn validator_rejects_dangling_expression_child_id() {
     )
     .expect_err("validator should reject a child ID outside the dense expression store");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Invalid expression id"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Invalid expression id"));
 }
 
 #[test]
@@ -4222,8 +4234,8 @@ fn validator_rejects_dangling_index_expression_id() {
     )
     .expect_err("validator should reject an index edge outside the dense expression store");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("Invalid expression id"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Invalid expression id"));
 }
 
 #[test]
@@ -4267,8 +4279,12 @@ fn validator_rejects_cycle_closing_deep_binop_chain() {
     )
     .expect_err("validator should reject a deep BinOp chain that loops back to its top");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("HIR expression graph contains a cycle"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error
+            .message
+            .contains("HIR expression graph contains a cycle")
+    );
 }
 
 #[test]
@@ -4367,12 +4383,12 @@ fn validator_visits_range_start_before_end() {
     // Both children are dangling, so the reported id shows which child the walk reached first.
     assert!(
         error
-            .msg
+            .message
             .contains(&format!("Invalid expression id {start:?}"))
     );
     assert!(
         !error
-            .msg
+            .message
             .contains(&format!("Invalid expression id {end:?}"))
     );
 }
@@ -4414,12 +4430,12 @@ fn validator_visits_outermost_load_index_first() {
 
     assert!(
         error
-            .msg
+            .message
             .contains(&format!("Invalid expression id {outer:?}"))
     );
     assert!(
         !error
-            .msg
+            .message
             .contains(&format!("Invalid expression id {inner:?}"))
     );
 }
@@ -4510,8 +4526,8 @@ fn validator_reports_left_chain_error_before_right_chain_error() {
 
     // Children are walked left to right, so the left chain's dangling operand is reported before
     // the right chain's payload index is ever checked.
-    assert!(error.msg.contains("Invalid expression id"));
-    assert!(!error.msg.contains("VariantPayloadGet variant index"));
+    assert!(error.message.contains("Invalid expression id"));
+    assert!(!error.message.contains("VariantPayloadGet variant index"));
 }
 
 #[test]
@@ -4562,8 +4578,12 @@ fn validator_checks_comparison_result_type_before_walking_operands() {
     )
     .expect_err("validator should reject a comparison that does not produce Bool");
 
-    assert!(error.msg.contains("HirBinOp comparison must produce Bool"));
-    assert!(!error.msg.contains("Invalid expression id"));
+    assert!(
+        error
+            .message
+            .contains("HirBinOp comparison must produce Bool")
+    );
+    assert!(!error.message.contains("Invalid expression id"));
 }
 
 #[test]
@@ -4598,10 +4618,10 @@ fn validator_reports_invalid_load_index_before_load_type_mismatch() {
     )
     .expect_err("validator should reject a Load with a dangling index");
 
-    assert!(error.msg.contains("Invalid expression id"));
+    assert!(error.message.contains("Invalid expression id"));
     assert!(
         !error
-            .msg
+            .message
             .contains("Load expression type does not match its place type")
     );
 }
@@ -5211,8 +5231,8 @@ fn validator_rejects_missing_region_parent() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject missing region parents");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("missing parent"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("missing parent"));
 }
 
 #[test]
@@ -5280,9 +5300,10 @@ fn validator_rejects_cross_function_cfg_edges() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject cross-function CFG edges");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("multiple functions") || error.msg.contains("crosses function boundary")
+        error.message.contains("multiple functions")
+            || error.message.contains("crosses function boundary")
     );
 }
 
@@ -5328,9 +5349,7 @@ fn lowering_errors_preserve_string_table_context() {
     )
     .expect_err("unknown function call should fail HIR lowering");
 
-    let _error = messages
-        .primary_infrastructure_error()
-        .expect("expected HIR lowering error");
+    assert!(matches!(messages, PreparedFailure::Infrastructure(_)));
 }
 // ---------------------------------------------------------------------------
 // VariantConstruct validation
@@ -5419,11 +5438,11 @@ fn hir_variant_construct_option_invalid_index_rejected() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject out-of-range Option variant index");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("out of range"),
+        error.message.contains("out of range"),
         "expected 'out of range' in error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -5559,11 +5578,11 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject wrong field name in choice VariantConstruct");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("field name"),
+        error.message.contains("field name"),
         "expected 'field name' in error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -5700,11 +5719,11 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject wrong field type in choice VariantConstruct");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("field type mismatch"),
+        error.message.contains("field type mismatch"),
         "expected 'field type mismatch' in error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -5822,11 +5841,11 @@ fn hir_route_construct_with_input_missing_leading_capture_rejected() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject a one-input route missing a leading capture");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("captures must fill"),
+        error.message.contains("captures must fill"),
         "expected the capture-count error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -5843,11 +5862,11 @@ fn validator_rejects_collection_expression_with_non_collection_type() {
         &ExternalPackageRegistry::new(),
     )
     .expect_err("validator should reject Collection expression with non-collection type");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.msg.contains("not a collection type"),
+        error.message.contains("not a collection type"),
         "expected 'not a collection type' in error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -5946,7 +5965,7 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
     )
     .expect_err("validator should reject Dec value/type scale disagreement");
 
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }
 
 #[test]
@@ -5981,7 +6000,7 @@ fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_func
         &ExternalPackageRegistry::new(),
     )
     .expect_err("a dangling pending edge cannot validate");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     module.catch_protected_calls[0] = record;
 
     let foreign_function = module
@@ -5997,5 +6016,5 @@ fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_func
         &ExternalPackageRegistry::new(),
     )
     .expect_err("a pending handler cannot enter another function's CFG");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 }

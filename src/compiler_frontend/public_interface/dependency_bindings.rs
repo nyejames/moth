@@ -12,7 +12,8 @@
 
 use super::interface_view::ProviderBindingView;
 use super::model::PublicSemanticInterface;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -83,7 +84,7 @@ pub(crate) struct SourceProviderDependencySet<'a> {
 impl<'a> SourceProviderDependencySet<'a> {
     pub(crate) fn new(
         dependencies: Vec<SourceProviderDependency<'a>>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut set = Self {
             interfaces: Vec::with_capacity(dependencies.len()),
             binding_views: Vec::with_capacity(dependencies.len()),
@@ -97,20 +98,26 @@ impl<'a> SourceProviderDependencySet<'a> {
             match dependency.kind {
                 ProviderDependencyKind::Authored { shell } => {
                     if set.by_shell.contains_key(&shell) {
-                        return Err(CompilerError::compiler_error(format!(
-                            "source provider input set resolved dependency shell {:?} more than once",
-                            shell
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "source provider input set resolved dependency shell {:?} more than once",
+                                shell
+                            ),
+                        ));
                     }
                     let provider_id = set.register(dependency.interface)?;
                     set.by_shell.insert(shell, provider_id);
                 }
                 ProviderDependencyKind::ImplicitTemplate { package_prefix } => {
                     if set.implicit_by_prefix.contains_key(package_prefix) {
-                        return Err(CompilerError::compiler_error(format!(
-                            "source provider input set registered implicit template scope @{} more than once",
-                            package_prefix
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "source provider input set registered implicit template scope @{} more than once",
+                                package_prefix
+                            ),
+                        ));
                     }
                     let provider_id = set.register(dependency.interface)?;
                     set.implicit_by_prefix.insert(package_prefix, provider_id);
@@ -127,7 +134,7 @@ impl<'a> SourceProviderDependencySet<'a> {
     fn register(
         &mut self,
         interface: &'a PublicSemanticInterface,
-    ) -> Result<ProviderInterfaceId, CompilerError> {
+    ) -> Result<ProviderInterfaceId, InfrastructureFailure> {
         if let Some(existing_id) = self.by_origin.get(&interface.module_origin).copied() {
             let existing = self.interfaces[existing_id.0];
             // The same borrowed completed interface is registered once per authored shell.
@@ -137,10 +144,13 @@ impl<'a> SourceProviderDependencySet<'a> {
                 return Ok(existing_id);
             }
             if existing != interface {
-                return Err(CompilerError::compiler_error(format!(
-                    "provider interface for module origin {:?} disagrees with an equal-origin provider interface",
-                    interface.module_origin
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "provider interface for module origin {:?} disagrees with an equal-origin provider interface",
+                        interface.module_origin
+                    ),
+                ));
             }
             return Ok(existing_id);
         }
@@ -182,7 +192,7 @@ impl<'a> SourceProviderDependencySet<'a> {
     pub(crate) fn validate_binding_targets(
         &self,
         external_registry: &ExternalPackageRegistry,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for interface in &self.interfaces {
             interface.validate_binding_targets(external_registry)?;
         }
@@ -208,17 +218,20 @@ impl<'a> SourceProviderDependencySet<'a> {
 
     /// Resolve one dense provider identity to its borrowed completed interface.
     ///
-    /// Internal dense lookup failures are `CompilerError` invariant failures, never silently
+    /// Internal dense lookup failures are `InfrastructureFailure` invariant failures, never silently
     /// erased into absence.
     pub(crate) fn interface(
         &self,
         provider_id: ProviderInterfaceId,
-    ) -> Result<&'a PublicSemanticInterface, CompilerError> {
+    ) -> Result<&'a PublicSemanticInterface, InfrastructureFailure> {
         self.interfaces.get(provider_id.0).copied().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "provider interface table has no interface for provider id {}",
-                provider_id.0
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "provider interface table has no interface for provider id {}",
+                    provider_id.0
+                ),
+            )
         })
     }
 
@@ -228,12 +241,15 @@ impl<'a> SourceProviderDependencySet<'a> {
     pub(crate) fn binding_view(
         &self,
         provider_id: ProviderInterfaceId,
-    ) -> Result<&ProviderBindingView<'a>, CompilerError> {
+    ) -> Result<&ProviderBindingView<'a>, InfrastructureFailure> {
         self.binding_views.get(provider_id.0).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "provider interface table has no binding view for provider id {}",
-                provider_id.0
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "provider interface table has no binding view for provider id {}",
+                    provider_id.0
+                ),
+            )
         })
     }
 

@@ -1,0 +1,7 @@
+entry = "@.moth"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0002"]
+message_contains = ["empty after stripping the cosmetic '@' prefix"]

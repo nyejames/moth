@@ -7,7 +7,8 @@
 //!       lowering, borrow analysis and summary convergence. The boundary store owns what happens
 //!       afterwards. A transaction publishes nothing: a diagnosed module simply drops it.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::module_compilation::generated::artefacts::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
@@ -71,6 +72,8 @@ pub(crate) struct GeneratedFunctionTransaction<'a> {
     ids_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedRequestId>,
     completed_records: Vec<CompletedGeneratedFunction>,
     completed_by_identity: FxHashMap<GeneratedFunctionIdentity, GeneratedFunctionId>,
+    /// Transient warnings keyed separately from warning-free sidecar payloads through convergence.
+    completed_warnings: FxHashMap<GeneratedFunctionIdentity, DiagnosticBag>,
 }
 
 impl<'a> GeneratedFunctionTransaction<'a> {
@@ -81,6 +84,7 @@ impl<'a> GeneratedFunctionTransaction<'a> {
             ids_by_identity: FxHashMap::default(),
             completed_records: Vec::new(),
             completed_by_identity: FxHashMap::default(),
+            completed_warnings: FxHashMap::default(),
         }
     }
 
@@ -120,42 +124,36 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         request_ids
     }
 
-    pub(crate) fn identity(
-        &self,
-        request_id: GeneratedRequestId,
-    ) -> Result<&GeneratedFunctionIdentity, CompilerError> {
+    pub(crate) fn identity(&self, request_id: GeneratedRequestId) -> &GeneratedFunctionIdentity {
         self.records
             .get(request_id.index())
             .map(|record| &record.identity)
-            .ok_or_else(|| out_of_range(request_id))
+            .unwrap_or_else(|| out_of_range(request_id))
     }
 
     /// The display facts one request owns for diagnostics.
     pub(crate) fn request_facts(
         &self,
         request_id: GeneratedRequestId,
-    ) -> Result<(String, Option<SourceSpan>), CompilerError> {
+    ) -> (String, Option<SourceSpan>) {
         self.records
             .get(request_id.index())
             .map(|record| (record.display_name.clone(), record.call_span))
-            .ok_or_else(|| out_of_range(request_id))
+            .unwrap_or_else(|| out_of_range(request_id))
     }
 
-    pub(crate) fn enter(
-        &mut self,
-        request_id: GeneratedRequestId,
-    ) -> Result<GeneratedRequestEntry, CompilerError> {
+    pub(crate) fn enter(&mut self, request_id: GeneratedRequestId) -> GeneratedRequestEntry {
         let record = self
             .records
             .get_mut(request_id.index())
-            .ok_or_else(|| out_of_range(request_id))?;
+            .unwrap_or_else(|| out_of_range(request_id));
         match record.state {
             GeneratedRequestState::Pending => {
                 record.state = GeneratedRequestState::Materialising;
-                Ok(GeneratedRequestEntry::Materialise)
+                GeneratedRequestEntry::Materialise
             }
-            GeneratedRequestState::Materialising => Ok(GeneratedRequestEntry::Recursive),
-            GeneratedRequestState::Complete => Ok(GeneratedRequestEntry::Complete),
+            GeneratedRequestState::Materialising => GeneratedRequestEntry::Recursive,
+            GeneratedRequestState::Complete => GeneratedRequestEntry::Complete,
         }
     }
 
@@ -164,27 +162,31 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         request_id: GeneratedRequestId,
         summary: PublicCallSummary,
         sidecar: GeneratedFunctionSidecar,
-    ) -> Result<(), CompilerError> {
+        warnings: DiagnosticBag,
+    ) {
         let record = self
             .records
             .get_mut(request_id.index())
-            .ok_or_else(|| out_of_range(request_id))?;
+            .unwrap_or_else(|| out_of_range(request_id));
         if record.state != GeneratedRequestState::Materialising {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated request {:?} completed from an invalid transaction state",
                 record.identity
-            )));
+            );
         }
         if sidecar.identity != record.identity {
-            return Err(CompilerError::compiler_error(
-                "Generated sidecar identity disagrees with its request",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated sidecar identity disagrees with its request"
+            );
         }
         if self.completed_by_identity.contains_key(&record.identity) {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated request {:?} completed more than once",
                 record.identity
-            )));
+            );
         }
 
         record.state = GeneratedRequestState::Complete;
@@ -193,11 +195,11 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         self.completed_by_identity
             .insert(identity.clone(), generated_id);
         self.completed_records.push(CompletedGeneratedFunction {
-            identity,
+            identity: identity.clone(),
             summary,
             sidecar,
         });
-        Ok(())
+        self.completed_warnings.insert(identity, warnings);
     }
 
     /// The current summary for one generated function, local first and then already published.
@@ -226,38 +228,73 @@ impl<'a> GeneratedFunctionTransaction<'a> {
     pub(crate) fn sidecar_mut(
         &mut self,
         identity: &GeneratedFunctionIdentity,
-    ) -> Result<&mut GeneratedFunctionSidecar, CompilerError> {
-        let record_id = self.completed_by_identity.get(identity).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+    ) -> &mut GeneratedFunctionSidecar {
+        let record_id = self.completed_by_identity.get(identity).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated transaction cannot find sidecar {identity:?}"
-            ))
-        })?;
+            )
+        });
         self.completed_records
             .get_mut(record_id.index())
             .map(|record| &mut record.sidecar)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
                     "Generated transaction sidecar index for {identity:?} is out of range"
-                ))
+                )
             })
+    }
+    pub(crate) fn sidecar_and_warnings_mut(
+        &mut self,
+        identity: &GeneratedFunctionIdentity,
+    ) -> (&mut GeneratedFunctionSidecar, &mut DiagnosticBag) {
+        let record_id = self.completed_by_identity.get(identity).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated transaction cannot find sidecar {identity:?}"
+            )
+        });
+        let sidecar = &mut self
+            .completed_records
+            .get_mut(record_id.index())
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated transaction sidecar index for {identity:?} is out of range"
+                )
+            })
+            .sidecar;
+        let warnings = self
+            .completed_warnings
+            .get_mut(identity)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated transaction cannot find warnings for sidecar {identity:?}"
+                )
+            });
+        (sidecar, warnings)
     }
 
     pub(crate) fn summary_mut(
         &mut self,
         identity: &GeneratedFunctionIdentity,
-    ) -> Result<&mut PublicCallSummary, CompilerError> {
-        let record_id = self.completed_by_identity.get(identity).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+    ) -> &mut PublicCallSummary {
+        let record_id = self.completed_by_identity.get(identity).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated transaction cannot update unknown completed request {identity:?}"
-            ))
-        })?;
+            )
+        });
         self.completed_records
             .get_mut(record_id.index())
             .map(|record| &mut record.summary)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
                     "Generated transaction summary index for {identity:?} is out of range"
-                ))
+                )
             })
     }
 
@@ -268,25 +305,28 @@ impl<'a> GeneratedFunctionTransaction<'a> {
     pub(crate) fn retain_reachable_sidecars(
         &mut self,
         reachable: &FxHashSet<GeneratedFunctionIdentity>,
-    ) -> Result<(), CompilerError> {
+    ) {
         if let Some(record) = self
             .records
             .iter()
             .find(|record| record.state != GeneratedRequestState::Complete)
         {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated transaction stopped before request {:?} completed",
                 record.identity
-            )));
+            );
         }
         if self.records.len() != self.completed_records.len() {
-            return Err(CompilerError::compiler_error(
-                "Generated transaction request and sidecar records disagree after convergence",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated transaction request and sidecar records disagree after convergence"
+            );
         }
-
         self.completed_records
             .retain(|record| reachable.contains(&record.identity));
+        self.completed_warnings
+            .retain(|identity, _| reachable.contains(identity));
         self.completed_by_identity = self
             .completed_records
             .iter()
@@ -301,39 +341,60 @@ impl<'a> GeneratedFunctionTransaction<'a> {
             .enumerate()
             .map(|(index, record)| (record.identity.clone(), GeneratedRequestId(index)))
             .collect();
-        Ok(())
     }
 
-    /// Close the transaction and hand back everything it completed.
-    pub(crate) fn finish(self) -> Result<GeneratedFunctionDelta, CompilerError> {
+    pub(crate) fn finish(mut self) -> (GeneratedFunctionDelta, Vec<DiagnosticBag>) {
         if let Some(record) = self
             .records
             .iter()
             .find(|record| record.state != GeneratedRequestState::Complete)
         {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated transaction stopped before request {:?} completed",
                 record.identity
-            )));
+            );
         }
         if self
             .completed_records
             .iter()
             .any(|record| !record.sidecar.module.executable.hir.expressions.is_frozen())
         {
-            return Err(CompilerError::compiler_error(
-                "Generated transaction cannot publish a growing HIR expression store",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated transaction cannot publish a growing HIR expression store"
+            );
         }
-        Ok(GeneratedFunctionDelta::from_records(self.completed_records))
+        let mut warnings = Vec::with_capacity(self.completed_records.len());
+        for record in &self.completed_records {
+            let Some(record_warnings) = self.completed_warnings.remove(&record.identity) else {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated transaction cannot find warnings for completed sidecar {:?}",
+                    record.identity
+                );
+            };
+            warnings.push(record_warnings);
+        }
+        if !self.completed_warnings.is_empty() {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated transaction retained warnings without completed sidecars"
+            );
+        }
+        (
+            GeneratedFunctionDelta::from_records(self.completed_records),
+            warnings,
+        )
     }
 }
 
-fn out_of_range(request_id: GeneratedRequestId) -> CompilerError {
-    CompilerError::compiler_error(format!(
+fn out_of_range(request_id: GeneratedRequestId) -> ! {
+    crate::compiler_bug!(
+        CompilerStage::ProjectBuildAssembly,
         "Generated transaction received out-of-range request id {}",
         request_id.index()
-    ))
+    )
 }
 
 #[cfg(test)]

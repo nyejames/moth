@@ -39,7 +39,8 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, BranchExitSummary, ParsedReceiverValue, ProducedValues,
     ThenValueSlot,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -212,7 +213,7 @@ fn collect_retained_then_producers(
                 }
             }
             ThenValueSlot::Taken => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "multi-bind producer discovery reached a `then` value already owned by completion",
                 )
                 .into());
@@ -284,12 +285,14 @@ fn collect_pending_continuation_producers(
         return Ok(BranchExitSummary::PRODUCES);
     }
     let continuation = state.continuation(id).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "multi-bind producer discovery addressed a continuation outside its body domain",
         )
     })?;
     match continuation {
-        NumericContinuation::ThenValue(_) => Err(CompilerError::compiler_error(
+        NumericContinuation::ThenValue(_) => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a live `then` continuation was not exposed through its producer-slot accessor",
         )
         .into()),
@@ -568,7 +571,8 @@ pub(crate) fn complete_deferred_value_block<'env>(
         ParsedReceiverValue::Complete(expression) => Ok(expression),
         ParsedReceiverValue::NeedsSlotInference { block, span } => {
             let target_count = target.expected_arity.ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a resumed value block asked for slot inference without an authored arity",
                 )
             })?;
@@ -583,7 +587,8 @@ pub(crate) fn complete_deferred_value_block<'env>(
                 services.const_values,
             )
         }
-        ParsedReceiverValue::Retained(_) => Err(CompilerError::compiler_error(
+        ParsedReceiverValue::Retained(_) => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a resumed value block retained itself instead of completing",
         )
         .into()),

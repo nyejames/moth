@@ -8,7 +8,8 @@
 //! MUST NOT: render Markdown, tokenize source, parse dependency clauses, own source-kind decisions, or
 //!           construct source-location facts from filesystem paths.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -46,12 +47,15 @@ pub(crate) fn content_constant_path(
     content_source: PathId,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<PathId, CompilerError> {
+) -> Result<PathId, InfrastructureFailure> {
     let content_name = string_table.intern(SYNTHETIC_CONTENT_NAME);
     path_fork
         .try_intern_child(content_source, content_name)
         .ok_or_else(|| {
-            CompilerError::compiler_error("path table exhausted while interning content path")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "path table exhausted while interning content path",
+            )
         })
 }
 
@@ -64,9 +68,10 @@ pub(crate) fn synthetic_content_header(
     input: SyntheticContentHeaderInput,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Header, CompilerError> {
+) -> Result<Header, InfrastructureFailure> {
     if input.initializer_range.source() != input.file_id {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "synthetic content range does not match its prepared source identity",
         ));
     }

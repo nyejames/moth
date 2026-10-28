@@ -30,7 +30,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity, CanonicalTraitIdentity,
     CanonicalTypeIdentity, CanonicalTypeProjectionContext,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -231,7 +231,7 @@ fn declarations_with_receiver_methods(
 /// bypassing the full draft builder so the evidence projection is the only unit under test.
 ///
 /// The declarations passed in must already expose the public receiver-method origins the
-/// evidence projection will join against; the helper no longer accepts a raw
+/// evidence projection will join against; the helper does not accept a raw
 /// receiver-method catalog; the declarations already carry finalized origins.
 #[allow(
     clippy::too_many_arguments,
@@ -246,7 +246,7 @@ fn project_evidence(
     type_environment: &TypeEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<PublicEvidenceRecord>, CompilerError> {
+) -> Result<Vec<PublicEvidenceRecord>, InfrastructureFailure> {
     let registry = ExternalPackageRegistry::new();
     let nominal_resolver = TransientNominalOriginResolver::new(type_environment, nominal_origins);
     let generic_resolver = FoldedValueGenericParameterResolver;
@@ -276,7 +276,7 @@ fn string_type_id(env: &TypeEnvironment) -> TypeId {
 /// public-interface metadata without repeating the evidence and canonical-origin setup.
 fn project_label_display_evidence_with_method_origins(
     method_origins: Vec<OriginFunctionId>,
-) -> Result<Vec<PublicEvidenceRecord>, CompilerError> {
+) -> Result<Vec<PublicEvidenceRecord>, InfrastructureFailure> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
@@ -1122,7 +1122,7 @@ fn evidence_rejects_duplicate_stable_keys() {
 
     let message = result
         .expect_err("duplicate evidence keys must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("target-plus-trait identity"),
         "expected a duplicate-key rejection, got: {message}"
@@ -1132,7 +1132,7 @@ fn evidence_rejects_duplicate_stable_keys() {
 #[test]
 fn evidence_rejects_core_trait_without_classifier() {
     // A trait definition with `TraitVisibility::Core` but no `CoreTraitKind` is malformed
-    // compiler metadata. The projection must reject it as a `CompilerError` rather than
+    // compiler metadata. The projection must reject it as an `InfrastructureFailure` rather than
     // silently fall through to source-path visibility.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1211,7 +1211,7 @@ fn evidence_rejects_core_trait_without_classifier() {
 
     let message = result
         .expect_err("a core trait without a CoreTraitKind must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("no recorded `CoreTraitKind`"),
         "expected a core-without-classifier rejection, got: {message}"
@@ -1291,7 +1291,7 @@ fn evidence_rejects_requirement_count_mismatch() {
 
     let message = result
         .expect_err("a requirement count mismatch must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("count mismatch"),
         "expected a count-mismatch rejection, got: {message}"
@@ -1322,7 +1322,7 @@ fn evidence_rejects_wrong_receiver_origin() {
 
     let message = result
         .expect_err("a wrong-receiver method origin must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("wrong-receiver method origin"),
         "expected a wrong-receiver rejection, got: {message}"
@@ -1336,7 +1336,7 @@ fn evidence_rejects_free_function_origin_in_receiver_surface() {
 
     let message = result
         .expect_err("a free-function method origin in a receiver surface must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("free-function origin"),
         "expected a free-function-origin rejection, got: {message}"
@@ -1357,7 +1357,7 @@ fn evidence_rejects_duplicate_public_method_match() {
 
     let message = result
         .expect_err("a duplicate public method match must be rejected")
-        .msg;
+        .message;
     assert!(
         message.contains("matches multiple public receiver-method entries"),
         "expected a duplicate-match rejection, got: {message}"

@@ -42,9 +42,11 @@ use crate::compiler_frontend::ast::templates::tir::{
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
     replace_expression_overlay_entries,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
+    DiagnosticDraft, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -143,7 +145,7 @@ impl AstFinalizer<'_, '_> {
                     {
                         // Generic free function: must have no emitted node.
                         if normalized_function_signatures_by_path.contains_key(&root.path) {
-                            return Err(CompilerError::compiler_error(format!(
+                            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                 "public default synchronization: a generic free-function root at {:?} has an emitted declaration node; generic functions must not emit an ordinary declaration",
                                 root.path
                             ))
@@ -152,13 +154,13 @@ impl AstFinalizer<'_, '_> {
                         let template = generic_function_templates_by_path
                             .get(&root.path)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
+                                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                     "public default synchronization: a generic free-function root at {:?} has no retained generic-template metadata; every generic function must carry its source file",
                                     root.path
                                 ))
                             })?;
                         if template.generic_parameter_list_id != *root_generic_parameter_list_id {
-                            return Err(CompilerError::compiler_error(format!(
+                            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                 "public default synchronization: a generic free-function root at {:?} has a generic-parameter-list mismatch: root GenericParameterListId({}) vs retained template GenericParameterListId({})",
                                 root.path,
                                 root_generic_parameter_list_id.0,
@@ -172,7 +174,7 @@ impl AstFinalizer<'_, '_> {
                             .get(&root.path)
                             .copied()
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
+                                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                     "public default synchronization: a non-generic free-function root at {:?} has no emitted declaration node; only generic functions may omit an emitted node",
                                     root.path
                                 ))
@@ -182,14 +184,14 @@ impl AstFinalizer<'_, '_> {
                 }
                 ResolvedPublicTypeRootKind::Struct { type_id, fields } => {
                     let definition = type_environment.get(*type_id).ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "public default synchronization: a struct root at {:?} references TypeId({}) which has no type definition in the type environment",
                             root.path,
                             type_id.0
                         ))
                     })?;
                     let TypeDefinition::Struct(struct_definition) = definition else {
-                        return Err(CompilerError::compiler_error(format!(
+                        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "public default synchronization: a struct root at {:?} references TypeId({}) which is not a struct definition",
                             root.path,
                             type_id.0
@@ -199,7 +201,7 @@ impl AstFinalizer<'_, '_> {
                     if struct_definition.generic_parameters.is_some() {
                         // Generic struct: must have no emitted node.
                         if normalized_struct_fields_by_path.contains_key(&root.path) {
-                            return Err(CompilerError::compiler_error(format!(
+                            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                 "public default synchronization: a generic struct root at {:?} (TypeId({})) has an emitted declaration node; generic structs must not emit an ordinary declaration",
                                 root.path,
                                 type_id.0
@@ -212,7 +214,7 @@ impl AstFinalizer<'_, '_> {
                             .get(&root.path)
                             .copied()
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
+                                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                     "public default synchronization: a non-generic struct root at {:?} (TypeId({})) has no emitted declaration node; only generic structs may omit an emitted node",
                                     root.path,
                                     type_id.0
@@ -245,7 +247,7 @@ impl AstFinalizer<'_, '_> {
             if generic_function_templates_by_path.contains_key(&root_entry.function_path) {
                 // Generic receiver method: must have no emitted node.
                 if normalized_function_signatures_by_path.contains_key(&root_entry.function_path) {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "public default synchronization: a generic receiver method at {:?} has an emitted declaration node; generic functions must not emit an ordinary declaration",
                         root_entry.function_path
                     ))
@@ -257,7 +259,7 @@ impl AstFinalizer<'_, '_> {
                     .get(&root_entry.function_path)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "public default synchronization: a non-generic receiver method at {:?} has no emitted declaration node; only generic functions may omit an emitted node",
                             root_entry.function_path
                         ))
@@ -296,7 +298,7 @@ impl AstFinalizer<'_, '_> {
             }
 
             if normalized_function_signatures_by_path.contains_key(&catalog_entry.function_path) {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "public default synchronization: a generic receiver method at {:?} has an emitted declaration node; generic functions must not emit an ordinary declaration",
                     catalog_entry.function_path
                 ))
@@ -326,7 +328,7 @@ struct EmittedDeclarationDefaults<'ast> {
 /// synchronization orchestration focused on its joins.
 fn collect_emitted_declaration_defaults(
     emitted_ast: &[AstNode],
-) -> Result<EmittedDeclarationDefaults<'_>, CompilerError> {
+) -> Result<EmittedDeclarationDefaults<'_>, InfrastructureFailure> {
     let mut normalized_function_signatures_by_path: FxHashMap<PathId, &FunctionSignature> =
         FxHashMap::default();
     let mut normalized_struct_fields_by_path: FxHashMap<PathId, &[Declaration]> =
@@ -336,10 +338,13 @@ fn collect_emitted_declaration_defaults(
         if let NodeKind::Function(path, signature, _) = &node.kind {
             match normalized_function_signatures_by_path.entry(path.to_owned()) {
                 std::collections::hash_map::Entry::Occupied(_) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "public default synchronization: duplicate emitted function declaration at path {:?}; the emitted AST must not contain two nodes with the same path",
-                        path
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "public default synchronization: duplicate emitted function declaration at path {:?}; the emitted AST must not contain two nodes with the same path",
+                            path
+                        ),
+                    ));
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
                     slot.insert(signature);
@@ -348,10 +353,13 @@ fn collect_emitted_declaration_defaults(
         } else if let NodeKind::StructDefinition(path, fields) = &node.kind {
             match normalized_struct_fields_by_path.entry(path.to_owned()) {
                 std::collections::hash_map::Entry::Occupied(_) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "public default synchronization: duplicate emitted struct declaration at path {:?}; the emitted AST must not contain two nodes with the same path",
-                        path
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "public default synchronization: duplicate emitted struct declaration at path {:?}; the emitted AST must not contain two nodes with the same path",
+                            path
+                        ),
+                    ));
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
                     slot.insert(fields.as_slice());
@@ -371,14 +379,17 @@ fn collect_emitted_declaration_defaults(
 /// The set also distinguishes private catalog entries from already-normalized roots.
 fn unique_root_receiver_paths(
     receiver_methods: &[ReceiverMethodEntry],
-) -> Result<FxHashSet<PathId>, CompilerError> {
+) -> Result<FxHashSet<PathId>, InfrastructureFailure> {
     let mut seen_paths: FxHashSet<PathId> = FxHashSet::default();
     for entry in receiver_methods {
         if !seen_paths.insert(entry.function_path) {
-            return Err(CompilerError::compiler_error(format!(
-                "public default synchronization: a root table receiver method at {:?} is duplicated; each root receiver method must join exactly one catalog entry",
-                entry.function_path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public default synchronization: a root table receiver method at {:?} is duplicated; each root receiver method must join exactly one catalog entry",
+                    entry.function_path
+                ),
+            ));
         }
     }
     Ok(seen_paths)
@@ -576,7 +587,10 @@ fn normalize_control_flow_templates(
             normalize_nodes(body, context)
         }
 
-        _ => unreachable!("normalize_control_flow_templates called with non-control-flow node"),
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "normalize_control_flow_templates called with non-control-flow node"
+        ),
     }
 }
 
@@ -614,7 +628,10 @@ fn normalize_declaration_templates(
             Ok(())
         }
 
-        _ => unreachable!("normalize_declaration_templates called with non-declaration node"),
+        _ => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "normalize_declaration_templates called with non-declaration node"
+        ),
     }
 }
 
@@ -974,7 +991,8 @@ fn replace_inactive_assertion_message(
         && matches!(
             constants
                 .payload(value)
-                .ok_or_else(|| CompilerError::compiler_error(
+                .ok_or_else(|| InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "assertion message constant ID is outside its owner"
                 ))?,
             ConstValuePayload::OptionNone
@@ -1012,18 +1030,18 @@ fn replace_inactive_assertion_message(
 
 #[derive(Debug)]
 pub(in crate::compiler_frontend::ast) enum TemplateNormalizationError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
-impl From<CompilerDiagnostic> for TemplateNormalizationError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for TemplateNormalizationError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         TemplateNormalizationError::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for TemplateNormalizationError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for TemplateNormalizationError {
+    fn from(error: InfrastructureFailure) -> Self {
         TemplateNormalizationError::Infrastructure(error.into())
     }
 }
@@ -1037,7 +1055,9 @@ impl From<Box<InfrastructureErrors>> for TemplateNormalizationError {
 impl From<TemplateError> for TemplateNormalizationError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => {
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 TemplateNormalizationError::Diagnostic(diagnostic)
             }
             TemplateError::Infrastructure(error) => {
@@ -1241,7 +1261,7 @@ fn normalize_expression_template_node(
             }
             FinalizedTemplateValue::SlotInsertHelper => {
                 if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
                         template.span,
                     )
@@ -1384,10 +1404,9 @@ fn normalize_template_for_hir(
     // preserves shared TIR nodes while covering dynamic expressions, selectors,
     // loop headers, and every reachable control-flow body from one root pass.
     let reference = template.tir_reference;
-    // Same-store is now the only path: every TIR reference is local to this
-    // module store, so expression-overlay payloads are always collected. Phase
-    // promotion to Finalized is gated separately below, so parsed references
-    // can receive normalized overlays without becoming finalized views.
+    // All TIR references are local to this module store, so overlay payloads are
+    // collected from the same store. Phase promotion to Finalized is gated separately
+    // below; parsed references may receive normalized overlays without becoming finalized views.
     let should_mark_finalized = reference.phase.is_at_least(TemplateTirPhase::Composed);
     let expression_payloads = collect_expression_overlay_payloads(&reference, context)?;
     if expression_payloads.is_empty() && reference.context.expression_overlay.is_none() {
@@ -1463,7 +1482,7 @@ fn materialize_runtime_template_handoff_for_hir(
         prepared.outcome,
         TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::SlotContribution,)
     ) {
-        return Err(CompilerDiagnostic::invalid_template_slot(
+        return Err(templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertOutsideParentSlot,
             None,
             template.span,

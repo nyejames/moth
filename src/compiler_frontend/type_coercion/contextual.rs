@@ -11,9 +11,8 @@
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionConstructionFailure, OwnedExpr,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, TypeMismatchContext, ValueReceiverContext,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
+use crate::compiler_frontend::compiler_messages::{TypeMismatchContext, ValueReceiverContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 
@@ -21,8 +20,8 @@ use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 /// Result for the contextual coercion boundary.
 ///
-/// Coercion diagnostics remain plain `CompilerDiagnostic` values until the
-/// owning accumulation boundary.
+/// Type mismatches are drafts carried through `ExpressionConstructionFailure`
+/// until the owning accumulation boundary.
 type ContextualCoercionResult<T> = Result<T, ExpressionConstructionFailure>;
 
 /// Validates and applies the contextual coercion policy for an explicit typed boundary.
@@ -54,10 +53,13 @@ pub(crate) fn coerce_expression_to_explicit_type_boundary(
         );
     }
 
-    Err(
-        CompilerDiagnostic::type_mismatch(expected_type_id, actual_type_id, mismatch_context, span)
-            .into(),
+    Err(types_borrows_targets::type_mismatch(
+        expected_type_id,
+        actual_type_id,
+        mismatch_context,
+        span,
     )
+    .into())
 }
 
 /// Applies contextual coercion to `expr` if the target type requires it.

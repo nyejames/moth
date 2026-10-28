@@ -16,7 +16,7 @@ use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, BorrowProblem, CallArgument, CallEffect, CallId, CallResultProvenance, Event,
     EventKind, OriginKind, PlaceId,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn execute_call_argument<'a>(
@@ -25,7 +25,7 @@ pub(super) fn execute_call_argument<'a>(
     call: CallId,
     index: u32,
     argument: &CallArgument,
-) -> Result<EventExecutionResult<'a>, CompilerError> {
+) -> Result<EventExecutionResult<'a>, InfrastructureFailure> {
     require_place(context.problem, argument.place, "call argument place")?;
     let use_row = require_use(context.problem, argument.use_id, "call argument")?;
     if use_row.point != event.point || use_row.place != argument.place {
@@ -108,7 +108,7 @@ pub(super) fn execute_call_effect<'a>(
     context: &mut OracleExecutionContext<'a, '_>,
     event: &Event,
     effect: &CallEffect,
-) -> Result<EventExecutionResult<'a>, CompilerError> {
+) -> Result<EventExecutionResult<'a>, InfrastructureFailure> {
     let problem = context.problem;
     let trace_index = context.trace_index;
     let bounds = context.bounds;
@@ -159,7 +159,7 @@ pub(super) fn execute_call_effect<'a>(
             )));
         }
 
-        // LEAVE-LOCAL: independent static four-way provenance dispatch is at boracle/origins.rs:1547.
+        // The independent static four-way provenance dispatch is at boracle/origins.rs:1547.
         // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
         let target = match provenance {
             CallResultProvenance::Fresh => {
@@ -300,7 +300,7 @@ fn resolve_alias_params_arguments<'a>(
     context: &mut OracleExecutionContext<'a, '_>,
     effect: &CallEffect,
     parameter_indices: &[usize],
-) -> Result<Result<Vec<RuntimeAccessTarget>, OracleLimitReason>, CompilerError> {
+) -> Result<Result<Vec<RuntimeAccessTarget>, OracleLimitReason>, InfrastructureFailure> {
     let problem = context.problem;
     let place_index = context.place_index;
     let bounds = context.bounds;
@@ -338,7 +338,7 @@ fn issue_call_result_provenance(
     event: &Event,
     result_place: PlaceId,
     source_targets: &[RuntimeAccessTarget],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for source_target in source_targets {
         let capability_id = context.state.issue_capability(
             AccessKind::Shared,
@@ -358,7 +358,7 @@ fn issue_call_result_provenance(
 fn verify_granular_arguments(
     problem: &BorrowProblem,
     effect: &CallEffect,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut found = vec![false; effect.arguments.len()];
     for event in problem.events() {
         let EventKind::CallArgument {

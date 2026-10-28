@@ -4,14 +4,20 @@
 //! WHY: call/return validation is a distinct frontend boundary with its own payload family.
 
 use super::{
-    DiagnosticRenderContext, closest_name_suggestion, diagnostic_type_name, named_value_or_default,
+    DiagnosticRenderContext, RenderedPayload, closest_name_suggestion, named_value_or_default,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidBuiltinCallView, InvalidCallShapeView, InvalidCastView, InvalidCopyTargetView,
+    InvalidFieldAccessView, InvalidMultiBindView, InvalidReceiverCallView, InvalidReturnShapeView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidAssignmentTargetView;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
     InvalidCastReason, InvalidCopyTargetReason, InvalidFieldAccessReason, InvalidMultiBindReason,
     InvalidReceiverCallReason, InvalidReturnShapeReason, ReceiverCallKind,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 /// Build a "call context" prefix that names the function being called when available.
@@ -150,6 +156,25 @@ pub(crate) fn invalid_call_shape_message(
     }
 }
 
+/// WHAT: renders call shape from its code, typed facts and code-specific string list.
+/// WHY: the code rebuilds the reason `invalid_call_shape_message` consumes.
+pub(crate) fn render_invalid_call_shape(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidCallShapeView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = calls_data::invalid_call_shape_reason(
+        view.reason,
+        view.parameter_name,
+        view.count,
+        diagnostic.string_ids(),
+    );
+    RenderedPayload {
+        message: invalid_call_shape_message(reason, view.callee_name, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
 /// Render the shared immutable-place mutable-access message.
 ///
 /// WHAT: used both for an immutable place passed without `~` and for an authored `~` on an
@@ -207,10 +232,25 @@ pub(crate) fn invalid_return_shape_message(reason: InvalidReturnShapeReason) -> 
     }
 }
 
+/// WHAT: renders return-shape diagnostics from their code and optional value counts.
+/// WHY: the row stores only the counts needed to rebuild the semantic reason.
+pub(crate) fn render_invalid_return_shape(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidReturnShapeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = view
+        .reason
+        .to_reason(view.expected_count, view.provided_count);
+    RenderedPayload {
+        message: invalid_return_shape_message(reason),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_assignment_target_message(
     reason: InvalidAssignmentTargetReason,
     target_name: Option<StringId>,
-    _target_type: Option<TypeId>,
     field_name: Option<StringId>,
     root_binding_name: Option<StringId>,
     context: DiagnosticRenderContext<'_>,
@@ -261,6 +301,23 @@ pub(crate) fn invalid_assignment_target_message(
         InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget => {
             "`~` is not written on assignment targets. Reassignment uses ordinary `=` and requires an already-mutable binding.".to_string()
         }
+    }
+}
+
+pub(crate) fn render_invalid_assignment_target(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidAssignmentTargetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_assignment_target_message(
+            facts.reason,
+            facts.target_name,
+            facts.field_name,
+            facts.root_binding_name,
+            context,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -380,18 +437,26 @@ pub(crate) fn invalid_builtin_call_message(
     }
 }
 
+/// WHAT: renders an invalid builtin call from its typed facts.
+/// WHY: the reason and optional builtin name are the complete inputs to `invalid_builtin_call_message`.
+pub(crate) fn render_invalid_builtin_call(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidBuiltinCallView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_builtin_call_message(view.reason, view.builtin_name, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_cast_message(
     reason: InvalidCastReason,
-    source_type: Option<TypeId>,
-    target_type: Option<TypeId>,
-    context: DiagnosticRenderContext<'_>,
+    source_type_name: Option<String>,
+    target_type_name: Option<String>,
 ) -> String {
-    let source = source_type
-        .map(|type_id| diagnostic_type_name(type_id, context))
-        .unwrap_or_else(|| "the source value".to_owned());
-    let target = target_type
-        .map(|type_id| diagnostic_type_name(type_id, context))
-        .unwrap_or_else(|| "the target type".to_owned());
+    let source = source_type_name.unwrap_or_else(|| "the source value".to_owned());
+    let target = target_type_name.unwrap_or_else(|| "the target type".to_owned());
 
     match reason {
         InvalidCastReason::MissingExplicitTarget => {
@@ -441,6 +506,30 @@ pub(crate) fn invalid_cast_message(
         InvalidCastReason::BuiltinCastFailedInConst => {
             "This builtin cast failed while evaluating a compile-time expression.".to_owned()
         }
+    }
+}
+
+/// WHAT: renders cast diagnostics from snapshot type displays.
+/// WHY: type names must remain valid after raw `TypeId`s are compacted.
+pub(crate) fn render_invalid_cast(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidCastView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let path_table = context.path_table();
+    let source_type_name = view.source_type.map(|type_id| {
+        diagnostic
+            .types()
+            .display_for_render(type_id, context.string_table, path_table)
+    });
+    let target_type_name = view.target_type.map(|type_id| {
+        diagnostic
+            .types()
+            .display_for_render(type_id, context.string_table, path_table)
+    });
+    RenderedPayload {
+        message: invalid_cast_message(view.reason, source_type_name, target_type_name),
+        guidance: Vec::new(),
     }
 }
 
@@ -541,6 +630,27 @@ pub(crate) fn invalid_receiver_call_message(
                 "{method_text} is provided by more than one generic bound for {receiver_type_text}. Add a more specific bound or rename one of the trait requirements."
             )
         }
+    }
+}
+
+/// WHAT: renders an invalid receiver call from its compact facts and optional binding name.
+/// WHY: `invalid_receiver_call_message` consumes these receiver-specific facts.
+pub(crate) fn render_invalid_receiver_call(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidReceiverCallView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let binding_name = calls_data::invalid_receiver_call_binding_name(diagnostic.string_ids());
+    RenderedPayload {
+        message: invalid_receiver_call_message(
+            view.reason,
+            view.receiver_type,
+            view.method_name,
+            view.receiver_kind,
+            binding_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -690,16 +800,28 @@ pub(crate) fn invalid_copy_target_message(reason: InvalidCopyTargetReason) -> St
     }
 }
 
+/// WHAT: renders an invalid copy target from its unit reason.
+/// WHY: the reason alone selects the message from `invalid_copy_target_message`.
+pub(crate) fn render_invalid_copy_target(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidCopyTargetView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_copy_target_message(view.reason),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_field_access_message(
     reason: InvalidFieldAccessReason,
     field_name: Option<StringId>,
-    receiver_type: Option<TypeId>,
+    receiver_type_name: Option<String>,
     known_fields: &[StringId],
-    context: DiagnosticRenderContext<'_>,
+    string_table: &dyn StringTableResolver,
 ) -> String {
-    let string_table = context.string_table;
     let field_text = named_value_or_default(field_name, string_table, "this field");
-    let receiver_text = receiver_type.map(|type_id| diagnostic_type_name(type_id, context));
+    let receiver_text = receiver_type_name;
 
     match reason {
         InvalidFieldAccessReason::ExpectedNameAfterDot => {
@@ -740,5 +862,47 @@ pub(crate) fn invalid_field_access_message(
                 None => format!("Property or method {field_text} not found."),
             }
         }
+    }
+}
+
+/// WHAT: renders field access from typed fields and the known-field string list.
+/// WHY: a type snapshot preserves the same display spelling after compaction.
+pub(crate) fn render_invalid_field_access(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidFieldAccessView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let receiver_type_name = view.receiver_type.map(|type_id| {
+        diagnostic
+            .types()
+            .display_for_render(type_id, context.string_table, context.path_table())
+    });
+    RenderedPayload {
+        message: invalid_field_access_message(
+            view.reason,
+            view.field_name,
+            receiver_type_name,
+            diagnostic.string_ids(),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an invalid multi-bind from its compact facts.
+/// WHY: the record stores the reason code and arity counts; the render rebuilds the reason
+/// `invalid_multi_bind_message` consumes.
+pub(crate) fn render_invalid_multi_bind(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidMultiBindView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_multi_bind_message(
+            facts.reason.to_reason(facts.expected, facts.found),
+            facts.target_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }

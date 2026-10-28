@@ -3,9 +3,9 @@
 //! WHAT: owns `then` value parsing, active value targets, all-path exit summaries
 //! and reachable produced-value traversal shared by catch handlers and value-producing
 //! control flow.
-//! WHY: catch-specific fallback parsing and terminal-only enforcement were catch-only
-//! artifacts; generalising them now keeps value-block syntax from duplicating the same
-//! arity, coercion and completeness logic.
+//! WHY: fallback parsing and terminal-only enforcement are shared by catch and value
+//!      blocks, so value-block syntax does not duplicate the same arity, coercion and
+//!      completeness logic.
 //!
 //! This module owns local value production only. It does not own:
 //! - result propagation (`!` and `return!`),

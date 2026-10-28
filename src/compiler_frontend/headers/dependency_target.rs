@@ -7,7 +7,8 @@
 //!      Independent prefix slices and extension lookups can disagree on malformed retained state.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::path::Path;
@@ -67,9 +68,10 @@ impl CheckedExternalProviderTarget {
     pub(crate) fn extension_spelling<'a>(
         &self,
         string_table: &'a StringTable,
-    ) -> Result<&'a str, CompilerError> {
+    ) -> Result<&'a str, InfrastructureFailure> {
         string_table.try_resolve(self.extension).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target has an invalid extension string id",
             )
         })
@@ -93,37 +95,45 @@ impl CheckedExternalProviderTarget {
         target: &DependencyTargetKind,
         path_fork: &PathInternerFork,
         string_table: &StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let DependencyTargetKind::ExternalProvider {
             prefix_component_count,
             extension,
         } = target
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target is attached to a source dependency",
             ));
         };
         if self.extension_id() != *extension {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target extension disagrees with its classification",
             ));
         }
 
         let path_depth = path_fork.try_depth(path).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target path is outside its owning path fork",
             )
         })?;
         let prefix_depth = path_fork.try_depth(self.prefix).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target prefix is outside its owning path fork",
             )
         })?;
         let prefix_len = usize::try_from(*prefix_component_count).map_err(|_| {
-            CompilerError::compiler_error("retained provider prefix count does not fit usize")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "retained provider prefix count does not fit usize",
+            )
         })?;
         if prefix_len == 0 {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained provider target has a zero prefix component count",
             ));
         }
@@ -137,7 +147,8 @@ impl CheckedExternalProviderTarget {
             .chain(prefix_components.iter())
             .any(|component| string_table.try_resolve(*component).is_none())
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target contains an invalid path component string id",
             ));
         }
@@ -146,14 +157,16 @@ impl CheckedExternalProviderTarget {
             || path_components.get(..prefix_len) != Some(prefix_components.as_slice())
             || path_components.get(prefix_len..) != Some(self.remaining_components.as_slice())
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target does not match its retained path",
             ));
         }
         if path_depth as usize != path_components.len()
             || prefix_depth as usize != prefix_components.len()
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target path depth disagrees with its retained components",
             ));
         }
@@ -161,19 +174,22 @@ impl CheckedExternalProviderTarget {
         let expected_raw_prefix =
             path_fork.render_portable(self.prefix, string_table, &mut raw_prefix_scratch);
         if expected_raw_prefix != self.raw_prefix {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target raw prefix disagrees with its path identity",
             ));
         }
         let extension_spelling = self.extension_spelling(string_table)?;
         let prefix_component =
             string_table.resolve(*prefix_components.last().ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "checked provider target prefix has no final component",
                 )
             })?);
         if explicit_non_source_extension(prefix_component) != Some(extension_spelling) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "checked provider target prefix does not end with its classified extension",
             ));
         }
@@ -192,7 +208,7 @@ pub(crate) fn checked_provider_target(
     target: &DependencyTargetKind,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-) -> Result<Option<CheckedExternalProviderTarget>, CompilerError> {
+) -> Result<Option<CheckedExternalProviderTarget>, InfrastructureFailure> {
     let DependencyTargetKind::ExternalProvider {
         prefix_component_count,
         extension,
@@ -215,36 +231,6 @@ pub(crate) fn checked_provider_target(
         extension: *extension,
         raw_prefix,
     }))
-}
-
-/// One decoded explicit-extension provider target.
-///
-/// WHAT: exposes the validated prefix as a `PathId` in the same fork plus the
-///       remaining provider-specific components and the interned extension whose
-///       spelling matches the prefix's last component.
-/// WHY: the legacy decoder remains available to focused malformed-state tests and compatibility
-///      construction, while prepared shells carry [`CheckedExternalProviderTarget`] directly.
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DecodedExternalProviderTarget<'a> {
-    prefix: PathId,
-    remaining_components: Vec<StringId>,
-    extension_spelling: &'a str,
-}
-
-#[cfg(test)]
-impl<'a> DecodedExternalProviderTarget<'a> {
-    pub(crate) fn prefix_path_id(&self) -> PathId {
-        self.prefix
-    }
-
-    pub(crate) fn remaining_components(&self) -> &[StringId] {
-        &self.remaining_components
-    }
-
-    pub(crate) fn extension_spelling(&self) -> &'a str {
-        self.extension_spelling
-    }
 }
 
 /// Classify one retained path as source or explicit-extension provider.
@@ -284,57 +270,36 @@ pub(crate) fn classify_dependency_target(
 /// WHAT: validates prefix bounds, looks up the retained extension and compares it with the
 ///       last prefix component. Source targets return `Ok(None)`.
 /// WHY: malformed retained classification is compiler corruption and must fail through
-///      `CompilerError` rather than looking like an ordinary non-provider dependency.
-#[cfg(test)]
-pub(crate) fn decode_dependency_target<'a>(
-    path: PathId,
-    target: &DependencyTargetKind,
-    path_fork: &PathInternerFork,
-    string_table: &'a StringTable,
-) -> Result<Option<DecodedExternalProviderTarget<'a>>, CompilerError> {
-    match target {
-        DependencyTargetKind::Source => Ok(None),
-        DependencyTargetKind::ExternalProvider {
-            prefix_component_count,
-            extension,
-        } => validate_external_provider_parts(
-            path,
-            *prefix_component_count,
-            *extension,
-            path_fork,
-            string_table,
-        )
-        .map(|(prefix, remaining_components, extension_spelling)| {
-            Some(DecodedExternalProviderTarget {
-                prefix,
-                remaining_components,
-                extension_spelling,
-            })
-        }),
-    }
-}
-
+///      `InfrastructureFailure` rather than looking like an ordinary non-provider dependency.
 fn validate_external_provider_parts<'a>(
     path: PathId,
     prefix_component_count: u32,
     extension: StringId,
     path_fork: &PathInternerFork,
     string_table: &'a StringTable,
-) -> Result<(PathId, Vec<StringId>, &'a str), CompilerError> {
+) -> Result<(PathId, Vec<StringId>, &'a str), InfrastructureFailure> {
     if prefix_component_count == 0 {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider target has a zero prefix component count",
         ));
     }
 
     let prefix_len = usize::try_from(prefix_component_count).map_err(|_| {
-        CompilerError::compiler_error("retained provider prefix count does not fit usize")
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "retained provider prefix count does not fit usize",
+        )
     })?;
     let depth = path_fork.try_depth(path).ok_or_else(|| {
-        CompilerError::compiler_error("retained provider path is outside its owning path fork")
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "retained provider path is outside its owning path fork",
+        )
     })? as usize;
     if prefix_len > depth {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider prefix count is outside the path",
         ));
     }
@@ -345,30 +310,35 @@ fn validate_external_provider_parts<'a>(
         .iter()
         .any(|component| string_table.try_resolve(*component).is_none())
     {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider path contains an invalid component string id",
         ));
     }
     if prefix_len > components.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider prefix count is outside the path",
         ));
     }
 
     let Some(extension_spelling) = string_table.try_resolve(extension) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider target has an invalid extension string id",
         ));
     };
 
     let prefix_component = string_table.resolve(components[prefix_len - 1]);
     let Some(component_extension) = explicit_non_source_extension(prefix_component) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider prefix does not end with an explicit non-source extension",
         ));
     };
     if component_extension != extension_spelling {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained provider extension does not match the prefix component",
         ));
     }
@@ -376,7 +346,10 @@ fn validate_external_provider_parts<'a>(
     let mut prefix = path;
     for _ in 0..(depth - prefix_len) {
         prefix = path_fork.try_parent(prefix).ok_or_else(|| {
-            CompilerError::compiler_error("retained provider path is missing a parent link")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "retained provider path is missing a parent link",
+            )
         })?;
     }
 

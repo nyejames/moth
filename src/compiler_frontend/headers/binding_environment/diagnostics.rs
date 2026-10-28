@@ -5,8 +5,9 @@
 //! easy to update wording or metadata across all dependency-related failures.
 //! MUST NOT: contain business logic for resolution or registration.
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -20,10 +21,10 @@ pub(super) fn dependency_name_collision(
     local_name: StringId,
     span: Option<SourceSpan>,
     previous_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let primary_span = span.or(previous_span);
     let previous_span = span.and(previous_span);
-    CompilerDiagnostic::import_name_collision(local_name, previous_span, primary_span)
+    imports::import_name_collision(local_name, previous_span, primary_span)
 }
 
 /// Diagnostic when a dependency through a public surface resolves to a symbol that the surface does
@@ -33,8 +34,8 @@ pub(super) fn not_exported_by_public_surface(
     public_surface_name: StringId,
     public_surface_type: ImportPublicSurfaceType,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::not_exported_by_public_surface(
+) -> DiagnosticDraft {
+    imports::not_exported_by_public_surface(
         *dependency_path,
         public_surface_name,
         public_surface_type,
@@ -53,7 +54,7 @@ pub(crate) fn provider_public_surface_diagnostic(
     interface: &PublicSemanticInterface,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let module_path = interface.module_origin.logical_module_path();
     let (surface_name, surface_type) = module_path
         .rsplit('/')
@@ -76,37 +77,37 @@ pub(crate) fn provider_public_surface_diagnostic(
 pub(super) fn direct_special_file_dependency(
     path: &PathId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::direct_special_file_import(*path, span)
+) -> DiagnosticDraft {
+    imports::direct_special_file_import(*path, span)
 }
 
 /// Diagnostic when a dependency path matches a source file but not a symbol.
-pub(super) fn bare_file_dependency(path: &PathId, span: Option<SourceSpan>) -> CompilerDiagnostic {
-    CompilerDiagnostic::bare_file_import(*path, span)
+pub(super) fn bare_file_dependency(path: &PathId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    imports::bare_file_import(*path, span)
 }
 
 /// Diagnostic when a dependency path cannot be resolved to any known source or external symbol.
 pub(super) fn missing_dependency_target(
     path: &PathId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::missing_import_target(*path, span)
+) -> DiagnosticDraft {
+    imports::missing_import_target(*path, span)
 }
 
 /// Diagnostic when a direct source dependency targets a symbol that is not exported.
 pub(super) fn not_exported_by_source_file(
     symbol_path: &PathId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::not_exported_by_source_file(*symbol_path, span)
+) -> DiagnosticDraft {
+    imports::not_exported_by_source_file(*symbol_path, span)
 }
 
 /// Diagnostic when a dependency path matches multiple source symbols ambiguously.
 pub(super) fn ambiguous_dependency_target(
     path: &PathId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::ambiguous_import_target(*path, span)
+) -> DiagnosticDraft {
+    imports::ambiguous_import_target(*path, span)
 }
 
 /// Diagnostic when a virtual package exists but the requested symbol is not found.
@@ -114,22 +115,22 @@ pub(super) fn missing_package_symbol(
     symbol: StringId,
     package_path: StringId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::missing_package_symbol(symbol, package_path, span)
+) -> DiagnosticDraft {
+    imports::missing_package_symbol(symbol, package_path, span)
 }
 
 /// Diagnostic when a module has no public export and an external consumer tries to bind from it.
 pub(super) fn missing_module_root_public_surface(
     symbol_path: &PathId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::missing_module_root_public_surface(*symbol_path, span)
+) -> DiagnosticDraft {
+    imports::missing_module_root_public_surface(*symbol_path, span)
 }
 
 /// Diagnostic when a dependency targets a symbol in another module root that is not exported by that module's public export.
 pub(super) fn cross_module_dependency_not_exported(
     symbol_path: &PathId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::cross_module_import_not_exported(*symbol_path, span)
+) -> DiagnosticDraft {
+    imports::cross_module_import_not_exported(*symbol_path, span)
 }

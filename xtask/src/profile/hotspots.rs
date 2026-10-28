@@ -197,7 +197,6 @@ pub(crate) fn extract_hotspots(
         })
         .collect();
 
-    // Apply filter-mode thresholds.
     let min_inclusive = filter.minimum_inclusive_pct();
     let min_self = filter.minimum_self_pct();
     let include_edges = filter.include_edges();
@@ -238,7 +237,6 @@ pub(crate) fn extract_hotspots(
             .then(b.self_pct.total_cmp(&a.self_pct))
     });
 
-    // Apply the hot function limit.
     let limit = filter.hot_function_limit();
     candidates.truncate(limit);
 

@@ -7,7 +7,7 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
+//! `InfrastructureFailure::hir_transformation` in this module means an internal
 //! HIR transformation or lowering invariant failure only.
 
 use crate::compiler_frontend::ast::expressions::call_argument::CallPassingMode;
@@ -15,6 +15,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ArgumentListView, ArgumentView, ExpressionView,
 };
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -28,7 +30,6 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 use super::{LoweredExpression, LoweredResults};
 
@@ -80,12 +81,12 @@ impl<'a> HirBuilder<'a> {
                 arg_index + usize::from(receiver.is_some()),
             )?;
             for prelude_statement in lowered.prelude {
-                self.emit_statement_to_current_block(prelude_statement, span)?;
+                self.emit_statement_to_current_block(prelude_statement)?;
             }
             lowered_args.push(lowered.value);
         }
 
-        let result_type = self.lower_call_result_type(result_type_ids, span)?;
+        let result_type = self.lower_call_result_type(result_type_ids)?;
         let result_local = self.allocate_temp_local(result_type, None)?;
         let args = self
             .module
@@ -102,9 +103,9 @@ impl<'a> HirBuilder<'a> {
             span: *span,
         };
         self.side_table.map_statement(*span, &call_statement);
-        self.emit_statement_to_current_block(call_statement, span)?;
+        self.emit_statement_to_current_block(call_statement)?;
 
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let no_span = None;
         let raw_value =
             self.make_local_load_expression(result_local, result_type, &no_span, region)?;
@@ -134,12 +135,10 @@ impl<'a> HirBuilder<'a> {
         let mut prelude = Vec::new();
         let hir_op = hir_map_op_from_builtin(op);
         if receiver_requires_mutable != hir_op.requires_mutable_receiver() {
-            return_hir_transformation_error!(
-                format!(
-                    "Map builtin {:?} reached HIR lowering with inconsistent receiver mutability",
-                    op
-                ),
-                self.hir_error_location(span)
+            crate::compiler_bug!(
+                CompilerStage::HirConstruction,
+                "Map builtin {:?} reached HIR lowering with inconsistent receiver mutability",
+                op,
             );
         }
 
@@ -148,7 +147,7 @@ impl<'a> HirBuilder<'a> {
         let mut lowered_args = Vec::with_capacity(args.len());
         for (arg_index, argument) in args.iter().enumerate() {
             if self.expression_needs_current_block_lowering(argument.value()) {
-                self.flush_pending_call_prelude(&mut prelude, span)?;
+                self.flush_pending_call_prelude(&mut prelude)?;
             }
             let lowered = self.lower_call_argument_value(argument, span, arg_index)?;
             prelude.extend(lowered.prelude);
@@ -156,8 +155,8 @@ impl<'a> HirBuilder<'a> {
         }
 
         let statement_id = self.allocate_node_id();
-        let region = self.current_region_or_error(span)?;
-        let result_type = self.lower_call_result_type(result_type_ids, span)?;
+        let region = self.current_region_or_error()?;
+        let result_type = self.lower_call_result_type(result_type_ids)?;
 
         let result = if result_type == self.type_environment.builtins().none {
             None
@@ -211,7 +210,7 @@ impl<'a> HirBuilder<'a> {
         }
         for (arg_index, argument) in args.iter().enumerate() {
             if self.expression_needs_current_block_lowering(argument.value()) {
-                self.flush_pending_call_prelude(&mut prelude, span)?;
+                self.flush_pending_call_prelude(&mut prelude)?;
             }
             let lowered = self.lower_call_argument_value(
                 argument,
@@ -233,9 +232,9 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<LoweredResults, HirConstructionFailure> {
         let statement_id = self.allocate_node_id();
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let is_external = matches!(target, CallTarget::External(_));
-        let types = self.lower_call_result_types(result_type_ids, span)?;
+        let types = self.lower_call_result_types(result_type_ids)?;
         if self.call_target_requires_result_projection(&target) {
             self.module.call_result_contracts.insert(
                 target.clone(),
@@ -273,26 +272,24 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_call_result_types(
         &mut self,
         result_type_ids: &[FrontendTypeId],
-        span: &Option<SourceSpan>,
     ) -> Result<Vec<TypeId>, HirConstructionFailure> {
         result_type_ids
             .iter()
-            .map(|ty| self.lower_type_id(*ty, span))
+            .map(|ty| self.lower_type_id(*ty))
             .collect()
     }
 
     pub(super) fn lower_call_result_type(
         &mut self,
         result_type_ids: &[FrontendTypeId],
-        span: &Option<SourceSpan>,
     ) -> Result<TypeId, HirConstructionFailure> {
         match result_type_ids {
             [] => Ok(self.type_environment.builtins().none),
-            [ty] => self.lower_type_id(*ty, span),
-            _ => return_hir_transformation_error!(
+            [ty] => self.lower_type_id(*ty),
+            _ => Err(InfrastructureFailure::hir_transformation(
                 "Multiple slots reached scalar operation",
-                self.hir_error_location(span)
-            ),
+            )
+            .into()),
         }
     }
 
@@ -339,7 +336,7 @@ impl<'a> HirBuilder<'a> {
             .map_statement(metadata.span, &write_statement);
         prelude.push(write_statement);
 
-        let region = self.current_region_or_error(&metadata.span)?;
+        let region = self.current_region_or_error()?;
         let no_span = None;
         let value = self.make_expression(
             &no_span,
@@ -355,10 +352,9 @@ impl<'a> HirBuilder<'a> {
     fn flush_pending_call_prelude(
         &mut self,
         prelude: &mut Vec<HirStatement>,
-        span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         for statement in prelude.drain(..) {
-            self.emit_statement_to_current_block(statement, span)?;
+            self.emit_statement_to_current_block(statement)?;
         }
 
         Ok(())

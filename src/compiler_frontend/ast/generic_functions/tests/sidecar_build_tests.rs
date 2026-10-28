@@ -129,7 +129,8 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
                 strings.intern(&format!("generated-padding-{index}")),
             );
     }
-    Rc::make_mut(&mut generated.lookups)
+    Rc::get_mut(&mut generated.lookups)
+        .expect("fresh generated lookup owner should be unique")
         .generic_function_templates_by_path
         .clear();
     let requester_contract = requester

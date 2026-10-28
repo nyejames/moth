@@ -6,7 +6,7 @@
 //! would make the retry report a false cycle, so the retry has to reproduce the first diagnostic.
 
 use super::HirValidator;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
@@ -47,11 +47,17 @@ fn validator_clears_consecutive_not_rows_after_dangling_child_error() {
         .validate_expression(expression_id, None)
         .expect_err("retry should reach the dangling child after clearing every entered Not row");
 
-    assert_eq!(first_error.error_type, ErrorType::HirTransformation);
-    assert!(first_error.msg.contains("Invalid expression id"));
-    assert_eq!(second_error.error_type, ErrorType::HirTransformation);
-    assert!(second_error.msg.contains("Invalid expression id"));
-    assert_eq!(second_error.msg, first_error.msg);
+    assert_eq!(
+        first_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
+    assert!(first_error.message.contains("Invalid expression id"));
+    assert_eq!(
+        second_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
+    assert!(second_error.message.contains("Invalid expression id"));
+    assert_eq!(second_error.message, first_error.message);
 }
 
 #[test]
@@ -94,16 +100,22 @@ fn validator_rejects_self_cycle_through_range_row() {
         .validate_expression(range_id, None)
         .expect_err("retry should report the same cycle");
 
-    assert_eq!(first_error.error_type, ErrorType::HirTransformation);
+    assert_eq!(
+        first_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
     assert!(
         first_error
-            .msg
+            .message
             .contains("HIR expression graph contains a cycle")
     );
-    assert_eq!(second_error.error_type, ErrorType::HirTransformation);
+    assert_eq!(
+        second_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
     assert!(
         second_error
-            .msg
+            .message
             .contains("HIR expression graph contains a cycle")
     );
 }
@@ -158,9 +170,12 @@ fn validator_clears_expression_marks_after_error_in_deep_walk() {
         .validate_expression(value, None)
         .expect_err("retry should reach the same dangling Range start");
 
-    assert_eq!(first_error.error_type, ErrorType::HirTransformation);
-    assert!(first_error.msg.contains("Invalid expression id"));
-    assert_eq!(second_error.msg, first_error.msg);
+    assert_eq!(
+        first_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
+    assert!(first_error.message.contains("Invalid expression id"));
+    assert_eq!(second_error.message, first_error.message);
 }
 
 #[test]
@@ -216,11 +231,14 @@ fn validator_retry_reports_same_post_check_error_after_error_exit() {
         .validate_expression(value, None)
         .expect_err("retry should reject the same Option payload index");
 
-    assert_eq!(first_error.error_type, ErrorType::HirTransformation);
+    assert_eq!(
+        first_error.kind,
+        InfrastructureFailureKind::HirTransformation
+    );
     assert!(
         first_error
-            .msg
+            .message
             .contains("VariantPayloadGet variant index 5 out of range for Option")
     );
-    assert_eq!(second_error.msg, first_error.msg);
+    assert_eq!(second_error.message, first_error.message);
 }

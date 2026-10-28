@@ -3,6 +3,7 @@
 //! WHAT: compiles project modules through the frontend pipeline for single-file and directory entries.
 //! WHY: keeps public entry contracts and high-level boundary orchestration here while focused
 //!      compilation internals live in private child modules.
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::{timing_scope, timing_scope_attributed};
 
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
@@ -16,10 +17,22 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
+    BoundaryAccumulator, SuccessfulWarningBoundary, SuccessfulWarningPosition,
+    SuccessfulWarningSink,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
+};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -27,11 +40,11 @@ use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError,
+    SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError, SourceId,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
+use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::BuilderSurface;
@@ -44,7 +57,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::FrontendCompilationMode;
 use super::compiled_boundary::{
     CompiledSourcePackage, CompletedSourcePackageRegistry, PackageBoundaryId,
-    ProjectFrontendCompilation, TransientPremergeBatch,
+    ProjectFrontendCompilation, TransientPreparedBatch,
 };
 use super::config_boundary;
 use super::generated_store::BoundaryGeneratedFunctionStore;
@@ -91,7 +104,7 @@ pub(super) struct ModuleBoundaryPublication<'a> {
 ///      materialisation from partially publishing module, generated or resource state.
 pub(super) fn publish_module_and_generated(
     publication: ModuleBoundaryPublication<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let ModuleBoundaryPublication {
         modules,
         generated,
@@ -129,7 +142,7 @@ pub(super) fn publish_module_and_generated(
 ///      merge-remap-publish tail shared by canonical directory and synthetic single-file lanes.
 #[allow(
     clippy::too_many_arguments,
-    reason = "publication keeps mutable module, generated-function, materialisation and resource owners, module identity and origin, the compiled result, string/path base lengths and mutable boundary string/path tables separate"
+    reason = "publication keeps mutable module, generated-function, materialisation and resource owners, module identity and origin, the compiled result and transient warning bags, string/path base lengths, the command warning sink, and mutable boundary string/path tables separate"
 )]
 pub(super) fn publish_compiled_module(
     modules: &mut ModuleArtifactStore,
@@ -139,11 +152,22 @@ pub(super) fn publish_compiled_module(
     module_id: ModuleId,
     expected_origin: &StableModuleOriginIdentity,
     compiled: ModuleSemanticResult,
+    mut warnings: DiagnosticBag,
+    mut generated_warning_bags: Vec<DiagnosticBag>,
     string_table_base_len: usize,
     path_base_len: usize,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<(), PremergeFailure> {
+    warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
+    warning_boundary: SuccessfulWarningBoundary,
+) -> Result<(), PreparedFailure> {
+    if compiled.generated_delta.records().len() != generated_warning_bags.len() {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            "generated sidecar warning count disagrees with completed records",
+        )
+        .into());
+    }
     let remap = string_table.merge_delta_from(&compiled.string_table, string_table_base_len);
     debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
     // Authored exhaustion during module publication is a deterministic source-capacity
@@ -153,16 +177,25 @@ pub(super) fn publish_compiled_module(
         .merge_delta_from(&compiled.path_fork, &remap)
         .map_err(|error| match error {
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(
+                let batch = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
                         SourceSpanCapacityResource::LogicalPath,
-                    ),
-                    std::mem::take(string_table),
-                ))
+                        None,
+                    )),
+                    string_table.take_for_handoff(),
+                    Some(&compiled.module.executable.type_environment),
+                    None,
+                );
+                PreparedFailure::Diagnosed(batch)
             }
-            error => PremergeFailure::Infrastructure(
-                CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
-                    .into(),
+            error => PreparedFailure::Infrastructure(
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!("module path merge failed: {error:?}"),
+                )
+                .into(),
             ),
         })?;
     let ModuleSemanticResult {
@@ -173,18 +206,60 @@ pub(super) fn publish_compiled_module(
         path_fork: _,
         public_interface,
     } = compiled;
-    // Path IDs become boundary identities at this merge point. The executable lanes keep their
-    // construction placeholders; the single boundary-owned path table is installed once after
-    // every canonical publication completes, so no module publishes a full table clone.
-    // Published templates retain their issuing identity tables only through the boundary
-    // install tail, which pairs one final table with one frozen requester-domain string table.
-    if !remap.is_identity() {
-        module.remap_string_ids(&remap);
-        generated_delta.remap_string_ids(&remap);
-    }
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
         generated_delta.remap_path_ids(&path_remap);
+        warnings.remap_path_ids(&path_remap);
+        for warning_bag in &mut generated_warning_bags {
+            warning_bag.remap_path_ids(&path_remap);
+        }
+    }
+    let mut module_warning_batch = None;
+    let mut sidecar_warning_batches = Vec::new();
+    if warning_sink.is_some() {
+        let module_warnings = warnings.into_diagnostics();
+        let generated_records = generated_delta.into_records();
+        let sidecar_publication_base = generated.published_record_count();
+        // `merge_delta_from` has already rebased local strings into the command-owned root table.
+        // Capture typed facts while each owning environment is live, then stage by module and
+        // sidecar publication order so task completion order cannot affect report bytes.
+        let capture_rebased_warnings = |diagnostics, environment: &TypeEnvironment| {
+            let mut batch = PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from_diagnostics(diagnostics),
+                StringTable::empty_unallocated(),
+                Some(environment),
+                None,
+            );
+            batch.rebase_strings(&remap);
+            batch
+        };
+        module_warning_batch = (!module_warnings.is_empty()).then(|| {
+            capture_rebased_warnings(module_warnings, &module.executable.type_environment)
+        });
+        for (index, (record, warning_bag)) in generated_records
+            .iter()
+            .zip(generated_warning_bags)
+            .enumerate()
+        {
+            let diagnostics = warning_bag.into_diagnostics();
+            if !diagnostics.is_empty() {
+                sidecar_warning_batches.push((
+                    sidecar_publication_base + index,
+                    capture_rebased_warnings(
+                        diagnostics,
+                        &record.sidecar.module.executable.type_environment,
+                    ),
+                ));
+            }
+        }
+        generated_delta = GeneratedFunctionDelta::from_records(generated_records);
+    }
+    // The executable lanes keep their construction placeholders; the single boundary-owned path
+    // table is installed once after canonical publication. Prepared warning facts already use
+    // root StringIds and their empty batch tables avoid another merge at the render boundary.
+    if !remap.is_identity() {
+        module.remap_string_ids(&remap);
+        generated_delta.remap_string_ids(&remap);
     }
     publish_module_and_generated(ModuleBoundaryPublication {
         modules,
@@ -200,7 +275,24 @@ pub(super) fn publish_compiled_module(
         generated_delta,
         resource_source_associations,
     })
-    .map_err(PremergeFailure::from)
+    .map_err(PreparedFailure::from)?;
+    if let Some(warning_sink) = warning_sink {
+        if let Some(batch) = module_warning_batch {
+            warning_sink.append(
+                warning_boundary,
+                SuccessfulWarningPosition::BaseModule(module_id.index()),
+                batch,
+            );
+        }
+        for (publication_index, batch) in sidecar_warning_batches {
+            warning_sink.append(
+                warning_boundary,
+                SuccessfulWarningPosition::GeneratedSidecar(publication_index),
+                batch,
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Add one newly published module's generic templates to the boundary materialisation registry.
@@ -211,7 +303,7 @@ pub(super) fn publish_compiled_module(
 fn publish_materialisation_templates(
     materialisations: &mut ProviderMaterialisationRegistry,
     artifact: &CompiledModuleArtifact,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(context) = artifact.module.metadata.materialisation_context.as_ref() else {
         return Ok(());
     };
@@ -225,7 +317,7 @@ fn publish_materialisation_templates(
 ///      packages finished before this boundary started.
 fn seed_completed_package_materialisations(
     completed_packages: &CompletedSourcePackageRegistry,
-) -> Result<ProviderMaterialisationRegistry, CompilerError> {
+) -> Result<ProviderMaterialisationRegistry, InfrastructureFailure> {
     let mut registry = ProviderMaterialisationRegistry::default();
     let mut rows = Vec::new();
     for (identity, location) in completed_packages.materialisation_locations() {
@@ -233,7 +325,7 @@ fn seed_completed_package_materialisations(
         let context = package
             .boundary
             .modules
-            .materialisation_context_at(location.location)?;
+            .materialisation_context_at(location.location);
         rows.push((
             identity.clone(),
             Arc::clone(context),
@@ -274,6 +366,7 @@ pub(super) struct SourcePackageModuleInventory {
     path_interner: PathInternerBuilder,
     graph: ProjectModuleGraph,
     schedule: module_inventory::ModuleCompilationSchedule,
+    selected_source_ids: Vec<SourceId>,
     /// Canonical source facts merged before transient jobs fork their string-table base.
     canonical_source_facts: Vec<BuildConfigContractFact>,
     #[cfg(feature = "timers")]
@@ -298,113 +391,211 @@ struct SourcePackageCheckOnlyInventory {
     build_config_values: ResolvedBuildConfigMap,
     /// Canonical batches retained until the package source finalizes and converts each
     /// batch exactly once with its snapshot.
-    batches: Vec<PremergeDiagnosticBatch>,
+    batches: Vec<PreparedDiagnosticBatch>,
 }
 
 /// Typed boundary-orchestration failure retaining its source owner.
 ///
-/// WHAT: pairs the premerge lane with the finished package database when the failure is
-///       package-scoped, so the single public tail can attach the correct snapshot once.
-/// WHY: package failures must render against their own snapshot while project failures render
-///      against the project database finalized by the outer tail; carrying the owner here keeps
-///      every intermediate site typed until that deliberate final conversion.
+/// The terminal source owner is attached after finalization, when these prepared failures can be
+/// paired with the database that owns their spans. Every failure belongs to that owner and is
+/// reported in order.
 pub(super) struct BoundaryPremergeFailure {
-    pub(super) failure: Box<PremergeFailure>,
-    pub(super) package_source: Option<Box<SourceDatabase>>,
+    failures: Vec<PreparedFailure>,
+    package_source: Option<Box<SourceDatabase>>,
 }
 
 impl BoundaryPremergeFailure {
-    pub(super) fn project(failure: PremergeFailure) -> Self {
+    pub(super) fn project(failures: Vec<PreparedFailure>) -> Self {
         Self {
-            failure: Box::new(failure),
+            failures,
             package_source: None,
         }
     }
 
-    pub(super) fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
+    pub(super) fn package(failures: Vec<PreparedFailure>, source: SourceDatabase) -> Self {
         Self {
-            failure: Box::new(failure),
+            failures,
             package_source: Some(Box::new(source)),
         }
     }
 }
 
-impl From<PremergeFailure> for BoundaryPremergeFailure {
-    fn from(failure: PremergeFailure) -> Self {
-        Self::project(failure)
+impl From<PreparedFailure> for BoundaryPremergeFailure {
+    fn from(failure: PreparedFailure) -> Self {
+        Self::project(vec![failure])
     }
 }
 
-impl From<CompilerError> for BoundaryPremergeFailure {
-    fn from(error: CompilerError) -> Self {
-        Self::project(PremergeFailure::from(error))
+impl From<InfrastructureFailure> for BoundaryPremergeFailure {
+    fn from(error: InfrastructureFailure) -> Self {
+        Self::project(vec![PreparedFailure::from(error)])
     }
 }
 
 impl From<SourceDatabaseError> for BoundaryPremergeFailure {
     fn from(error: SourceDatabaseError) -> Self {
-        match error {
-            SourceDatabaseError::Capacity(capacity) => Self::project(PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                    StringTable::new(),
-                ),
-            )),
-            SourceDatabaseError::Infrastructure(error) => {
-                Self::project(PremergeFailure::from(error))
-            }
+        Self::from(PreparedFailure::from(error))
+    }
+}
+
+fn append_prepared_failure(
+    accumulator: &mut BoundaryAccumulator,
+    failure: PreparedFailure,
+    source: Option<Arc<SourceDatabase>>,
+) {
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, source.map(|source| (source, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors);
         }
     }
 }
 
-// NOTE: no `From<CompilerMessages>` here by design. Stage 0 stays in the typed premerge lane;
-// the public tail owns the single final vessel conversion.
+/// Convert one typed boundary failure after its last source owner has finalized.
+pub(super) fn premerge_failure_to_reports(
+    failure: BoundaryPremergeFailure,
+    warning_owner: &mut BoundaryAccumulator,
+    project_source: Option<Arc<SourceDatabase>>,
+) -> Result<DiagnosticReportSet, InfrastructureErrors> {
+    let BoundaryPremergeFailure {
+        failures,
+        package_source,
+    } = failure;
+    let package_source = package_source.map(|source| Arc::new(*source));
+    let failure_source = package_source.or_else(|| project_source.as_ref().map(Arc::clone));
+    warning_owner.discard_successful_warnings();
+    let mut accumulator = std::mem::replace(warning_owner, BoundaryAccumulator::new());
+    if let Some(source) = project_source {
+        accumulator.set_project_source_database(source);
+    }
+    for failure in failures {
+        append_prepared_failure(&mut accumulator, failure, failure_source.clone());
+    }
+    // The accumulator must own the only source handles before it unwraps its source rows.
+    drop(failure_source);
+    accumulator.finish(InstallMode::Unfrozen)
+}
+/// Append a boundary-wide finish cause, giving infrastructure precedence over diagnostics.
+///
+/// WHAT: drops the boundary's diagnosed batches and appends the finish cause after its existing
+///       infrastructure causes.
+/// WHY: once infrastructure exists the accumulator reports infrastructure alone, so a diagnosed
+///      batch cannot appear beside it.
+pub(super) fn append_boundary_finish_failure(
+    mut failure: BoundaryPremergeFailure,
+    finish_error: InfrastructureFailure,
+) -> BoundaryPremergeFailure {
+    failure
+        .failures
+        .retain(|entry| matches!(entry, PreparedFailure::Infrastructure(_)));
+    failure.failures.push(PreparedFailure::from(finish_error));
+    failure
+}
+
+// Intermediate orchestration stays typed until the terminal wrapper has finalized the relevant
+// source owner. That wrapper returns the `CompilationResult` with its frozen report set.
 
 /// Finish a package source owner beside a typed failure.
 ///
 /// WHAT: moves the builder's finished database onto a package-scoped failure. When
-///       finalization itself fails there is no snapshot to attach, so the original failure
-///       stays authoritative and the finish failure is surfaced deterministically beside it:
-///       a diagnosed batch keeps its diagnostics and table by move and carries the finish
-///       failure on the mixed outer infrastructure lane, while an infrastructure aggregate
-///       appends the finish cause with its own type, message and metadata unchanged.
-/// WHY: the builder is consumed by the failed finish, yet the original failure still owns
-///      diagnostics and tables no later stage can rebuild. Dropping either side would lose
-///      the user's failure or the freeze failure silently; both stay observable in the one
-///      project-scoped failure without cloning any diagnostic batch or string table.
+///       finalization itself fails there is no snapshot to attach, so the infrastructure failure
+///       takes precedence: a diagnosed batch and its table are dropped, while an existing
+///       infrastructure aggregate retains its causes and appends the finish failure.
+/// WHY: the builder is consumed by the failed finish, so no diagnostic snapshot can be trusted
+///      for the result. Returning infrastructure directly preserves all operational causes
+///      without cloning any diagnostic batch or string table.
 fn finalize_package_failure(
-    failure: PremergeFailure,
-    builder: SourceDatabaseBuilder,
+    failure: PreparedFailure,
+    mut builder: SourceDatabaseBuilder,
 ) -> BoundaryPremergeFailure {
+    if let Err(assembly_error) = builder.assemble_finalized_tables() {
+        let failure = failure.with_infrastructure_cause(assembly_error);
+        return BoundaryPremergeFailure::project(vec![failure]);
+    }
     match builder.finish() {
-        Ok(source) => BoundaryPremergeFailure::package(failure, source),
+        Ok(source) => BoundaryPremergeFailure::package(vec![failure], source),
         Err(finish_error) => {
-            BoundaryPremergeFailure::project(append_finish_failure(failure, finish_error))
+            let failure = failure.with_infrastructure_cause(finish_error);
+            BoundaryPremergeFailure::project(vec![failure])
         }
     }
 }
-/// Append a source-finalization cause without replacing or rewriting earlier failures.
+
+/// Finalize any loaded source builders not already frozen by their owning preparation outcome.
 ///
-/// The builder is consumed by a failed finish, but the original diagnostic batch and every
-/// infrastructure cause still belong to the aborted compilation and must reach its final tail.
-pub(super) fn append_finish_failure(
-    failure: PremergeFailure,
-    finish_error: CompilerError,
-) -> PremergeFailure {
-    match failure {
-        PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
-            batch,
-            error: finish_error.into(),
-        },
-        PremergeFailure::Mixed { batch, mut error } => {
-            error.push(finish_error);
-            PremergeFailure::Mixed { batch, error }
+/// Candidate identities include registered but unselected records, so only sources whose retained
+/// snapshots exist have a span table to finalize. The source-set combines module candidates with
+/// selected content sources that are not module candidates.
+fn finalize_schedule_source_spans(
+    source_files: &mut SourceDatabaseBuilder,
+    schedule: Option<&module_inventory::ModuleCompilationSchedule>,
+    selected_source_ids: &[SourceId],
+) -> Result<(), InfrastructureFailure> {
+    let candidate_source_ids = schedule
+        .into_iter()
+        .flat_map(module_inventory::ModuleCompilationSchedule::candidate_source_ids)
+        .chain(selected_source_ids.iter().copied());
+
+    for source_id in candidate_source_ids {
+        if source_files.sources().retained_text(source_id).is_none()
+            || source_files.is_source_finalized(source_id)?
+        {
+            continue;
         }
-        PremergeFailure::Infrastructure(mut errors) => {
-            errors.push(finish_error);
-            PremergeFailure::Infrastructure(errors)
+        source_files.finish_source(source_id)?;
+    }
+    Ok(())
+}
+
+fn finalize_remaining_source_package_inventories(
+    mut failure: BoundaryPremergeFailure,
+    inventories: Vec<SourcePackageModuleInventory>,
+) -> BoundaryPremergeFailure {
+    for mut inventory in inventories {
+        if let Err(error) = finalize_schedule_source_spans(
+            &mut inventory.source_files,
+            Some(&inventory.schedule),
+            &inventory.selected_source_ids,
+        ) {
+            failure = append_boundary_finish_failure(failure, error);
+            continue;
+        }
+        if let Err(error) = inventory.source_files.assemble_finalized_tables() {
+            failure = append_boundary_finish_failure(failure, error);
+            continue;
+        }
+        if let Err(error) = inventory.source_files.finish() {
+            failure = append_boundary_finish_failure(failure, error);
         }
     }
+    failure
+}
+
+pub(super) fn finalize_source_package_inventories(
+    inventories: &mut Vec<SourcePackageModuleInventory>,
+) -> Result<(), BoundaryPremergeFailure> {
+    for index in 0..inventories.len() {
+        let finalization = {
+            let inventory = &mut inventories[index];
+            finalize_schedule_source_spans(
+                &mut inventory.source_files,
+                Some(&inventory.schedule),
+                &inventory.selected_source_ids,
+            )
+        };
+        if let Err(error) = finalization {
+            let inventory = inventories.swap_remove(index);
+            let failure =
+                finalize_package_failure(PreparedFailure::from(error), inventory.source_files);
+            return Err(finalize_remaining_source_package_inventories(
+                failure,
+                std::mem::take(inventories),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Index every resolved provider edge once by consumer module and retained dependency shell.
@@ -417,49 +608,52 @@ pub(super) fn append_finish_failure(
 ///       provider surface, so the shell is the complete join identity.
 pub(crate) fn build_provider_binding_index(
     provider_bindings: &[ResolvedDependencyEdge],
-) -> Result<FxHashMap<(ModuleId, DependencyShellId), usize>, CompilerError> {
+) -> FxHashMap<(ModuleId, DependencyShellId), usize> {
     let mut index = FxHashMap::default();
     for (binding_index, binding) in provider_bindings.iter().enumerate() {
         let shell_id = binding.dependency_shell_id;
         let key = (binding.consumer_module_id, shell_id);
         if index.insert(key, binding_index).is_some() {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "ModuleId {} resolved dependency shell {:?} to more than one provider edge",
                 binding.consumer_module_id.index(),
                 shell_id
-            )));
+            );
         }
     }
 
-    Ok(index)
+    index
 }
 
 /// Index every resolved source-package dependency once by consumer module and retained shell.
 pub(crate) fn build_source_package_dependency_index(
     provider_binding_index: &FxHashMap<(ModuleId, DependencyShellId), usize>,
     source_package_dependencies: &[ResolvedSourcePackageDependency],
-) -> Result<FxHashMap<(ModuleId, DependencyShellId), usize>, CompilerError> {
+) -> FxHashMap<(ModuleId, DependencyShellId), usize> {
     let mut index = FxHashMap::default();
     for (dependency_index, package_dependency) in source_package_dependencies.iter().enumerate() {
         let shell_id = package_dependency.dependency_shell_id;
         let key = (package_dependency.consumer_module_id, shell_id);
         if provider_binding_index.contains_key(&key) {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "ModuleId {} resolved dependency shell {:?} to both a provider module and a source package",
                 package_dependency.consumer_module_id.index(),
                 shell_id
-            )));
+            );
         }
         if index.insert(key, dependency_index).is_some() {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "ModuleId {} resolved dependency shell {:?} to more than one source-package dependency",
                 package_dependency.consumer_module_id.index(),
                 shell_id
-            )));
+            );
         }
     }
 
-    Ok(index)
+    index
 }
 
 /// Index every consumer module's direct package dependencies once per boundary.
@@ -471,19 +665,20 @@ pub(crate) fn build_source_package_dependency_index(
 pub(crate) fn build_module_package_dependency_index(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     completed_packages: &CompletedSourcePackageRegistry,
-) -> Result<FxHashMap<ModuleId, Vec<PackageBoundaryId>>, CompilerError> {
+) -> FxHashMap<ModuleId, Vec<PackageBoundaryId>> {
     let mut dependencies: FxHashMap<ModuleId, Vec<PackageBoundaryId>> = FxHashMap::default();
 
     for package_dependency in source_package_dependencies {
         let package_id = completed_packages
             .by_prefix(package_dependency.dependency_prefix.as_str())
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
                     "ModuleId {} depends on unindexed source package @{}",
                     package_dependency.consumer_module_id.index(),
                     package_dependency.dependency_prefix
-                ))
-            })?;
+                )
+            });
         dependencies
             .entry(package_dependency.consumer_module_id)
             .or_default()
@@ -495,12 +690,12 @@ pub(crate) fn build_module_package_dependency_index(
         package_ids.dedup();
     }
 
-    Ok(dependencies)
+    dependencies
 }
 
 fn order_source_package_inventories(
     inventories: Vec<SourcePackageModuleInventory>,
-) -> Result<Vec<SourcePackageModuleInventory>, CompilerError> {
+) -> Result<Vec<SourcePackageModuleInventory>, BoundaryPremergeFailure> {
     let package_prefixes = inventories
         .iter()
         .map(|inventory| inventory.dependency_prefix.clone())
@@ -523,7 +718,16 @@ fn order_source_package_inventories(
         })
         .collect::<Vec<_>>();
 
-    let order = order_packages_by_dependency(&package_prefixes, &dependency_prefixes)?;
+    let order = match order_packages_by_dependency(&package_prefixes, &dependency_prefixes) {
+        Ok(order) => order,
+        Err(error) => {
+            let failure = BoundaryPremergeFailure::from(error);
+            return Err(finalize_remaining_source_package_inventories(
+                failure,
+                inventories,
+            ));
+        }
+    };
     let mut remaining = inventories.into_iter().map(Some).collect::<Vec<_>>();
     let ordered = order
         .into_iter()
@@ -542,27 +746,29 @@ fn order_source_package_inventories(
 ///       whose ready set leaves a min-heap in input order. The returned indices are the package
 ///       positions in dependency-first order.
 /// WHY: package readiness and publication need one deterministic order without rebuilding
-///      dependency sets per pass; the dense schedule also detects unknown providers and cycles.
+///      dependency sets per pass; cycles are user-authored config diagnostics.
 pub(crate) fn order_packages_by_dependency(
     package_prefixes: &[String],
     dependency_prefixes: &[Vec<String>],
-) -> Result<Vec<usize>, CompilerError> {
+) -> Result<Vec<usize>, PreparedFailure> {
     let package_count = package_prefixes.len();
     if dependency_prefixes.len() != package_count {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "package dependency schedule received {} packages but {} dependency entries",
             package_count,
             dependency_prefixes.len()
-        )));
+        );
     }
 
     let mut index_by_prefix: FxHashMap<&str, usize> = FxHashMap::default();
     for (index, prefix) in package_prefixes.iter().enumerate() {
         if index_by_prefix.insert(prefix.as_str(), index).is_some() {
-            return Err(CompilerError::compiler_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "source package @{} appears more than once in the package inventory",
                 prefix
-            )));
+            );
         }
     }
 
@@ -573,15 +779,14 @@ pub(crate) fn order_packages_by_dependency(
     for (index, dependencies) in dependency_prefixes.iter().enumerate() {
         let mut seen_providers: FxHashSet<usize> = FxHashSet::default();
         for dependency in dependencies {
-            let provider_index = index_by_prefix
-                .get(dependency.as_str())
-                .copied()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Source package @{} depends on unindexed source package @{}",
-                        package_prefixes[index], dependency
-                    ))
-                })?;
+            let Some(provider_index) = index_by_prefix.get(dependency.as_str()).copied() else {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Source package @{} depends on unindexed source package @{}",
+                    package_prefixes[index],
+                    dependency
+                );
+            };
             if seen_providers.insert(provider_index) {
                 consumer_lists[provider_index].push(index);
                 indegree[index] += 1;
@@ -614,17 +819,56 @@ pub(crate) fn order_packages_by_dependency(
     }
 
     if ordered.len() != package_count {
-        let blocked = (0..package_count)
-            .filter(|index| !ordered.contains(index))
-            .map(|index| format!("@{}", package_prefixes[index]))
-            .collect::<Vec<_>>();
-        return Err(CompilerError::compiler_error(format!(
-            "Source package dependency cycle detected; no package is ready among {}",
-            blocked.join(", ")
-        )));
+        let blocked_index = package_on_dependency_cycle(&indegree, &consumer_lists);
+        let mut strings = StringTable::new();
+        let mut fork = PathInternerFork::empty();
+        let path = fork
+            .try_intern_portable_path(&package_prefixes[blocked_index], &mut strings)
+            .map_err(|_| {
+                let mut bag = DiagnosticBag::new();
+                bag.push(token_lexical::logical_path_capacity());
+                PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                    bag,
+                    StringTable::new(),
+                    None,
+                    None,
+                ))
+            })?;
+        let mut bag = DiagnosticBag::new();
+        bag.push(project_config::circular_dependency(path, None));
+        return Err(PreparedFailure::Diagnosed(
+            PreparedDiagnosticBatch::capture_from_bag(
+                bag,
+                strings,
+                None,
+                Some(std::sync::Arc::new(fork.snapshot_table())),
+            ),
+        ));
     }
 
     Ok(ordered)
+}
+
+/// Names one package on a dependency cycle left unordered by the topological sweep.
+///
+/// WHAT: walks from the first blocked package through blocked providers until one repeats.
+/// WHY: the first blocked package may only depend on a cycle, so its index is not a witness.
+///      Every blocked package keeps a blocked provider, so the walk cannot stop early, and the
+///      repeated package is on the cycle.
+fn package_on_dependency_cycle(indegree: &[usize], consumer_lists: &[Vec<usize>]) -> usize {
+    let blocked = |index: usize| indegree[index] > 0;
+    let mut visited = vec![false; indegree.len()];
+    let mut current = indegree
+        .iter()
+        .position(|remaining| *remaining > 0)
+        .expect("a package cycle leaves at least one blocked inventory");
+    while !visited[current] {
+        visited[current] = true;
+        current = (0..indegree.len())
+            .find(|&provider| blocked(provider) && consumer_lists[provider].contains(&current))
+            .expect("every blocked package has a blocked provider");
+    }
+    current
 }
 
 /// Discover each registered source-backed package within its own indexed boundary.
@@ -672,8 +916,8 @@ pub(super) fn discover_source_package_inventories(
         )?;
         let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
         let mut package_selected_source_texts = SelectedSourceTextMap::default();
+        let path_interner = package_sources.sources_mut().fork_path_builder();
         let (package_source_files, mut package_source_spans) = package_sources.split();
-        let mut path_interner = package_source_files.clone_path_builder();
         let package_path_fork = path_interner.fork_source().fork_for_module();
         let package_resolution = DirectoryDependencyResolution::package(
             namespace_set,
@@ -700,25 +944,46 @@ pub(super) fn discover_source_package_inventories(
                 mode.includes_check_only(),
                 &mut package_selected_source_texts,
                 string_table,
-                &mut path_interner,
+                &path_interner,
                 #[cfg(feature = "timers")]
                 timing_boundary,
             );
+        let (package_waves, package_failure) = match package_waves_result {
+            Ok(module_waves) => (Some(module_waves), None),
+            Err(failure) => (None, Some(failure)),
+        };
         let _ = package_source_spans;
-        let package_retain_result =
-            package_selected_source_texts.retain_into(package_sources.sources_mut());
+        let package_selected_source_ids =
+            package_selected_source_texts.selected_source_ids(package_sources.sources());
+        let mut package_retain_path_fork = package_sources.sources().fork_path_interner();
+        let package_retain_result = package_selected_source_texts
+            .retain_into(package_sources.sources_mut(), &mut package_retain_path_fork);
         package_sources.adopt_pending_span_builders();
         if let Err(error) = package_retain_result {
-            return Err(finalize_package_failure(
-                PremergeFailure::from(error),
-                package_sources,
-            ));
+            let failure =
+                error.admit_into_owner(package_failure, string_table, &package_retain_path_fork);
+            let failure = match finalize_schedule_source_spans(
+                &mut package_sources,
+                package_waves.as_ref(),
+                &package_selected_source_ids,
+            ) {
+                Ok(()) => failure,
+                Err(finish_error) => failure.with_infrastructure_cause(finish_error),
+            };
+            return Err(finalize_package_failure(failure, package_sources));
         }
-        let package_waves = match package_waves_result {
-            Ok(module_waves) => module_waves,
-            Err(failure) => {
-                return Err(finalize_package_failure(failure, package_sources));
-            }
+        let Some(package_waves) = package_waves else {
+            let failure = package_failure
+                .expect("a failed package discovery must retain its prepared failure");
+            let failure = match finalize_schedule_source_spans(
+                &mut package_sources,
+                None,
+                &package_selected_source_ids,
+            ) {
+                Ok(()) => failure,
+                Err(finish_error) => failure.with_infrastructure_cause(finish_error),
+            };
+            return Err(finalize_package_failure(failure, package_sources));
         };
         // Merge canonical contract spans before any transient package job forks its string
         // table. Every later transient fact can then share this boundary prefix safely.
@@ -730,12 +995,10 @@ pub(super) fn discover_source_package_inventories(
             .module_identities()
             .module_id_for_directory(package_index.entry_root())
         else {
-            return Err(finalize_package_failure(
-                PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
-                )).into()),
-                package_sources,
-            ));
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
+            );
         };
         inventories.push(SourcePackageModuleInventory {
             dependency_prefix: dependency_prefix.to_owned(),
@@ -746,6 +1009,7 @@ pub(super) fn discover_source_package_inventories(
             path_interner,
             graph: package_graph,
             schedule: package_waves,
+            selected_source_ids: package_selected_source_ids,
             canonical_source_facts,
             #[cfg(feature = "timers")]
             timing_boundary,
@@ -773,11 +1037,17 @@ pub(super) fn prepare_source_package_check_only_jobs(
             .source_package_boundaries()
             .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
         else {
-            return Err(CompilerError::compiler_error(format!(
-                "Source package @{} disappeared before deferred check-only preparation",
-                inventory.dependency_prefix
-            ))
-            .into());
+            let failure = BoundaryPremergeFailure::from(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Source package @{} disappeared before deferred check-only preparation",
+                    inventory.dependency_prefix
+                ),
+            ));
+            return Err(finalize_remaining_source_package_inventories(
+                failure,
+                std::mem::take(inventories),
+            ));
         };
         let package_path_fork = inventory.path_interner.fork_source().fork_for_module();
         let package_resolution = DirectoryDependencyResolution::package(
@@ -795,36 +1065,55 @@ pub(super) fn prepare_source_package_check_only_jobs(
             external_imports,
             package_resolution,
             string_table,
-            &mut inventory.path_interner,
+            &inventory.path_interner,
             &mut selected_source_texts,
         );
         let _ = source_spans;
-        let retain_result = selected_source_texts.retain_into(inventory.source_files.sources_mut());
-        inventory.source_files.adopt_pending_span_builders();
-        match (preparation_result, retain_result) {
-            (Ok(()), Ok(())) => {}
-            (Ok(()), Err(error)) => {
-                let inventory = inventories.swap_remove(index);
-                return Err(finalize_package_failure(
-                    PremergeFailure::from(error),
-                    inventory.source_files,
-                ));
-            }
-            (Err(failure), Ok(())) => {
-                let inventory = inventories.swap_remove(index);
-                return Err(finalize_package_failure(failure, inventory.source_files));
-            }
-            (Err(failure), Err(error)) => {
-                let inventory = inventories.swap_remove(index);
-                return Err(finalize_package_failure(
-                    append_finish_failure(failure, error),
-                    inventory.source_files,
-                ));
-            }
+        let check_only_source_ids =
+            selected_source_texts.selected_source_ids(inventory.source_files.sources());
+        inventory.selected_source_ids.extend(check_only_source_ids);
+        let mut retain_path_fork = inventory.source_files.sources().fork_path_interner();
+        let retain_result = selected_source_texts
+            .retain_into(inventory.source_files.sources_mut(), &mut retain_path_fork);
+        if retain_result.is_ok() {
+            inventory.source_files.adopt_pending_span_builders();
         }
+        let owner = preparation_result.err();
+        let owner = match retain_result {
+            Ok(()) => owner,
+            Err(error) => Some(error.admit_into_owner(owner, string_table, &retain_path_fork)),
+        };
+        let Some(failure) = owner else {
+            continue;
+        };
+        let mut inventory = inventories.swap_remove(index);
+        let failure = match finalize_schedule_source_spans(
+            &mut inventory.source_files,
+            Some(&inventory.schedule),
+            &inventory.selected_source_ids,
+        ) {
+            Ok(()) => failure,
+            Err(finish_error) => failure.with_infrastructure_cause(finish_error),
+        };
+        let failure = finalize_package_failure(failure, inventory.source_files);
+        return Err(finalize_remaining_source_package_inventories(
+            failure,
+            std::mem::take(inventories),
+        ));
     }
 
     Ok(())
+}
+
+pub(super) fn commit_successful_source_package_warnings(
+    warning_sink: &mut SuccessfulWarningSink<'_>,
+    package_index: usize,
+    source_database: &Arc<SourceDatabase>,
+) {
+    warning_sink.commit_boundary(
+        SuccessfulWarningBoundary::SourcePackage(package_index),
+        Some(Arc::clone(source_database)),
+    );
 }
 
 /// Compile source packages in provider order and publish their completed facades.
@@ -844,7 +1133,8 @@ pub(super) fn compile_source_package_inventories(
     inventories: Vec<SourcePackageModuleInventory>,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-) -> Result<(CompletedSourcePackageRegistry, Vec<TransientPremergeBatch>), BoundaryPremergeFailure>
+    mut warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
+) -> Result<(CompletedSourcePackageRegistry, Vec<TransientPreparedBatch>), BoundaryPremergeFailure>
 {
     let inventories = order_source_package_inventories(inventories)?;
     let config_globals = builder_surface.config_globals().clone();
@@ -855,7 +1145,7 @@ pub(super) fn compile_source_package_inventories(
     // Publish every canonical package before compiling transient package jobs. This keeps
     // check-only dependencies out of canonical package ordering and gives each job the complete
     // immutable facade registry.
-    for inventory in inventories {
+    for (package_index, inventory) in inventories.into_iter().enumerate() {
         let SourcePackageModuleInventory {
             package_identity,
             root_module_id,
@@ -868,10 +1158,17 @@ pub(super) fn compile_source_package_inventories(
             dependency_prefix,
             #[cfg(feature = "timers")]
             timing_boundary,
+            ..
         } = inventory;
         let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
             schedule.into_parts();
-        let result: Result<_, PremergeFailure> = (|| {
+        if let Some(warning_sink) = warning_sink.as_deref_mut() {
+            warning_sink.set_source_package_identity(
+                SuccessfulWarningBoundary::SourcePackage(package_index),
+                package_identity.clone(),
+            );
+        }
+        let result: Result<_, PreparedFailure> = (|| {
             let package_inputs = BuildConfigInputSet::new();
             let package_fallback_span = None;
             let build_config_values = config_boundary::resolve_boundary_build_config(
@@ -918,6 +1215,8 @@ pub(super) fn compile_source_package_inventories(
                     resource_inputs,
                     string_table,
                     &mut path_interner,
+                    warning_sink.as_deref_mut(),
+                    SuccessfulWarningBoundary::SourcePackage(package_index),
                 )?;
             let mut dependency_prefixes = Vec::new();
             let mut seen_dependency_prefixes = FxHashSet::default();
@@ -976,16 +1275,19 @@ pub(super) fn compile_source_package_inventories(
             canonical_source_facts,
             build_config_values,
             mut batches,
-            mut path_interner,
+            path_interner,
         } = inventory;
-        let result: Result<_, PremergeFailure> = (|| {
+        let result: Result<_, PreparedFailure> = (|| {
             let package_id = completed_source_packages
                 .by_prefix(dependency_prefix.as_str())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "deferred check-only source package @{} was not published",
-                        dependency_prefix
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "deferred check-only source package @{} was not published",
+                            dependency_prefix
+                        ),
+                    )
                 })?;
             let package = completed_source_packages.package(package_id)?;
             let check_only_batches = deferred_check_only::compile_check_only_jobs_after_canonical(
@@ -1012,27 +1314,27 @@ pub(super) fn compile_source_package_inventories(
                 &provider_bindings,
                 &source_package_dependencies,
                 string_table,
-                &mut path_interner,
+                &path_interner,
             )?;
             Ok((package_id, check_only_batches))
         })();
-        // Finish the package source owner beside the deferred result so success batches and
-        // failures convert/attach exactly once with this snapshot. A failed finish has no snapshot,
-        // so the deferred failure stays authoritative and the finish failure is chained beside it.
+        // Assemble tables frozen at each package source's last preparation producer, then consume
+        // the source owner after all compilation views have dropped.
         source_files.sources_mut().adopt_path_builder(path_interner);
-        let finish_outcome = source_files.finish();
+        let finish_outcome = source_files
+            .assemble_finalized_tables()
+            .and_then(|()| source_files.finish());
         let (result, finalized_source) = match (result, finish_outcome) {
             (result, Ok(finished)) => (result, finished),
             (Ok(_), Err(finish_error)) => {
-                return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
-                    finish_error,
-                )));
+                return Err(BoundaryPremergeFailure::project(vec![
+                    PreparedFailure::from(finish_error),
+                ]));
             }
             (Err(failure), Err(finish_error)) => {
-                return Err(BoundaryPremergeFailure::project(append_finish_failure(
-                    failure,
-                    finish_error,
-                )));
+                return Err(BoundaryPremergeFailure::project(vec![
+                    failure.with_infrastructure_cause(finish_error),
+                ]));
             }
         };
         let finalized = Arc::new(finalized_source);
@@ -1040,19 +1342,21 @@ pub(super) fn compile_source_package_inventories(
             Ok(value) => value,
             Err(failure) => {
                 let database = Arc::try_unwrap(finalized).map_err(|_| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
                         "package source database was unexpectedly shared before failure attach",
                     )
                 })?;
-                return Err(BoundaryPremergeFailure::package(failure, database));
+                return Err(BoundaryPremergeFailure::package(vec![failure], database));
             }
         };
-        // The registry holds the sole owner used by later frozen-identity extraction. Transient
-        // batches keep their local tables and domain tags until the final render tail merges them.
+        if let Some(warning_sink) = warning_sink.as_deref_mut() {
+            commit_successful_source_package_warnings(warning_sink, package_id.index(), &finalized);
+        }
         completed_source_packages.set_source_database(package_id, finalized)?;
         batches.extend(check_only_batches);
         for batch in batches {
-            transient_batches.push(TransientPremergeBatch::package(package_id, batch));
+            transient_batches.push(TransientPreparedBatch::package(package_id, batch));
         }
     }
 
@@ -1061,12 +1365,12 @@ pub(super) fn compile_source_package_inventories(
 
 /// Discover all entry modules in a directory project and compile each one.
 ///
-/// WHAT: owns the single final conversion from the premerge lane into the boundary vessel.
+/// WHAT: owns the single final conversion from the premerge lane into an explicit outcome.
 /// WHY: every intermediate directory site stays typed until here, so source attachment and
-///      string-table finalization happen exactly once at this outer tail.
+///      terminal diagnostic finalization happen exactly once at this outer tail.
 #[allow(
     clippy::too_many_arguments,
-    reason = "directory compilation keeps configuration, build profile, validated output settings, directives, mutable builder/string/source owners, build-config inputs and compilation mode separate"
+    reason = "directory compilation keeps configuration, build profile, validated output settings, directives, mutable builder, warning/report, source, build-config inputs and compilation mode separate"
 )]
 pub(crate) fn compile_directory_frontend(
     config: &Config,
@@ -1074,36 +1378,40 @@ pub(crate) fn compile_directory_frontend(
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
-    string_table: &mut StringTable,
+    warning_owner: &mut BoundaryAccumulator,
     project_source_files: &mut Option<Arc<SourceDatabase>>,
+    project_source_builder: &mut Option<SourceDatabaseBuilder>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    match compile_directory_frontend_in_premerge_lane(
-        config,
-        build_profile,
-        validated_output_settings,
-        style_directives,
-        builder_surface,
-        string_table,
-        project_source_files,
-        build_config_inputs,
-        mode,
-    ) {
-        Ok(compilation) => Ok(compilation),
-        Err(directory_failure) => {
-            if let Some(package_source) = directory_failure.package_source {
-                return Err((*directory_failure.failure)
-                    .into_messages_with_source(string_table, Arc::new(*package_source)));
-            }
-            let mut messages = (*directory_failure.failure).into_messages(string_table);
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(project_source) = project_source_files.as_ref()
-            {
-                messages.set_source_database(Arc::clone(project_source));
-            }
-            Err(messages)
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let result = {
+        let (string_table, mut warning_sink) = warning_owner.compiler_parts_mut();
+        compile_directory_frontend_in_premerge_lane(
+            config,
+            build_profile,
+            validated_output_settings,
+            style_directives,
+            builder_surface,
+            string_table,
+            &mut warning_sink,
+            project_source_files,
+            project_source_builder,
+            build_config_inputs,
+            mode,
+        )
+    };
+    match result {
+        Ok(compilation) => {
+            compilation.into_compilation_result(warning_owner, project_source_files.take(), None)
         }
+        Err(directory_failure) => match premerge_failure_to_reports(
+            directory_failure,
+            warning_owner,
+            project_source_files.take(),
+        ) {
+            Ok(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+            Err(errors) => Err(errors),
+        },
     }
 }
 
@@ -1112,8 +1420,8 @@ pub(crate) fn compile_directory_frontend(
 /// WHAT: runs package/project discovery, source loading, deferred check-only preparation,
 ///       provider publication and graph validation with typed failures, retaining a finished
 ///       package snapshot beside package-scoped failures.
-/// WHY: the public wrapper above owns the single final vessel conversion; this lane never
-///      constructs it early and never clones a diagnostic table solely to transport a failure.
+/// WHY: the terminal wrapper above owns the single final boundary freeze; this lane keeps
+///      prepared failures typed and avoids cloning a diagnostic table solely to transport them.
 #[allow(
     clippy::too_many_arguments,
     reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
@@ -1125,7 +1433,9 @@ fn compile_directory_frontend_in_premerge_lane(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
+    warning_sink: &mut SuccessfulWarningSink<'_>,
     project_source_files: &mut Option<Arc<SourceDatabase>>,
+    project_source_builder: &mut Option<SourceDatabaseBuilder>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, BoundaryPremergeFailure> {
@@ -1136,6 +1446,9 @@ fn compile_directory_frontend_in_premerge_lane(
         crate::timing::TimingMetric::Stage0DirectoryInventory
     );
 
+    let mut project_sources = project_source_builder
+        .take()
+        .unwrap_or_else(|| SourceDatabaseBuilder::new(SourceDatabase::empty()));
     // 1. Setup path resolution based on config settings.
     // `build_project_path_resolver_with_index` returns the typed premerge lane; retain it
     // beside the finished source owner and convert once at the outer tail.
@@ -1150,26 +1463,21 @@ fn compile_directory_frontend_in_premerge_lane(
     ) {
         Ok(resolver) => resolver,
         Err(failure) => {
-            return Err(BoundaryPremergeFailure::project(failure));
+            let failure = BoundaryPremergeFailure::project(vec![failure]);
+            let finish_outcome = project_sources
+                .assemble_finalized_tables()
+                .and_then(|()| project_sources.finish());
+            return match finish_outcome {
+                Ok(sources) => {
+                    *project_source_files = Some(Arc::new(sources));
+                    Err(failure)
+                }
+                Err(finish_error) => Err(append_boundary_finish_failure(failure, finish_error)),
+            };
         }
     };
     let project_path_resolver = project_setup.resolver;
     let project_registration_index = project_setup.source_tree_index.source_registration_index();
-    let cached_source =
-        match project_source_files.take() {
-            Some(cached) => match Arc::try_unwrap(cached) {
-                Ok(database) => database,
-                Err(_) => {
-                    return Err(BoundaryPremergeFailure::project(
-                    PremergeFailure::Infrastructure(CompilerError::compiler_error(
-                        "project source database was unexpectedly shared before registration",
-                    ).into()),
-                ));
-                }
-            },
-            None => SourceDatabase::empty(),
-        };
-    let mut project_sources = SourceDatabaseBuilder::new(cached_source);
     let result = (|| -> Result<ProjectFrontendCompilation, BoundaryPremergeFailure> {
         project_sources
             .sources_mut()
@@ -1179,8 +1487,8 @@ fn compile_directory_frontend_in_premerge_lane(
                 Some(&project_path_resolver),
                 string_table,
             )?;
+        let mut project_path_interner = project_sources.sources_mut().fork_path_builder();
         let (project_source_files, mut project_source_spans) = project_sources.split();
-        let mut project_path_interner = project_source_files.clone_path_builder();
         let project_path_fork = project_path_interner.fork_source().fork_for_module();
         let mut selected_source_texts = SelectedSourceTextMap::default();
         let config_globals = builder_surface.config_globals().clone();
@@ -1240,7 +1548,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,
-                &mut project_path_interner,
+                &project_path_interner,
                 #[cfg(feature = "timers")]
                 project_timing_boundary,
             );
@@ -1248,34 +1556,93 @@ fn compile_directory_frontend_in_premerge_lane(
             Ok(schedule) => schedule,
             Err(failure) => {
                 let _ = project_source_spans;
-                let retain_result =
-                    selected_source_texts.retain_into(project_sources.sources_mut());
+                let project_selected_source_ids =
+                    selected_source_texts.selected_source_ids(project_sources.sources());
+                let mut project_retain_path_fork = project_sources.sources().fork_path_interner();
+                let retain_result = selected_source_texts
+                    .retain_into(project_sources.sources_mut(), &mut project_retain_path_fork);
                 project_sources.adopt_pending_span_builders();
                 let failure = match retain_result {
                     Ok(()) => failure,
-                    Err(error) => append_finish_failure(failure, error),
+                    Err(error) => error.admit_into_owner(
+                        Some(failure),
+                        string_table,
+                        &project_retain_path_fork,
+                    ),
                 };
-                return Err(BoundaryPremergeFailure::project(failure));
+                let failure = match finalize_schedule_source_spans(
+                    &mut project_sources,
+                    None,
+                    &project_selected_source_ids,
+                ) {
+                    Ok(()) => failure,
+                    Err(error) => failure.with_infrastructure_cause(error),
+                };
+                let failure = BoundaryPremergeFailure::project(vec![failure]);
+                return Err(finalize_remaining_source_package_inventories(
+                    failure,
+                    source_package_inventories,
+                ));
             }
         };
-        let effective_project_fields =
-            config_boundary::effective_project_fields(config, string_table)?;
-        let fixed_project_facts =
-            config_boundary::fixed_project_contract_facts(&effective_project_fields);
-        let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
-        let project_fallback = config.setting_span("project");
+        let _ = project_source_spans;
+        let project_selected_source_ids =
+            selected_source_texts.selected_source_ids(project_sources.sources());
+        let mut project_retain_path_fork = project_sources.sources().fork_path_interner();
+        let project_retain_result = selected_source_texts
+            .retain_into(project_sources.sources_mut(), &mut project_retain_path_fork);
+        project_sources.adopt_pending_span_builders();
+        if let Err(error) = project_retain_result {
+            let failure = error.admit_into_owner(None, string_table, &project_retain_path_fork);
+            let failure = match finalize_schedule_source_spans(
+                &mut project_sources,
+                Some(&project_schedule),
+                &project_selected_source_ids,
+            ) {
+                Ok(()) => failure,
+                Err(finish_error) => failure.with_infrastructure_cause(finish_error),
+            };
+            return Err(BoundaryPremergeFailure::project(vec![failure]));
+        }
+
         // All canonical project and source-package inventories are complete now. Prepare transient
         // jobs only after that global provider-discovery barrier so each job forks final canonical
         // external package/cache/resolution state.
-        if mode.includes_check_only() {
-            prepare_source_package_check_only_jobs(
+        if mode.includes_check_only()
+            && let Err(failure) = prepare_source_package_check_only_jobs(
                 &mut source_package_inventories,
                 &project_setup.module_namespace_set,
                 style_directives,
                 &mut external_imports,
                 string_table,
-            )?;
+            )
+        {
+            return Err(
+                match finalize_schedule_source_spans(
+                    &mut project_sources,
+                    Some(&project_schedule),
+                    &project_selected_source_ids,
+                ) {
+                    Ok(()) => failure,
+                    Err(error) => append_boundary_finish_failure(failure, error),
+                },
+            );
         }
+        if let Err(failure) = finalize_source_package_inventories(&mut source_package_inventories) {
+            return Err(
+                match finalize_schedule_source_spans(
+                    &mut project_sources,
+                    Some(&project_schedule),
+                    &project_selected_source_ids,
+                ) {
+                    Ok(()) => failure,
+                    Err(error) => append_boundary_finish_failure(failure, error),
+                },
+            );
+        }
+
+        let (_, mut project_source_spans) = project_sources.split();
+        let mut project_check_only_source_texts = SelectedSourceTextMap::default();
         let project_check_only_result = if mode.includes_check_only() {
             project_schedule.prepare_check_only_jobs(
                 style_directives,
@@ -1284,32 +1651,57 @@ fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 string_table,
-                &mut project_path_interner,
-                &mut selected_source_texts,
+                &project_path_interner,
+                &mut project_check_only_source_texts,
             )
         } else {
             Ok(())
         };
         let _ = project_source_spans;
-        let project_retain_result =
-            selected_source_texts.retain_into(project_sources.sources_mut());
+        let project_check_only_source_ids =
+            project_check_only_source_texts.selected_source_ids(project_sources.sources());
+        let mut project_check_only_path_fork = project_sources.sources().fork_path_interner();
+        let project_check_only_retain_result = project_check_only_source_texts.retain_into(
+            project_sources.sources_mut(),
+            &mut project_check_only_path_fork,
+        );
         project_sources.adopt_pending_span_builders();
-        match (project_check_only_result, project_retain_result) {
-            (Ok(()), Ok(())) => {}
-            (Ok(()), Err(error)) => {
-                return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
-                    error,
-                )));
+        let mut all_project_source_ids = project_selected_source_ids;
+        all_project_source_ids.extend(project_check_only_source_ids);
+        let owner = project_check_only_result.err();
+        let owner = match project_check_only_retain_result {
+            Ok(()) => owner,
+            Err(error) => {
+                Some(error.admit_into_owner(owner, string_table, &project_check_only_path_fork))
             }
-            (Err(failure), Ok(())) => {
-                return Err(BoundaryPremergeFailure::project(failure));
-            }
-            (Err(failure), Err(error)) => {
-                return Err(BoundaryPremergeFailure::project(append_finish_failure(
-                    failure, error,
-                )));
-            }
+        };
+        if let Some(failure) = owner {
+            let failure = match finalize_schedule_source_spans(
+                &mut project_sources,
+                Some(&project_schedule),
+                &all_project_source_ids,
+            ) {
+                Ok(()) => failure,
+                Err(error) => failure.with_infrastructure_cause(error),
+            };
+            return Err(BoundaryPremergeFailure::project(vec![failure]));
         }
+        if let Err(error) = finalize_schedule_source_spans(
+            &mut project_sources,
+            Some(&project_schedule),
+            &all_project_source_ids,
+        ) {
+            return Err(BoundaryPremergeFailure::project(vec![
+                PreparedFailure::from(error),
+            ]));
+        }
+
+        let effective_project_fields =
+            config_boundary::effective_project_fields(config, string_table)?;
+        let fixed_project_facts =
+            config_boundary::fixed_project_contract_facts(&effective_project_fields);
+        let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
+        let project_fallback = config.setting_span("project");
         let project_source_files = Arc::clone(project_sources.sources());
 
         let (
@@ -1348,7 +1740,7 @@ fn compile_directory_frontend_in_premerge_lane(
             project_fallback,
             string_table,
         )
-        .map_err(BoundaryPremergeFailure::project)?;
+        .map_err(|failure| BoundaryPremergeFailure::project(vec![failure]))?;
         if let Some(input) = config_boundary::first_unknown_build_config_input(
             build_config_inputs,
             &all_project_source_facts,
@@ -1361,13 +1753,10 @@ fn compile_directory_frontend_in_premerge_lane(
                 project_fallback,
                 string_table,
             );
-            return Err(BoundaryPremergeFailure::project(failure));
+            return Err(BoundaryPremergeFailure::project(vec![failure]));
         }
-        let project_globals = config_boundary::build_project_globals_interface(
-            config,
-            &effective_project_fields,
-            string_table,
-        )?;
+        let project_globals =
+            config_boundary::build_project_globals_interface(config, &effective_project_fields)?;
         let external_packages = Arc::new(builder_surface.binding_packages.clone());
         #[cfg(feature = "timers")]
         timing_guard_stage0_directory_inventory.finish();
@@ -1388,6 +1777,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 source_package_inventories,
                 &mut resource_inputs,
                 string_table,
+                Some(warning_sink),
             )?;
 
         timing_scope_attributed!(
@@ -1423,9 +1813,11 @@ fn compile_directory_frontend_in_premerge_lane(
             &mut resource_inputs,
             string_table,
             &mut project_path_interner,
+            Some(warning_sink),
+            SuccessfulWarningBoundary::Project,
         )?;
         for batch in project_batches {
-            transient_batches.push(TransientPremergeBatch::project(batch));
+            transient_batches.push(TransientPreparedBatch::project(batch));
         }
         #[cfg(feature = "timers")]
         timing_guard_build_boundary_compile_2.finish();
@@ -1442,7 +1834,9 @@ fn compile_directory_frontend_in_premerge_lane(
             transient_batches,
         )?)
     })();
-    let finish_outcome = project_sources.finish();
+    let finish_outcome = project_sources
+        .assemble_finalized_tables()
+        .and_then(|()| project_sources.finish());
     // Finalize the project source owner beside the semantic result. A finished source keeps
     // current attachment behavior; a failed finish has no snapshot, so the semantic
     // failure stays authoritative and the finish failure chains beside it for the
@@ -1451,16 +1845,15 @@ fn compile_directory_frontend_in_premerge_lane(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
-                finish_error,
-            )));
+            return Err(BoundaryPremergeFailure::project(vec![
+                PreparedFailure::from(finish_error),
+            ]));
         }
         (Err(directory_failure), Err(finish_error)) => {
-            let combined = append_finish_failure(*directory_failure.failure, finish_error);
-            return Err(BoundaryPremergeFailure {
-                failure: Box::new(combined),
-                package_source: directory_failure.package_source,
-            });
+            return Err(append_boundary_finish_failure(
+                directory_failure,
+                finish_error,
+            ));
         }
     };
     *project_source_files = Some(finalized);

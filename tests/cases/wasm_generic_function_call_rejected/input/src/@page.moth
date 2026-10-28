@@ -1,0 +1,5 @@
+identity type T |value T| -> T:
+    return value
+;
+
+[:identity_result [identity(3)]]

@@ -100,7 +100,7 @@ pub(crate) fn transfer_statement(
             results,
         } => {
             let location = context.diagnostics.statement_error_span(statement);
-            let semantics = resolve_call_semantics(context, target, args.len(), location)?;
+            let semantics = resolve_call_semantics(context, target, args.len())?;
             let call_args = context
                 .expressions
                 .values(*args)
@@ -433,10 +433,10 @@ pub(super) fn transfer_invoke(
         ..
     } = terminator
     else {
-        return Err(input.context.diagnostics.internal_error(
-            "Non-Invoke terminator reached operation transfer",
-            input.location,
-        ));
+        return Err(input
+            .context
+            .diagnostics
+            .internal_error("Non-Invoke terminator reached operation transfer"));
     };
     let context = input.context;
     let results = success_results
@@ -445,7 +445,7 @@ pub(super) fn transfer_invoke(
         .map(HirLocalDestination::Define);
     match operation {
         HirFallibleOperation::Call { target, args } => {
-            let semantics = resolve_call_semantics(context, target, args.len(), input.location)?;
+            let semantics = resolve_call_semantics(context, target, args.len())?;
             let arguments = context
                 .expressions
                 .values(*args)
@@ -1003,13 +1003,10 @@ fn transfer_call_result_alias(
     let result_local = destination.local();
 
     let Some(local_index) = input.layout.index_of(result_local) else {
-        return Err(input.context.diagnostics.internal_error(
-            format!(
-                "Call result local '{}' is not in the active function layout",
-                input.context.diagnostics.local_name(result_local)
-            ),
-            input.location,
-        ));
+        return Err(input.context.diagnostics.internal_error(format!(
+            "Call result local '{}' is not in the active function layout",
+            input.context.diagnostics.local_name(result_local)
+        )));
     };
 
     let alias_roots = match return_alias {
@@ -1022,7 +1019,6 @@ fn transfer_call_result_alias(
                         format!(
                             "Borrow checker found out-of-range return-alias index {arg_index} at call site"
                         ),
-                        input.location,
                     ));
                 };
                 roots.union_with(arg_root_set);

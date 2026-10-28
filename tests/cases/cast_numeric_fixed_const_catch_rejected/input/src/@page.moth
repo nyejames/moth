@@ -1,5 +1,5 @@
--- C04: a known invalid conversion under catch is a compile-time diagnostic,
--- never a fallback. Retired: this fixture previously asserted fallback 7.
+-- A known invalid conversion under catch is a compile-time diagnostic,
+-- never a fallback.
 
 recovered #U8 = cast 300 catch:
     then 7

@@ -4,9 +4,14 @@
 //! concrete `HeaderKind` payload.
 //! WHY: declaration-kind parsing is separate from per-file token walking and from dependency sorting.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, InvalidDeclarationReason,
+    DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -179,9 +184,10 @@ fn set_cursor_position(
     owner: &'static str,
 ) -> HeaderDispatchResult<()> {
     cursor.set_position(position).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "{owner}: {error:?}",
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("{owner}: {error:?}",),
+        ))
     })
 }
 
@@ -232,7 +238,7 @@ pub(super) fn create_header(
     if current_tag == TokenTag::OF {
         if !generic_parameters.is_empty() {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_declaration(
+                names_declarations::invalid_declaration(
                     InvalidDeclarationReason::GenericTraitsUnsupported,
                     Some(declaration_name),
                     Some(name_span),
@@ -276,12 +282,11 @@ pub(super) fn create_header(
     // WHAT: `must:` begins a trait declaration; `must not` begins an incompatibility
     //      declaration; `must TRAIT` begins a conformance declaration.
     // WHY: trait declarations, conformances, and incompatibility metadata are top-level
-    //      declarations that participate in header parsing; they replace the old
-    //      reserved-trait rejection path.
+    //      declarations that participate in header parsing.
     if current_tag == TokenTag::MUST {
         if !generic_parameters.is_empty() {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_declaration(
+                names_declarations::invalid_declaration(
                     InvalidDeclarationReason::GenericTraitsUnsupported,
                     Some(declaration_name),
                     Some(name_span),
@@ -431,7 +436,7 @@ pub(super) fn create_header(
                 context.string_table,
             );
             let (signature, cursor_position) = {
-                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                let mut declaration_cursor = DeclarationCursor::new(*cursor);
                 let signature = parse_function_signature_syntax(
                     &mut declaration_cursor,
                     context.warnings,
@@ -483,10 +488,8 @@ pub(super) fn create_header(
 
         // `This` keyword outside trait declarations is invalid.
         TokenTag::TRAIT_THIS => {
-            return Err(CompilerDiagnostic::invalid_this_usage(
-                crate::compiler_frontend::compiler_messages::InvalidThisUsageReason::OutsideTraitDeclaration,
-                Some(cursor_span(cursor, declaration_span)),
-            )
+            return Err(generics_traits_api::invalid_this_usage(crate::compiler_frontend::compiler_messages::InvalidThisUsageReason::OutsideTraitDeclaration,
+            Some(cursor_span(cursor, declaration_span)),)
             .into());
         }
 
@@ -508,7 +511,7 @@ pub(super) fn create_header(
                 );
                 cursor.advance();
                 let (fields, cursor_position) = {
-                    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                    let mut declaration_cursor = DeclarationCursor::new(*cursor);
                     let fields = parse_struct_shell(
                         &mut declaration_cursor,
                         context.string_table,
@@ -547,7 +550,7 @@ pub(super) fn create_header(
             if !generic_parameters.is_empty()
                 && starts_build_config_qualifier_at_cursor(cursor, file_id, context.string_table)?
             {
-                return Err(CompilerDiagnostic::invalid_config_reason(
+                return Err(project_config::invalid_config_reason(
                     Some(declaration_name),
                     InvalidConfigReason::ConfigQualifierInvalidPlacement,
                     Some(cursor_span(cursor, declaration_span)),
@@ -598,7 +601,7 @@ pub(super) fn create_header(
             );
 
             let (choice_header, cursor_position) = {
-                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                let mut declaration_cursor = DeclarationCursor::new(*cursor);
                 let choice_header = parse_choice_header_payload(
                     &mut declaration_cursor,
                     full_name,
@@ -644,7 +647,7 @@ pub(super) fn create_header(
         TokenTag::AS => {
             if !generic_parameters.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_declaration(
+                    names_declarations::invalid_declaration(
                         InvalidDeclarationReason::ParameterizedGenericTypeAlias,
                         Some(declaration_name),
                         Some(name_span),
@@ -667,7 +670,7 @@ pub(super) fn create_header(
 
             cursor.advance();
             let (target, cursor_position) = {
-                let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+                let mut declaration_cursor = DeclarationCursor::new(*cursor);
                 let target = parse_type_annotation_cursor(
                     &mut declaration_cursor,
                     TypeAnnotationContext::TypeAliasTarget,
@@ -699,7 +702,7 @@ pub(super) fn create_header(
                 }
             });
             if let Some(error) = selection_error {
-                return Err(error.into());
+                return Err(error);
             }
             collect_capacity_references_in_parsed_ref(&target, &mut capacity_references);
 
@@ -725,7 +728,7 @@ pub(super) fn create_header(
 }
 
 fn emit_header_naming_warning(
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     identifier: StringId,
     span: Option<SourceSpan>,
     naming_kind: IdentifierNamingKind,
@@ -751,7 +754,7 @@ fn parse_optional_generic_parameters(
     // dependency-name collisions after all clauses and declaration shells are retained.
     let forbidden_names = FxHashSet::default();
     let (result, cursor_position) = {
-        let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+        let mut declaration_cursor = DeclarationCursor::new(*cursor);
         let result = parse_generic_parameter_list_after_type_keyword(
             &mut declaration_cursor,
             &forbidden_names,
@@ -775,7 +778,7 @@ fn collect_type_ordering_hints(
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
-) -> Result<(), CompilerError> {
+) -> Result<(), HeaderParseFailure> {
     let mut selection_error = None;
     for_each_named_type_in_parsed_ref(type_ref, &mut |type_reference| {
         if selection_error.is_some() {
@@ -785,14 +788,16 @@ fn collect_type_ordering_hints(
         match type_reference {
             // Generic parameters are bare local names. A qualified path must remain intact even
             // when its terminal component happens to share a generic parameter's spelling.
-            ParsedNamedTypeReference::Bare(type_name) => {
+            ParsedNamedTypeReference::Bare {
+                name: type_name, ..
+            } => {
                 if generic_parameters.contains_name(type_name)
                     || context.path_fork.component(current_header_path) == Some(type_name)
                 {
                     return;
                 }
             }
-            ParsedNamedTypeReference::Qualified(_) => {}
+            ParsedNamedTypeReference::Qualified { .. } => {}
         }
 
         selection_error = collect_named_type_ordering_hint(
@@ -826,7 +831,7 @@ fn collect_signature_member_ordering_hints(
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
-) -> Result<(), CompilerError> {
+) -> HeaderDispatchResult<()> {
     collect_type_ordering_hints(
         &member.type_annotation,
         generic_parameters,
@@ -874,7 +879,7 @@ fn empty_token_range(
 /// WHAT: consumes the cursor that the declaration parser left on the first body token and returns
 /// the source range from that token through its matching `;`, tracking scope depth so nested
 /// scopes (inner `if`/`loop`/etc.) close correctly.
-/// WHY: the canonical header path must retain ranges, not clone a compatibility token vector or
+/// WHY: the canonical header path must retain ranges, not clone a token vector or
 /// rescan source text, and the cursor is the sole source of parser position and EOF/span facts.
 /// Only the structural range is captured here: AST owns body syntax diagnostics, declaration
 /// ordering hints come from the signature, and Stage 0 records graph-active file references from
@@ -933,7 +938,7 @@ pub(super) fn capture_function_body_range_from_cursor(
             }
             TokenTag::DOUBLE_COLON => {}
             TokenTag::EOF => {
-                return Err(CompilerDiagnostic::unexpected_end_of_file(
+                return Err(token_lexical::unexpected_end_of_file(
                     Some(string_table.intern(";")),
                     Some(current.source_span()),
                 )
@@ -950,9 +955,10 @@ pub(super) fn capture_function_body_range_from_cursor(
         ))
     })?;
     TokenRange::try_new_for(source, body_start, body_end).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "function body token range was invalid: {error:?}"
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("function body token range was invalid: {error:?}"),
+        ))
     })
 }
 fn create_constant_header_payload(
@@ -972,7 +978,7 @@ fn create_constant_header_payload(
         .into());
     };
     let (declaration_syntax, cursor_position) = {
-        let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
+        let mut declaration_cursor = DeclarationCursor::new(*cursor);
         let declaration_syntax = parse_declaration_syntax(
             &mut declaration_cursor,
             declaration_name,
@@ -994,7 +1000,7 @@ fn create_constant_header_payload(
         && source_tag_at_cursor(cursor, file_id)? == TokenTag::COMMA
         && let Some(qualifier) = &declaration_syntax.config_qualifier
     {
-        return Err(CompilerDiagnostic::invalid_config_reason(
+        return Err(project_config::invalid_config_reason(
             Some(declaration_name),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
             qualifier.qualifier_span,
@@ -1003,7 +1009,7 @@ fn create_constant_header_payload(
     }
 
     // Local declaration-ordering hints: declared type annotation only.
-    // WHY: constant initializer references are now first-class ordering hints generated by
+    // WHY: constant initializer reference edges are collected separately in
     // headers/constant_dependencies.rs; this function only collects type-surface hints.
     collect_constant_type_hints(
         &declaration_syntax,
@@ -1017,7 +1023,7 @@ fn create_constant_header_payload(
 
 fn internal_header_dispatch_error(
     message: &'static str,
-    span: Option<SourceSpan>,
-) -> CompilerError {
-    CompilerError::new(message, span, ErrorType::Compiler)
+    _span: Option<SourceSpan>,
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(CompilerStage::HeaderParsing, message)
 }

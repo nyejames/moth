@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::generic_functions::numeric_origins::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::numeric_construction::{
@@ -39,11 +40,12 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidMatchArmReason, InvalidMatchPatternReason,
-    ValueReceiverContext,
+    DeferredFeatureReason, InvalidMatchArmReason, InvalidMatchPatternReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -93,7 +95,7 @@ struct ParsedMatchPatternHeader {
 ///
 /// WHAT: preserves authored match diagnostics and retained-token infrastructure failures.
 /// WHY: guard expressions and option capture parsing can consume a frozen prepared-file stream,
-/// so an invalid retained table must reach the module boundary as `CompilerError`.
+/// so an invalid retained table must reach the module boundary as `InfrastructureFailure`.
 type MatchHeaderResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse a scrutinee expression that stops at the top-level `is` token.
@@ -101,9 +103,9 @@ type MatchHeaderResult<T> = Result<T, ExpressionParseError>;
 /// WHAT: shared two-lane expression parse used by statement, template and value
 /// receivers before they consume `is`; the position owns its complete fragment, so a
 /// numeric-dependent scrutinee comes back as a retained statement expression.
-/// WHY: each consumer previously reconstructed this `until([Is])` boundary, and a scrutinee that
-///      references a pending numeric origin must keep its authored syntax until the body root
-///      selects the subject type instead of fabricating a typed value now.
+/// WHY: sharing the top-level `is` boundary gives every consumer the same retained-fragment
+///      contract. A scrutinee with pending numeric origins preserves authored syntax until the
+///      body root selects its type.
 pub(crate) fn parse_scrutinee_until_is(
     token_stream: &mut AstCursor,
     scope_context: &ScopeContext,
@@ -171,7 +173,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     let mut arm_scope = match_context.clone();
 
     if arm_scope.get_reference(&capture_name).is_some() {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::CaptureBindingShadowsVariable,
             None,
             None,
@@ -188,7 +190,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
 
     let binding_path = path_fork
         .try_intern_child(arm_scope.scope, capture_name)
-        .expect("path table exhausted while creating match capture scope");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
 
     let declaration = Declaration {
         id: binding_path,
@@ -346,7 +348,7 @@ fn parse_match_guard(
 
     let mut guard_type = ExpectedType::Infer;
     let guard_context =
-        match_context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
+        match_context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)?;
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::until(ExpressionParseResources {
         token_stream,
@@ -489,7 +491,7 @@ fn parse_match_pattern_header(
             if token_stream.current_tag() == TokenTag::SYMBOL
                 && !option_pattern_constructor_like(token_stream)
             {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee,
                     None,
                     None,
@@ -573,7 +575,7 @@ pub(crate) fn deferred_pattern_span(pattern: &DeferredArmPattern) -> Option<Sour
 
 fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<()> {
     if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(deferred_feature_reason_diagnostic(
+        return Err(names_declarations::deferred_feature_reason(
             DeferredFeatureReason::CaptureTaggedPattern,
             Some(token_stream.current_span()),
         )
@@ -581,7 +583,7 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
     }
 
     if token_stream.current_tag() == TokenTag::AS {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::AsNotValid,
             None,
             None,
@@ -591,21 +593,19 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
     }
 
     if token_stream.current_tag() == TokenTag::COLON {
-        return Err(CompilerDiagnostic::invalid_match_arm(
+        return Err(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::LegacyColonSyntax,
             Some(token_stream.current_span()),
         )
         .into());
     }
-
     if token_stream.current_tag() == TokenTag::ARROW {
-        return Err(CompilerDiagnostic::invalid_match_arm(
+        return Err(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
         )
         .into());
     }
-
     Ok(())
 }
 
@@ -640,7 +640,7 @@ fn build_arm_scope_with_choice_captures(
 
         // Enforce no-shadowing: the local binding name must not collide with any visible local.
         if let Some(_existing) = arm_scope.get_reference(&binding_name) {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::CaptureBindingShadowsVariable,
                 None,
                 None,
@@ -659,7 +659,7 @@ fn build_arm_scope_with_choice_captures(
 
         let binding_path = path_fork
             .try_intern_child(arm_scope.scope, binding_name)
-            .expect("path table exhausted while creating choice capture scope");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
 
         let declaration = Declaration {
             id: binding_path,
@@ -752,7 +752,10 @@ fn parse_pending_choice_pattern_header(
         .nominal_path(declared.declared_type_id)
         .cloned()
         .ok_or_else(|| {
-            CompilerError::compiler_error("a declared pending choice subject had no nominal path")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "a declared pending choice subject had no nominal path",
+            )
         })?;
 
     let parsed = parse_choice_variant_pattern(
@@ -806,7 +809,7 @@ fn build_pending_choice_arm_scope(
         let binding_name = capture.binding_name;
 
         if arm_scope.get_reference(&binding_name).is_some() {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::CaptureBindingShadowsVariable,
                 None,
                 None,
@@ -825,7 +828,7 @@ fn build_pending_choice_arm_scope(
 
         let binding_path = path_fork
             .try_intern_child(arm_scope.scope, binding_name)
-            .expect("path table exhausted while creating choice capture scope");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
 
         let shape = {
             let mut numeric_state = match_context.numeric_state_mut();
@@ -922,7 +925,7 @@ fn parse_pending_option_pattern_header(
     if token_stream.current_tag() == TokenTag::SYMBOL
         && !option_pattern_constructor_like(token_stream)
     {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee,
             None,
             None,
@@ -942,7 +945,8 @@ fn parse_pending_option_pattern_header(
         DeferredArmPattern::Ready(pattern) => PendingOptionPattern::PresentValue(pattern),
         DeferredArmPattern::Retained(retained) => PendingOptionPattern::RetainedValue(retained),
         DeferredArmPattern::PendingChoice(_) | DeferredArmPattern::PendingOption(_) => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a pending non-choice parse returned a pending choice or option pattern",
             )
             .into());
@@ -976,7 +980,7 @@ fn build_pending_option_capture_scope(
     let arm_scope = match_context.clone();
 
     if arm_scope.get_reference(&binding.name).is_some() {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::CaptureBindingShadowsVariable,
             None,
             None,
@@ -993,7 +997,7 @@ fn build_pending_option_capture_scope(
 
     let binding_path = path_fork
         .try_intern_child(arm_scope.scope, binding.name)
-        .expect("path table exhausted while creating option capture scope");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
 
     arm_scope.declare_pending_pattern_capture(
         AuthoredBindingFacts {

@@ -7,6 +7,7 @@
 //!      `ExpressionOperationView::Template` values. A bare `Constant` reference would drop the
 //!      wrapper and insert structure, so the reference has to be a template again.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::cell::RefCell;
 
 use super::ids::{TemplateIrId, TemplateIrNodeId};
@@ -26,7 +27,7 @@ use crate::compiler_frontend::ast::file_value_resolution::structural_string;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicTemplateSlotKey,
@@ -45,7 +46,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHAT: rebuilds the public projection once per `ConstValueId` per module, then reuses the
 ///       memoised TIR root for every later reference.
 /// WHY: all references to one constant must share one TIR root, matching the single authored
-///      initializer that imported references inlined before the typed store cutover.
+///      initializer that imported references inline.
 pub(crate) fn rebuild_const_template_reference(
     value: ConstValueId,
     store: &mut TemplateIrStore,
@@ -246,7 +247,7 @@ impl Rebuild<'_> {
         origin: &StableResourceOriginId,
     ) -> Result<ResourceId, ExpressionParseError> {
         let resources = self.module_resources.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "Imported structural string reference requires module file-value resolution services",
             )
         })?;

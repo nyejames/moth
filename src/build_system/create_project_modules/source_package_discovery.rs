@@ -9,8 +9,8 @@
 
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -92,7 +92,7 @@ pub(crate) fn build_source_package_boundary_indexes(
     source_file_kinds: &SourceFileKindRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
     string_table: &mut StringTable,
-) -> Result<SourcePackageBoundaryIndexes, PremergeFailure> {
+) -> Result<SourcePackageBoundaryIndexes, PreparedFailure> {
     let mut indexes = Vec::new();
 
     for package in source_packages.iter() {
@@ -101,7 +101,8 @@ pub(crate) fn build_source_package_boundary_indexes(
         // never proceeds against a path whose canonicalization failed. This preserves the
         // existing file-error diagnostic for unresolvable package roots.
         let canonical_root = fs::canonicalize(path).map_err(|error| {
-            CompilerError::file_error(
+            InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 path,
                 format!("Failed to canonicalize source-backed package root: {error}"),
             )

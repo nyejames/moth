@@ -27,8 +27,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::keywords::token_tag_for_source_word;
 use crate::compiler_frontend::source::SourceSpan;
@@ -227,10 +229,10 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         end_policy: TemplateBodyEndPolicy,
     ) -> BodyParseResult<()> {
         // The tokenizer only allows for strings, templates or slots inside the template body.
-        let mut last_known_span = current_token_source_span(self.token_stream);
+        let mut last_known_span = Some(self.token_stream.current_span());
         while self.token_stream.position() < self.token_stream.length() {
             add_ast_counter(AstCounter::TemplateBodyTokenVisits, 1);
-            last_known_span = current_token_source_span(self.token_stream);
+            last_known_span = Some(self.token_stream.current_span());
 
             match self.token_stream.current_tag() {
                 TokenTag::EOF
@@ -239,7 +241,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                     return Ok(());
                 }
                 TokenTag::EOF => {
-                    return Err(CompilerDiagnostic::unexpected_end_of_file(
+                    return Err(token_lexical::unexpected_end_of_file(
                         Some(self.close_bracket_id),
                         last_known_span,
                     )
@@ -278,7 +280,8 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                         .token_stream
                         .current_string_id_in(self.string_table)?
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
                                 "template-body string token had no string payload",
                             )
                         })?;
@@ -300,17 +303,16 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                         .token_stream
                         .current_diagnostic_token(self.string_table)
                         .map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
+                            InfrastructureFailure::malformed_token_projection(
                                 "template-body unexpected-token diagnostic",
+                                error,
                             )
                         })?
                         .unwrap_or_else(|| {
                             DiagnosticToken::from_static_tag(self.token_stream.current_tag())
                         });
-                    let mut diagnostic =
-                        CompilerDiagnostic::unexpected_token_from_tag(found_token, last_known_span);
-                    diagnostic.primary_span = last_known_span;
+                    let diagnostic =
+                        token_lexical::unexpected_token_from_tag(found_token, last_known_span);
                     return Err(diagnostic.into());
                 }
             }
@@ -321,11 +323,10 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         if matches!(end_policy, TemplateBodyEndPolicy::DonorExhaustionIsClose) {
             Ok(())
         } else {
-            Err(CompilerDiagnostic::unexpected_end_of_file(
-                Some(self.close_bracket_id),
-                last_known_span,
+            Err(
+                token_lexical::unexpected_end_of_file(Some(self.close_bracket_id), last_known_span)
+                    .into(),
             )
-            .into())
         }
     }
 
@@ -505,7 +506,8 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 .get_template(child_template.tir_reference.root)
                 .map(|template_ir| template_ir.kind.clone())
                 .ok_or_else(|| {
-                    TemplateError::from(CompilerError::compiler_error(
+                    TemplateError::from(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Nested template kind was missing from the parser's owning TIR store.",
                     ))
                 })?
@@ -562,7 +564,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                     child_template.span,
                 );
 
-                construction_context.record_slot(slot_placeholder, child_template.span)?;
+                construction_context.record_slot(slot_placeholder, child_template.span);
                 return Ok(());
             }
         }
@@ -610,9 +612,6 @@ fn tir_only_body_construction_context(
     context: &ScopeContext,
 ) -> TemplateConstructionContext {
     TemplateConstructionContext::new(context.template_ir_store.clone(), span)
-}
-fn current_token_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
 }
 
 /// Finalizes a control-flow body template's parser-emitted TIR and returns the
@@ -663,7 +662,7 @@ fn consume_balanced_brackets_as_literal_text(
 ) -> BodyParseResult<()> {
     // Emit the opening bracket as literal text.
     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
-    let span = current_token_source_span(token_stream);
+    let span = Some(token_stream.current_span());
     construction_context.record_text(text_ids.open_bracket_id, 1, span);
     token_stream.advance();
 
@@ -673,7 +672,7 @@ fn consume_balanced_brackets_as_literal_text(
         if tag == TokenTag::EOF {
             return Ok(());
         }
-        let span = current_token_source_span(token_stream);
+        let span = Some(token_stream.current_span());
         balance.step_tag(tag);
         match tag {
             TokenTag::TEMPLATE_HEAD => {
@@ -690,7 +689,8 @@ fn consume_balanced_brackets_as_literal_text(
                 let content = token_stream
                     .current_string_id_in(string_table)?
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "literal template body string token had no string payload",
                         )
                     })?;
@@ -711,7 +711,8 @@ fn consume_balanced_brackets_as_literal_text(
                 let id = token_stream
                     .current_string_id_in(string_table)?
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "literal template body symbol token had no string payload",
                         )
                     })?;

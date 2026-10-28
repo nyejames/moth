@@ -10,8 +10,8 @@
 
 use std::num::NonZeroU32;
 
-/// Frozen by the slice 1C2 census. Changing this constant without re-running that census is a
-/// contract break: the assertions below pin the measured 22/10 split.
+/// Frozen by the final source-span corpus. Changing this constant without re-running that census
+/// is a contract break: the assertions below pin the measured 22/10 split.
 pub(super) const LENGTH_BITS: u32 = 10;
 
 pub(super) const LENGTH_MASK: u32 = (1 << LENGTH_BITS) - 1;

@@ -3,8 +3,9 @@
 //! Check-only units execute only after canonical providers are published. Their successful
 //! artefacts never enter a retained boundary; this child preserves the diagnostic-only lane.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -27,7 +28,7 @@ use super::{
 fn seed_boundary_materialisations(
     registry: &mut ProviderMaterialisationRegistry,
     modules: &ModuleArtifactStore,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for artifact in modules.successful_artefacts_in_module_id_order() {
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
             registry.publish_context_with_rebase_required(context, true)?;
@@ -41,11 +42,11 @@ fn seed_boundary_materialisations(
 /// This is used for source packages after *all* source-package facades have published. Check-only
 /// jobs can therefore consume any canonical module/package provider without adding package edges
 /// or changing the retained boundary. Successful artefacts, generated deltas and resource
-/// associations are dropped; only diagnostics and warnings are returned as premerge batches.
+/// associations are dropped; only prepared diagnostics and warnings are returned.
 ///
-/// WHAT: stays in the premerge lane and calls the typed canonical batch helper directly.
-/// WHY: the deferred lane never constructs the final vessel; the source-owner tail converts
-///      each batch exactly once with its finalized snapshot.
+/// WHAT: stays in the prepared lane and calls the typed canonical batch helper directly.
+/// WHY: the deferred lane never constructs the final vessel; the source-owner tail appends
+///      each prepared batch with its finalized snapshot.
 #[allow(
     clippy::too_many_arguments,
     reason = "deferred check-only compilation keeps boundary context, provider and generated stores, jobs, provider and package edges, and mutable string/path tables as separate borrows"
@@ -57,18 +58,16 @@ pub(super) fn compile_check_only_jobs_after_canonical(
     check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_dependencies: &[ResolvedSourcePackageDependency],
-    string_table: &mut StringTable,
-    path_interner: &mut PathInternerBuilder,
-) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
+    string_table: &StringTable,
+    path_interner: &PathInternerBuilder,
+) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
     let mut provider_materialisations =
         seed_completed_package_materialisations(context.completed_packages())?;
     seed_boundary_materialisations(&mut provider_materialisations, provider_store)?;
 
-    let provider_binding_index = build_provider_binding_index(provider_bindings)?;
-    let source_package_dependency_index = build_source_package_dependency_index(
-        &provider_binding_index,
-        source_package_dependencies,
-    )?;
+    let provider_binding_index = build_provider_binding_index(provider_bindings);
+    let source_package_dependency_index =
+        build_source_package_dependency_index(&provider_binding_index, source_package_dependencies);
     let build_config_index = context.build_config_resolution_index();
 
     compile_check_only_batches(

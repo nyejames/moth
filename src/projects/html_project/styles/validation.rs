@@ -12,9 +12,8 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
 use crate::compiler_frontend::ast::templates::template::FormatterResult;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, MalformedTemplateReason, SyntaxDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, MalformedTemplateReason};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -86,10 +85,7 @@ impl PassThroughFormatterInput {
         }
     }
 
-    pub(crate) fn into_formatter_result(
-        self,
-        warnings: Vec<CompilerDiagnostic>,
-    ) -> FormatterResult {
+    pub(crate) fn into_formatter_result(self, warnings: DiagnosticBag) -> FormatterResult {
         FormatterResult {
             output: FormatterOutput {
                 pieces: self.output_pieces,
@@ -98,30 +94,21 @@ impl PassThroughFormatterInput {
         }
     }
 
-    /// Turn validator warnings into malformed-template diagnostics of one syntax kind.
-    ///
-    /// WHY: both callers report the same payload shape and differ only in which template kind
-    /// was malformed, so the kind travels as data rather than as a per-caller constructor.
-    pub(crate) fn map_warnings(
-        &self,
-        warnings: Vec<SourceWarning>,
-        kind: SyntaxDiagnosticKind,
-    ) -> Vec<CompilerDiagnostic> {
+    /// Turn validator warnings into malformed-template diagnostics using their typed reasons.
+    pub(crate) fn map_warnings(&self, warnings: Vec<SourceWarning>) -> DiagnosticBag {
         if self.spans.is_empty() || self.flattened_source.trim().is_empty() {
-            return Vec::new();
+            return DiagnosticBag::new();
         }
 
-        warnings
-            .into_iter()
-            .filter_map(|warning| {
-                let span = map_warning_span_to_source_span(&self.spans, &warning)?;
-                Some(CompilerDiagnostic::malformed_template(
-                    kind,
-                    warning.reason,
-                    span,
-                ))
-            })
-            .collect()
+        DiagnosticBag::from_diagnostics(
+            warnings
+                .into_iter()
+                .filter_map(|warning| {
+                    let span = map_warning_span_to_source_span(&self.spans, &warning)?;
+                    Some(templates::malformed_template(warning.reason, span))
+                })
+                .collect(),
+        )
     }
 }
 

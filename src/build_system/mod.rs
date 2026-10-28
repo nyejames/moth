@@ -7,6 +7,7 @@
 //  Public Modules
 // -------------------------
 
+pub(crate) mod backend_build_context;
 pub(crate) mod build;
 pub(crate) mod build_profile;
 pub(crate) mod create_project_modules;

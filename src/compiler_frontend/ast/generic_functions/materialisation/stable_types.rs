@@ -25,7 +25,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity, ExportedGenericParameterIdentity,
     GenericDeclarationOrigin, NominalOriginResolver,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -227,12 +230,13 @@ impl StableReceiverKey {
     pub(super) fn capture(
         receiver: &ReceiverKey,
         _string_table: &StringTable,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         match receiver {
             ReceiverKey::Struct(path) => Ok(Self::Struct(*path)),
             ReceiverKey::Choice(path) => Ok(Self::Choice(*path)),
             ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => {
-                Err(CompilerError::compiler_error(
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Retained receiver method has a non-source receiver key",
                 ))
             }
@@ -362,7 +366,8 @@ impl<N: MaterialisationNominalSource> FoldedValueMaterialiser
         &mut self,
         origin: &crate::compiler_frontend::paths::resource_identity::StableResourceOriginId,
         span: Option<SourceSpan>,
-    ) -> Result<crate::compiler_frontend::paths::module_resources::ResourceId, CompilerError> {
+    ) -> Result<crate::compiler_frontend::paths::module_resources::ResourceId, InfrastructureFailure>
+    {
         // WHY: `intern_origin` is idempotent within one sidecar table, so repeated projections
         // during one materialisation reuse one local handle and one row. A handle is valid only in
         // the table that issued it.
@@ -376,7 +381,7 @@ impl<N: MaterialisationNominalSource> FoldedValueMaterialiser
         &mut self,
         identity: &CanonicalTypeIdentity,
         string_table: &mut StringTable,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, ConstValueStoreError> {
         intern_generated_canonical_type(
             identity,
             self.type_environment,
@@ -414,7 +419,7 @@ pub(super) struct GeneratedValueMaterialisationServices<'a> {
 ///
 /// WHAT: converts every stable variant into the same ordinary `ConstValueStore` payload the
 ///       declaring phase owns, then stages children before their aggregate.
-/// WHY: generated bodies must not reconstruct legacy expression trees for defaults; constant
+/// WHY: generated bodies import defaults through their declaring folded-value owner; constant
 ///      defaults and executable occurrences retain separate owners.
 pub(super) fn import_canonical_folded_value(
     materialiser: &mut GeneratedFoldedValueMaterialiser<'_, '_, impl MaterialisationNominalSource>,
@@ -427,7 +432,7 @@ pub(super) fn import_canonical_folded_value(
     match folded {
         PublicFoldedValue::Number(value) => {
             if materialiser.type_environment.number_scale(expected_type_id) != Some(value.scale()) {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation, format!(
                     "Imported folded Dec value at scale {} disagrees with its consumer-local canonical type",
                     value.scale()
                 ))
@@ -459,7 +464,7 @@ pub(super) fn import_canonical_folded_value(
             ConstValuePayload::Char(*value),
         ),
         PublicFoldedValue::String(value) => {
-            let value = import_folded_string(materialiser, value, string_table, span)?;
+            let value = import_folded_string(materialiser, value, string_table, span);
             insert_literal(
                 const_values,
                 expected_type_id,
@@ -468,15 +473,9 @@ pub(super) fn import_canonical_folded_value(
             )
         }
         PublicFoldedValue::ConstTemplate { template, folded } => {
-            let folded = match folded {
-                Some(value) => Some(import_folded_string(
-                    materialiser,
-                    value,
-                    string_table,
-                    span,
-                )?),
-                None => None,
-            };
+            let folded = folded
+                .as_ref()
+                .map(|value| import_folded_string(materialiser, value, string_table, span));
             import_const_template(template, folded, expected_type_id, const_values, span)
         }
         PublicFoldedValue::Collection(values) => {
@@ -485,7 +484,8 @@ pub(super) fn import_canonical_folded_value(
                 .collection_shape(expected_type_id)
                 .map(|shape| shape.element_type)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded collection value has a non-collection canonical type",
                     )
                 })?;
@@ -529,7 +529,8 @@ pub(super) fn import_canonical_folded_value(
                 .type_environment
                 .fields_for(expected_type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded record value has a canonical type without fields",
                     )
                 })?
@@ -552,7 +553,8 @@ pub(super) fn import_canonical_folded_value(
         } => {
             let choice_type_id = materialiser.intern_canonical_type(type_identity, string_table)?;
             if choice_type_id != expected_type_id {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Imported folded choice value disagrees with its declared canonical type",
                 )
                 .into());
@@ -561,7 +563,8 @@ pub(super) fn import_canonical_folded_value(
                 .type_environment
                 .variants_for(choice_type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded choice value has a non-choice canonical type",
                     )
                 })?
@@ -569,9 +572,12 @@ pub(super) fn import_canonical_folded_value(
                 .find(|variant| string_table.resolve(variant.name) == variant_name)
                 .cloned()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Imported folded choice value names unknown variant '{variant_name}'"
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
+                        format!(
+                            "Imported folded choice value names unknown variant '{variant_name}'"
+                        ),
+                    )
                 })?;
             let definitions = match &variant.payload {
                 ChoiceVariantPayloadDefinition::Unit => Vec::new(),
@@ -581,7 +587,8 @@ pub(super) fn import_canonical_folded_value(
                 .type_environment
                 .nominal_path(choice_type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded choice type has no consumer-local nominal path",
                     )
                 })?
@@ -648,7 +655,8 @@ pub(super) fn import_canonical_folded_value(
                 .type_environment
                 .option_inner_type(expected_type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded option value has a non-option canonical type",
                     )
                 })?;
@@ -679,7 +687,8 @@ pub(super) fn import_canonical_folded_value(
                 .type_environment
                 .option_inner_type(expected_type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded option value has a non-option canonical type",
                     )
                 })?;
@@ -687,7 +696,8 @@ pub(super) fn import_canonical_folded_value(
                 .type_environment
                 .get(inner_type_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Imported folded option value has an unknown inner canonical type",
                     )
                 })?;
@@ -709,20 +719,19 @@ pub(super) fn import_canonical_folded_value(
     }
 }
 
-/// Converts a constant-store failure raised while projecting stable folded values.
-///
-/// WHY: `Infrastructure` already carries every compiler error that produced it. A `Diagnostic` means the
-/// store rejected a projected node; stable folded input is validated upstream, so it is reported as an
-/// invariant break rather than a user-facing diagnostic.
-pub(super) fn const_store_error_into_compiler_error(
+pub(super) fn const_store_error_into_prepared_failure(
     error: ConstValueStoreError,
-) -> Box<InfrastructureErrors> {
+    string_table: &StringTable,
+    type_environment: Option<&TypeEnvironment>,
+) -> PreparedFailure {
     match error {
-        ConstValueStoreError::Infrastructure(errors) => errors,
-        ConstValueStoreError::Diagnostic(diagnostic) => CompilerError::compiler_error(format!(
-            "Imported folded value violated a constant store invariant: {diagnostic:?}"
-        ))
-        .into(),
+        ConstValueStoreError::Infrastructure(errors) => PreparedFailure::Infrastructure(errors),
+        ConstValueStoreError::Diagnostic(diagnostic) => PreparedFailure::capture_diagnosed(
+            DiagnosticBag::from(diagnostic),
+            string_table.clone(),
+            type_environment,
+            None,
+        ),
     }
 }
 fn insert_literal(
@@ -750,9 +759,9 @@ fn import_folded_string(
     value: &OwnedFoldedString,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-) -> Result<ConstStringValue, ConstValueStoreError> {
+) -> ConstStringValue {
     match value {
-        OwnedFoldedString::Text(text) => Ok(ConstStringValue::Text(string_table.intern(text))),
+        OwnedFoldedString::Text(text) => ConstStringValue::Text(string_table.intern(text)),
         OwnedFoldedString::Pieces(pieces) => {
             let mut projected = Vec::with_capacity(pieces.len());
             for piece in pieces {
@@ -769,7 +778,7 @@ fn import_folded_string(
                     OwnedFoldedStringPiece::SiteRoot => ConstStringPiece::SiteRoot,
                 });
             }
-            Ok(ConstStringValue::Pieces(projected))
+            ConstStringValue::Pieces(projected)
         }
     }
 }
@@ -816,7 +825,9 @@ fn import_anonymous_record(
         let field_path = materialiser
             .path_fork
             .try_intern_child(PathId::ROOT, string_table.intern(&field.name))
-            .ok_or_else(|| CompilerError::compiler_error("Imported field path table exhausted"))?;
+            .ok_or_else(|| {
+                token_lexical::compiler_capacity_exceeded(CapacityResource::PathNodes, span)
+            })?;
         let value = import_canonical_folded_value(
             materialiser,
             &field.value,
@@ -877,7 +888,7 @@ fn import_named_fields(
     span: Option<SourceSpan>,
 ) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
     if fields.len() != definitions.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
             "Imported folded aggregate value has a field count inconsistent with its canonical type",
         )
         .into());
@@ -888,9 +899,14 @@ fn import_named_fields(
             .path_fork
             .component(definition.name)
             .map(|name| string_table.resolve(name))
-            .ok_or_else(|| CompilerError::compiler_error("Imported field path has no name"))?;
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "Imported field path has no name",
+                )
+            })?;
         if definition_name != field.name {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::internal(CompilerStage::GenericMaterialisation, format!(
                 "Imported folded aggregate field '{}' does not match canonical field '{definition_name}'",
                 field.name
             ))
@@ -924,7 +940,8 @@ fn start_type_for_folded_range(
         ),
         _ => {
             let _ = (expected_type_id, type_environment);
-            Err(CompilerError::compiler_error(
+            Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Imported folded range endpoints must be fixed scalar values",
             )
             .into())
@@ -960,12 +977,13 @@ impl NominalOriginResolver for MaterialisationNominalOriginResolver<'_> {
     fn resolve_nominal_origin(
         &self,
         nominal_id: NominalTypeId,
-    ) -> Result<OriginTypeId, CompilerError> {
+    ) -> Result<OriginTypeId, InfrastructureFailure> {
         let type_id = self
             .type_environment
             .type_id_for_nominal_id(nominal_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Materialisation folded-value projection has an unknown nominal type",
                 )
             })?;
@@ -974,7 +992,8 @@ impl NominalOriginResolver for MaterialisationNominalOriginResolver<'_> {
             .canonical_identity_for_type_id(type_id)
         {
             Some(CanonicalTypeIdentity::SourceNominal(origin)) => Ok(origin.clone()),
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Materialisation folded-value projection has no source nominal origin",
             )),
         }

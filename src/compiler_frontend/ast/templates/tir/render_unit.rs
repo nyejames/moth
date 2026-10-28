@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::ast::templates::tir::formatter_view::{
@@ -27,8 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::slot_composition::compose_tir
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 // ------------------------------
 //  Aggregate-wrapper candidates
@@ -102,14 +102,14 @@ pub(in crate::compiler_frontend::ast::templates) fn build_conditional_body_candi
 fn head_prefix_node_span(
     store: &TemplateIrStore,
     head_prefix_nodes: &[TemplateIrNodeId],
-) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, CompilerError> {
+) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, InfrastructureFailure> {
     match head_prefix_nodes.first().copied() {
         None => Ok(None),
         Some(node_id) => store
             .get_node(node_id)
             .map(|node| node.span)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "TIR aggregate-wrapper candidate: selected head-prefix node {} was missing from the store.",
                     node_id
                 ))
@@ -125,7 +125,7 @@ fn conditional_body_candidate_span(
     store: &TemplateIrStore,
     head_prefix_nodes: &[TemplateIrNodeId],
     body_children: &[TemplateIrNodeId],
-) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, CompilerError> {
+) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, InfrastructureFailure> {
     let selected = head_prefix_nodes
         .first()
         .or_else(|| body_children.first())
@@ -136,7 +136,7 @@ fn conditional_body_candidate_span(
             .get_node(node_id)
             .map(|node| node.span)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "TIR conditional body candidate: selected node {} was missing from the store.",
                     node_id
                 ))
@@ -148,41 +148,12 @@ fn conditional_body_candidate_span(
 //  Formatter helpers
 // ------------------------------
 
-/// Converts TIR formatter diagnostic messages into a single `TemplateError`.
-///
-/// WHAT: returns the outer infrastructure failure typed when present, else scans the
-///       formatter output for hard errors and returns the first one as a `TemplateError`;
-///       when neither exists, fabricates a generic compiler-error so the caller never
-///       receives an unexplained failure.
-/// WHY: the formatter emits structured diagnostics; this helper provides the
-///      narrow bridge from formatter messages back to template-stage errors without
-///      converting the outer failure into a user diagnostic.
-pub(super) fn tir_formatter_messages_to_template_error(
-    messages: CompilerMessages,
-) -> TemplateError {
-    let CompilerMessages {
-        infrastructure_errors,
-        diagnostics,
-        ..
-    } = messages;
-    if let Some(errors) = infrastructure_errors {
-        return TemplateError::Infrastructure(errors);
-    }
-    for diagnostic in diagnostics {
-        if diagnostic.severity == DiagnosticSeverity::Error {
-            return diagnostic.into();
-        }
-    }
-
-    CompilerError::compiler_error("TIR formatter failed without returning a compiler error.").into()
-}
-
 /// Runs the TIR formatter and forwards any warnings to the active diagnostic
 /// context.
 ///
-/// WHAT: thin wrapper around `format_tir_template` that returns formatter
-///       warnings with the formatted TIR result.
-/// WHY: warnings are user-visible formatter behavior and must reach the caller.
+/// WHAT: thin wrapper around `format_tir_template` that moves formatter warnings
+///       into the active scope context and returns only the formatted root.
+/// WHY: warnings belong to the scope context and must be recorded exactly once.
 #[allow(
     clippy::too_many_arguments,
     reason = "the scope context receives formatter warnings, so it stays a separate input"
@@ -197,8 +168,8 @@ pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warni
     style: &Style,
     scope_context: &ScopeContext,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, TemplateError> {
-    let result = format_tir_template(
+) -> Result<TemplateIrNodeId, TemplateError> {
+    let TirFormatterResult { root, warnings } = format_tir_template(
         store,
         expression_builder,
         const_values,
@@ -207,14 +178,13 @@ pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warni
         context,
         style,
         string_table,
-    )
-    .map_err(tir_formatter_messages_to_template_error)?;
+    )?;
 
-    for warning in &result.warnings {
-        scope_context.emit_warning(warning.clone());
+    for warning in warnings.into_diagnostics() {
+        scope_context.emit_warning(warning);
     }
 
-    Ok(result)
+    Ok(root)
 }
 
 /// Formats a control-flow body TIR root using the template's style formatter.
@@ -245,11 +215,10 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
         empty_context,
         style,
         string_table,
-    )
-    .map_err(tir_formatter_messages_to_template_error)?;
+    )?;
 
-    for warning in &result.warnings {
-        context.emit_warning(warning.clone());
+    for warning in result.warnings.into_diagnostics() {
+        context.emit_warning(warning);
     }
 
     Ok(result.root)
@@ -259,7 +228,7 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
 //  Sequence and whitespace helpers
 // ------------------------------
 
-/// Returns the children of a `Sequence` node, or an internal `CompilerError`
+/// Returns the children of a `Sequence` node, or an internal `InfrastructureFailure`
 /// when the node is missing or not a sequence.
 ///
 /// WHAT: extracts the flat child list so it can be appended after head-prefix
@@ -270,19 +239,25 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
 pub(in crate::compiler_frontend::ast::templates) fn sequence_children(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
-) -> Result<Vec<TemplateIrNodeId>, CompilerError> {
+) -> Result<Vec<TemplateIrNodeId>, InfrastructureFailure> {
     let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "TIR sequence-children lookup: node {} was missing from the store.",
-            node_id
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "TIR sequence-children lookup: node {} was missing from the store.",
+                node_id
+            ),
+        )
     })?;
     match &node.kind {
         TemplateIrNodeKind::Sequence { children } => Ok(children.clone()),
-        _ => Err(CompilerError::compiler_error(format!(
-            "TIR sequence-children lookup: node {} was not a Sequence root.",
-            node_id
-        ))),
+        _ => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "TIR sequence-children lookup: node {} was not a Sequence root.",
+                node_id
+            ),
+        )),
     }
 }
 
@@ -343,14 +318,17 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
 pub(in crate::compiler_frontend::ast::templates) fn head_prefix_tir_nodes(
     store: &TemplateIrStore,
     root_children: &[TemplateIrNodeId],
-) -> Result<Vec<TemplateIrNodeId>, CompilerError> {
+) -> Result<Vec<TemplateIrNodeId>, InfrastructureFailure> {
     let mut prefix = Vec::new();
     for &node_id in root_children {
         let node = store.get_node(node_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR head-prefix extraction: root child node {} was missing from the store.",
-                node_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR head-prefix extraction: root child node {} was missing from the store.",
+                    node_id
+                ),
+            )
         })?;
         if matches!(
             node.kind,

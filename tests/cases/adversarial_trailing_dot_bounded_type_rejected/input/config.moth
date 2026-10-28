@@ -1,0 +1,5 @@
+project #= (
+    name = "adversarial_trailing_dot_bounded_type_rejected",
+    entry_root = "src",
+)
+html #= ()

@@ -1,15 +1,15 @@
 //! Synthesized runtime helper function emission.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use wasm_encoder::{Function, Instruction, MemArg, ValType};
 
 pub(crate) fn emit_helper_function(
     helper: WasmRuntimeHelper,
     plan: &WasmEmitPlan,
-) -> Result<Function, CompilerError> {
+) -> Result<Function, InfrastructureFailure> {
     // Pure numeric helpers have no dependency on linear memory or the allocator.
     match helper {
         WasmRuntimeHelper::FloatPower => return Ok(super::float_power::emit_float_power()),
@@ -29,12 +29,11 @@ pub(crate) fn emit_helper_function(
     }
 
     // WHAT: helpers share one bump-allocation/global model.
-    // WHY: correctness-first runtime scaffolding until richer ownership/runtime logic lands.
+    // WHY: runtime helpers use this common model without ownership-specific specialization.
     let heap_top_global = plan.heap_top_global_index.ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::wasm_generation(
             "Wasm emission expected heap_top global while synthesizing runtime helpers",
         )
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
     })?;
 
     let alloc_index = plan
@@ -42,8 +41,7 @@ pub(crate) fn emit_helper_function(
         .get(&WasmRuntimeHelper::Alloc)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error("Wasm emission missing rt_alloc helper index")
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+            InfrastructureFailure::wasm_generation("Wasm emission missing rt_alloc helper index")
         })?;
     if helper == WasmRuntimeHelper::StringFromFloat {
         return super::float_format::emit_string_from_float(plan, alloc_index);
@@ -57,7 +55,7 @@ pub(crate) fn emit_helper_function(
             | WasmRuntimeHelper::VecLen
             | WasmRuntimeHelper::VecGet
     ) {
-        return super::vec_helpers::emit_vec_helper(helper, alloc_index);
+        return Ok(super::vec_helpers::emit_vec_helper(helper, alloc_index));
     }
 
     // Local declarations: each helper declares only non-parameter locals.
@@ -108,7 +106,10 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecPushHandle
         | WasmRuntimeHelper::VecLen
         | WasmRuntimeHelper::VecGet => {
-            unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "vec helpers are dispatched early to vec_helpers::emit_vec_helper"
+            )
         }
         WasmRuntimeHelper::FloatPower
         | WasmRuntimeHelper::FloatRemainder
@@ -116,7 +117,10 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::F16BitsToF32
         | WasmRuntimeHelper::FloatToDecimal
         | WasmRuntimeHelper::StringFromFloat => {
-            unreachable!("numeric/string formatters are dispatched to their focused emitters")
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "numeric/string formatters are dispatched to their focused emitters"
+            )
         }
     };
 
@@ -571,20 +575,18 @@ pub(crate) fn emit_helper_function(
                 .get(&WasmRuntimeHelper::StringNewBuffer)
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::wasm_generation(
                         "Wasm emission missing rt_string_new_buffer helper index",
                     )
-                    .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
                 })?;
             let string_finish_index = plan
                 .helper_indices
                 .get(&WasmRuntimeHelper::StringFinish)
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::wasm_generation(
                         "Wasm emission missing rt_string_finish helper index",
                     )
-                    .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
                 })?;
 
             const VALUE_I64: u32 = 0;
@@ -689,14 +691,17 @@ pub(crate) fn emit_helper_function(
         }
         WasmRuntimeHelper::Release | WasmRuntimeHelper::DropIfOwned => {
             // WHAT: release/drop helpers are conservative no-ops for both string and vec handles.
-            // WHY: ownership-eliding/free semantics are introduced incrementally after baseline correctness.
+            // WHY: ownership-eliding and free semantics are not implemented; helpers do not free.
             function.instruction(&Instruction::Return);
         }
         WasmRuntimeHelper::VecNew
         | WasmRuntimeHelper::VecPushHandle
         | WasmRuntimeHelper::VecLen
         | WasmRuntimeHelper::VecGet => {
-            unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "vec helpers are dispatched early to vec_helpers::emit_vec_helper"
+            )
         }
         WasmRuntimeHelper::FloatPower
         | WasmRuntimeHelper::FloatRemainder
@@ -704,7 +709,10 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::F16BitsToF32
         | WasmRuntimeHelper::FloatToDecimal
         | WasmRuntimeHelper::StringFromFloat => {
-            unreachable!("numeric/string formatters are dispatched to their focused emitters")
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "numeric/string formatters are dispatched to their focused emitters"
+            )
         }
     }
     function.instruction(&Instruction::End);
@@ -715,22 +723,24 @@ fn emit_string_from_u64(
     function: &mut Function,
     plan: &WasmEmitPlan,
     alloc_index: u32,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let string_new_buffer_index = plan
         .helper_indices
         .get(&WasmRuntimeHelper::StringNewBuffer)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error("Wasm emission missing rt_string_new_buffer helper index")
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+            InfrastructureFailure::wasm_generation(
+                "Wasm emission missing rt_string_new_buffer helper index",
+            )
         })?;
     let string_finish_index = plan
         .helper_indices
         .get(&WasmRuntimeHelper::StringFinish)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error("Wasm emission missing rt_string_finish helper index")
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+            InfrastructureFailure::wasm_generation(
+                "Wasm emission missing rt_string_finish helper index",
+            )
         })?;
 
     const VALUE_I64: u32 = 0;

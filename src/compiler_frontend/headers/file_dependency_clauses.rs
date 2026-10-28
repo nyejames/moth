@@ -4,8 +4,10 @@
 //!       selections.
 //! WHY: one authored clause owns one dependency shell. Stage 0 and later header stages must
 //!      consume that ownership instead of receiving one provider row per selected name.
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
     DependencyClauseParseError, RetainedDependencyPath, ScannedDependencyBinding,
@@ -39,12 +41,14 @@ fn dependency_clause_token_index(
     cursor: &TokenCursor<'_>,
 ) -> FileDependencyClauseResult<TokenIndex> {
     let index = cursor.position().index().checked_sub(1).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "dependency clause token preceded the source token index",
         ))
     })?;
     TokenIndex::try_from_index(index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "dependency clause token exceeded its checked index domain",
         ))
     })
@@ -58,11 +62,9 @@ pub(super) fn parse_and_record_private_dependency(
     clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     if context.is_config_file {
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
-            crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
-            crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-            Some(clause_span),
-        )
+        return Err(project_config::invalid_dependency_clause(crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
+        crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::DependencyClauseNotAllowed,
+        Some(clause_span),)
         .into());
     }
     parse_and_record_dependency_clause(
@@ -116,7 +118,8 @@ fn parse_and_record_dependency_clause(
     let source_tokens = cursor.source_tokens();
     if source_tokens.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "dependency clause source token owner does not match its file identity",
             ),
         ));
@@ -156,11 +159,9 @@ fn parse_and_record_dependency_clause(
         ScannedDependencyBinding::Namespace { alias: None }
     ) && matches!(target, DependencyTargetKind::ExternalProvider { .. })
     {
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
-            crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
-            crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::ProviderRequiresBinding,
-            Some(parsed.provider.path_span),
-        )
+        return Err(project_config::invalid_dependency_clause(crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
+        crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::ProviderRequiresBinding,
+        Some(parsed.provider.path_span),)
         .into());
     }
 
@@ -170,11 +171,12 @@ fn parse_and_record_dependency_clause(
             ScannedDependencyBinding::DirectSelections { selections } if !selections.is_empty()
         )
     {
-        return Err(CompilerDiagnostic::invalid_export_target(Some(clause_span)).into());
+        return Err(generics_traits_api::invalid_export_target(Some(clause_span)).into());
     }
 
     let ordinal = u32::try_from(state.dependency_clause_count).map_err(|_| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "dependency clause ordinal exceeded its checked identity domain",
         ))
     })?;
@@ -184,7 +186,8 @@ fn parse_and_record_dependency_clause(
             .dependency_clause_count
             .checked_add(1)
             .ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "dependency clause count overflowed its source state",
                 ))
             })?;
@@ -206,14 +209,16 @@ fn parse_and_record_dependency_clause(
     )?;
 
     let next_position = TokenIndex::try_from_index(next_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "dependency clause follower exceeded its checked index domain",
         ))
     })?;
     cursor.set_position(next_position).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "dependency clause follower exceeded its source token cursor: {error:?}",
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("dependency clause follower exceeded its source token cursor: {error:?}",),
+        ))
     })?;
     Ok(())
 }

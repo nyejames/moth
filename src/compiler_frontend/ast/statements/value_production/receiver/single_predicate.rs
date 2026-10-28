@@ -23,8 +23,9 @@ use crate::compiler_frontend::ast::statements::match_headers::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchSubject;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, ValueReceiverContext,
+    InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -61,8 +62,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) enum Classif
 ///
 /// WHAT: a committed header (or its diagnostic) ends the parse; an ordinary subject carries its
 ///       already parsed scrutinee back so the Bool owner resumes from the seed instead of
-///       relexing it; absence means no header was attempted.
-/// WHY: the scrutinee parsed exactly once. Forward producers and generic requests stay issued
+///       relexing it.
+/// WHY: the scrutinee is always parsed once. Forward producers and generic requests stay issued
 ///      once; the seed is never revalidated on the Bool path.
 pub(in crate::compiler_frontend::ast::statements::value_production) enum SinglePredicateParseOutcome
 {
@@ -70,8 +71,6 @@ pub(in crate::compiler_frontend::ast::statements::value_production) enum SingleP
     Decided(Result<super::super::types::ParsedReceiverValue, ExpressionParseError>),
     /// Not a predicate: the parsed scrutinee seed for Bool resume.
     OrdinarySubject(StatementExpression),
-    /// No single-predicate header applies; the Bool owner parses fresh.
-    Absent,
 }
 pub(in crate::compiler_frontend::ast::statements::value_production) struct SinglePredicateHeaderInput<
     'a,
@@ -87,23 +86,17 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Singl
     pub classification: IfHeaderClassification,
     pub path_fork: &'a mut PathInternerFork,
 }
-/// Attempts to parse a type-eligible single-predicate header after `if`.
+/// Attempts to parse one type-eligible single-predicate candidate after `if`.
 ///
-/// WHAT: parses the scrutinee once, commits it on an eligible match header and
-/// hands the seed back unchanged for ordinary subjects. There is no replay:
-/// producer tickets and generic requests stay issued exactly once.
-/// WHY: single-predicate classification is semantic, not syntactic. A subject
-/// that is not an option or choice reaches the shared Bool owner as its parsed
-/// seed, with the cursor unchanged after the scrutinee boundary.
+/// WHAT: parses the scrutinee exactly once, commits an eligible match header and hands the seed
+/// back unchanged for ordinary subjects. There is no replay: producer tickets and generic
+/// requests stay issued exactly once.
+/// WHY: single-predicate classification is semantic, not syntactic. A subject that is not an
+/// option or choice reaches the shared Bool owner as its parsed seed, with the cursor unchanged
+/// after the scrutinee boundary.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn classify_single_predicate_header(
     input: SinglePredicateHeaderInput<'_, '_, '_>,
-) -> Option<Result<ClassifiedSinglePredicateHeader, ExpressionParseError>> {
-    parse_single_predicate_once(input)
-}
-/// Parses one single-predicate candidate. The subject stays parsed exactly once.
-fn parse_single_predicate_once(
-    input: SinglePredicateHeaderInput<'_, '_, '_>,
-) -> Option<Result<ClassifiedSinglePredicateHeader, ExpressionParseError>> {
+) -> Result<ClassifiedSinglePredicateHeader, ExpressionParseError> {
     let SinglePredicateHeaderInput {
         token_stream,
         context,
@@ -117,8 +110,8 @@ fn parse_single_predicate_once(
 
     let start_span = token_stream.current_span();
     let scrutinee_context =
-        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
-    let scrutinee = match parse_scrutinee_until_is(
+        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)?;
+    let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &scrutinee_context,
         type_interner,
@@ -126,25 +119,14 @@ fn parse_single_predicate_once(
         const_values,
         string_table,
         path_fork,
-    ) {
-        Ok(scrutinee) => scrutinee,
-        Err(error) => return Some(Err(error)),
-    };
+    )?;
     if token_stream.current_tag() != TokenTag::IS {
-        return Some(Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(
-            scrutinee,
-        )));
+        return Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(scrutinee));
     }
     let subject = match &scrutinee {
         StatementExpression::Built(scrutinee) => {
-            let scrutinee = match expression_builder.view(*scrutinee) {
-                Ok(view) => view,
-                Err(error) => return Some(Err(error.into())),
-            };
-            match scrutinee.require_single(ValueReceiverContext::MatchScrutinee) {
-                Ok(type_id) => MatchSubject::Known(type_id),
-                Err(diagnostic) => return Some(Err(diagnostic.into())),
-            }
+            let scrutinee = expression_builder.view(*scrutinee)?;
+            MatchSubject::Known(scrutinee.require_single(ValueReceiverContext::MatchScrutinee)?)
         }
         // A retained subject classifies through the shared retained operand owner: a concrete type
         // names its subject type, a retained generic choice names its variants from its declared
@@ -168,11 +150,9 @@ fn parse_single_predicate_once(
         _ => None,
     };
     if let Some(reason) = option_rejection {
-        return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
-            reason,
-            Some(start_span),
-        )
-        .into()));
+        return Err(
+            choices_control_flow::invalid_control_flow_statement(reason, Some(start_span)).into(),
+        );
     }
 
     if !subject_is_single_predicate_eligible(
@@ -181,18 +161,16 @@ fn parse_single_predicate_once(
         &subject,
         classification,
     ) {
-        return Some(Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(
-            scrutinee,
-        )));
+        return Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(scrutinee));
     }
 
     token_stream.advance(); // consume `is`
     // Capture bindings such as `|name|` belong on the matched arm, not the
     // receiving declaration or the else branch.
     let match_context =
-        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
 
-    let parsed_pattern = match parse_single_predicate_match_pattern(
+    let parsed_pattern = parse_single_predicate_match_pattern(
         &subject,
         token_stream,
         &match_context,
@@ -201,19 +179,16 @@ fn parse_single_predicate_once(
         const_values,
         string_table,
         path_fork,
-    ) {
-        Ok(pattern) => pattern,
-        Err(error) => return Some(Err(error)),
-    };
+    )?;
 
-    Some(Ok(ClassifiedSinglePredicateHeader::Predicate(Box::new(
+    Ok(ClassifiedSinglePredicateHeader::Predicate(Box::new(
         ParsedSinglePredicateHeader {
             scrutinee,
             pattern: parsed_pattern.pattern,
             then_context: parsed_pattern.arm_scope,
             body_delimiter: classification.body_delimiter,
         },
-    ))))
+    )))
 }
 
 /// Detects unsupported optional single-predicate forms from classification facts.

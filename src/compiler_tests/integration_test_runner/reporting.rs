@@ -11,10 +11,12 @@ use super::{
     SummaryCounts, TestCaseSpec, WarningExpectation,
 };
 use super::{PolicyEvaluation, PolicyFinding};
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticSeverity,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
 use saying::say;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -140,7 +142,7 @@ pub(crate) fn format_case_listing(cases: &[TestCaseSpec]) -> String {
 ///
 /// WHAT: records manifest metadata and the current typed expectation facts without executing a
 ///       case.
-/// WHY: audit output is a review input for later policy phases, not a second test runner.
+/// WHY: audit output supports suite-policy review without executing cases.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SuiteInventoryReport {
     pub schema_version: u32,
@@ -719,33 +721,38 @@ pub(crate) fn render_case_result(
     }
 
     if let Some(messages) = &result.messages {
-        for (diagnostic_index, diagnostic) in messages
-            .diagnostics()
-            .enumerate()
-            .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
-        {
-            if result.passed && matches!(case.expected, ExpectedOutcome::Failure(_)) {
-                say!(Yellow diagnostic_summary_label(diagnostic));
-                continue;
+        match messages {
+            Ok(CompilationOutcome::Success { warnings, .. }) => {
+                if show_warnings && let Some(warnings) = warnings {
+                    render_diagnostic_reports(warnings, DiagnosticSeverity::Warning, false);
+                }
             }
-
-            terminal::print_diagnostic_with_context(
-                diagnostic,
-                messages.diagnostic_render_context(diagnostic_index),
-            );
-        }
-
-        if show_warnings {
-            for (diagnostic_index, warning) in messages
-                .diagnostics()
-                .enumerate()
-                .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Warning)
-            {
-                terminal::print_diagnostic_with_context(
-                    warning,
-                    messages.diagnostic_render_context(diagnostic_index),
+            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                let summarized_failure =
+                    result.passed && matches!(case.expected, ExpectedOutcome::Failure(_));
+                render_diagnostic_reports(reports, DiagnosticSeverity::Error, summarized_failure);
+                if show_warnings {
+                    render_diagnostic_reports(reports, DiagnosticSeverity::Warning, false);
+                }
+            }
+            Err(_) => {
+                crate::compiler_frontend::compiler_messages::display_messages::print_compilation_result(
+                    messages,
                 );
             }
+        }
+    }
+}
+fn render_diagnostic_reports(
+    reports: &DiagnosticReportSet,
+    severity: DiagnosticSeverity,
+    summarize_errors: bool,
+) {
+    for (report, view) in reports.iter_severity(severity) {
+        if summarize_errors && severity == DiagnosticSeverity::Error {
+            say!(Yellow diagnostic_summary_label(view));
+        } else {
+            terminal::print_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
         }
     }
 }
@@ -794,26 +801,30 @@ pub(crate) fn expected_outcome_label(expected: &ExpectedOutcome) -> &'static str
 }
 
 pub(crate) fn observed_failure_reason(result: &CaseExecutionResult) -> String {
-    if let Some(messages) = &result.messages
-        && let Some(first_diagnostic) = messages
-            .diagnostics()
-            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-    {
-        let base = result
-            .failure_reason
-            .as_deref()
-            .unwrap_or("Compilation failed.");
-        let diagnostic_index = messages
-            .diagnostic_slice()
-            .iter()
-            .position(|diagnostic| std::ptr::eq(diagnostic, first_diagnostic))
-            .unwrap_or(0);
-        let terse_line = terse::format_terse_diagnostic_with_context(
-            first_diagnostic,
-            messages.diagnostic_render_context(diagnostic_index),
-        );
-
-        return format!("{base} First diagnostic: {terse_line}");
+    if let Some(messages) = &result.messages {
+        if let Some(reports) = diagnostic_reports(messages)
+            && let Some((report, first_diagnostic)) =
+                reports.iter_severity(DiagnosticSeverity::Error).next()
+        {
+            let base = result
+                .failure_reason
+                .as_deref()
+                .unwrap_or("Compilation failed.");
+            let terse_line = terse::format_terse_diagnostic_view(
+                first_diagnostic,
+                DiagnosticRenderContext::for_report(report),
+            );
+            return format!("{base} First diagnostic: {terse_line}");
+        }
+        if messages.is_err()
+            && let Some(terse_line) = terse::format_terse_compilation_result(messages).first()
+        {
+            let base = result
+                .failure_reason
+                .as_deref()
+                .unwrap_or("Compilation failed.");
+            return format!("{base} First diagnostic: {terse_line}");
+        }
     }
 
     if let Some(reason) = &result.failure_reason {
@@ -827,9 +838,9 @@ pub(crate) fn observed_failure_reason(result: &CaseExecutionResult) -> String {
     "No failure reason was recorded.".to_string()
 }
 
-fn diagnostic_summary_label(diagnostic: &CompilerDiagnostic) -> String {
-    let descriptor = diagnostic.kind.descriptor();
-    let category = match diagnostic.kind.category() {
+fn diagnostic_summary_label(diagnostic: DiagnosticView<'_>) -> String {
+    let descriptor = diagnostic.descriptor();
+    let category = match diagnostic.category() {
         DiagnosticCategory::Syntax => "Syntax Error",
         DiagnosticCategory::Type => "Type Error",
         DiagnosticCategory::Rule
@@ -837,12 +848,10 @@ fn diagnostic_summary_label(diagnostic: &CompilerDiagnostic) -> String {
         | DiagnosticCategory::DeferredFeature => "Language Rule Error",
         DiagnosticCategory::Borrow => "Borrow Checker Violation",
         DiagnosticCategory::Config => "Malformed Config",
-        DiagnosticCategory::Infrastructure => "Infrastructure Failure",
     };
 
     format!("{category} [{}]", descriptor.code)
 }
-
 pub(crate) fn write_failure_triage_report(
     report_path_str: &str,
     run: &RunIdentity,
@@ -971,27 +980,52 @@ fn format_terse_failure_lines(
     }
 
     if let Some(messages) = &result.messages {
-        for diagnostic_index in messages.diagnostic_display_order() {
-            let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-
-            let should_render = match diagnostic.severity {
-                DiagnosticSeverity::Error => true,
-                DiagnosticSeverity::Warning => show_warnings,
-                DiagnosticSeverity::Note => false,
-            };
-
-            if !should_render {
-                continue;
+        match messages {
+            Err(_) => lines.extend(terse::format_terse_compilation_result(messages)),
+            Ok(CompilationOutcome::Success {
+                warnings: Some(reports),
+                ..
+            }) if show_warnings => {
+                append_terse_diagnostics(&mut lines, reports, [DiagnosticSeverity::Warning]);
             }
-
-            lines.push(terse::format_terse_diagnostic_with_context(
-                diagnostic,
-                messages.diagnostic_render_context(diagnostic_index),
-            ));
+            Ok(CompilationOutcome::Success { .. }) => {}
+            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                if show_warnings {
+                    append_terse_diagnostics(
+                        &mut lines,
+                        reports,
+                        [DiagnosticSeverity::Error, DiagnosticSeverity::Warning],
+                    );
+                } else {
+                    append_terse_diagnostics(&mut lines, reports, [DiagnosticSeverity::Error]);
+                }
+            }
         }
     }
 
     lines
+}
+fn diagnostic_reports(messages: &CompilationResult<()>) -> Option<&DiagnosticReportSet> {
+    match messages {
+        Ok(CompilationOutcome::Success { warnings, .. }) => warnings.as_ref(),
+        Ok(CompilationOutcome::Diagnosed(reports)) => Some(reports),
+        Err(_) => None,
+    }
+}
+
+fn append_terse_diagnostics(
+    lines: &mut Vec<String>,
+    reports: &DiagnosticReportSet,
+    severities: impl IntoIterator<Item = DiagnosticSeverity>,
+) {
+    for severity in severities {
+        for (report, view) in reports.iter_severity(severity) {
+            lines.push(terse::format_terse_diagnostic_view(
+                view,
+                DiagnosticRenderContext::for_report(report),
+            ));
+        }
+    }
 }
 
 fn format_terse_summary_line(summary: SummaryCounts, duration: std::time::Duration) -> String {

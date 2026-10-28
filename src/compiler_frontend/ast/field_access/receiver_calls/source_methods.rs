@@ -63,9 +63,11 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverCallReason, ValueReceiverContext,
+    InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -183,7 +185,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     } = input;
 
     if receiver_node.expression_is_const_record_value(&*expression_builder)? {
-        return Err(CompilerDiagnostic::invalid_receiver_call(
+        return Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
             None,
             Some(member_name),
@@ -195,7 +197,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     }
 
     if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-        return Err(CompilerDiagnostic::invalid_receiver_call(
+        return Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::MustUseParentheses,
             None,
             Some(member_name),
@@ -309,7 +311,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         },
                     )?;
                     let receiver_argument = instantiation.receiver_argument.ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "generic receiver instantiation omitted its actual receiver argument",
                         )
                     })?;
@@ -352,7 +355,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         },
                     )?;
                     let receiver_argument = instantiation.receiver_argument.ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "generic receiver instantiation omitted its actual receiver argument",
                         )
                     })?;
@@ -413,7 +417,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         full_arguments.push(receiver_argument);
         for argument in args {
             let Some(parameter_slot) = argument.parameter_slot else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Receiver call argument is missing its retained parameter slot",
                 )
                 .into());
@@ -732,7 +737,7 @@ impl DeferredReceiverCall {
 ///       fallible-handling fragment entry and snapshots the resolved identity, signature, receiver
 ///       value and ordered argument list into the construction-only call record.
 /// WHY: the call site is the only place the authored operand handling and the concrete signature
-///      exist. A retained call can no longer read tokens, so recording the `!` decision here keeps
+///      exist. A retained call cannot read tokens, so recording the `!` decision here keeps
 ///      propagation exactly as authored. A `catch` is never this site's to consume: it protects the
 ///      whole selected expression (for example `10 + obj.f(pending) catch:`), so the token stays for
 ///      the enclosing fragment owner, which retains the complete fragment together with its
@@ -804,7 +809,8 @@ fn retain_numeric_receiver_call(
                 let Some(ParsedFallibleSuffix::Ready(FallibleHandling::Propagate)) =
                     authored_suffix
                 else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "an authored operand `!` was not parsed as typed propagation",
                     )
                     .into());
@@ -962,7 +968,8 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
     // carries it from its authored site, and a chained step injects the preceding step's completed
     // value before resuming this same constructor.
     let DeferredCallReceiver::Ready(receiver_expression) = receiver else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a chained retained receiver call completed without its preceding step value",
         )
         .into());
@@ -1146,7 +1153,8 @@ fn receiver_call_expression(
     full_arguments.push(receiver_argument);
     for argument in args {
         let Some(parameter_slot) = argument.parameter_slot else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Receiver call argument is missing its retained parameter slot",
             )
             .into());

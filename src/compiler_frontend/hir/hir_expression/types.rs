@@ -1,7 +1,7 @@
 //! HIR type-lowering helpers.
 //!
 //! WHAT: validates frontend `TypeId`s and manages generic struct/choice registration for HIR.
-//! WHY: HIR now carries frontend semantic `TypeId`s directly. This module owns generic
+//! WHY: HIR carries frontend semantic `TypeId`s directly. This module owns generic
 //!      nominal instance registration and defensive type-id validation.
 //!
 //! Compatibility boundary:
@@ -9,6 +9,8 @@
 //! generic struct/choice layout registration. It is derived from canonical frontend `TypeId`
 //! information before HIR and must not become a second semantic type identity system.
 
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
 };
@@ -21,35 +23,30 @@ use crate::compiler_frontend::hir::module::{HirChoice, HirChoiceField, HirChoice
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
     /// Verifies that a frontend `TypeId` is registered in `TypeEnvironment`.
     ///
-    /// WHAT: HIR now uses frontend `TypeId`s directly, so this is a defensive check.
+    /// WHAT: HIR uses frontend `TypeId`s directly, so this is a defensive check.
     /// WHY: catches unregistered types that slipped through AST resolution.
     pub(crate) fn lower_type_id(
         &mut self,
         type_id: FrontendTypeId,
-        span: &Option<SourceSpan>,
     ) -> Result<TypeId, HirConstructionFailure> {
         match self.type_environment.get(type_id) {
             Some(TypeDefinition::GenericParameter(parameter)) => {
-                return_hir_transformation_error!(
-                    format!(
-                        "Unresolved generic parameter TypeId {:?} ({:?}) reached HIR lowering",
-                        type_id, parameter.id
-                    ),
-                    self.hir_error_location(span)
-                );
+                Err(InfrastructureFailure::hir_transformation(format!(
+                    "Unresolved generic parameter TypeId {:?} ({:?}) reached HIR lowering",
+                    type_id, parameter.id
+                ))
+                .into())
             }
             Some(_) => Ok(type_id),
-            None => {
-                return_hir_transformation_error!(
-                    format!("TypeId {:?} is not registered in TypeEnvironment", type_id),
-                    self.hir_error_location(span)
-                );
-            }
+            None => Err(InfrastructureFailure::hir_transformation(format!(
+                "TypeId {:?} is not registered in TypeEnvironment",
+                type_id
+            ))
+            .into()),
         }
     }
 
@@ -58,7 +55,6 @@ impl<'a> HirBuilder<'a> {
         key: &crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
         nominal_path: &PathId,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::StructId, HirConstructionFailure> {
         if let Some(&struct_id) = self.generic_structs_by_key.get(key) {
             return Ok(struct_id);
@@ -71,7 +67,8 @@ impl<'a> HirBuilder<'a> {
                 .type_environment
                 .nominal_id_for_path(nominal_path)
                 .ok_or_else(|| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
                         format!(
                             "Base struct '{}' not found in HIR TypeEnvironment",
                             self.symbol_name_for_diagnostics(nominal_path)
@@ -83,7 +80,7 @@ impl<'a> HirBuilder<'a> {
                 &mut self.type_environment,
             )
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HirConstruction,
                     format!(
                         "Generic struct '{}' has an argument that is not registered in HIR TypeEnvironment",
                         self.symbol_name_for_diagnostics(nominal_path)
@@ -112,7 +109,7 @@ impl<'a> HirBuilder<'a> {
             .unwrap_or_default();
 
         for (field_name, field_type_id) in field_definitions {
-            let field_type = self.lower_type_id(field_type_id, span)?;
+            let field_type = self.lower_type_id(field_type_id)?;
             let field_id = self.allocate_field_id();
             self.fields_by_struct_and_name
                 .insert((struct_id, field_name), field_id);
@@ -157,7 +154,8 @@ impl<'a> HirBuilder<'a> {
                 .type_environment
                 .nominal_id_for_path(nominal_path)
                 .ok_or_else(|| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
                         format!(
                             "Base choice '{}' not found in HIR TypeEnvironment",
                             self.symbol_name_for_diagnostics(nominal_path)
@@ -169,7 +167,7 @@ impl<'a> HirBuilder<'a> {
                 &mut self.type_environment,
             )
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HirConstruction,
                     format!(
                         "Generic choice '{}' has an argument that is not registered in HIR TypeEnvironment",
                         self.symbol_name_for_diagnostics(nominal_path)
@@ -181,7 +179,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         let choice_id = self.allocate_choice_id();
-        let hir_variants = self.lower_choice_variants_for_type_id(instance_type_id, _span)?;
+        let hir_variants = self.lower_choice_variants_for_type_id(instance_type_id)?;
 
         self.generic_choices_by_key
             .insert(key.to_owned(), choice_id);
@@ -202,7 +200,6 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_choice_variants_for_type_id(
         &mut self,
         type_id: TypeId,
-        span: &Option<SourceSpan>,
     ) -> Result<Vec<crate::compiler_frontend::hir::module::HirChoiceVariant>, HirConstructionFailure>
     {
         // Copy compact variant facts before allocating/lowering fields. This keeps
@@ -210,10 +207,11 @@ impl<'a> HirBuilder<'a> {
         // immutable borrow across `self` mutations.
         let variant_definitions = {
             let Some(variants) = self.type_environment.variants_for(type_id) else {
-                return_hir_transformation_error!(
-                    format!("Choice TypeId {:?} has no variant metadata", type_id),
-                    self.hir_error_location(span)
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "Choice TypeId {:?} has no variant metadata",
+                    type_id
+                ))
+                .into());
             };
 
             let mut lowered_variants = Vec::with_capacity(variants.len());
@@ -224,10 +222,10 @@ impl<'a> HirBuilder<'a> {
                     lowered_fields.reserve(fields.len());
                     for field in fields {
                         let Some(field_name) = self.path_fork.try_component(field.name) else {
-                            return_hir_transformation_error!(
+                            return Err(InfrastructureFailure::hir_transformation(
                                 "Choice variant field is missing a name",
-                                self.hir_error_location(span)
-                            );
+                            )
+                            .into());
                         };
                         lowered_fields.push((field_name, field.type_id));
                     }
@@ -244,7 +242,7 @@ impl<'a> HirBuilder<'a> {
             let mut hir_variant_fields = Vec::with_capacity(variant_fields.len());
 
             for (field_name, field_type_id) in variant_fields {
-                let field_type = self.lower_type_id(field_type_id, span)?;
+                let field_type = self.lower_type_id(field_type_id)?;
                 hir_variant_fields.push(HirChoiceField {
                     name: field_name,
                     ty: field_type,

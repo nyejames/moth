@@ -2,8 +2,7 @@
 //!
 //! WHAT: owns HIR -> Wasm LIR lowering, optional core Wasm emission, runtime helper contracts,
 //! and debug output for the HTML/Wasm experiment.
-//! WHY: the backend remains crate-internal while the roadmap keeps broader Wasm maturity beyond
-//! the current experimental path.
+//! WHY: the backend remains crate-internal because it is still an experimental path.
 pub(crate) mod backend;
 pub(crate) mod debug;
 pub(crate) mod emit;

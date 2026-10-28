@@ -21,7 +21,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeProjectionContext, StableTraitRequirementIdentity,
     project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::{
@@ -120,13 +121,13 @@ fn collect_receiver_method_records(
 /// The projection is deterministic: duplicate stable evidence keys, duplicate requirement
 /// mappings, requirement count or name mismatches, missing target or trait canonical identity,
 /// duplicate public method matches, wrong receiver origins and free-function origins are
-/// `CompilerError` values rather than silent omissions. A requirement whose method is simply
+/// `InfrastructureFailure` values rather than silent omissions. A requirement whose method is simply
 /// absent from the completed public receiver surface is a valid non-reusable omission, not an
 /// infrastructure failure.
 pub(super) fn project_reusable_evidence(
     declarations: &[PublicDeclarationRecord],
     context: &EvidenceProjectionContext,
-) -> Result<Vec<PublicEvidenceRecord>, CompilerError> {
+) -> Result<Vec<PublicEvidenceRecord>, InfrastructureFailure> {
     let receiver_methods = collect_receiver_method_records(declarations);
 
     let mut records = Vec::new();
@@ -147,12 +148,15 @@ pub(super) fn project_reusable_evidence(
         let identity =
             CanonicalEvidenceIdentity::new(target_type_identity.clone(), trait_identity.clone());
         if !seen_identities.insert(identity.clone()) {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: two canonical evidence records \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: two canonical evidence records \
                  resolved to the same target-plus-trait identity {:?}; a duplicate must not \
                  enter the reusable-evidence collection",
-                identity
-            )));
+                    identity
+                ),
+            ));
         }
 
         let Some(record) = project_one_evidence_record(
@@ -202,40 +206,49 @@ enum ProjectedTrait {
 /// nominal path is retained in the public source-nominal type origin index. A public nominal
 /// target projects through the existing canonical type projection. A nominal without a public
 /// origin is private and excluded from the draft. A missing or non-nominal target is malformed
-/// source-evidence metadata and returns `CompilerError`.
+/// source-evidence metadata and returns `InfrastructureFailure`.
 fn project_target_type_identity(
     evidence: &TraitEvidenceDefinition,
     context: &EvidenceProjectionContext,
-) -> Result<ProjectedTarget, CompilerError> {
+) -> Result<ProjectedTarget, InfrastructureFailure> {
     let Some(definition) = context.type_environment.get(evidence.target_type_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft evidence projection: the evidence target TypeId({}) is not \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft evidence projection: the evidence target TypeId({}) is not \
              registered in the TypeEnvironment; an unregistered target is an internal invariant \
              violation",
-            evidence.target_type_id.0
-        )));
+                evidence.target_type_id.0
+            ),
+        ));
     };
 
     let nominal_id = match definition {
         TypeDefinition::Struct(def) => def.id,
         TypeDefinition::Choice(def) => def.id,
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: the evidence target TypeId({}) \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: the evidence target TypeId({}) \
                  resolved to {:?}, not a nominal struct or choice; source conformance targets \
                  must be same-file nominal types",
-                evidence.target_type_id.0, definition
-            )));
+                    evidence.target_type_id.0, definition
+                ),
+            ));
         }
     };
 
     let Some(path) = context.type_environment.nominal_path_by_id(nominal_id) else {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft evidence projection: the evidence target NominalTypeId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft evidence projection: the evidence target NominalTypeId({}) \
              has no registered path in the TypeEnvironment; an unregistered nominal is an \
              internal invariant violation",
-            nominal_id.0
-        )));
+                nominal_id.0
+            ),
+        ));
     };
 
     let Some(receiver_origin) = context
@@ -256,20 +269,26 @@ fn project_target_type_identity(
     // nominal target, so the paired origin must equal the resolver origin; a mismatch is an
     // internal invariant violation rather than a silent coercion.
     let CanonicalTypeIdentity::SourceNominal(canonical_origin) = &identity else {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft evidence projection: the evidence target TypeId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft evidence projection: the evidence target TypeId({}) \
              projected to {:?}, not SourceNominal; a non-source-nominal canonical target for \
              source conformance is an internal invariant violation",
-            evidence.target_type_id.0, identity
-        )));
+                evidence.target_type_id.0, identity
+            ),
+        ));
     };
     if canonical_origin != &receiver_origin {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft evidence projection: the evidence target TypeId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft evidence projection: the evidence target TypeId({}) \
              canonical origin {:?} does not match the public source-nominal origin {:?}; a \
              mismatch is an internal invariant violation",
-            evidence.target_type_id.0, canonical_origin, receiver_origin
-        )));
+                evidence.target_type_id.0, canonical_origin, receiver_origin
+            ),
+        ));
     }
 
     Ok(ProjectedTarget::Public(Box::new(identity), receiver_origin))
@@ -289,7 +308,7 @@ fn project_target_type_identity(
 fn project_evidence_trait_identity(
     evidence: &TraitEvidenceDefinition,
     context: &EvidenceProjectionContext,
-) -> Result<ProjectedTrait, CompilerError> {
+) -> Result<ProjectedTrait, InfrastructureFailure> {
     // A definition whose visibility is `Core` but which has no recorded `core_trait_kind` is
     // malformed compiler metadata and must not silently fall through to source classification.
     let definition = context.trait_environment.get(evidence.trait_id);
@@ -300,13 +319,16 @@ fn project_evidence_trait_identity(
             .core_trait_kind(evidence.trait_id)
             .is_none()
     {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft evidence projection: the evidence TraitId({}) is declared \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft evidence projection: the evidence TraitId({}) is declared \
              as a core trait but has no recorded `CoreTraitKind`; a core trait without its \
              classifier is malformed compiler metadata and must not be silently classified as \
              a source trait",
-            evidence.trait_id.0
-        )));
+                evidence.trait_id.0
+            ),
+        ));
     }
 
     let source_fact =
@@ -348,24 +370,27 @@ fn project_evidence_trait_identity(
 /// surface, the whole evidence record is non-reusable: the projection returns `Ok(None)` so
 /// the caller omits it without a diagnostic. A missing, extra, duplicate or name-mismatched
 /// requirement, an unresolvable method path, a duplicate public method match, a wrong-receiver
-/// origin or a free-function origin in the receiver surface is a `CompilerError`.
+/// origin or a free-function origin in the receiver surface is an `InfrastructureFailure`.
 fn project_one_evidence_record(
     evidence: &TraitEvidenceDefinition,
     identity: CanonicalEvidenceIdentity,
     target_origin: OriginTypeId,
     receiver_methods: &[ReceiverMethodRecordRef<'_>],
     context: &EvidenceProjectionContext,
-) -> Result<Option<PublicEvidenceRecord>, CompilerError> {
+) -> Result<Option<PublicEvidenceRecord>, InfrastructureFailure> {
     let trait_definition = context
         .trait_environment
         .get(evidence.trait_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: the evidence TraitId({}) has no \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: the evidence TraitId({}) has no \
                  resolved definition in the TraitEnvironment; a missing definition is an \
                  internal invariant violation",
-                evidence.trait_id.0
-            ))
+                    evidence.trait_id.0
+                ),
+            )
         })?;
 
     // Index the evidence requirement entries by dense requirement ID so each authored
@@ -378,24 +403,30 @@ fn project_one_evidence_record(
             .insert(requirement_evidence.requirement_id, requirement_evidence)
             .is_some()
         {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: two evidence requirement entries \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: two evidence requirement entries \
                  share TraitRequirementId({}) for trait TraitId({}); a duplicate must not \
                  silently overwrite the first",
-                requirement_evidence.requirement_id.0, evidence.trait_id.0
-            )));
+                    requirement_evidence.requirement_id.0, evidence.trait_id.0
+                ),
+            ));
         }
     }
 
     if trait_definition.requirements.len() != evidence.requirements.len() {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft evidence projection: the trait definition for TraitId({}) \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft evidence projection: the trait definition for TraitId({}) \
              has {} requirement(s) but the evidence record has {}; a count mismatch is an \
              internal invariant violation",
-            evidence.trait_id.0,
-            trait_definition.requirements.len(),
-            evidence.requirements.len()
-        )));
+                evidence.trait_id.0,
+                trait_definition.requirements.len(),
+                evidence.requirements.len()
+            ),
+        ));
     }
 
     let mut requirement_mappings = Vec::with_capacity(trait_definition.requirements.len());
@@ -408,22 +439,28 @@ fn project_one_evidence_record(
             .to_owned();
 
         if !seen_requirement_names.insert(requirement_name.clone()) {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: the trait definition for TraitId({}) \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: the trait definition for TraitId({}) \
                  has two requirements named '{}'; a duplicate requirement name is an internal \
                  invariant violation",
-                evidence.trait_id.0, requirement_name
-            )));
+                    evidence.trait_id.0, requirement_name
+                ),
+            ));
         }
 
         let Some(requirement_evidence) = evidence_by_requirement_id.get(&authored_requirement.id)
         else {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: the authored requirement '{}' \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: the authored requirement '{}' \
                  (TraitRequirementId({})) has no matching evidence entry for trait TraitId({}); \
                  a missing requirement mapping is an internal invariant violation",
-                requirement_name, authored_requirement.id.0, evidence.trait_id.0
-            )));
+                    requirement_name, authored_requirement.id.0, evidence.trait_id.0
+                ),
+            ));
         };
 
         // Use the exact validated evidence method path to obtain its defining method name.
@@ -434,12 +471,15 @@ fn project_one_evidence_record(
             .component(requirement_evidence.method_path)
             .map(|component| context.string_table.resolve(component))
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "public-interface draft evidence projection: the evidence requirement '{}' \
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface draft evidence projection: the evidence requirement '{}' \
                      method path {:?} has no resolvable defining name; a missing defining name \
                      is an internal invariant violation",
-                    requirement_name, requirement_evidence.method_path
-                ))
+                        requirement_name, requirement_evidence.method_path
+                    ),
+                )
             })?;
 
         let requirement_identity = StableTraitRequirementIdentity::new(
@@ -459,14 +499,17 @@ fn project_one_evidence_record(
             return Ok(None);
         };
         if candidates.next().is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft evidence projection: the evidence requirement '{}' \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft evidence projection: the evidence requirement '{}' \
                  matches multiple public receiver-method entries on receiver {:?} for method \
                  name '{}'; a duplicate attached method is an internal invariant violation",
-                requirement_identity.requirement_name(),
-                target_origin,
-                method_name
-            )));
+                    requirement_identity.requirement_name(),
+                    target_origin,
+                    method_name
+                ),
+            ));
         }
 
         // The method origin must be a receiver method for the exact target origin; a free
@@ -475,25 +518,31 @@ fn project_one_evidence_record(
         match method_origin.receiver() {
             Some(receiver) if receiver == &target_origin => {}
             Some(receiver) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft evidence projection: the evidence requirement '{}' \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface draft evidence projection: the evidence requirement '{}' \
                      method origin {:?} names receiver {:?} but the evidence target origin is \
                      {:?}; a wrong-receiver method origin is an internal invariant violation",
-                    requirement_identity.requirement_name(),
-                    method_origin,
-                    receiver,
-                    target_origin
-                )));
+                        requirement_identity.requirement_name(),
+                        method_origin,
+                        receiver,
+                        target_origin
+                    ),
+                ));
             }
             None => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft evidence projection: the evidence requirement '{}' \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface draft evidence projection: the evidence requirement '{}' \
                      resolved to a free-function method origin {:?} rather than a receiver \
                      method; a free-function origin in a receiver surface is an internal \
                      invariant violation",
-                    requirement_identity.requirement_name(),
-                    method_origin
-                )));
+                        requirement_identity.requirement_name(),
+                        method_origin
+                    ),
+                ));
             }
         }
 

@@ -8,18 +8,16 @@
 //! - CSS validation and inline-style policy are owned by the HTML project builder, even though
 //!   the frontend executes the formatter during parsing and folding.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::FormatterInput;
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::{
-    CssTemplateWarning, MalformedTemplateReason, SyntaxDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{CssTemplateWarning, MalformedTemplateReason};
 
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::styles::validation::{PassThroughFormatterInput, SourceWarning};
 use std::sync::Arc;
 
@@ -70,13 +68,15 @@ impl TemplateFormatter for CssValidationTemplateFormatter {
     fn format(
         &self,
         input: FormatterInput,
-        string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages> {
-        let flattened_input = PassThroughFormatterInput::from_input(input, string_table);
-        let warnings = flattened_input.map_warnings(
-            validate_css_source(&flattened_input.flattened_source, self.mode, string_table),
-            SyntaxDiagnosticKind::MalformedCssTemplate,
-        );
+        diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    ) -> Result<FormatterResult, TemplateError> {
+        let flattened_input =
+            PassThroughFormatterInput::from_input(input, diagnostic_strings.strings());
+        let warnings = flattened_input.map_warnings(validate_css_source(
+            &flattened_input.flattened_source,
+            self.mode,
+            diagnostic_strings,
+        ));
         Ok(flattened_input.into_formatter_result(warnings))
     }
 }
@@ -93,7 +93,7 @@ struct ScanState {
 fn validate_css_source(
     source: &str,
     mode: CssFormatterMode,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder<'_>,
 ) -> Vec<SourceWarning> {
     // WHAT: one pass for delimiter integrity + one pass for statement/block shape.
     // WHY: keeps diagnostics cheap while still catching common malformed templates.
@@ -181,7 +181,7 @@ fn validate_css_shape(
     chars: &[char],
     mode: CssFormatterMode,
     warnings: &mut Vec<SourceWarning>,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder<'_>,
 ) {
     let mut index = 0usize;
     let mut state = ScanState::default();
@@ -305,7 +305,7 @@ fn validate_statement_segment(
     depth: usize,
     mode: CssFormatterMode,
     warnings: &mut Vec<SourceWarning>,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder<'_>,
 ) {
     let Some((text, trimmed_start, trimmed_end)) = trimmed_segment(chars, start, end) else {
         return;
@@ -362,7 +362,7 @@ fn validate_declaration_statement(
     start_offset: usize,
     end_offset: usize,
     warnings: &mut Vec<SourceWarning>,
-    string_table: &mut StringTable,
+    string_table: &mut DiagnosticStringBuilder<'_>,
 ) {
     // Declaration check intentionally stays simple:
     // - must contain one `:` split point (first colon wins)

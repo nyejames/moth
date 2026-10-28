@@ -6,10 +6,9 @@
 //! The compact seed tables and exact split-table expansion below are adapted from
 //! `ryu` 1.0.23 `d2s_small_table.rs` under the same dual license.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
 const INV_COUNT: usize = 292;
@@ -259,16 +258,17 @@ const CANDIDATE_F64: u32 = 56;
 // The binary16 and Ryū branches are exclusive; reuse the i32 exponent scratch slot.
 const CANDIDATE_EXP: u32 = Q;
 
-fn table_offset(plan: &WasmEmitPlan) -> Result<u32, CompilerError> {
+fn table_offset(plan: &WasmEmitPlan) -> Result<u32, InfrastructureFailure> {
     plan.float_format_tables_offset.ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::wasm_generation(
             "Wasm binary-float formatter is missing its planned Ryu tables",
         )
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
     })
 }
 
-pub(crate) fn emit_float_to_decimal(plan: &WasmEmitPlan) -> Result<Function, CompilerError> {
+pub(crate) fn emit_float_to_decimal(
+    plan: &WasmEmitPlan,
+) -> Result<Function, InfrastructureFailure> {
     let _ = table_offset(plan)?;
     let mut function = Function::new(vec![
         (30, ValType::I32),
@@ -1910,16 +1910,15 @@ const STRING_VALUE: u32 = 16;
 pub(crate) fn emit_string_from_float(
     plan: &WasmEmitPlan,
     alloc_index: u32,
-) -> Result<Function, CompilerError> {
+) -> Result<Function, InfrastructureFailure> {
     let decimal_index = plan
         .helper_indices
         .get(&WasmRuntimeHelper::FloatToDecimal)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::wasm_generation(
                 "Wasm binary-float formatter is missing rt_float_to_decimal",
             )
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
     let mut function = Function::new(vec![
         (11, ValType::I32),

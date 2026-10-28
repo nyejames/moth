@@ -12,13 +12,13 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ResolvedNumericOperation, ResolvedOperation, ResolvedOperationKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
     /// Returns the resolved numeric facts for an arithmetic operation.
@@ -27,10 +27,10 @@ impl<'a> HirBuilder<'a> {
         facts: &'f ResolvedOperation,
     ) -> Result<&'f ResolvedNumericOperation, HirConstructionFailure> {
         let ResolvedOperationKind::Numeric(numeric) = &facts.kind else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Arithmetic reached HIR without resolved numeric facts",
-                self.hir_error_location(&facts.span)
-            );
+            )
+            .into());
         };
         Ok(numeric)
     }
@@ -41,16 +41,16 @@ impl<'a> HirBuilder<'a> {
         facts: &ResolvedOperation,
     ) -> Result<(), HirConstructionFailure> {
         let ResolvedOperationKind::Range { domain } = &facts.kind else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Range operation reached HIR without resolved range facts",
-                self.hir_error_location(&facts.span)
-            );
+            )
+            .into());
         };
         if !domain.is_integer() && !domain.is_binary_float() {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Resolved range operation has an invalid numeric domain",
-                self.hir_error_location(&facts.span)
-            );
+            )
+            .into());
         }
         Ok(())
     }
@@ -68,27 +68,25 @@ impl<'a> HirBuilder<'a> {
             left,
             numeric.left_domain,
             numeric.left_conversion,
-            span,
         )?;
         let operands = match right {
             Some(right) => {
                 let Some(right_domain) = numeric.right_domain else {
-                    return_hir_transformation_error!(
+                    return Err(InfrastructureFailure::hir_transformation(
                         "Binary numeric operation is missing its resolved right domain",
-                        self.hir_error_location(span)
-                    );
+                    )
+                    .into());
                 };
                 let right = self.lower_resolved_numeric_operand(
                     right,
                     right_domain,
                     numeric.right_conversion,
-                    span,
                 )?;
                 HirNumericOperands::Binary { left, right }
             }
             None => HirNumericOperands::Unary { operand: left },
         };
-        let result_type = self.lower_type_id(facts.result_type, span)?;
+        let result_type = self.lower_type_id(facts.result_type)?;
         self.emit_checked_numeric_value(
             HirNumericOp {
                 operator: numeric.operator,
@@ -115,27 +113,25 @@ impl<'a> HirBuilder<'a> {
                     left,
                     comparison.left_domain,
                     comparison.left_conversion,
-                    span,
                 )?;
                 let right = self.lower_resolved_numeric_operand(
                     right,
                     comparison.right_domain,
                     comparison.right_conversion,
-                    span,
                 )?;
                 (left, right)
             }
             ResolvedOperationKind::NonNumeric => (left, right),
             _ => {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Comparison reached HIR with invalid resolved operation facts",
-                    self.hir_error_location(span)
-                );
+                )
+                .into());
             }
         };
 
-        let region = self.current_region_or_error(span)?;
-        let operation = self.lower_bin_op(&facts.operator, span)?;
+        let region = self.current_region_or_error()?;
+        let operation = self.lower_bin_op(&facts.operator)?;
         self.make_expression(
             span,
             HirExpressionKind::BinOp {
@@ -156,8 +152,8 @@ impl<'a> HirBuilder<'a> {
         expression: ExpressionView<'_>,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let region = self.current_region_or_error(span)?;
-        let operation = self.lower_unary_op(&Operator::Not, span)?;
+        let region = self.current_region_or_error()?;
+        let operation = self.lower_unary_op(&Operator::Not)?;
         self.make_expression(
             span,
             HirExpressionKind::UnaryOp {
@@ -178,7 +174,7 @@ impl<'a> HirBuilder<'a> {
         facts: &ResolvedOperation,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let span = &facts.span;
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         self.make_expression(
             span,
             HirExpressionKind::Range { start, end },

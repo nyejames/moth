@@ -1,12 +1,16 @@
 use super::*;
+use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
+use crate::build_system::create_project_modules::create_project_modules_tests::successful_compilation_value;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
@@ -27,8 +31,10 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_single_file() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let default_line = "limit #Config of I32 = 2147483648";
-    let package_source =
-        format!("{default_line}\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n");
+    let package_source = format!(
+        "{default_line}\n@warnpkg value\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n"
+    );
+    let warning_package_source = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n";
     let consumer_source = "@broken run\nvalue = run()\n";
 
     for (entry_mode, direct_file) in [("ordinary direct file", true), ("directory", false)] {
@@ -37,6 +43,14 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         let source_root = project_root.join("src");
         let package_root = project_root.join("packages/broken");
         fs::create_dir_all(&source_root).expect("should create project source root");
+        let warning_package_root = project_root.join("packages/warnpkg");
+        fs::create_dir_all(&warning_package_root)
+            .expect("should create earlier warning source package root");
+        fs::write(
+            warning_package_root.join("@mod.moth"),
+            warning_package_source,
+        )
+        .expect("should write earlier warning source package");
         fs::create_dir_all(&package_root).expect("should create source package root");
         fs::write(
             project_root.join("config.moth"),
@@ -60,44 +74,48 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         config.project_name = "docs".to_owned();
         config.entry_root = PathBuf::from("src");
         let style_directives = StyleDirectiveRegistry::built_ins();
-        let mut string_table = StringTable::new();
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
         frontend_surface
             .source_packages
             .register_filesystem_root("broken", package_root, PackageOrigin::Builder)
-            .expect("test source root should register");
+            .expect("broken test source root should register");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("warnpkg", warning_package_root, PackageOrigin::Builder)
+            .expect("warning test source root should register");
 
-        let messages = match compile_project_frontend(
+        let result = compile_project_frontend(
             &mut config,
             BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
-            &mut string_table,
-        ) {
-            Err(messages) => messages,
-            Ok(_) => panic!("{entry_mode}: invalid package default unexpectedly compiled"),
-        };
+            &mut warning_owner,
+        );
+        let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+        let warning_codes = reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .map(|(_, view)| view.descriptor().code.to_owned())
+            .collect::<Vec<_>>();
         assert!(
-            !messages.has_infrastructure_error(),
-            "{entry_mode}: {messages:?}"
+            warning_codes.is_empty(),
+            "{entry_mode}: diagnosed results must not carry prior successful-package warnings: {warning_codes:?}"
         );
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1, "{entry_mode}: {messages:?}");
-        assert_eq!(
-            diagnostics[0].kind.code(),
-            "MOTH-SYNTAX-0008",
-            "{entry_mode}: {messages:?}"
-        );
+        let errors = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{entry_mode}");
+        let (report, view) = errors[0];
+        assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0008", "{entry_mode}");
 
-        let rendered = render_compiler_messages_html(&messages, &project_root);
+        let rendered = render_compilation_result_html(&result, &project_root);
         assert!(
             rendered.contains(default_line),
             "{entry_mode}: the diagnostic must render its package-owned source excerpt: {rendered}"
         );
-        let position = messages
-            .diagnostic_render_context(0)
-            .primary_position(diagnostics[0])
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
             .expect("invalid package default should retain its authored source position");
         assert_eq!(
             portable_path_text(&position.path),
@@ -149,9 +167,8 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let mut config = Config::new(dir.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
-    let mut project_source_files = None;
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
@@ -164,69 +181,53 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-        &mut project_source_files,
+        &mut warning_owner,
+        &mut None,
+        &mut None,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     );
-    let Err(mut messages) = result else {
-        panic!("source-package config contract must not consume the project input");
-    };
-    messages.set_source_database(Arc::clone(
-        project_source_files
-            .as_ref()
-            .expect("directory frontend should retain the project source database"),
-    ));
-    let observed_identities = messages
-        .error_diagnostics()
-        .map(|diagnostic| diagnostic.identity())
-        .collect::<Vec<_>>();
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
 
-    let matching = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            diagnostic.severity
-                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-                && matches!(
-                    &diagnostic.payload,
-                    DiagnosticPayload::InvalidConfig {
-                        reason: InvalidConfigReason::MissingConfigInput,
-                        ..
-                    }
-                )
+    let matching = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter(|(_, view)| {
+            view.descriptor().code == "MOTH-CONFIG-0001"
+                && view.reason_key() == Some("invalid_config.missing_config_input")
         })
         .collect::<Vec<_>>();
     assert_eq!(
         matching.len(),
         1,
-        "the isolated source package should report exactly one missing-input diagnostic; observed {observed_identities:?}"
+        "exactly one missing-input diagnostic expected"
     );
-    let (diagnostic_index, diagnostic) = matching[0];
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(key),
-        reason: InvalidConfigReason::MissingConfigInput,
-    } = &diagnostic.payload
-    else {
-        unreachable!("the diagnostic was filtered to the missing-input payload");
+    let (report, view) = matching[0];
+    assert!(
+        view.string_ids()
+            .iter()
+            .any(|key| report.context().strings().resolve(*key) == "enabled"),
+        "the missing-input diagnostic should name the enabled contract"
+    );
+    let span = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => span,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("source-package config diagnostic should retain its authored span")
+        }
     };
-    assert_eq!(messages.string_table.resolve(*key), "enabled");
-    let span = diagnostic
-        .primary_span
-        .expect("source-package config diagnostic should retain its authored span");
     assert_ne!(
         span.source(),
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
         "source-package diagnostics must not use the synthetic compilation-root span",
     );
-    assert!(
-        messages
-            .diagnostic_render_context(diagnostic_index)
-            .primary_position(diagnostic)
-            .is_some(),
-        "source-package diagnostics should retain source context",
-    );
-    let rendered = render_compiler_messages_html(&messages, &dir);
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("source-package diagnostics should retain source context");
+    assert_eq!(position.source, span.source());
+    let rendered = render_compilation_result_html(&result, &dir);
     assert!(
         rendered.contains("enabled #Config of Bool"),
         "the missing-input frame should use the package snapshot: {rendered}"
@@ -265,7 +266,7 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
@@ -277,37 +278,29 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
         .register_filesystem_root("second", second_package, PackageOrigin::Builder)
         .expect("test source root should register");
 
-    let mut frontend = compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("diagnosed source packages are retained in the typed frontend outcome");
-    let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
+        &mut warning_owner,
+    );
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
 
+    let errors = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert!(
-        messages.error_count() >= 2,
+        errors.len() >= 2,
         "both diagnosed source packages should retain their errors"
     );
-    let diagnosed_paths = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            diagnostic.severity
-                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-        })
-        .filter_map(|(diagnostic_index, diagnostic)| {
-            Some(
-                messages
-                    .diagnostic_render_context(diagnostic_index)
-                    .primary_position(diagnostic)?
-                    .path,
-            )
+    let diagnosed_paths = errors
+        .iter()
+        .filter_map(|(report, view)| {
+            DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .map(|position| position.path)
         })
         .collect::<Vec<_>>();
     assert!(
@@ -329,9 +322,11 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
     let dir = _tmp_dir.path().to_path_buf();
-    let package = dir.join("packages/broken");
     let src = dir.join("src");
+    let package = dir.join("packages/broken");
+    let warning_package = dir.join("packages/warning");
     fs::create_dir_all(&package).expect("should create package root");
+    fs::create_dir_all(&warning_package).expect("should create warning package root");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
@@ -345,93 +340,56 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         "export:\n    run || -> I32:\n        return missing_package_value\n    ;\n;\n",
     )
     .expect("should write diagnosed source package");
+    fs::write(
+        warning_package.join("@mod.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write successful warning package");
 
     for entry in [dir.clone(), src.join("@page.moth")] {
         let mut config = Config::new(entry);
         config.entry_root = PathBuf::from("src");
         let style_directives = StyleDirectiveRegistry::built_ins();
-        let mut string_table = StringTable::new();
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let _path_fork = PathInternerFork::empty();
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
         frontend_surface
             .source_packages
             .register_filesystem_root("broken", package.clone(), PackageOrigin::Builder)
-            .expect("test source root should register");
+            .expect("broken test source root should register");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("warning", warning_package.clone(), PackageOrigin::Builder)
+            .expect("warning test source root should register");
 
-        let mut frontend = compile_project_frontend(
+        let result = compile_project_frontend(
             &mut config,
             BuildProfile::Dev,
             None,
             &style_directives,
             &mut frontend_surface,
-            &mut string_table,
-        )
-        .expect("a diagnosed package with blocked project consumers is a retained outcome");
-
-        assert_eq!(
-            frontend
-                .source_packages
-                .get(0)
-                .expect("package boundary retained")
-                .boundary
-                .diagnosed
-                .len(),
-            1,
-            "package diagnostic should be retained in its own boundary"
+            &mut warning_owner,
         );
-        assert_eq!(
-            frontend.project.blocked.len(),
-            1,
-            "project consumer should be blocked, not an infrastructure failure"
+        let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+        let warnings = reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .collect::<Vec<_>>();
+        assert!(
+            warnings.is_empty(),
+            "diagnosed package outcomes must not carry independent successful-package warnings"
         );
-        assert_eq!(
-            frontend.project.diagnosed.len(),
-            0,
-            "the project boundary itself should have no diagnostic"
-        );
-        let package_boundary = &frontend
-            .source_packages
-            .get(0)
-            .expect("package boundary retained")
-            .boundary;
-        assert_eq!(
-            package_boundary
-                .successful_artefacts_in_module_id_order()
-                .count(),
-            0,
-            "a diagnosed source package must publish no partial module or public interface",
-        );
-        assert_eq!(
-            package_boundary.generated.sidecars().count(),
-            0,
-            "a diagnosed source package must publish no generated sidecars",
-        );
-        assert_eq!(
-            frontend
-                .project
-                .successful_artefacts_in_module_id_order()
-                .count(),
-            0,
-            "the blocked consumer must publish no partial module or public interface",
-        );
-        assert_eq!(
-            frontend.project.generated.sidecars().count(),
-            0,
-            "the blocked consumer must publish no generated sidecars",
-        );
-
-        let project_source = frontend.project_source_database.take();
-        let messages = frontend.into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source,
-            None,
-        );
-        assert_eq!(
-            messages.error_count(),
-            1,
-            "the package diagnostic should render once"
-        );
-        let rendered = render_compiler_messages_html(&messages, &dir);
+        let errors = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "package diagnostic should render once");
+        let (report, view) = errors[0];
+        assert_eq!(view.descriptor().code, "MOTH-RULE-0034");
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
+            .expect("package diagnostic should retain its authored source position");
+        assert!(position.path.ends_with("@mod.moth"));
+        assert!(position.line.contains("return missing_package_value"));
+        let rendered = render_compilation_result_html(&result, &dir);
         assert!(
             rendered.contains("return missing_package_value"),
             "the diagnosed package must retain its own source snapshot: {rendered}"
@@ -446,30 +404,42 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         frontend_surface
             .source_packages
             .register_filesystem_root("broken", package, PackageOrigin::Builder)
-            .expect("the broken package registers once");
+            .expect("the broken package should register once");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("warning", warning_package, PackageOrigin::Builder)
+            .expect("the warning package should register once");
         let result = crate::build_system::create_project_modules::compile_single_file_boracle(
             &config,
             &StyleDirectiveRegistry::built_ins(),
             &mut frontend_surface,
             &mut string_table,
         );
-        let messages = match result {
-            Err(messages) => messages,
-            Ok(_) => panic!("Boracle consumer of a diagnosed package unexpectedly compiled"),
-        };
-        assert!(!messages.has_infrastructure_error(), "{messages:?}");
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1, "{messages:?}");
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0034");
-        let position = messages
-            .diagnostic_render_context(0)
-            .primary_position(diagnostics[0])
+        let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+        let warning_count = reports.iter_severity(DiagnosticSeverity::Warning).count();
+        assert_eq!(
+            warning_count, 0,
+            "Boracle diagnosed results must not carry prior successful-package warnings",
+        );
+        let errors = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            errors.len(),
+            1,
+            "Boracle should report exactly one diagnosed source-package error"
+        );
+        let (report, view) = errors[0];
+        assert_eq!(view.descriptor().code, "MOTH-RULE-0034");
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
             .expect("Boracle must retain the failed package's authored source span");
         assert!(position.line.contains("return missing_package_value"));
-        let rendered = render_compiler_messages_html(&messages, &dir);
+        let rendered = render_compilation_result_html(&result, &dir);
         assert!(rendered.contains("return missing_package_value"));
     }
 }
+
 #[test]
 fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -498,18 +468,19 @@ io.line(result)
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("same-module generated constants should use their own TIR store");
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut warning_owner,
+        ),
+    );
     let sidecars = frontend
         .project
         .generated
@@ -574,7 +545,7 @@ independent_result I32 = independent(42)
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
@@ -583,15 +554,16 @@ independent_result I32 = independent(42)
         crate::compiler_frontend::instrumentation::reset_frontend_counters();
         Some(crate::timing::start_benchmark_collection(true).expect("timing session should start"))
     };
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("active-base public generic call should compile");
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut warning_owner,
+        ),
+    );
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let convergence_observations = {
         crate::compiler_frontend::instrumentation::log_frontend_counters();
@@ -805,7 +777,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         ),
         // The sidecar's failure lane splits the block after `sum`. The second add then sits after
         // an unwrapped write, so only the first sum keeps a proof. The published table must match
-        // the final HIR, not the table that existed before the rewrite.
+        // the final HIR, not an intermediate table.
         (
             LaneFixture::RewritesSidecarProofs,
             "compute type T |value T| -> I32:\n    seed I32 = 3\n    sum I32 = seed + 1\n    doubled I32 = sum + sum\n    return doubled\n;\n\n\
@@ -839,16 +811,17 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
 
         let mut config = Config::new(dir.clone());
         let style_directives = StyleDirectiveRegistry::built_ins();
-        let mut string_table = StringTable::new();
-        let frontend = compile_project_frontend(
-            &mut config,
-            BuildProfile::Dev,
-            None,
-            &style_directives,
-            &mut BuilderSurface::with_mandatory_core(),
-            &mut string_table,
-        )
-        .unwrap_or_else(|error| panic!("{fixture:?}: link-fact fixture should compile: {error:?}"));
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+        let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+            compile_project_frontend(
+                &mut config,
+                BuildProfile::Dev,
+                None,
+                &style_directives,
+                &mut BuilderSurface::with_mandatory_core(),
+                &mut warning_owner,
+            ),
+        );
 
         let mut has_api_only_module = false;
         for artefact in frontend.project.successful_artefacts_in_module_id_order() {
@@ -902,8 +875,8 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
     }
 }
 
-/// Compiles one single-page project and returns the frontend, or the diagnostics it produced.
-fn compile_single_page_project(page: &str) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+/// Compiles one single-page project and returns its three-lane frontend outcome.
+fn compile_single_page_project(page: &str) -> CompilationResult<ProjectFrontendCompilation> {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
@@ -916,14 +889,14 @@ fn compile_single_page_project(page: &str) -> Result<ProjectFrontendCompilation,
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
+        &mut warning_owner,
     )
 }
 
@@ -947,10 +920,11 @@ fn pruned_fallback_map_leaves_no_runtime_map_demand() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     // `1 + 2` cannot fail, so the catch fallback is unreachable and is removed before
     // publication. Its map literal and `.length` must leave no map demand in the link facts.
-    let frontend = compile_single_page_project(
-        "value = 1 + 2 catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n[: value=[value]]\n",
-    )
-    .unwrap_or_else(|error| panic!("pruned fallback fixture should compile: {error:?}"));
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_single_page_project(
+            "value = 1 + 2 catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n[: value=[value]]\n",
+        ),
+    );
 
     let mut entry_count = 0;
     for artefact in frontend.project.successful_artefacts_in_module_id_order() {
@@ -973,12 +947,13 @@ fn live_fallback_map_demand_is_visible_to_the_published_probe() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     // `risky` declares `Error!`, so its catch keeps a live error edge. The same map demand must
     // reach the probe, which shows that the pruned absence above is not an empty probe.
-    let frontend = compile_single_page_project(
-        "risky |value I32| -> I32, Error!:\n    return value\n;\n\n\
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_single_page_project(
+            "risky |value I32| -> I32, Error!:\n    return value\n;\n\n\
          value = risky(1) catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n\
          [: value=[value]]\n",
-    )
-    .unwrap_or_else(|error| panic!("live fallback fixture should compile: {error:?}"));
+        ),
+    );
 
     let mut saw_map_demand = false;
     for artefact in frontend.project.successful_artefacts_in_module_id_order() {
@@ -1001,8 +976,9 @@ fn pruned_catch_handler_publishes_no_materialisation_request_or_sidecar() {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/cases/cast_wasm_unreachable_cast_ignored/input/src/@page.moth"
     ));
-    let frontend = compile_single_page_project(page)
-        .unwrap_or_else(|error| panic!("pruned handler fixture should compile: {error:?}"));
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_single_page_project(page),
+    );
 
     assert!(frontend.project.diagnosed.is_empty());
     assert!(frontend.project.blocked.is_empty());
@@ -1048,16 +1024,17 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .unwrap_or_else(|error| panic!("static-if duplicate fixture should compile: {error:?}"));
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut warning_owner,
+        ),
+    );
 
     assert!(
         frontend.project.diagnosed.is_empty(),
@@ -1163,16 +1140,17 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .unwrap_or_else(|error| panic!("inactive retained method fixture should compile: {error:?}"));
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut warning_owner,
+        ),
+    );
 
     assert!(
         frontend.project.diagnosed.is_empty(),
@@ -1251,59 +1229,50 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let frontend = compile_project_frontend(
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .unwrap_or_else(|error| {
-        panic!("failed concrete body should retain a diagnosed frontend outcome: {error:?}")
-    });
-
-    assert_eq!(
-        frontend.project.diagnosed.len(),
-        1,
-        "the failed concrete body should diagnose the single entry module"
+        &mut warning_owner,
+    );
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+    let rendered_messages = terse::format_terse_compilation_result(&result);
+    assert!(
+        rendered_messages
+            .iter()
+            .any(|message| message.contains("String") && message.contains("U64")),
+        "the diagnosed module should retain concrete type names after its environment is dropped: {rendered_messages:?}",
     );
     assert!(
-        frontend.project.blocked.is_empty(),
-        "a failed concrete body should diagnose its module rather than block it"
+        rendered_messages
+            .iter()
+            .all(|message| !message.contains("TypeId(")),
+        "a diagnosed module with a live environment must not render unresolved type IDs: {rendered_messages:?}",
     );
-    assert_eq!(
-        frontend
-            .project
-            .successful_artefacts_in_module_id_order()
-            .count(),
-        0,
-        "a failed concrete body must publish no successful artefact"
-    );
-    assert_eq!(
-        frontend.project.generated.sidecars().count(),
-        0,
-        "the earlier valid identity request must not publish a sidecar after the failed transaction"
-    );
-
-    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
-    let type_mismatches: Vec<_> = diagnostics
-        .iter()
-        .filter(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
-        .collect();
+    let type_mismatches = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001")
+        .collect::<Vec<_>>();
     assert_eq!(
         type_mismatches.len(),
         1,
         "the concrete outer<U64> body should report exactly one type mismatch"
     );
-    let mismatch = type_mismatches[0];
-    assert_eq!(mismatch.kind.code(), "MOTH-TYPE-0001");
+    let (report, mismatch) = type_mismatches[0];
+    let identity = compact_diagnostic_identity(report, mismatch);
+    assert_eq!(identity.0, "MOTH-TYPE-0001");
+    let (_, spanned, location) = identity
+        .2
+        .iter()
+        .find(|(role, _, _)| *role == "generic-body")
+        .expect("the mismatch should keep the concrete generic body site label");
+    assert!(*spanned, "generic body label should retain its source span");
     assert!(
-        mismatch.labels.iter().any(
-            |label| label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
-        ),
-        "the mismatch should keep the concrete generic body site label"
+        location.is_some(),
+        "generic body label should resolve through the frozen source owner"
     );
 }
 
@@ -1331,50 +1300,48 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
-    let mut frontend = compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("diagnosed recursive materialisation should remain a retained frontend outcome");
-    let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
-    let diagnostic = messages
-        .error_diagnostics()
+        &mut warning_owner,
+    );
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("recursive materialisation should retain one error diagnostic");
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidGenericInstantiation {
-            reason: InvalidGenericInstantiationReason::RecursiveFunctionInstantiation,
-            ..
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_generic_instantiation.recursive_function_instantiation")
+    );
+    let (span, span_context) = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span) => {
+            (span, report.context())
         }
-    ));
-    let frozen_identity = messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("generated diagnostic should retain its frozen identity context");
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            context,
+        } => (
+            span,
+            context.expect("the donor identity should be installed for the generated diagnostic"),
+        ),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("recursive generated diagnostic should retain its request span")
+        }
+    };
+    let context = DiagnosticRenderContext::for_report(report);
+    let position = context
+        .site_position(view.primary_site())
+        .expect("the retained request span should resolve in its report");
     let entry_path = fs::canonicalize(dir.join("src/@page.moth"))
         .expect("entry source path should canonicalize");
-    let span = diagnostic
-        .primary_span
-        .expect("recursive generated diagnostic should retain the request span");
-    let entry_id = span.source();
-    let entry_slot = frozen_identity
-        .get(entry_id)
-        .expect("frozen identity should resolve the request source");
-    assert_eq!(
-        entry_slot.canonical_os_path.as_deref(),
-        Some(entry_path.as_path()),
-        "request span should resolve to the entry source in the frozen identity"
-    );
-    let range = span.byte_range(frozen_identity);
+    assert_eq!(position.host_path, Some(entry_path.as_path()));
+    let range = span.byte_range(span_context);
     let final_call = format!("{function_name}(1)");
     let expected_start = entry_source
         .rfind(&final_call)
@@ -1417,65 +1384,40 @@ html #= ()\n",
     let mut config = Config::new(dir.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
         .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
-    let mut project_source_files = None;
-    let frontend = compile_project_frontend_with_inputs(
+    let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-        &mut project_source_files,
+        &mut warning_owner,
+        &mut None,
+        &mut None,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
-    )
-    .expect("imported generic materialisation should remain retained");
-
-    let project_source_database = project_source_files
-        .as_ref()
-        .expect("project source database should be retained");
-    let package_source_database = frontend
-        .source_packages
-        .source_database(crate::build_system::create_project_modules::compiled_boundary::PackageBoundaryId::from_index(0))
-        .expect("package source database should be retained");
-    let project_source_id = project_source_database
-        .iter()
-        .next()
-        .expect("project source database should contain the entry source")
-        .id;
-    let package_source_id = package_source_database
-        .iter()
-        .next()
-        .expect("package source database should contain the package source")
-        .id;
-    assert_eq!(
-        project_source_id, package_source_id,
-        "project and package databases should begin with colliding SourceId values"
     );
-
-    let messages = frontend.into_render_messages_with_frozen_identity(
-        &mut string_table,
-        project_source_files.take(),
-        None,
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .next()
+            .is_none(),
+        "warnings must not accompany a diagnosed compilation"
     );
-    let (diagnostic_index, diagnostic) = messages
-        .diagnostics()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. })
-        })
-        .expect("imported generic materialisation should retain one type mismatch diagnostic");
-
-    let context = messages.diagnostic_render_context(diagnostic_index);
+    let (report, view) = reports
+        .iter()
+        .find(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001")
+        .expect("type mismatch should remain in the diagnostic report");
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("request primary span should resolve through the project snapshot");
     let project_path = fs::canonicalize(project_path).expect("project path should canonicalize");
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
@@ -1485,30 +1427,40 @@ html #= ()\n",
         "request primary path should be the project snapshot: {}",
         primary.path.display()
     );
-    assert_eq!(
-        diagnostic
-            .primary_span
-            .expect("materialised diagnostic should retain the project request span")
-            .source(),
-        project_source_id,
-        "request span should retain the project database's colliding source ID"
-    );
+    let primary_span = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => span,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("materialised diagnostic should retain the project request span")
+        }
+    };
+    let colliding_source_id = primary_span.source();
 
-    let body_label = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite))
-        .expect("generic diagnostic should retain a donor body label");
-    let declaration_label = diagnostic
-        .labels
+    let labels = view.durable_labels().collect::<Vec<_>>();
+    let body_label = labels
         .iter()
         .find(|label| {
-            label.message == Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
+            matches!(
+                label.message,
+                crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::GenericInstantiationBodySite
+            )
+        })
+        .expect("generic diagnostic should retain a donor body label");
+    let declaration_label = labels
+        .iter()
+        .find(|label| {
+            matches!(
+                label.message,
+                crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::GenericInstantiationDeclarationSite
+            )
         })
         .expect("generic diagnostic should retain a donor declaration label");
     for label in [body_label, declaration_label] {
         let position = context
-            .label_position(label)
+            .site_position(label.site)
             .expect("donor label should resolve through its frozen identity handle");
         assert_eq!(position.host_path, Some(package_path.as_path()));
         assert!(
@@ -1520,69 +1472,52 @@ html #= ()\n",
             !position.line.is_empty(),
             "donor label should retain its package source line"
         );
+        let label_source = match label.site {
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                span,
+            )
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } => span.source(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                panic!("donor label should retain a source span")
+            }
+        };
         assert_eq!(
-            label
-                .span
-                .expect("donor label should retain a source span")
-                .source(),
-            package_source_id,
-            "donor label should retain the package database's colliding source ID"
+            label_source, colliding_source_id,
+            "donor label should preserve the colliding source ID while resolving through its own identity"
         );
     }
 
-    let extended_label = [body_label, declaration_label]
+    let (extended_label, extended_span) = [*body_label, *declaration_label]
         .into_iter()
-        .find(|label| {
-            let Some(span) = label.span else {
-                return false;
-            };
-            let Some(identity) = label
-                .frozen_identity_handle
-                .as_ref()
-                .and_then(|handle| handle.get())
+        .find_map(|label| {
+            let crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                context,
+            } = label.site
             else {
-                return false;
+                return None;
             };
+            let identity =
+                context.expect("donor label should resolve through its frozen identity handle");
             let range = span.byte_range(identity);
-            range.end() - range.start() > 1023
+            (range.end() - range.start() > 1023).then_some((label, span))
         })
         .expect("at least one donor label should resolve an extended span-table row");
     let extended_position = context
-        .label_position(extended_label)
+        .site_position(extended_label.site)
         .expect("extended donor label should resolve through package identity");
     assert_eq!(extended_position.host_path, Some(package_path.as_path()));
-    let project_identity = messages
-        .frozen_identity_context_for_diagnostic(diagnostic_index)
-        .expect("request diagnostic should retain the project frozen identity");
-    let project_slot = project_identity
-        .get(
-            extended_label
-                .span
-                .expect("extended label should have a span")
-                .source(),
-        )
+    let project_slot = report
+        .context()
+        .get(extended_span.source())
         .expect("the colliding source ID should resolve in the project identity");
     assert_eq!(
         project_slot.canonical_os_path.as_deref(),
         Some(project_path.as_path()),
         "a package span must not be resolved through the project identity context"
-    );
-    let (warning_index, warning) = messages
-        .diagnostics()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            diagnostic.severity == DiagnosticSeverity::Warning && diagnostic.primary_span.is_some()
-        })
-        .expect("generated generic body should retain a spanful warning");
-    let warning_context = messages.diagnostic_render_context(warning_index);
-    let warning_position = warning_context
-        .primary_position(warning)
-        .expect("generated warning should resolve through its donor identity");
-    assert_eq!(warning_position.host_path, Some(package_path.as_path()));
-    assert!(
-        warning_position.path.ends_with("@mod.moth"),
-        "generated warning should use the package snapshot: {}",
-        warning_position.path.display()
     );
 }
 
@@ -1622,68 +1557,54 @@ export:
     let mut config = Config::new(dir.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
         .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
-    let mut project_source_files = None;
-    let frontend = compile_project_frontend_with_inputs(
+    let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-        &mut project_source_files,
+        &mut warning_owner,
+        &mut None,
+        &mut None,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
-    )
-    .expect("nested imported generic diagnostics should remain retained");
-
-    let project_source_database = project_source_files
-        .as_ref()
-        .expect("project source database should be retained");
-    let package_source_database = frontend
-        .source_packages
-        .source_database(crate::build_system::create_project_modules::compiled_boundary::PackageBoundaryId::from_index(0))
-        .expect("package source database should be retained");
-    let project_source_id = project_source_database
-        .iter()
-        .next()
-        .expect("project source database should contain the entry source")
-        .id;
-    let package_source_id = package_source_database
-        .iter()
-        .next()
-        .expect("package source database should contain the package source")
-        .id;
-    assert_eq!(
-        project_source_id, package_source_id,
-        "project and package databases should begin with colliding SourceId values"
     );
-
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
     let project_path = fs::canonicalize(project_path).expect("project path should canonicalize");
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
-    let messages = frontend.into_render_messages_with_frozen_identity(
-        &mut string_table,
-        project_source_files.take(),
-        None,
-    );
-    let (diagnostic_index, diagnostic) = messages
-        .diagnostics()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            diagnostic
-                .primary_span
-                .is_some_and(|span| span.source() == package_source_id)
+    let (report, view) = reports
+        .iter()
+        .find(|(report, view)| {
+            DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .is_some_and(|position| position.host_path == Some(package_path.as_path()))
         })
         .expect("nested generic failure should retain its package-owned call-site span");
-    let context = messages.diagnostic_render_context(diagnostic_index);
-    let primary = context
-        .primary_position(diagnostic)
+    let package_source_id = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => span.source(),
+        other => panic!("package call site must retain its explicit identity handle: {other:?}"),
+    };
+    let project_slot = report
+        .context()
+        .get(package_source_id)
+        .expect("the package source ID should collide with a retained project source");
+    assert_eq!(
+        project_slot.canonical_os_path.as_deref(),
+        Some(project_path.as_path()),
+        "the colliding source ID should map to the project snapshot outside its package identity handle"
+    );
+    let primary = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("nested generic call-site span should resolve");
     assert_eq!(primary.host_path, Some(package_path.as_path()));
     assert!(
@@ -1754,18 +1675,19 @@ same_private_box PrivateBox of Bool = forward(private_box)
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("public generic nominal arguments should materialise");
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut warning_owner,
+        ),
+    );
     let sidecars = frontend
         .project
         .generated
@@ -1821,7 +1743,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
                         .executable
                         .path_table
                         .component(fields[0].name)
-                        .map(|id| string_table.resolve(id)),
+                        .map(|id| warning_owner.string_table().resolve(id)),
                     Some("value")
                 );
                 assert_eq!(
@@ -1835,8 +1757,14 @@ same_private_box PrivateBox of Bool = forward(private_box)
                     .variants_for(instance_type_id)
                     .expect("generated Maybe instance should expose substituted variants");
                 assert_eq!(variants.len(), 2);
-                assert_eq!(string_table.resolve(variants[0].name), "Some");
-                assert_eq!(string_table.resolve(variants[1].name), "Empty");
+                assert_eq!(
+                    warning_owner.string_table().resolve(variants[0].name),
+                    "Some"
+                );
+                assert_eq!(
+                    warning_owner.string_table().resolve(variants[1].name),
+                    "Empty"
+                );
                 let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
                     panic!("Some should retain its record payload");
                 };
@@ -1847,7 +1775,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
                         .executable
                         .path_table
                         .component(fields[0].name)
-                        .map(|id| string_table.resolve(id)),
+                        .map(|id| warning_owner.string_table().resolve(id)),
                     Some("value")
                 );
                 assert_eq!(fields[0].type_id, builtin_type_ids::STRING);
@@ -1868,7 +1796,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
                         .executable
                         .path_table
                         .component(fields[0].name)
-                        .map(|id| string_table.resolve(id)),
+                        .map(|id| warning_owner.string_table().resolve(id)),
                     Some("value")
                 );
                 assert_eq!(fields[0].type_id, builtin_type_ids::BOOL);
@@ -1947,16 +1875,17 @@ result = combine(Box(Label("payload")))
 
     let mut config = Config::new(root.to_path_buf());
     config.entry_root = PathBuf::from("src");
-    let mut strings = StringTable::new();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &StyleDirectiveRegistry::built_ins(),
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut strings,
-    )
-    .expect("both requester receiver contracts should restore before combine emits");
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut warning_owner,
+        ),
+    );
     assert!(!frontend.has_diagnosed_or_blocked());
     let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
     assert_eq!(
@@ -2025,14 +1954,16 @@ result = combine(Box(Label("payload")))
 
     // Use the existing rendered-output owner rather than inspecting generated JS text.
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-    let mut built = build_project(
-        &builder,
-        root.to_str()
-            .expect("temporary project path should be UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("independently bounded evidence must build end to end");
+    let mut built = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str()
+                .expect("temporary project path should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
     let rendered =
         crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
             &mut built,
@@ -2096,15 +2027,17 @@ result String = outer(LocalMarker(1), "trigger")
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
     string_table.intern("preexisting-global-name");
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut string_table,
-    )
-    .expect("nested generated sidecars should publish after the provider module");
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut warning_owner,
+        ),
+    );
 
     let imported_marker_path = frontend
         .project
@@ -2121,7 +2054,12 @@ result String = outer(LocalMarker(1), "trigger")
                     let Some(type_id) = environment.type_id_for_nominal_id(nominal_id) else {
                         return false;
                     };
-                    display_type(type_id, environment, &string_table, path_table) == "RemoteMarker"
+                    display_type(
+                        type_id,
+                        environment,
+                        warning_owner.string_table(),
+                        path_table,
+                    ) == "RemoteMarker"
                 })
         })
         .expect("requester path table should contain the imported marker path");
@@ -2148,6 +2086,21 @@ result String = outer(LocalMarker(1), "trigger")
         2,
         "outer and nested inner should materialise"
     );
+    let boundary_path_table = &frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .next()
+        .expect("the project boundary should publish its requesting module")
+        .module
+        .executable
+        .path_table;
+    assert!(
+        sidecars.iter().all(|sidecar| std::sync::Arc::ptr_eq(
+            &sidecar.module.executable.path_table,
+            boundary_path_table
+        )),
+        "generated sidecars must share their boundary's one path-table allocation"
+    );
 
     for sidecar in sidecars {
         let environment = &sidecar.module.executable.type_environment;
@@ -2161,7 +2114,7 @@ result String = outer(LocalMarker(1), "trigger")
             display_type(
                 marker_type_id,
                 environment,
-                &string_table,
+                warning_owner.string_table(),
                 &sidecar.module.executable.path_table,
             ),
             "RemoteMarker"
@@ -2177,7 +2130,7 @@ result String = outer(LocalMarker(1), "trigger")
                 .executable
                 .path_table
                 .component(fields[0].name)
-                .map(|id| string_table.resolve(id)),
+                .map(|id| warning_owner.string_table().resolve(id)),
             Some("value")
         );
     }
@@ -2243,18 +2196,19 @@ wrapped Wrapper = identity(make())
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("facade-hidden nominal closure should materialise");
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut warning_owner,
+        ),
+    );
     let sidecars = frontend
         .project
         .generated
@@ -2319,17 +2273,18 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
 
     let mut config = Config::new(dir);
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("real private generic helper contracts should compile");
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut warning_owner,
+        ),
+    );
 
     let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
     assert_eq!(
@@ -2414,17 +2369,18 @@ export:
     let mut config = Config::new(dir);
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    let frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("later public generic request should compile with the private failure contract");
+    let frontend = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut warning_owner,
+        ),
+    );
     assert!(
         !frontend.has_diagnosed_or_blocked(),
         "both declaring module and later requester must compile without source diagnoses",
@@ -2523,11 +2479,13 @@ export:
 // A later generated request cannot leak escaping implicit failure through a missing or custom
 // error slot. Dormant validation of the declaring template rejects it before publication, so the
 // requesting transaction never materialises the instantiation.
-fn compile_later_request_rejection(project_dir: &std::path::Path) -> ProjectFrontendCompilation {
+fn compile_later_request_rejection(
+    project_dir: &std::path::Path,
+) -> CompilationResult<ProjectFrontendCompilation> {
     let mut config = Config::new(project_dir.to_path_buf());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     compile_project_frontend(
         &mut config,
@@ -2535,9 +2493,63 @@ fn compile_later_request_rejection(project_dir: &std::path::Path) -> ProjectFron
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
+        &mut warning_owner,
     )
-    .expect("a diagnosed declaring module stays a retained frontend outcome")
+}
+
+type ResolvedDiagnosticLocation = (String, Option<String>, u32, u32, u32, u32);
+type CompactLabelIdentity = (&'static str, bool, Option<ResolvedDiagnosticLocation>);
+type CompactDiagnosticIdentity = (String, Option<String>, Vec<CompactLabelIdentity>);
+
+fn compact_diagnostic_identity(
+    report: &DiagnosticReport,
+    view: DiagnosticView<'_>,
+) -> CompactDiagnosticIdentity {
+    let context = DiagnosticRenderContext::for_report(report);
+    let labels = view
+        .durable_labels()
+        .map(|label| {
+            let role = match label.message {
+                DurableLabelMessage::BuiltinFailureCall => "call",
+                DurableLabelMessage::BuiltinFailureOrigin => "origin",
+                DurableLabelMessage::GenericInstantiationBodySite => "generic-body",
+                _ => "other",
+            };
+            let location = context.site_position(label.site).map(|position| {
+                (
+                    position.path.to_string_lossy().into_owned(),
+                    position
+                        .host_path
+                        .map(|path| path.to_string_lossy().into_owned()),
+                    position.start.line,
+                    position.start.column,
+                    position.end.line,
+                    position.end.column,
+                )
+            });
+            (role, label.spanned, location)
+        })
+        .collect();
+    (
+        view.descriptor().code.to_owned(),
+        view.reason_key().map(str::to_owned),
+        labels,
+    )
+}
+
+fn assert_spanned_call_origin_labels(identity: &CompactDiagnosticIdentity, call_count: usize) {
+    let mut expected_roles = vec!["call"; call_count];
+    expected_roles.push("origin");
+    let actual_roles = identity
+        .2
+        .iter()
+        .map(|(role, spanned, location)| {
+            assert!(*spanned, "{role} label must retain a source span");
+            assert!(location.is_some(), "{role} source span must resolve");
+            *role
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_roles, expected_roles);
 }
 
 fn assert_later_request_rejected(declaring_source: &str, requester_source: &str, reason_key: &str) {
@@ -2553,69 +2565,36 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
         .expect("should write declaring module");
     fs::write(src.join("@page.moth"), requester_source).expect("should write requester");
 
-    let frontend = compile_later_request_rejection(temp_dir.path());
+    let result = compile_later_request_rejection(temp_dir.path());
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
     assert!(
-        frontend.project.generated.sidecars().next().is_none(),
-        "no escaping later request may materialise",
+        reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .next()
+            .is_none(),
+        "a diagnosed compilation must not carry unrelated successful warnings"
     );
-    assert_eq!(
-        frontend.project.diagnosed.len(),
-        1,
-        "the declaring module owns the rejection"
-    );
-    assert_eq!(
-        frontend.project.blocked.len(),
-        1,
-        "the requester stays blocked on its provider"
-    );
-
-    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    let diagnostics = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(
         diagnostics.len(),
         1,
         "one escaping failure is reported once"
     );
-    let diagnostic = &diagnostics[0];
-    assert_eq!(diagnostic.identity().reason_key, Some(reason_key));
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason:
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness }
-            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                witness, ..
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("later request rejection must carry a failure witness: {diagnostic:?}");
-    };
-    // The witness names the declaring private hop, then the originating multiplication.
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(witness.call_spans.len(), 1);
-    assert_eq!(witness.elided_call_hops, 0);
-    assert!(witness.call_spans[0].is_some() && witness.origin_span.is_some());
-    let labels = diagnostic
-        .labels
-        .iter()
-        .map(|label| (label.span, label.message.clone()))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        labels,
-        vec![
-            (
-                witness.call_spans[0],
-                Some(DiagnosticLabelMessage::BuiltinFailureCall)
-            ),
-            (
-                witness.origin_span,
-                Some(DiagnosticLabelMessage::BuiltinFailureOrigin)
-            ),
-        ],
-    );
+    let identity = compact_diagnostic_identity(diagnostics[0].0, diagnostics[0].1);
+    assert_eq!(identity.0, "MOTH-RULE-0051");
+    assert_eq!(identity.1, Some(reason_key.to_owned()));
+    assert_spanned_call_origin_labels(&identity, 1);
 
-    // Recompiling the same project reports the identical structured rejection.
-    let repeat = compile_later_request_rejection(temp_dir.path());
-    let repeated = &repeat.project.diagnosed[0].diagnostics.diagnostics()[0];
-    assert_eq!(repeated.identity(), diagnostic.identity());
-    assert_eq!(repeated.payload, diagnostic.payload);
+    // Recompiling the same project preserves the compact code, reason key, labels, and their
+    // report-resolved source positions.
+    let repeated_result = compile_later_request_rejection(temp_dir.path());
+    let repeated = super::super::create_project_modules_tests::diagnosed_reports(&repeated_result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| compact_diagnostic_identity(report, view))
+        .collect::<Vec<_>>();
+    assert_eq!(repeated, vec![identity]);
 }
 
 #[test]
@@ -2643,12 +2622,12 @@ fn implicit_failure_later_generated_request_rejects_custom_error_function() {
     );
 }
 
-// M02: a private helper that changes from infallible to fallible changes the
+// A private helper that changes from infallible to fallible changes the
 // exported caller's verdict even though every public signature text stays
 // identical. The first compilation publishes a success-only export whose helper
 // cannot fail; rewriting the helper body to a possibly overflowing op rejects
-// the same exported caller. Each compilation here is fresh (no cross-build
-// artefact reuse exists yet), so this proves the verdict follows the helper's
+// the same exported caller. Each compilation here is fresh (there is no cross-build
+// artefact reuse), so this proves the verdict follows the helper's
 // current semantic failure summary rather than the unchanged public text — not
 // cache invalidation.
 #[test]
@@ -2686,7 +2665,9 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     )
     .expect("should write requester");
 
-    let first = compile_later_request_rejection(temp_dir.path());
+    let first = super::super::create_project_modules_tests::successful_compilation_value(
+        compile_later_request_rejection(temp_dir.path()),
+    );
     assert!(
         first.project.generated.sidecars().next().is_some(),
         "the infallible helper version must materialise the later request"
@@ -2735,49 +2716,42 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     fs::write(src.join("helper").join("@mod.moth"), &fallible_source)
         .expect("should write fallible declaring module");
 
-    let second = compile_later_request_rejection(temp_dir.path());
+    let result = compile_later_request_rejection(temp_dir.path());
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
     assert!(
-        second.project.generated.sidecars().next().is_none(),
-        "no escaping later request may materialise once the helper can fail"
+        reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .next()
+            .is_none(),
+        "the rejected compilation must not carry unrelated successful warnings"
     );
-    assert_eq!(
-        second.project.diagnosed.len(),
-        1,
-        "the declaring module owns the rejection after the helper widened"
-    );
-    assert_eq!(
-        second.project.blocked.len(),
-        1,
-        "the requester stays blocked on its provider"
-    );
-    let diagnostics = second.project.diagnosed[0].diagnostics.diagnostics();
+    let diagnostics = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(
         diagnostics.len(),
         1,
         "one escaping failure is reported once"
     );
-    let diagnostic = &diagnostics[0];
+    let identity = compact_diagnostic_identity(diagnostics[0].0, diagnostics[0].1);
+    assert_eq!(identity.0, "MOTH-RULE-0051");
     assert_eq!(
-        diagnostic.identity().reason_key,
+        identity.1.as_deref(),
         Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
     );
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("widened helper rejection must carry an export witness: {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert!(witness.origin_span.is_some());
-    // Recompiling the widened project reports the identical structured rejection,
-    // so the verdict is repeatable and not a one-off ordering artefact.
-    let repeat = compile_later_request_rejection(temp_dir.path());
-    let repeated = &repeat.project.diagnosed[0].diagnostics.diagnostics()[0];
-    assert_eq!(repeated.identity(), diagnostic.identity());
-    assert_eq!(repeated.payload, diagnostic.payload);
+    assert_spanned_call_origin_labels(&identity, 1);
+
+    // Recompiling the widened project preserves the identity, labels, and their report-resolved
+    // source positions.
+    let repeated_result = compile_later_request_rejection(temp_dir.path());
+    let repeated = super::super::create_project_modules_tests::diagnosed_reports(&repeated_result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| compact_diagnostic_identity(report, view))
+        .collect::<Vec<_>>();
+    assert_eq!(repeated, vec![identity]);
 }
 
-// D02: the bounded-witness export source must render the identical terse diagnostic
+// The bounded-witness export source must render the identical terse diagnostic
 // across repeated real-pipeline compilations, even when independent declarations
 // sharing the helper module are textually permuted. The chain hops and the numeric
 // origin stay byte-identical in place (their spans participate in the witness), so
@@ -2819,28 +2793,9 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
     )
     .expect("should write entry");
     fn terse_error_lines(project_dir: &std::path::Path) -> Vec<String> {
-        let frontend = compile_later_request_rejection(project_dir);
-        assert!(
-            frontend.project.generated.sidecars().next().is_none(),
-            "the escaping export must not materialise"
-        );
-        let project_source = frontend.project_source_database.clone();
-        let mut string_table = StringTable::new();
-        let messages = frontend.into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source,
-            None,
-        );
-        messages
-            .diagnostics()
-            .enumerate()
-            .map(|(index, diagnostic)| {
-                terse::format_terse_diagnostic_with_context(
-                    diagnostic,
-                    messages.diagnostic_render_context(index),
-                )
-            })
-            .collect()
+        let result = compile_later_request_rejection(project_dir);
+        super::super::create_project_modules_tests::diagnosed_reports(&result);
+        terse::format_terse_compilation_result(&result)
     }
     let first = terse_error_lines(temp_dir.path());
     assert_eq!(
@@ -2874,31 +2829,24 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
         first,
         "the permuted source must itself render deterministically"
     );
-    // The structured witness behind the rendering carries the exact bounded
-    // content: one IntOverflow code, three kept call spans plus the origin, and
-    // two elided middle hops.
-    let frontend = compile_later_request_rejection(temp_dir.path());
-    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    // The compact report keeps the stable identity and durable call/origin labels; the
+    // rendered assertion above pins the elided-hop wording.
+    let result = compile_later_request_rejection(temp_dir.path());
+    let diagnostics = super::super::create_project_modules_tests::diagnosed_reports(&result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
-    let diagnostic = &diagnostics[0];
+    let identity = compact_diagnostic_identity(diagnostics[0].0, diagnostics[0].1);
+    assert_eq!(identity.0, "MOTH-RULE-0051");
     assert_eq!(
-        diagnostic.identity().reason_key,
+        identity.1.as_deref(),
         Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
     );
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("the bounded chain rejection must carry an export witness: {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(witness.call_spans.len(), 3);
-    assert_eq!(witness.elided_call_hops, 2);
-    assert!(witness.origin_span.is_some());
+    assert_spanned_call_origin_labels(&identity, 3);
 }
 
 #[test]
-fn source_package_warning_retained_by_frontend_outcome() {
+fn source_package_warning_staged_by_frontend_outcome() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
     let dir = _tmp_dir.path().to_path_buf();
@@ -2921,44 +2869,60 @@ fn source_package_warning_retained_by_frontend_outcome() {
     let mut config = Config::new(dir.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
         .register_filesystem_root("warnpkg", package, PackageOrigin::Builder)
         .expect("test source root should register");
-    let mut frontend = compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
+        &mut warning_owner,
+    );
+    let mut frontend = match result.expect("warning source package should compile") {
+        CompilationOutcome::Success {
+            value,
+            warnings: None,
+        } => value,
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => panic!("inner frontend should not freeze warnings: {warnings:?}"),
+        CompilationOutcome::Diagnosed(reports) => {
+            panic!("warning-only source package should compile: {reports:?}")
+        }
+    };
+    let project_source_database = frontend.project_source_database.take();
+    drop(frontend);
+    let warning_outcome = crate::build_system::build::finish_successful_project_warnings(
+        &mut warning_owner,
+        project_source_database,
+        (),
     )
-    .expect("warning source package should compile");
-
-    let warning_codes = frontend
-        .successful_module_views()
-        .flat_map(|module| {
-            module
-                .metadata
-                .warnings
-                .iter()
-                .map(|warning| warning.kind.code().to_owned())
-        })
+    .expect("successful frontend warnings should freeze");
+    let warnings = match warning_outcome {
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => warnings,
+        other => panic!("warning source package should retain its warning: {other:?}"),
+    };
+    let warning_codes = warnings
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect::<Vec<_>>();
     assert!(
         warning_codes.iter().any(|code| code == "MOTH-RULE-0022"),
         "source-package warning should be retained: {warning_codes:?}"
     );
-
-    let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
     assert!(
-        messages.warning_count() >= 1,
-        "render boundary should retain the source-package warning"
+        !warning_codes.is_empty(),
+        "successful compilation should retain source-package warnings"
     );
 }
 
@@ -2967,19 +2931,19 @@ struct SuccessfulPackageWarningBuilder {
 }
 
 impl BackendBuilder for SuccessfulPackageWarningBuilder {
+    type Error = std::convert::Infallible;
     fn build_backend(
         &self,
         _project_compilation: ProjectCompilation,
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
-        _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+        _context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, crate::build_system::build::BackendInvocationFailure<Self::Error>> {
         Ok(Project {
             output_files: Vec::new(),
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic(Vec::<&str>::new()),
-            warnings: Vec::new(),
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
         })
@@ -2988,7 +2952,7 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
     fn validate_project_config(
         &self,
         _config: &Config,
-        _string_table: &mut StringTable,
+        _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
         Ok(())
     }
@@ -3031,7 +2995,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
     let builder = SuccessfulPackageWarningBuilder { package_root };
-    let build_result = build_project(
+    let result = build_project(
         &builder,
         project_root
             .to_str()
@@ -3039,25 +3003,41 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
         &[],
         &BuildConfigInputSet::new(),
     )
-    .expect("successful build should retain the package warning");
-
+    .unwrap_or_else(|never| match never {});
+    let result = match result {
+        Ok(CompilationOutcome::Success {
+            value,
+            warnings: None,
+        }) => value.finish_output(Ok(())),
+        Ok(CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        }) => panic!("build_project should not freeze warnings: {warnings:?}"),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("warning-only build should succeed: {reports:?}")
+        }
+        Err(failures) => panic!("warning-only build should not fail: {failures:?}"),
+    };
+    let warnings = match &result {
+        Ok(CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        }) => warnings,
+        Ok(CompilationOutcome::Success { warnings: None, .. }) => {
+            panic!("successful source-package warning should be reported")
+        }
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("warning-only build should succeed: {reports:?}")
+        }
+        Err(failures) => panic!("warning-only build should not fail: {failures:?}"),
+    };
     assert!(
-        build_result
-            .warnings
+        warnings
             .iter()
-            .any(|warning| warning.kind.code() == "MOTH-RULE-0022"),
+            .any(|(_, view)| { view.family().descriptor().code == "MOTH-RULE-0022" }),
         "successful build should retain the source-package warning"
     );
-
-    let mut messages = CompilerMessages::from_diagnostics(
-        build_result.warnings.clone(),
-        build_result.string_table.clone(),
-    );
-    messages.install_source_contexts(build_result.warning_source_contexts.clone(), 0);
-    if let Some(source_database) = build_result.source_database.as_ref() {
-        messages.set_source_database(Arc::clone(source_database));
-    }
-    let rendered = render_compiler_messages_html(&messages, &project_root);
+    let rendered = render_compilation_result_html(&result, &project_root);
 
     assert!(
         rendered.contains("&quot;one&quot; =&gt; result = &quot;one&quot;"),
@@ -3093,7 +3073,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let mut config = Config::new(project_root.clone());
     config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
@@ -3101,25 +3081,20 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
         .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
-    let mut project_source_files = None;
-    let frontend = compile_project_frontend_with_inputs(
+    let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
-        &mut project_source_files,
+        &mut warning_owner,
+        &mut None,
+        &mut None,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
-    )
-    .expect("the package diagnostic should remain a retained frontend outcome");
-    let messages = frontend.into_render_messages_with_frozen_identity(
-        &mut string_table,
-        project_source_files.take(),
-        None,
     );
-    let rendered = render_compiler_messages_html(&messages, &project_root);
+    super::super::create_project_modules_tests::diagnosed_reports(&result);
+    let rendered = render_compilation_result_html(&result, &project_root);
 
     assert!(
         rendered.contains(package_text.trim_end()),

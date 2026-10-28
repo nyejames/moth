@@ -9,13 +9,14 @@
 //! targets and cannot rediscover the filesystem. It never parses expressions or reads bytes.
 
 use crate::builder_surface::SourceFileKindRegistry;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCompileTimePathReason, PathKind,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, PreparedFileReferenceClass, ResolvedFileReference,
-    ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget, ResourceSourceId,
+    ResolvedFileReferenceFailure, ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget,
+    ResourceSourceId,
 };
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -88,7 +89,7 @@ impl<'a> FileReferenceResolver<'a> {
     ///
     /// User-authored resolution failures become retained diagnostic outcomes. Missing targets
     /// also register a build-only watch interest. A disagreement between the source index and a
-    /// canonical target is an infrastructure invariant failure and returns `CompilerError`.
+    /// canonical target is an infrastructure invariant failure and returns `InfrastructureFailure`.
     #[allow(
         clippy::too_many_arguments,
         reason = "resolution keeps mutable resolver, consumer module identity, path syntax, the reference, source database, mutable string/discovered-source state and shared path fork as separate inputs"
@@ -102,7 +103,7 @@ impl<'a> FileReferenceResolver<'a> {
         string_table: &mut StringTable,
         path_fork: &PathInternerFork,
         discovered_content_sources: &mut Vec<SourceRecordIndex>,
-    ) -> Result<ResolvedFileReference, CompilerError> {
+    ) -> Result<ResolvedFileReference, InfrastructureFailure> {
         let source_file = reference.source_file;
         let authored_path = path_syntax
             .try_path_for_token(reference.path_syntax, reference.span)?
@@ -144,15 +145,14 @@ impl<'a> FileReferenceResolver<'a> {
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
 
-        if let Some(mut diagnostic) =
-            invalid_components_diagnostic(&authored_components, authored_path, Some(reference.span))
+        if let Some(failure) =
+            invalid_components_failure(&authored_components, authored_path, reference.span)
         {
-            set_primary_span_from_reference(&mut diagnostic, reference);
             return Ok(ResolvedFileReference {
                 source_file,
                 path_syntax: reference.path_syntax,
                 class: reference.class,
-                outcome: ResolvedFileReferenceOutcome::Diagnostic(diagnostic),
+                outcome: ResolvedFileReferenceOutcome::Diagnostic(failure),
             });
         }
 
@@ -172,7 +172,6 @@ impl<'a> FileReferenceResolver<'a> {
             &candidate,
             &authored_components,
             reference.class,
-            string_table,
         )?;
         let canonical = match resolution {
             PhysicalResolution::Target(canonical) => canonical,
@@ -204,7 +203,7 @@ impl<'a> FileReferenceResolver<'a> {
                     source_file,
                     reference,
                     authored_path,
-                    invalid_reason(reason, string_table),
+                    invalid_reason(reason, &mut DiagnosticStringBuilder::new(string_table)),
                 ));
             }
         };
@@ -230,7 +229,7 @@ impl<'a> FileReferenceResolver<'a> {
                     .source_tree_index
                     .source_index_for_canonical_path(&canonical)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                             "canonical content target {:?} is absent from SourceTreeIndex",
                             canonical
                         ))
@@ -241,17 +240,18 @@ impl<'a> FileReferenceResolver<'a> {
                         .extension()
                         .and_then(|extension| extension.to_str())
                         .unwrap_or_default();
-                    let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
-                        authored_path,
-                        string_table.intern(extension),
-                        Some(reference.span),
-                    );
-                    set_primary_span_from_reference(&mut diagnostic, reference);
+                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
                     return Ok(ResolvedFileReference {
                         source_file,
                         path_syntax: reference.path_syntax,
                         class: reference.class,
-                        outcome: ResolvedFileReferenceOutcome::Diagnostic(diagnostic),
+                        outcome: ResolvedFileReferenceOutcome::Diagnostic(
+                            ResolvedFileReferenceFailure::UnsupportedSourceFileKind {
+                                path: authored_path,
+                                extension: diagnostic_strings.intern(extension),
+                                span: reference.span,
+                            },
+                        ),
                     });
                 }
                 let target_source_index = self.indexed_source(consumer_module_id, &canonical)?;
@@ -262,9 +262,7 @@ impl<'a> FileReferenceResolver<'a> {
                     .get_by_canonical_path(&canonical)
                     .map(|identity| identity.id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "indexed content target is absent from the module SourceDatabase",
-                        )
+                        InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "indexed content target is absent from the module SourceDatabase")
                     })?;
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
                     source: target_file_id,
@@ -272,9 +270,7 @@ impl<'a> FileReferenceResolver<'a> {
             }
             PreparedFileReferenceClass::ResourceFile => {
                 let relative_path = candidate.strip_prefix(&root_directory).map_err(|_| {
-                    CompilerError::compiler_error(
-                        "resource candidate escaped its consumer module root after component validation",
-                    )
+                    InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, "resource candidate escaped its consumer module root after component validation")
                 })?;
                 let owner_relative_path =
                     PortableResourcePath::from_relative_logical_path(relative_path)?;
@@ -287,7 +283,10 @@ impl<'a> FileReferenceResolver<'a> {
             PreparedFileReferenceClass::SiteRoot
             | PreparedFileReferenceClass::Extensionless
             | PreparedFileReferenceClass::SourceKindNoFileValue => {
-                unreachable!("non-physical file-reference class reached physical resolution")
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "non-physical file-reference class reached physical resolution"
+                )
             }
         };
 
@@ -306,8 +305,7 @@ impl<'a> FileReferenceResolver<'a> {
         candidate: &Path,
         authored_components: &[String],
         class: PreparedFileReferenceClass,
-        string_table: &mut StringTable,
-    ) -> Result<PhysicalResolution, CompilerError> {
+    ) -> Result<PhysicalResolution, InfrastructureFailure> {
         resolve_physical_target_cached(
             &mut self.settled,
             root_directory,
@@ -315,7 +313,6 @@ impl<'a> FileReferenceResolver<'a> {
             candidate,
             authored_components,
             class,
-            string_table,
         )
     }
 
@@ -347,37 +344,46 @@ impl<'a> FileReferenceResolver<'a> {
         &self,
         consumer_module_id: ModuleId,
         canonical: &Path,
-    ) -> Result<SourceRecordIndex, CompilerError> {
+    ) -> Result<SourceRecordIndex, InfrastructureFailure> {
         let source_index = self
             .source_tree_index
             .source_index_for_canonical_path(canonical)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "canonical source target {:?} is absent from SourceTreeIndex",
                     canonical
                 ))
             })?;
         let record = self.source_tree_index.source(source_index);
         if record.ownership() != SourceOwnership::Owned(consumer_module_id) {
-            return Err(CompilerError::compiler_error(format!(
-                "canonical source target {:?} disagrees with indexed ownership facts",
-                canonical
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "canonical source target {:?} disagrees with indexed ownership facts",
+                    canonical
+                ),
+            ));
         }
         if !record.supported() {
-            return Err(CompilerError::compiler_error(format!(
-                "unsupported source target {:?} must be diagnosed before indexed_source",
-                canonical
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "unsupported source target {:?} must be diagnosed before indexed_source",
+                    canonical
+                ),
+            ));
         }
 
         // Kind is not compared here: this tree record is the same one whose classification the
         // source database registered, so a comparison would check that value against itself.
         let SourceClassification::CompilerSemantic(_) = record.classification() else {
-            return Err(CompilerError::compiler_error(format!(
-                "canonical source target {:?} is not compiler semantic",
-                canonical
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "canonical source target {:?} is not compiler semantic",
+                    canonical
+                ),
+            ));
         };
 
         Ok(source_index)
@@ -394,24 +400,15 @@ impl<'a> FileReferenceResolver<'a> {
             source_file,
             path_syntax: reference.path_syntax,
             class: reference.class,
-            outcome: {
-                let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-                    authored_path,
+            outcome: ResolvedFileReferenceOutcome::Diagnostic(
+                ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                    path: authored_path,
                     reason,
-                    Some(reference.span),
-                );
-                set_primary_span_from_reference(&mut diagnostic, reference);
-                ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
-            },
+                    span: reference.span,
+                },
+            ),
         }
     }
-}
-
-fn set_primary_span_from_reference(
-    diagnostic: &mut CompilerDiagnostic,
-    reference: &PreparedFileReference,
-) {
-    diagnostic.primary_span = Some(reference.span);
 }
 
 fn resolve_physical_target_cached(
@@ -421,8 +418,7 @@ fn resolve_physical_target_cached(
     candidate: &Path,
     authored_components: &[String],
     class: PreparedFileReferenceClass,
-    string_table: &mut StringTable,
-) -> Result<PhysicalResolution, CompilerError> {
+) -> Result<PhysicalResolution, InfrastructureFailure> {
     let key = (root_directory.to_path_buf(), candidate.to_path_buf(), class);
     if let Some(resolution) = settled.get(&key) {
         return Ok(resolution.clone());
@@ -438,10 +434,7 @@ fn resolve_physical_target_cached(
                     PhysicalResolution::Invalid(PhysicalInvalidReason::EscapesSymlink)
                 } else {
                     let metadata = fs::metadata(&canonical).map_err(|error| {
-                        CompilerError::file_error(
-                            &canonical,
-                            format!("Failed to inspect file-value target: {error}"),
-                        )
+                        InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &canonical, format!("Failed to inspect file-value target: {error}"))
                     })?;
                     if metadata.is_dir() {
                         PhysicalResolution::Invalid(PhysicalInvalidReason::TargetIsDirectory)
@@ -453,7 +446,7 @@ fn resolve_physical_target_cached(
                 }
             }
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                let missing = resolve_missing_target_evidence(candidate, string_table)?;
+                let missing = resolve_missing_target_evidence(candidate)?;
                 if missing.non_directory_ancestor {
                     PhysicalResolution::Invalid(PhysicalInvalidReason::TargetNotRegular)
                 } else if missing
@@ -473,10 +466,7 @@ fn resolve_physical_target_cached(
                 PhysicalResolution::Invalid(PhysicalInvalidReason::TargetNotRegular)
             }
             Err(error) => {
-                return Err(CompilerError::file_error(
-                    candidate,
-                    format!("Failed to resolve file-value target: {error}"),
-                ));
+                return Err(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, candidate, format!("Failed to resolve file-value target: {error}")));
             }
         },
     };
@@ -497,8 +487,7 @@ struct MissingTargetEvidence {
 /// semantics. The evidence is retained in the physical cache for repeated occurrences.
 fn resolve_missing_target_evidence(
     candidate: &Path,
-    _string_table: &mut StringTable,
-) -> Result<MissingTargetEvidence, CompilerError> {
+) -> Result<MissingTargetEvidence, InfrastructureFailure> {
     const MAX_SYMLINK_FOLLOWS: usize = 40;
 
     let mut pending = candidate.to_path_buf();
@@ -526,12 +515,9 @@ fn resolve_missing_target_evidence(
                     match fs::symlink_metadata(&next) {
                         Ok(metadata) if metadata.file_type().is_symlink() => {
                             let target = fs::read_link(&next).map_err(|error| {
-                                CompilerError::file_error(
-                                    &next,
-                                    format!(
-                                        "Failed to read dangling file-value symlink target: {error}"
-                                    ),
-                                )
+                                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &next, format!(
+                                    "Failed to read dangling file-value symlink target: {error}"
+                                ))
                             })?;
                             let mut replacement = if target.is_absolute() {
                                 target
@@ -545,10 +531,7 @@ fn resolve_missing_target_evidence(
                             if symlinks_followed > MAX_SYMLINK_FOLLOWS
                                 || !seen_paths.insert(replacement.clone())
                             {
-                                return Err(CompilerError::file_error(
-                                    &next,
-                                    "File-value symlink chain contains a cycle or exceeds the supported depth",
-                                ));
+                                return Err(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &next, "File-value symlink chain contains a cycle or exceeds the supported depth"));
                             }
                             replaced_symlink = Some(replacement);
                             break;
@@ -569,12 +552,9 @@ fn resolve_missing_target_evidence(
                             });
                         }
                         Err(error) => {
-                            return Err(CompilerError::file_error(
-                                &next,
-                                format!(
-                                    "Failed to inspect missing file-value path component: {error}"
-                                ),
-                            ));
+                            return Err(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &next, format!(
+                                "Failed to inspect missing file-value path component: {error}"
+                            )));
                         }
                     }
                 }
@@ -595,13 +575,16 @@ fn resolve_missing_target_evidence(
 }
 
 /// Canonicalize a physical path that was already proven to be the longest existing prefix.
-fn canonicalize_existing_path(existing_path: &Path) -> Result<Option<PathBuf>, CompilerError> {
+fn canonicalize_existing_path(
+    existing_path: &Path,
+) -> Result<Option<PathBuf>, InfrastructureFailure> {
     match fs::canonicalize(existing_path) {
         Ok(path) => Ok(Some(path)),
         Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
             Ok(None)
         }
-        Err(error) => Err(CompilerError::file_error(
+        Err(error) => Err(InfrastructureFailure::filesystem(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             existing_path,
             format!("Failed to resolve missing file-value ancestor: {error}"),
         )),
@@ -621,7 +604,7 @@ fn join_components(root: &Path, components: &[String]) -> PathBuf {
 fn lexical_case_check(
     root_directory: &Path,
     components: &[String],
-) -> Result<LexicalCaseCheck, CompilerError> {
+) -> Result<LexicalCaseCheck, InfrastructureFailure> {
     let mut current = root_directory.to_path_buf();
     for component in components {
         let entries = match fs::read_dir(&current) {
@@ -632,10 +615,7 @@ fn lexical_case_check(
                 return Ok(LexicalCaseCheck::Clear);
             }
             Err(error) => {
-                return Err(CompilerError::file_error(
-                    &current,
-                    format!("Failed to inspect file-value path casing: {error}"),
-                ));
+                return Err(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &current, format!("Failed to inspect file-value path casing: {error}")));
             }
         };
 
@@ -644,10 +624,7 @@ fn lexical_case_check(
         let mut case_insensitive_matches = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| {
-                CompilerError::file_error(
-                    &current,
-                    format!("Failed to inspect file-value directory entry: {error}"),
-                )
+                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &current, format!("Failed to inspect file-value directory entry: {error}"))
             })?;
             let name = entry.file_name();
             let Some(name) = name.to_str() else {
@@ -694,13 +671,13 @@ pub(super) fn stable_case_mismatch(component: &str, matches: &mut Vec<String>) -
 
 fn invalid_reason(
     reason: PhysicalInvalidReason,
-    string_table: &mut StringTable,
+    strings: &mut DiagnosticStringBuilder<'_>,
 ) -> InvalidCompileTimePathReason {
     match reason {
         PhysicalInvalidReason::CaseMismatch { provided, expected } => {
             InvalidCompileTimePathReason::CaseMismatch {
-                provided: string_table.intern(&provided),
-                expected: string_table.intern(&expected),
+                provided: strings.intern(&provided),
+                expected: strings.intern(&expected),
             }
         }
         PhysicalInvalidReason::EscapesSymlink => InvalidCompileTimePathReason::EscapesSymlink,
@@ -713,48 +690,46 @@ fn invalid_reason(
 ///
 /// Leading `@` is deliberately absent here: it is a parser concern — unquoted `@@` is already
 /// rejected by the parser, and quoted `"@logo.svg"` is a legal filesystem component.
-fn invalid_components_diagnostic(
+fn invalid_components_failure(
     components: &[String],
     authored_path: PathId,
-    source_span: Option<SourceSpan>,
-) -> Option<CompilerDiagnostic> {
+    span: SourceSpan,
+) -> Option<ResolvedFileReferenceFailure> {
     for component in components {
         if component == "." {
-            return Some(CompilerDiagnostic::invalid_compile_time_path(
-                authored_path,
-                InvalidCompileTimePathReason::CurrentDirectorySegment,
-                source_span,
-            ));
+            return Some(ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: authored_path,
+                reason: InvalidCompileTimePathReason::CurrentDirectorySegment,
+                span,
+            });
         }
         if component == ".." {
-            return Some(CompilerDiagnostic::invalid_compile_time_path(
-                authored_path,
-                InvalidCompileTimePathReason::ParentDirectorySegment,
-                source_span,
-            ));
+            return Some(ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: authored_path,
+                reason: InvalidCompileTimePathReason::ParentDirectorySegment,
+                span,
+            });
         }
         let path = Path::new(component);
         if path.is_absolute() {
-            return Some(CompilerDiagnostic::invalid_path(
-                PathKind::InvalidComponent,
-                source_span,
-            ));
+            return Some(ResolvedFileReferenceFailure::InvalidComponent { span });
         }
     }
 
     None
 }
 
-/// One retained invalid-path diagnostic for a synthesized single-file reference.
+/// One retained invalid-path failure for a synthesized single-file reference.
 fn invalid_path_outcome(
     authored_path: PathId,
     reason: InvalidCompileTimePathReason,
     reference: &PreparedFileReference,
 ) -> SingleFileReferenceOutcome {
-    let mut diagnostic =
-        CompilerDiagnostic::invalid_compile_time_path(authored_path, reason, Some(reference.span));
-    set_primary_span_from_reference(&mut diagnostic, reference);
-    SingleFileReferenceOutcome::Diagnostic(diagnostic)
+    SingleFileReferenceOutcome::Diagnostic(ResolvedFileReferenceFailure::InvalidCompileTimePath {
+        path: authored_path,
+        reason,
+        span: reference.span,
+    })
 }
 
 /// A Stage 0 outcome retained while synthetic single-file discovery is still assembling its
@@ -778,7 +753,7 @@ pub(crate) enum SingleFileReferenceOutcome {
         source: ResourceSourceId,
         owner_relative_path: PortableResourcePath,
     },
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(ResolvedFileReferenceFailure),
 }
 
 /// Physical resolver for synthetic single-file discovery.
@@ -822,7 +797,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
         reference: &PreparedFileReference,
         string_table: &mut StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<SingleFileResolvedReference, CompilerError> {
+    ) -> Result<SingleFileResolvedReference, InfrastructureFailure> {
         let authored_path = path_syntax
             .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
@@ -852,19 +827,18 @@ impl<'a> SingleFileReferenceResolver<'a> {
             .iter()
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
-        if let Some(mut diagnostic) =
-            invalid_components_diagnostic(&authored_components, authored_path, Some(reference.span))
+        if let Some(failure) =
+            invalid_components_failure(&authored_components, authored_path, reference.span)
         {
-            set_primary_span_from_reference(&mut diagnostic, reference);
             return Ok(SingleFileResolvedReference {
-                outcome: SingleFileReferenceOutcome::Diagnostic(diagnostic),
+                outcome: SingleFileReferenceOutcome::Diagnostic(failure),
                 ..result
             });
         }
 
         let candidate = join_components(&self.root_directory, &authored_components);
         let lexically_escapes = match candidate.parent() {
-            Some(parent) => self.chain_escapes_module_boundary(parent, string_table)?,
+            Some(parent) => self.chain_escapes_module_boundary(parent)?,
             None => false,
         };
         if lexically_escapes {
@@ -885,7 +859,6 @@ impl<'a> SingleFileReferenceResolver<'a> {
             &candidate,
             &authored_components,
             reference.class,
-            string_table,
         )?;
         let canonical = match resolution {
             PhysicalResolution::Target(canonical) => canonical,
@@ -894,7 +867,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 canonical_ancestor,
             } => {
                 let escapes = match canonical_ancestor.as_deref() {
-                    Some(ancestor) => self.chain_escapes_module_boundary(ancestor, string_table)?,
+                    Some(ancestor) => self.chain_escapes_module_boundary(ancestor)?,
                     None => false,
                 };
                 if escapes {
@@ -921,7 +894,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 return Ok(SingleFileResolvedReference {
                     outcome: invalid_path_outcome(
                         authored_path,
-                        invalid_reason(reason, string_table),
+                        invalid_reason(reason, &mut DiagnosticStringBuilder::new(string_table)),
                         reference,
                     ),
                     ..result
@@ -929,7 +902,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
             }
         };
 
-        if self.chain_escapes_module_boundary(&canonical, string_table)? {
+        if self.chain_escapes_module_boundary(&canonical)? {
             return Ok(SingleFileResolvedReference {
                 outcome: invalid_path_outcome(
                     authored_path,
@@ -949,16 +922,15 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 .source_file_kinds
                 .supports_recognized_extension(extension)
             {
+                let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
                 return Ok(SingleFileResolvedReference {
-                    outcome: {
-                        let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
-                            authored_path,
-                            string_table.intern(extension),
-                            Some(reference.span),
-                        );
-                        set_primary_span_from_reference(&mut diagnostic, reference);
-                        SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                    },
+                    outcome: SingleFileReferenceOutcome::Diagnostic(
+                        ResolvedFileReferenceFailure::UnsupportedSourceFileKind {
+                            path: authored_path,
+                            extension: diagnostic_strings.intern(extension),
+                            span: reference.span,
+                        },
+                    ),
                     ..result
                 });
             }
@@ -969,7 +941,8 @@ impl<'a> SingleFileReferenceResolver<'a> {
         }
 
         let owner_relative_path = candidate.strip_prefix(&self.root_directory).map_err(|_| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 "single-file resource candidate escaped its module root after validation",
             )
         })?;
@@ -991,8 +964,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
     fn chain_escapes_module_boundary(
         &mut self,
         path: &Path,
-        string_table: &mut StringTable,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         for directory in path.ancestors() {
             if directory == self.root_directory {
                 break;
@@ -1000,7 +972,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
             if !directory.starts_with(&self.root_directory) {
                 break;
             }
-            if self.directory_is_module_root_boundary(directory, string_table)? {
+            if self.directory_is_module_root_boundary(directory)? {
                 return Ok(true);
             }
         }
@@ -1013,8 +985,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
     fn directory_is_module_root_boundary(
         &mut self,
         directory: &Path,
-        _string_table: &mut StringTable,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         if let Some(is_boundary) = self.boundary_cache.get(directory) {
             return Ok(*is_boundary);
         }
@@ -1023,10 +994,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 let mut is_boundary = false;
                 for entry in entries {
                     let entry = entry.map_err(|error| {
-                        CompilerError::file_error(
-                            directory,
-                            format!("Failed to read module boundary directory entry: {error}"),
-                        )
+                        InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, directory, format!("Failed to read module boundary directory entry: {error}"))
                     })?;
                     let entry_path = entry.path();
                     if entry_path.is_file()
@@ -1047,10 +1015,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 false
             }
             Err(error) => {
-                return Err(CompilerError::file_error(
-                    directory,
-                    format!("Failed to inspect module boundary directory: {error}"),
-                ));
+                return Err(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, directory, format!("Failed to inspect module boundary directory: {error}")));
             }
         };
         self.boundary_cache

@@ -13,7 +13,13 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue, RelationalPatternOp,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, InfrastructureFailureKind};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidMatchGuardReason;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::InvalidMatchGuardView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::finish_prepared_batch;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
@@ -34,13 +40,12 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     reference_expr_with_type_id,
 };
 
-use crate::compiler_frontend::tests::type_id_fixture_support::choice_type_id;
-use crate::compiler_frontend::value_mode::ValueMode;
-
-use crate::compiler_frontend::hir::hir_builder::{
+use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
     HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
-    build_ast_with_registered_types, lower_ast, validate_module_for_tests,
+    build_ast_with_registered_types, choice_type_id, lower_ast,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
 
 /// One exact `I32` value for pattern and body fixtures.
 fn i32_value(value: i64) -> FixedScalarValue {
@@ -799,16 +804,27 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     )
     .expect_err("guard expressions with preludes should fail HIR lowering");
 
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert_eq!(&error.error_type, &ErrorType::HirTransformation);
-    assert!(
-        error
-            .msg
-            .contains("Match arm guard lowering produced side-effect statements"),
-        "unexpected error message: {}",
-        error.msg,
+    let batch = match err {
+        PreparedFailure::Diagnosed(batch) => batch,
+        PreparedFailure::Infrastructure(errors) => {
+            panic!("match guard failure should be a typed diagnostic: {errors:?}")
+        }
+    };
+    let failure = finish_prepared_batch(batch, string_table);
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+        panic!("match guard failure should retain one diagnosed report");
+    };
+    let (_report, view) = reports
+        .iter()
+        .next()
+        .expect("match guard failure should retain one typed report");
+    let facts = view
+        .family_view::<InvalidMatchGuardView>()
+        .expect("match guard failure should use its typed diagnostic family");
+    assert_eq!(facts.reason, InvalidMatchGuardReason::SideEffectingPrelude);
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_match_guard.side_effecting_prelude")
     );
 }
 
@@ -876,26 +892,27 @@ fn match_rejects_non_literal_pattern_expressions() {
         constants,
         TypeEnvironment::new(),
     );
-    let err = lower_ast(
-        ast,
-        &mut string_table,
-        &mut path_fork,
-        &super::ExternalPackageRegistry::new(),
-    )
-    .expect_err("non-literal match pattern should fail HIR lowering");
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert_eq!(&error.error_type, &ErrorType::HirTransformation);
-    assert!(
-        error
-            .msg
-            .contains("Match arm patterns must be compile-time literals"),
-        "unexpected error message: {}",
-        error.msg,
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        lower_ast(
+            ast,
+            &mut string_table,
+            &mut path_fork,
+            &super::ExternalPackageRegistry::new(),
+        )
+    }));
+    let panic = match panic {
+        Err(panic) => panic,
+        Ok(_) => panic!("a non-literal match pattern must panic as a compiler bug"),
+    };
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .expect("compiler bug panic should carry a structured report");
+    assert_eq!(report.stage, CompilerStage::HirConstruction);
+    assert_eq!(
+        report.message.as_ref(),
+        "Match arm patterns must be compile-time literals"
     );
 }
-
 #[test]
 fn break_outside_loop_reports_hir_transformation_error() {
     let mut path_fork = super::PathInternerFork::empty();
@@ -927,11 +944,14 @@ fn break_outside_loop_reports_hir_transformation_error() {
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("break outside loop should fail");
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert_eq!(&error.error_type, &ErrorType::HirTransformation);
-    assert!(error.msg.contains("active loop context"));
+    let error = match err {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
+    assert_eq!(&error.kind, &InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("active loop context"));
 }
 
 #[test]
@@ -965,11 +985,14 @@ fn continue_outside_loop_reports_hir_transformation_error() {
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("continue outside loop should fail");
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert_eq!(&error.error_type, &ErrorType::HirTransformation);
-    assert!(error.msg.contains("active loop context"));
+    let error = match err {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
+    assert_eq!(&error.kind, &InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("active loop context"));
 }
 
 #[test]
@@ -1006,11 +1029,14 @@ fn top_level_return_reports_hir_transformation_error() {
     )
     .expect_err("top-level return should fail");
 
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
-    assert_eq!(&error.error_type, &ErrorType::HirTransformation);
-    assert!(error.msg.contains("Top-level return"));
+    let error = match err {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
+    assert_eq!(&error.kind, &InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("Top-level return"));
 }
 
 #[test]
@@ -1302,7 +1328,6 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
 /// with correct tag indices and a shared `ChoiceId`.
 ///
 /// WHY: choice match arms must not become `HirPattern::Literal(HirExpressionKind::FixedScalar)`
-/// after the Choice Hardening refactor.
 #[test]
 fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
     let mut path_fork = super::PathInternerFork::empty();

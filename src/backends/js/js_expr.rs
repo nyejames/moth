@@ -10,7 +10,8 @@ use crate::backends::js::numeric_carrier::{
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expression_store::{
@@ -32,7 +33,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn lower_expr(
         &mut self,
         expression_id: HirValueId,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let expression = hir.expressions.expression(expression_id);
         // WHAT: dispatch lowering by the fully resolved HIR expression shape.
@@ -41,9 +42,10 @@ impl<'hir> JsEmitter<'hir> {
         match &expression.kind {
             HirExpressionKind::FixedScalar(value) => JsNumericCarrier::fixed_literal(*value)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "JS backend cannot format fixed scalar literal {value}"
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
+                        format!("JS backend cannot format fixed scalar literal {value}"),
+                    )
                 }),
             HirExpressionKind::Number(value) => Ok(JsNumericCarrier::number_literal(value)),
             HirExpressionKind::VariantConstruct {
@@ -102,28 +104,32 @@ impl<'hir> JsEmitter<'hir> {
 
                 let Some(collection_shape) = self.type_environment.collection_shape(expression.ty)
                 else {
-                    return Err(CompilerError::compiler_error(
-                        "JS backend lowered a collection expression whose type is not a collection",
-                    ));
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS backend lowered a collection expression whose type is not a collection"
+                    );
                 };
 
                 if let Some(fixed_capacity) = collection_shape.fixed_capacity {
                     // Capacities are source-visible I32 counts, so their emitted literal uses the
                     // exact I32 carrier (a decimal Number).
                     let capacity = i64::from(i32::try_from(fixed_capacity).map_err(|_| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::BackendLowering,
                             "JS fixed collection capacity exceeds the I32 capacity carrier",
                         )
                     })?);
                     let capacity = FixedScalarValue::signed(FixedScalar::I32, capacity)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::BackendLowering,
                                 "JS fixed collection capacity exceeds the I32 capacity carrier",
                             )
                         })?;
                     let fixed_capacity =
                         JsNumericCarrier::fixed_literal(capacity).ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::BackendLowering,
                                 "JS fixed collection capacity exceeds the I32 capacity carrier",
                             )
                         })?;
@@ -163,9 +169,10 @@ impl<'hir> JsEmitter<'hir> {
     fn lower_structural_string(
         &self,
         pieces: &[ConstStringPiece],
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let Some(url_map) = self.config.structural_string_urls.as_ref() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
                 "JavaScript lowering received a structural string without a builder URL map",
             ));
         };
@@ -176,15 +183,19 @@ impl<'hir> JsEmitter<'hir> {
                 ConstStringPiece::Text(text) => rendered.push_str(self.string_table.resolve(*text)),
                 ConstStringPiece::Resource(resource_id) => {
                     let Some(url) = url_map.resource_urls.get(resource_id) else {
-                        return Err(CompilerError::compiler_error(format!(
-                            "JavaScript lowering has no rendered URL for structural resource {resource_id:?}"
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::BackendLowering,
+                            format!(
+                                "JavaScript lowering has no rendered URL for structural resource {resource_id:?}"
+                            ),
+                        ));
                     };
                     rendered.push_str(url);
                 }
                 ConstStringPiece::SiteRoot => {
                     let Some(url) = url_map.site_root_url.as_deref() else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::BackendLowering,
                             "JavaScript lowering has no rendered URL for a structural site root",
                         ));
                     };
@@ -206,7 +217,10 @@ impl<'hir> JsEmitter<'hir> {
     /// helper calls (`__moth_field`, `__moth_index`) or a direct local name.
     /// WHY: the JS backend uses runtime helpers for field and index access to preserve its
     /// reference and aliasing semantics.
-    pub(crate) fn lower_place(&mut self, place: &HirPlace) -> Result<String, CompilerError> {
+    pub(crate) fn lower_place(
+        &mut self,
+        place: &HirPlace,
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let mut lowered = self.local_name(place.root)?.to_owned();
         for projection in hir.expressions.projections(place.projections) {
@@ -235,7 +249,7 @@ impl<'hir> JsEmitter<'hir> {
         carrier: &HirVariantCarrier,
         variant_index: usize,
         fields: HirVariantFieldRange,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let mut entries = vec![];
         for field in hir.expressions.variant_fields(fields) {
@@ -269,25 +283,28 @@ impl<'hir> JsEmitter<'hir> {
         source: HirValueId,
         variant_index: usize,
         field_index: usize,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let source_js = self.lower_expr(source)?;
         let field_name_js = match carrier {
             HirVariantCarrier::Choice { choice_id } => {
-                let choice = self.hir.choices.get(choice_id.0 as usize).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                let choice = self.hir.choices.get(choice_id.0 as usize).unwrap_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
                         "JavaScript backend: invalid ChoiceId {choice_id:?} in VariantPayloadGet"
-                    ))
-                })?;
-                let variant = choice.variants.get(variant_index).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    )
+                });
+                let variant = choice.variants.get(variant_index).unwrap_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
                         "JavaScript backend: invalid variant index {variant_index} for choice {choice_id:?}"
-                    ))
-                })?;
-                let field = variant.fields.get(field_index).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    )
+                });
+                let field = variant.fields.get(field_index).unwrap_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
                         "JavaScript backend: invalid field index {field_index} for variant {variant_index} of choice {choice_id:?}"
-                    ))
-                })?;
+                    )
+                });
                 escape_js_string(self.string_table.resolve(field.name))
             }
             HirVariantCarrier::Option => "\"value\"".to_owned(),
@@ -312,7 +329,7 @@ impl<'hir> JsEmitter<'hir> {
         left: HirValueId,
         operator: HirBinOp,
         right: HirValueId,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let left_type = hir.expressions.expression(left).ty;
         let right_type = hir.expressions.expression(right).ty;
@@ -334,7 +351,10 @@ impl<'hir> JsEmitter<'hir> {
             return match operator {
                 HirBinOp::Eq => Ok(equality),
                 HirBinOp::Ne => Ok(format!("(!{equality})")),
-                _ => unreachable!(),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS equality dispatch already restricted this arm to HirBinOp::Eq or HirBinOp::Ne"
+                ),
             };
         }
 
@@ -342,7 +362,10 @@ impl<'hir> JsEmitter<'hir> {
         // coercing either carrier to the other. StringAppend remains ordinary JS concatenation.
         let js_operator = match operator {
             HirBinOp::StringAppend => "+",
-            HirBinOp::Eq | HirBinOp::Ne => unreachable!("equality returned above"),
+            HirBinOp::Eq | HirBinOp::Ne => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JS equality/inequality already returned at the Eq/Ne dispatch above this relational match"
+            ),
             HirBinOp::Lt => "<",
             HirBinOp::Le => "<=",
             HirBinOp::Gt => ">",
@@ -393,7 +416,7 @@ impl<'hir> JsEmitter<'hir> {
         operator: HirBinOp,
         right: String,
         right_side: OptionComparisonSide,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let equality = match (left_side, right_side) {
             (OptionComparisonSide::Option { .. }, OptionComparisonSide::NoneLiteral) => {
                 format!("(({left}).tag === \"none\")")
@@ -448,19 +471,19 @@ impl<'hir> JsEmitter<'hir> {
                 format!("((({right}).tag === \"some\") && {inner_equality})")
             }
 
-            _ => {
-                return Err(CompilerError::compiler_error(
-                    "JavaScript backend received option equality without an option operand",
-                ));
-            }
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend received option equality without an option operand"
+            ),
         };
 
         match operator {
             HirBinOp::Eq => Ok(equality),
             HirBinOp::Ne => Ok(format!("(!{equality})")),
-            _ => Err(CompilerError::compiler_error(
-                "JavaScript backend received non-equality option comparison",
-            )),
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend received non-equality option comparison"
+            ),
         }
     }
 
@@ -519,7 +542,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         mut operator: HirUnaryOp,
         mut operand: HirValueId,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let mut rendered = String::new();
         let mut closing_parentheses = 0;
 
@@ -566,11 +589,12 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         type_id: TypeId,
         entries: HirMapEntryRange,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let Some(_map_shape) = self.type_environment.map_shape(type_id) else {
-            return Err(CompilerError::compiler_error(
-                "JS backend lowered a map literal whose type is not a map",
-            ));
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JS backend lowered a map literal whose type is not a map"
+            );
         };
 
         let hir = self.hir;
@@ -615,7 +639,7 @@ pub(crate) fn escape_js_string(value: &str) -> String {
 pub(super) fn js_cast_expression_for_policy(
     policy: BuiltinCastPolicyId,
     value: &str,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     match policy {
         BuiltinCastPolicyId::NumericConversion { source, target } => {
             JsNumericConversion::classify(source, target)
@@ -629,11 +653,12 @@ pub(super) fn js_cast_expression_for_policy(
             Ok(format!("__moth_cast_int_to_string({value})"))
         }
         BuiltinCastPolicyId::NumericToString(scalar) => {
-            let precision = scalar.binary_float_precision().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            let precision = scalar.binary_float_precision().unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "JS backend received a non-numeric string formatting policy for {scalar}"
-                ))
-            })?;
+                )
+            });
             Ok(format!(
                 "__moth_cast_float_to_string({value}, {}, \"{scalar}\")",
                 binary_float_precision_bits(precision),
@@ -650,26 +675,29 @@ pub(super) fn js_cast_expression_for_policy(
             scale.get()
         )),
         BuiltinCastPolicyId::StringToNumeric(scalar) if scalar.is_integer() => {
-            let carrier = JsNumericCarrier::for_scalar(scalar).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            let carrier = JsNumericCarrier::for_scalar(scalar).unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "JS backend has no integer carrier for {scalar}"
-                ))
-            })?;
-            let (minimum, maximum) = carrier.integer_bounds_js().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                )
+            });
+            let (minimum, maximum) = carrier.integer_bounds_js().unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "JS backend has no integer bounds for {scalar}"
-                ))
-            })?;
+                )
+            });
             Ok(format!(
                 "__moth_cast_int({value}, {minimum}, {maximum}, \"{scalar}\")",
             ))
         }
         BuiltinCastPolicyId::StringToNumeric(scalar) => {
-            let precision = scalar.binary_float_precision().ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+            let precision = scalar.binary_float_precision().unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "JS backend received a non-numeric parse policy for {scalar}"
-                ))
-            })?;
+                )
+            });
             Ok(format!(
                 "__moth_cast_float({value}, {}, \"{scalar}\")",
                 binary_float_precision_bits(precision),

@@ -35,11 +35,19 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, CompileTimeEvaluationErrorReason, DiagnosticLabelMessage,
-    DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCastReason,
-    InvalidFallibleHandlingReason, InvalidReturnShapeReason,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidFallibleHandlingReason, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -71,8 +79,9 @@ use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
@@ -80,7 +89,9 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
+use crate::compiler_frontend::tests::parse_support::{
+    ast_first_error_type_display, tokenize_source_for_test,
+};
 use crate::compiler_frontend::tokenizer::tokens::{TemplateBodyMode, TokenizerEntryMode};
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
@@ -90,6 +101,192 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+fn freeze_prepared_failure(
+    failure: PreparedFailure,
+    source_files: Arc<SourceDatabase>,
+    string_table: &StringTable,
+) -> CompilationResult<()> {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table.clone());
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, Some((source_files, None)));
+        }
+        PreparedFailure::Infrastructure(error) => {
+            accumulator.append_infrastructure(error);
+        }
+    }
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
+}
+
+trait AstFailureResultExt<T> {
+    fn expect_ast_failure(self, message: &str) -> CompilationResult<()>;
+    fn expect_diagnosed(self, message: &str) -> CompilationResult<()>;
+}
+
+impl<T> AstFailureResultExt<T> for CompilationResult<T> {
+    fn expect_ast_failure(self, message: &str) -> CompilationResult<()> {
+        self.expect_diagnosed(message)
+    }
+
+    fn expect_diagnosed(self, message: &str) -> CompilationResult<()> {
+        match self {
+            Ok(CompilationOutcome::Diagnosed(reports)) => {
+                Ok(CompilationOutcome::Diagnosed(reports))
+            }
+            Err(_) => panic!("{message}: expected diagnosed result, got infrastructure errors"),
+            Ok(CompilationOutcome::Success { .. }) => {
+                panic!("{message}: expected diagnosed result, got successful compilation")
+            }
+        }
+    }
+}
+
+fn diagnosed_reports<T>(result: &CompilationResult<T>) -> &DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Err(_) => panic!("expected diagnosed compilation result, got infrastructure errors"),
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("expected diagnosed compilation result, got successful compilation")
+        }
+    }
+}
+
+fn single_ast_error_view<T>(result: &CompilationResult<T>) -> DiagnosticView<'_> {
+    let mut errors = diagnosed_reports(result)
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error);
+    let (_, diagnostic) = errors
+        .next()
+        .expect("AST failure should contain an error diagnostic");
+    assert!(
+        errors.next().is_none(),
+        "AST failure should contain one error"
+    );
+    diagnostic
+}
+
+#[track_caller]
+fn assert_ast_diagnostic<'a, T>(
+    result: &'a CompilationResult<T>,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) -> DiagnosticView<'a> {
+    let diagnostic = single_ast_error_view(result);
+    assert_eq!(diagnostic.descriptor().code, expected_code);
+    assert_eq!(diagnostic.reason_key(), expected_reason_key);
+    diagnostic
+}
+
+fn diagnostic_label_spans(
+    view: DiagnosticView<'_>,
+) -> Vec<Option<crate::compiler_frontend::source::SourceSpan>> {
+    view.durable_labels()
+        .map(|label| match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        })
+        .collect()
+}
+
+fn diagnostic_primary_span(
+    view: DiagnosticView<'_>,
+) -> Option<crate::compiler_frontend::source::SourceSpan> {
+    match view.primary_site() {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+fn fallible_reason_key(reason: &InvalidFallibleHandlingReason) -> &'static str {
+    match reason {
+        InvalidFallibleHandlingReason::CatchOutsideBoundary => {
+            "invalid_fallible_handling.catch_outside_boundary"
+        }
+        InvalidFallibleHandlingReason::CatchOnNonFallible => {
+            "invalid_fallible_handling.catch_on_non_fallible"
+        }
+        InvalidFallibleHandlingReason::CatchHandlerCanFallThrough => {
+            "invalid_fallible_handling.catch_handler_can_fall_through"
+        }
+        InvalidFallibleHandlingReason::InlineCatchMultiline => {
+            "invalid_fallible_handling.inline_catch_multiline"
+        }
+        InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict => {
+            "invalid_fallible_handling.explicit_propagation_catch_conflict"
+        }
+        InvalidFallibleHandlingReason::OptionPropagationCatchConflict => {
+            "invalid_fallible_handling.option_propagation_catch_conflict"
+        }
+        InvalidFallibleHandlingReason::AssertionMessageCannotEscape => {
+            "invalid_fallible_handling.assertion_message_cannot_escape"
+        }
+        InvalidFallibleHandlingReason::UnhandledErrorReturn => {
+            "invalid_fallible_handling.unhandled_error_return"
+        }
+        InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure { .. } => {
+            "invalid_fallible_handling.custom_error_mixed_with_implicit_failure"
+        }
+        InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes { .. } => {
+            "invalid_fallible_handling.incompatible_catch_error_types"
+        }
+        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction { .. } => {
+            "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function"
+        }
+        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. } => {
+            "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
+        }
+        _ => panic!("missing stable reason-key assertion for {reason:?}"),
+    }
+}
+
+#[track_caller]
+fn assert_ast_fallible_reason<T>(
+    failure: &CompilationResult<T>,
+    expected: InvalidFallibleHandlingReason,
+) -> DiagnosticView<'_> {
+    let diagnostic = assert_ast_diagnostic(
+        failure,
+        "MOTH-RULE-0051",
+        Some(fallible_reason_key(&expected)),
+    );
+    assert!(
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
+        "fallible handling diagnostic should retain its primary source site"
+    );
+    diagnostic
+}
+fn assert_ast_compile_time_reason<T>(
+    failure: &CompilationResult<T>,
+    expected: CompileTimeEvaluationErrorReason,
+) -> DiagnosticView<'_> {
+    let reason_key = match expected {
+        CompileTimeEvaluationErrorReason::DivideByZero => {
+            "compile_time_evaluation_error.divide_by_zero"
+        }
+        CompileTimeEvaluationErrorReason::IntegerOverflow => {
+            "compile_time_evaluation_error.integer_overflow"
+        }
+        CompileTimeEvaluationErrorReason::InvalidExponent => {
+            "compile_time_evaluation_error.invalid_exponent"
+        }
+        _ => panic!("missing stable compile-time reason-key assertion for {expected:?}"),
+    };
+    let diagnostic = assert_ast_diagnostic(failure, "MOTH-RULE-0053", Some(reason_key));
+    assert!(
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
+        "compile-time evaluation diagnostic should retain its primary source site"
+    );
+    diagnostic
+}
+
+fn assert_ast_unhandled_builtin_export<T>(failure: &CompilationResult<T>) -> DiagnosticView<'_> {
+    assert_ast_diagnostic(
+        failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
+    )
+}
 
 /// One materialised `I32` fixture value; panics when the fixture literal is out of range.
 fn i32_value(value: i64) -> FixedScalarValue {
@@ -113,6 +310,11 @@ struct FrontendServices {
 }
 
 impl FrontendServices {
+    /// Moves the fixture's source database out, so the frozen failure becomes its last owner.
+    fn take_source_files(&mut self) -> Arc<SourceDatabase> {
+        std::mem::replace(&mut self.source_files, Arc::new(SourceDatabase::empty()))
+    }
+
     fn with_compiler<R>(&mut self, run: impl FnOnce(&mut CompilerFrontend<'_>) -> R) -> R {
         let mut compiler = CompilerFrontend::new(
             self.options.clone(),
@@ -172,8 +374,7 @@ impl FrontendProject {
             PreparedSourcePackageRoots::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
             ModuleRootTable::empty(),
-        )
-        .expect("project path resolver should build");
+        );
 
         let mut string_table = StringTable::new();
         let source_files = Arc::new(
@@ -274,7 +475,7 @@ impl FrontendProject {
         let prepared_syntax = prepare_header_syntax(
             &mut prepared_outputs,
             &mut self.frontend.string_table,
-            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            &mut |source, diagnostic| crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(diagnostic, source),
             &mut self.frontend.path_fork,
         )
         .expect("header syntax preparation should succeed");
@@ -300,35 +501,62 @@ impl FrontendProject {
             .expect("header sorting should succeed")
     }
 
-    fn ast_result(&mut self) -> Result<Ast, CompilerMessages> {
-        // These fixtures have valid declaration shells. Body diagnostics must be returned by
-        // the semantic stage, never routed through the success-only `ast`/`hir` helpers.
+    fn ast_result(&mut self) -> CompilationResult<Ast> {
+        // These fixtures have valid declaration shells. Body diagnostics belong to the AST result
+        // and are frozen only when a test inspects them.
         let sorted = self.sorted_headers();
-        self.frontend
-            .with_compiler(|compiler| {
-                compiler.headers_to_ast(
-                    AstBuildRequest {
-                        sorted,
-                        entry_file_path: &self.entry_file,
-                        root_role: ModuleRootRole::Normal,
-                        build_profile: FrontendBuildProfile::Dev,
-                        capacity_estimate: Default::default(),
-                        resolved_file_references: ResolvedFileReferenceTable::default(),
-                        module_origin: None,
-                        build_config_values: Arc::new(Default::default()),
-                    },
-                    #[cfg(feature = "timers")]
-                    None,
-                )
-            })
-            .map(|result| result.ast)
+        let result = self.frontend.with_compiler(|compiler| {
+            compiler.headers_to_ast(
+                AstBuildRequest {
+                    sorted,
+                    entry_file_path: &self.entry_file,
+                    root_role: ModuleRootRole::Normal,
+                    build_profile: FrontendBuildProfile::Dev,
+                    capacity_estimate: Default::default(),
+                    resolved_file_references: ResolvedFileReferenceTable::default(),
+                    module_origin: None,
+                    build_config_values: Arc::new(Default::default()),
+                },
+                #[cfg(feature = "timers")]
+                None,
+            )
+        });
+        match result {
+            Ok(result) => Ok(CompilationOutcome::Success {
+                value: result.ast,
+                warnings: None,
+            }),
+            Err(failure) => match freeze_prepared_failure(
+                failure,
+                self.frontend.take_source_files(),
+                &self.frontend.string_table,
+            ) {
+                Ok(CompilationOutcome::Diagnosed(reports)) => {
+                    Ok(CompilationOutcome::Diagnosed(reports))
+                }
+                Err(errors) => Err(errors),
+                Ok(CompilationOutcome::Success { .. }) => {
+                    unreachable!("freezing a failure cannot produce a successful outcome")
+                }
+            },
+        }
     }
 
     fn ast(&mut self) -> Ast {
-        self.ast_result().expect("AST construction should succeed")
+        match self.ast_result() {
+            Ok(CompilationOutcome::Success { value, .. }) => value,
+            Err(errors) => panic!(
+                "AST construction failed due to infrastructure errors: {}",
+                errors.primary.message.as_ref()
+            ),
+            Ok(CompilationOutcome::Diagnosed(reports)) => panic!(
+                "AST construction was diagnosed with {} report(s)",
+                reports.iter().count()
+            ),
+        }
     }
 
-    fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, CompilerMessages> {
+    fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, PreparedFailure> {
         self.frontend
             .with_compiler(|compiler| {
                 compiler.generate_hir(
@@ -342,16 +570,20 @@ impl FrontendProject {
     }
 
     /// Exercise the summary owner's semantic contract checks without claiming backend delivery.
-    fn failure_contract_result(&mut self) -> Result<HirModule, CompilerMessages> {
-        let ast = self.ast_result()?;
-        let lowered = self.frontend.with_compiler(|compiler| {
-            compiler.generate_hir(
-                ast,
-                HirFunctionOriginLookup::default(),
-                None,
-                Default::default(),
-            )
-        })?;
+    fn failure_contract_result(&mut self) -> Result<HirModule, PreparedFailure> {
+        let ast = self.ast();
+        let lowered = self
+            .frontend
+            .with_compiler(|compiler| {
+                compiler.generate_hir(
+                    ast,
+                    HirFunctionOriginLookup::default(),
+                    None,
+                    Default::default(),
+                )
+            })
+            .expect("HIR lowering should succeed before checking its boundary contract");
+        let type_environment = lowered.type_environment;
         let hir = lowered.hir_module;
         let mut report = self
             .frontend
@@ -359,25 +591,39 @@ impl FrontendProject {
         crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
             &hir,
             &mut report,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &self.frontend.string_table))?;
+        );
 
         for function in &hir.functions {
-            let diagnostic =
+            if let Some(diagnostic) =
                 crate::compiler_frontend::module_compilation::generated::builtin_failure_diagnostic(
-                    &hir, &report, function.id,
-                ).map_err(|error| {
-                    CompilerMessages::from_error_ref(error, &self.frontend.string_table)
-                })?;
-            if let Some(diagnostic) = diagnostic {
-                return Err(CompilerMessages::from_diagnostic_ref(
-                    diagnostic,
-                    &self.frontend.string_table,
+                    &hir,
+                    &report,
+                    function.id,
                 )
-                .with_type_context_for_all_diagnostics(lowered.type_environment));
+            {
+                return Err(PreparedFailure::capture_diagnosed(
+                    DiagnosticBag::from(diagnostic),
+                    self.frontend.string_table.clone(),
+                    Some(&type_environment),
+                    Some(Arc::new(self.frontend.path_fork.snapshot_table())),
+                ));
             }
         }
         Ok(hir)
+    }
+
+    fn failure_contract_boundary_result(&mut self) -> CompilationResult<()> {
+        match self.failure_contract_result() {
+            Ok(_) => Ok(CompilationOutcome::Success {
+                value: (),
+                warnings: None,
+            }),
+            Err(failure) => freeze_prepared_failure(
+                failure,
+                self.frontend.take_source_files(),
+                &self.frontend.string_table,
+            ),
+        }
     }
 
     fn hir(&mut self) -> crate::compiler_frontend::hir::module::HirModule {
@@ -552,7 +798,6 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
         "the imported helper must carry its own borrow summary"
     );
 }
-
 #[test]
 fn frontend_diagnostics_preserve_source_spans() {
     let mut project = FrontendProject::new(
@@ -560,33 +805,12 @@ fn frontend_diagnostics_preserve_source_spans() {
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
     );
-
-    let sorted = project.sorted_headers();
-    let Err(messages) = project.frontend.with_compiler(|compiler| {
-        compiler.headers_to_ast(
-            AstBuildRequest {
-                sorted,
-                entry_file_path: &project.entry_file,
-                root_role: ModuleRootRole::Normal,
-                build_profile: FrontendBuildProfile::Dev,
-                capacity_estimate: Default::default(),
-                resolved_file_references: ResolvedFileReferenceTable::default(),
-                build_config_values: Arc::new(Default::default()),
-                module_origin: None,
-            },
-            #[cfg(feature = "timers")]
-            None,
-        )
-    }) else {
-        panic!("const host calls should fail during AST construction");
-    };
-
-    let first_diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("AST construction should return a diagnostic");
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("const host calls should fail during AST construction");
+    let diagnostic = single_ast_error_view(&failure);
     assert!(
-        first_diagnostic.primary_span.is_some(),
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
         "AST errors should preserve an authored source span"
     );
 
@@ -600,17 +824,21 @@ fn frontend_diagnostics_preserve_source_spans() {
     );
 
     let hir = project.hir();
-    let messages = project
+    let prepared_failure = project
         .frontend
         .with_compiler(|compiler| compiler.check_borrows(&hir))
         .expect_err("multiple mutable borrows should fail borrow checking");
+    let messages = freeze_prepared_failure(
+        prepared_failure,
+        project.frontend.take_source_files(),
+        &project.frontend.string_table,
+    );
 
-    let first_diagnostic = messages
-        .error_diagnostics()
+    let first_diagnostic = error_diagnostics(&messages)
         .next()
         .expect("borrow checking should return a diagnostic");
     assert!(
-        first_diagnostic.primary_span.is_some(),
+        !matches!(first_diagnostic.primary_site(), SiteRef::Absent),
         "borrow checker errors should preserve an authored source span"
     );
 }
@@ -1040,20 +1268,29 @@ fn assert_catch_contract<'a>(
     block
 }
 
+/// Error diagnostics retained by a diagnosed compilation result.
+fn error_diagnostics<T>(result: &CompilationResult<T>) -> impl Iterator<Item = DiagnosticView<'_>> {
+    diagnosed_reports(result)
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error)
+        .map(|(_, diagnostic)| diagnostic)
+}
+
 #[track_caller]
-fn assert_fallible_reason(messages: &CompilerMessages, expected: InvalidFallibleHandlingReason) {
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+fn assert_fallible_reason(
+    messages: &CompilationResult<()>,
+    expected: InvalidFallibleHandlingReason,
+) {
+    let diagnostics = error_diagnostics(messages).collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1, "unexpected diagnostics: {messages:?}");
+    let facts = diagnostics[0]
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("fallible diagnostic should retain its reason facts");
+    assert_eq!(facts.reason.unit_reason(), Some(expected.clone()));
     assert!(
-        matches!(
-            &diagnostics[0].payload,
-            DiagnosticPayload::InvalidFallibleHandling { reason } if reason == &expected
-        ),
-        "expected {expected:?}, got {:?}",
-        diagnostics[0]
+        !matches!(diagnostics[0].primary_site(), SiteRef::Absent),
+        "fallible diagnostic should retain its primary span"
     );
-    assert!(diagnostics[0].primary_span.is_some());
-    assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0051");
+    assert_eq!(diagnostics[0].descriptor().code, "MOTH-RULE-0051");
 }
 
 #[track_caller]
@@ -1207,8 +1444,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("private inferred failure summaries should converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -1341,8 +1577,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("numeric failure summaries must converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -1464,8 +1699,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("statement-owned failure summaries must converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -1548,8 +1782,7 @@ fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutab
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("private checked arithmetic summaries must converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -1680,8 +1913,7 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("private failure summaries must converge");
+    );
     assert!(report.analysis.public_call_summaries[&function_id].escapes_builtin_failure);
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
@@ -1862,25 +2094,26 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
              return left * right\n;\n",
     );
     let messages = project
-        .failure_contract_result()
-        .expect_err("custom return! must not discharge numeric failure");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("custom contract diagnosis");
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason:
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                witness, ..
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("expected custom error contract reason: {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert!(witness.call_spans.is_empty());
-    assert!(witness.origin_span.is_some());
-    assert!(diagnostic.primary_span.is_some());
+        .failure_contract_boundary_result()
+        .expect_diagnosed("custom return! must not discharge numeric failure");
+    let boundary_diagnostic = single_ast_error_view(&messages);
+    let facts = boundary_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("custom contract should retain fallible facts");
+    assert_eq!(
+        facts.reason,
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
+    );
+    assert_eq!(boundary_diagnostic.descriptor().code, "MOTH-RULE-0051");
+    assert!(!matches!(
+        boundary_diagnostic.primary_site(),
+        SiteRef::Absent
+    ));
+    assert_eq!(
+        frozen_builtin_failure_labels(&messages),
+        vec![(BuiltinFailureLabelRole::OperationOrigin, true)]
+    );
+    assert_eq!(frozen_elided_call_hops(&messages), Some(0));
 
     let mut project = failure_project(
         "Failure = | message String |\n\
@@ -2008,22 +2241,14 @@ fn implicit_failure_folded_catch_still_type_checks_handler_values() {
         let mut project = failure_project(&format!(
             "three || -> I32:\n    value I32 = 1 + 2 {handler}\n    return value\n;\n"
         ));
-        let messages = project
+        let failure = project
             .ast_result()
-            .err()
-            .expect("an unreachable handler must still satisfy its receiving type");
-        let diagnostic = messages
-            .error_diagnostics()
-            .next()
-            .expect("handler type mismatch");
-        assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0001");
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::TypeMismatch { expected, found, .. }
-                if expected == builtin_type_ids::fixed_scalar(FixedScalar::I32)
-                    && found == builtin_type_ids::STRING
-        ));
-        assert!(diagnostic.primary_span.is_some());
+            .expect_ast_failure("an unreachable handler must still satisfy its receiving type");
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+        assert!(
+            !matches!(diagnostic.primary_site(), SiteRef::Absent),
+            "handler type mismatch should retain its primary source site"
+        );
     }
 }
 
@@ -2581,25 +2806,69 @@ fn implicit_failure_custom_catch_reports_handler_compatibility_before_protected_
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("both private helpers must converge before catch compatibility is diagnosed");
+    );
     let diagnostic =
         crate::compiler_frontend::module_compilation::generated::builtin_failure_diagnostic(
             &hir, &report, recover.id,
         )
-        .expect("custom catch compatibility must produce a semantic diagnosis")
         .expect("the failing inner helper must make its custom catch incompatible");
-    assert_eq!(diagnostic.primary_span, inner_check.catch_span);
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                error_type_id, typed_producer_span, implicit_producer_span,
-            },
-        } if error_type_id == inner_check.error_type_id
-            && typed_producer_span == inner_check.typed_producer_span
-            && implicit_producer_span == inner_private_span
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("generated catch compatibility draft should compact");
+    let facts = view
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("generated catch compatibility should retain fallible facts");
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0051");
+    assert_eq!(
+        diagnostic_primary_span(view),
+        inner_check.catch_span,
+        "generated catch compatibility should retain its primary span"
+    );
+    assert_eq!(
+        facts.reason,
+        InvalidFallibleHandlingCode::CustomErrorMixedWithImplicitFailure
+    );
+    assert_eq!(facts.second_error_type, None);
+    let expected_error_type = format!("TypeId({})", inner_check.error_type_id.0);
+    assert_eq!(
+        view.types().display_for_render(
+            facts
+                .first_error_type
+                .expect("mixed catch retains its typed error type"),
+            &project.frontend.string_table,
+            None,
+        ),
+        expected_error_type
+    );
+
+    let mut typed_producer = None;
+    let mut implicit_producer = None;
+    for label in view.durable_labels() {
+        let span = match label.site {
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+            SiteRef::Absent => panic!("generated catch producer labels should retain spans"),
+        };
+        match label.message {
+            DurableLabelMessage::TypedFailureProducer { error_type } => {
+                typed_producer = Some((error_type, span));
+            }
+            DurableLabelMessage::ImplicitFailureProducer => implicit_producer = Some(span),
+            _ => {}
+        }
+    }
+    let (typed_error_type, typed_producer_span) =
+        typed_producer.expect("generated catch should retain the typed producer label");
+    assert_eq!(
+        view.types()
+            .display_for_render(typed_error_type, &project.frontend.string_table, None,),
+        expected_error_type
+    );
+    assert_eq!(Some(typed_producer_span), inner_check.typed_producer_span);
+    assert_eq!(
+        implicit_producer, inner_private_span,
+        "generated catch should retain the implicit producer span"
+    );
 }
 
 #[test]
@@ -2610,26 +2879,18 @@ fn implicit_failure_catch_rejects_custom_numeric_and_distinct_typed_errors() {
          recover |left I32, right I32| -> I32:\n\
              return load(left) * right catch then 0\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("custom plus implicit cannot share a handler");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("compatibility diagnosis");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                typed_producer_span: Some(_),
-                implicit_producer_span: Some(_),
-                ..
-            },
-        }
-    ));
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
-
+        .expect_ast_failure("custom plus implicit cannot share a handler");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.custom_error_mixed_with_implicit_failure"),
+    );
+    assert!(
+        !diagnostic_label_spans(diagnostic).is_empty(),
+        "custom/implicit failure should retain producer labels"
+    );
     for second_type in ["Other", "Error"] {
         let mut project = failure_project(&format!(
             "Failure = | message String |\nOther = | message String |\n\
@@ -2638,24 +2899,19 @@ fn implicit_failure_catch_rejects_custom_numeric_and_distinct_typed_errors() {
              recover |left Bool, right Bool| -> Bool:\n\
                  return first(left) and second(right) catch then false\n;\n"
         ));
-        let messages = project
+        let failure = project
             .ast_result()
-            .err()
-            .expect("distinct typed errors cannot share a handler");
-        let diagnostic = messages
-            .error_diagnostics()
-            .next()
-            .expect("compatibility diagnosis");
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
-                    first_error_type_id, second_error_type_id,
-                    first_producer_span: Some(_), second_producer_span: Some(_),
-                },
-            } if first_error_type_id != second_error_type_id
-        ));
-        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
+            .expect_ast_failure("distinct typed errors cannot share a handler");
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0051",
+            Some("invalid_fallible_handling.incompatible_catch_error_types"),
+        );
+        assert_eq!(
+            diagnostic_label_spans(diagnostic).len(),
+            2,
+            "each incompatible error producer should remain labeled"
+        );
     }
 }
 
@@ -2735,22 +2991,15 @@ fn implicit_failure_cast_catch_retains_operand_and_conversion_contracts() {
 
     let mut project =
         failure_project("bad |values {I32}| -> I32:\n    return cast values catch then 0\n;\n");
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a handler must not manufacture cast evidence");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("missing cast evidence");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidCast {
-            reason: InvalidCastReason::NoEvidence,
-            ..
-        }
-    ));
-    assert!(diagnostic.primary_span.is_some());
+        .expect_ast_failure("a handler must not manufacture cast evidence");
+    let diagnostic =
+        assert_ast_diagnostic(&failure, "MOTH-RULE-0083", Some("invalid_cast.no_evidence"));
+    assert!(
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
+        "missing cast evidence should retain its primary source site"
+    );
 }
 
 #[test]
@@ -2834,12 +3083,11 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
              value = left * right catch:\n        io.line(\"not a fallback\")\n    ;\n\
              return value\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a success receiver needs then or termination");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("a success receiver needs then or termination");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
     );
 
@@ -2847,40 +3095,27 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
         "recover |left I32, right I32| -> I32:\n\
              return left * right catch then 0, 1\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("numeric success has exactly one slot");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("arity diagnosis");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReturnShape {
-            reason: InvalidReturnShapeReason::TooManyReturnValues { expected_count: 1 },
-        }
-    ));
+        .expect_ast_failure("numeric success has exactly one slot");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0055",
+        Some("invalid_return_shape.too_many_return_values"),
+    );
 
     let mut project = failure_project(
         "recover |left I32, right I32| -> I32:\n\
              value ~= 0\n    value = left * right catch then value\n    return value\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("the success target is unavailable in recovery");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("success target diagnosis");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidAssignmentTarget {
-            reason: InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
-            ..
-        }
-    ));
+        .expect_ast_failure("the success target is unavailable in recovery");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.unavailable_in_catch_recovery"),
+    );
 }
 
 #[test]
@@ -2940,23 +3175,14 @@ fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity(
          recover |left I32, right I32| -> String:\n\
              number, label = pair(left * right) catch then 0\n    return label\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("multi-success fallback cannot leave a slot uninitialized");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("missing fallback slot");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReturnShape {
-            reason: InvalidReturnShapeReason::TooFewReturnValues {
-                expected_count: 2,
-                provided_count: 1
-            },
-        }
-    ));
+        .expect_ast_failure("multi-success fallback cannot leave a slot uninitialized");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0055",
+        Some("invalid_return_shape.too_few_return_values"),
+    );
 }
 
 #[test]
@@ -3085,20 +3311,25 @@ fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
              value = load(left) catch:\n        then left // right\n    ;\n    return value\n;\n",
     );
     let messages = project
-        .failure_contract_result()
-        .expect_err("handler failure still violates a custom contract");
-    let diagnostic = messages
-        .error_diagnostics()
+        .failure_contract_boundary_result()
+        .expect_diagnosed("handler failure still violates a custom contract");
+    let diagnostic = error_diagnostics(&messages)
         .next()
         .expect("outward failure diagnosis");
+    let facts = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("outward failure diagnosis should retain fallible facts");
     assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                witness, ..
-            },
-        } if witness.origin_span.is_some()
+        facts.reason,
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
     ));
+    assert!(diagnostic.durable_labels().any(|label| {
+        matches!(
+            label.message,
+            DurableLabelMessage::BuiltinFailureOrigin
+                | DurableLabelMessage::BuiltinWriteBackOrigin { .. }
+        ) && !matches!(label.site, SiteRef::Absent)
+    }));
 }
 
 #[test]
@@ -3155,12 +3386,11 @@ fn implicit_failure_catch_rejects_inner_argument_group_condition_template_and_co
     ];
     for source in sources {
         let mut project = failure_project(source);
-        let messages = project
+        let failure = project
             .ast_result()
-            .err()
-            .expect("catch remains a closed-receiver surface");
-        assert_fallible_reason(
-            &messages,
+            .expect_ast_failure("catch remains a closed-receiver surface");
+        assert_ast_fallible_reason(
+            &failure,
             InvalidFallibleHandlingReason::CatchOutsideBoundary,
         );
     }
@@ -3169,12 +3399,11 @@ fn implicit_failure_catch_rejects_inner_argument_group_condition_template_and_co
         "bad |left I32, right I32| -> I32:\n\
              return left * right catch then\n        0\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("inline catch cannot cross a logical line");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("inline catch cannot cross a logical line");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::InlineCatchMultiline,
     );
 }
@@ -3188,11 +3417,10 @@ fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
                 "{prefix}    identity |value I32| -> I32:\n        return value\n    ;\n{closing_export}\
                  bad |value I32| -> I32:\n    return {expression} catch then 0\n;\n"
             ));
-            let messages = project
+            let failure = project
                 .ast_result()
-                .err()
-                .expect("ordinary infallible values do not make catch eligible");
-            assert_fallible_reason(&messages, InvalidFallibleHandlingReason::CatchOnNonFallible);
+                .expect_ast_failure("ordinary infallible values do not make catch eligible");
+            assert_ast_fallible_reason(&failure, InvalidFallibleHandlingReason::CatchOnNonFallible);
         }
     }
 }
@@ -3203,12 +3431,11 @@ fn implicit_failure_catch_preserves_propagation_and_optional_conflicts() {
         "load |value I32| -> I32, Error!:\n    return value\n;\n\
          bad |value I32| -> I32, Error!:\n    return load(value)! catch then 0\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("propagation and catch conflict on the same expression");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("propagation and catch conflict on the same expression");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict,
     );
 
@@ -3216,12 +3443,11 @@ fn implicit_failure_catch_preserves_propagation_and_optional_conflicts() {
         "maybe |value I32| -> I32?:\n    return value\n;\n\
          bad |value I32| -> I32?:\n    return maybe(value)? catch then 0\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("option propagation must not target catch");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("option propagation must not target catch");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
     );
 
@@ -3243,11 +3469,10 @@ fn implicit_failure_catch_preserves_propagation_and_optional_conflicts() {
             "{producer}bad |left U32, right U32| -> {result_type}:\n\
                  return cast load(left){suffix} + right catch then 0\n;\n"
         ));
-        let messages = project
+        let failure = project
             .ast_result()
-            .err()
-            .expect("cast operand propagation must diagnose before debug finalization");
-        assert_fallible_reason(&messages, expected_reason);
+            .expect_ast_failure("cast operand propagation must diagnose before debug finalization");
+        assert_ast_fallible_reason(&failure, expected_reason);
     }
 }
 
@@ -3375,17 +3600,17 @@ fn implicit_failure_error_alias_is_canonical_but_lookalike_is_not() {
          safe_product |left I32, right I32| -> I32, Failure!:\n    return left * right\n;\n",
     );
     let messages = project
-        .failure_contract_result()
-        .expect_err("same-shaped structs do not become builtin Error");
-    let diagnostic = messages
-        .error_diagnostics()
+        .failure_contract_boundary_result()
+        .expect_diagnosed("same-shaped structs do not become builtin Error");
+    let diagnostic = error_diagnostics(&messages)
         .next()
         .expect("nominal lookalike rejection");
+    let facts = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("nominal lookalike rejection should retain fallible facts");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction { .. },
-        }
+        facts.reason,
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
     ));
 }
 
@@ -3398,25 +3623,27 @@ fn implicit_failure_error_wrapper_struct_is_not_canonical() {
          safe_product |left I32, right I32| -> I32, Wrapped!:\n    return left * right\n;\n",
     );
     let messages = project
-        .failure_contract_result()
-        .expect_err("a struct wrapping Error is not builtin Error");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("wrapper slot rejection");
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason:
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                witness, ..
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("expected custom error contract reason, got {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert!(witness.origin_span.is_some());
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
-    assert!(diagnostic.primary_span.is_some());
+        .failure_contract_boundary_result()
+        .expect_diagnosed("a struct wrapping Error is not builtin Error");
+    assert_eq!(error_diagnostics(&messages).count(), 1);
+    let boundary_diagnostic = single_ast_error_view(&messages);
+    let facts = boundary_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("wrapper slot rejection should retain fallible facts");
+    assert_eq!(
+        facts.reason,
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
+    );
+    assert_eq!(boundary_diagnostic.descriptor().code, "MOTH-RULE-0051");
+    assert!(!matches!(
+        boundary_diagnostic.primary_site(),
+        SiteRef::Absent
+    ));
+    assert_eq!(
+        frozen_builtin_failure_labels(&messages),
+        vec![(BuiltinFailureLabelRole::OperationOrigin, true)]
+    );
+    assert_eq!(frozen_elided_call_hops(&messages), Some(0));
 
     // The same wrapper must not unlock builtin mixing under catch either: a Wrapped-typed
     // producer alongside implicit failure stays a custom/implicit mix.
@@ -3427,22 +3654,18 @@ fn implicit_failure_error_wrapper_struct_is_not_canonical() {
              return load(left) * right catch |err|:\n\
                  saved Wrapped = err\n        then 0\n    ;\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("wrapper plus implicit cannot share a handler");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("wrapper catch diagnosis");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure { .. },
-        }
-    ));
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
-    assert!(diagnostic.primary_span.is_some());
+        .expect_ast_failure("wrapper plus implicit cannot share a handler");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.custom_error_mixed_with_implicit_failure"),
+    );
+    assert!(
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
+        "wrapper catch diagnosis should retain its primary source site"
+    );
 }
 
 #[test]
@@ -3460,20 +3683,10 @@ fn implicit_failure_static_invalid_arithmetic_is_not_made_valid_by_catch_or_erro
             let mut project = failure_project(&format!(
                 "bad || -> I32, Error!:\n    return {expression}{suffix}\n;\n"
             ));
-            let messages = project
+            let failure = project
                 .ast_result()
-                .err()
-                .expect("static invalid arithmetic remains a source diagnostic");
-            let diagnostic = messages
-                .error_diagnostics()
-                .next()
-                .expect("static numeric diagnosis");
-            assert!(matches!(
-                diagnostic.payload,
-                DiagnosticPayload::CompileTimeEvaluationError { reason, .. } if reason == expected_reason
-            ));
-            assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0053");
-            assert!(diagnostic.primary_span.is_some());
+                .expect_ast_failure("static invalid arithmetic remains a source diagnostic");
+            assert_ast_compile_time_reason(&failure, expected_reason);
         }
     }
 }
@@ -3487,8 +3700,8 @@ fn implicit_failure_assertion_message_rejects_inferred_call_even_when_inactive()
                  assert({condition}, message(left, right))\n;\n"
         ));
         let messages = project
-            .failure_contract_result()
-            .expect_err("assertion message cannot escape by inferred private failure");
+            .failure_contract_boundary_result()
+            .expect_diagnosed("assertion message cannot escape by inferred private failure");
         assert_fallible_reason(
             &messages,
             InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
@@ -3502,12 +3715,11 @@ fn implicit_failure_assertion_message_rejects_template_range_runtime_step() {
         "validate |ready Bool, step I32|:\n\
              assert(ready, [loop 0 to 10 by step |i|: x])\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("template range checks cannot escape an assertion message");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("template range checks cannot escape an assertion message");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
     );
 }
@@ -3520,12 +3732,11 @@ fn implicit_failure_dormant_generic_assertion_message_rejects_private_failure() 
              export:\n    validate type T |marker T, left I32, right I32, ready Bool|{error_slot}:\n\
                  assert(ready, message(left, right))\n    ;\n;\n"
         ));
-        let messages = project
-            .ast_result()
-            .err()
-            .expect("dormant generic assertion messages must be validated before discard");
-        assert_fallible_reason(
-            &messages,
+        let failure = project.ast_result().expect_ast_failure(
+            "dormant generic assertion messages must be validated before discard",
+        );
+        assert_ast_fallible_reason(
+            &failure,
             InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
         );
     }
@@ -3580,58 +3791,38 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
         "export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
                  return left * right\n    ;\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a dormant public generic cannot publish bare numeric failure");
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("expected dormant exported boundary witness, got {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert!(witness.call_spans.is_empty());
-    assert_eq!(witness.elided_call_hops, 0);
-    let producer_span = witness
-        .origin_span
-        .expect("direct numeric producer has an origin");
-    assert!(diagnostic.primary_span.is_some());
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].span, Some(producer_span));
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
+        .expect_ast_failure("a dormant public generic cannot publish bare numeric failure");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
+    );
+    assert_eq!(
+        diagnostic_label_spans(diagnostic),
+        [Some(
+            diagnostic_primary_span(diagnostic).expect("producer span")
+        )],
+        "a direct numeric producer should be the sole retained boundary label"
+    );
 
     let mut project = failure_project(
         "Failure = | message String |\n\
          product type T |marker T, left I32, right I32| -> I32, Failure!:\n\
              return left * right\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a dormant custom-error generic must discharge numeric failure");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("dormant custom contract diagnosis");
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                    witness, ..
-                },
-            } if witness.codes == vec![BuiltinErrorCode::IntOverflow]
-                && witness.origin_span.is_some()
-                && witness.call_spans.is_empty()
-                && witness.elided_call_hops == 0
-        ),
-        "expected dormant custom-error boundary reason, got {diagnostic:?}"
+        .expect_ast_failure("a dormant custom-error generic must discharge numeric failure");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function"),
     );
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
+    let labels = diagnostic_label_spans(diagnostic);
+    assert_eq!(labels.len(), 1);
+    assert!(labels[0].is_some(), "numeric origin should remain labeled");
 
     for (prefix, error_slot) in [("export:\n", ", Error!"), ("", "")] {
         let closing_export = if prefix.is_empty() { "" } else { ";\n" };
@@ -3659,41 +3850,8 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
 }
 
 #[test]
-fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
-    fn boundary_codes(messages: &CompilerMessages) -> Vec<BuiltinErrorCode> {
-        let diagnostic = messages
-            .error_diagnostics()
-            .next()
-            .expect("range loop boundary diagnosis");
-        match &diagnostic.payload {
-            DiagnosticPayload::InvalidFallibleHandling {
-                reason:
-                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness }
-                    | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                        witness,
-                        ..
-                    },
-            } => {
-                assert!(witness.origin_span.is_some());
-                witness.codes.clone()
-            }
-            _ => panic!("expected range loop boundary witness, got {diagnostic:?}"),
-        }
-    }
-
-    let int_codes = vec![
-        BuiltinErrorCode::IntOverflow,
-        BuiltinErrorCode::InvalidRangeStep,
-    ];
-    let float_codes = vec![
-        BuiltinErrorCode::FloatNonFinite,
-        BuiltinErrorCode::InvalidRangeStep,
-        BuiltinErrorCode::RangeStepNoProgress,
-    ];
-    for (scalar, end, zero, expected) in [
-        ("I32", "10", "0", &int_codes),
-        ("F64", "10.0", "0.0", &float_codes),
-    ] {
+fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
+    for (scalar, end, zero) in [("I32", "10", "0"), ("F64", "10.0", "0.0")] {
         // Converged boundary: a custom error slot sees the HIR-projected contributor.
         let mut project = failure_project(&format!(
             "Failure = | message String |\n\
@@ -3702,9 +3860,26 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
                  return {zero}\n;\n"
         ));
         let messages = project
-            .failure_contract_result()
-            .expect_err("custom contract must discharge range step failure");
-        assert_eq!(&boundary_codes(&messages), expected, "converged {scalar}");
+            .failure_contract_boundary_result()
+            .expect_diagnosed("custom contract must discharge range step failure");
+        let boundary_diagnostic = single_ast_error_view(&messages);
+        let facts = boundary_diagnostic
+            .family_view::<InvalidFallibleHandlingView>()
+            .expect("range loop boundary should retain fallible facts");
+        assert_eq!(
+            facts.reason,
+            InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
+        );
+        assert_eq!(boundary_diagnostic.descriptor().code, "MOTH-RULE-0051");
+        assert!(!matches!(
+            boundary_diagnostic.primary_site(),
+            SiteRef::Absent
+        ));
+        assert_eq!(
+            frozen_builtin_failure_labels(&messages),
+            vec![(BuiltinFailureLabelRole::OperationOrigin, true)]
+        );
+        assert_eq!(frozen_elided_call_hops(&messages), Some(0));
 
         // Dormant generic boundary: the finalizer reads the AST contributor directly.
         let mut project = failure_project(&format!(
@@ -3712,11 +3887,24 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
                      loop start to {end} by step |value|:\n            return value\n        ;\n\
                      return {zero}\n    ;\n;\n"
         ));
-        let messages = project
+        let failure = project
             .ast_result()
-            .err()
-            .expect("a dormant public generic cannot publish range step failure");
-        assert_eq!(&boundary_codes(&messages), expected, "dormant {scalar}");
+            .expect_ast_failure("a dormant public generic cannot publish range step failure");
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0051",
+            Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
+        );
+        let labels = diagnostic_label_spans(diagnostic);
+        assert_eq!(
+            labels.len(),
+            1,
+            "range step origin is the only boundary label"
+        );
+        assert!(
+            labels[0].is_some(),
+            "range step origin should remain labeled"
+        );
     }
 }
 
@@ -3728,9 +3916,7 @@ fn implicit_failure_dormant_complete_recursive_graph_without_numeric_origin_is_i
                  return identity(value)\n    ;\n;\n",
     );
     // Match concrete HIR convergence: stack exhaustion is fatal, not numeric failure.
-    project
-        .ast_result()
-        .expect("a complete origin-free recursive graph is infallible");
+    project.ast();
 }
 
 #[test]
@@ -3755,9 +3941,7 @@ fn implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_in
                 format!("{wrapper}{helpers}")
             };
             let mut project = failure_project(&source);
-            let ast = project
-                .ast_result()
-                .expect("closed private generic forwarding is infallible");
+            let ast = project.ast();
             assert!(
                 !ast.nodes.iter().any(|node| match &node.kind {
                     NodeKind::Function(path, _, _) => project
@@ -3785,24 +3969,24 @@ fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witnes
          export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
                  retained = identity(marker)\n        return private_product(retained, left, right)\n    ;\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a real numeric failure cannot escape a dormant export");
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostics[0].payload
-    else {
-        panic!(
-            "expected dormant numeric-origin witness, got {:?}",
-            diagnostics[0]
-        );
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert!(witness.origin_span.is_some());
-    assert_eq!(witness.call_spans.len(), 2);
+        .expect_ast_failure("a real numeric failure cannot escape a dormant export");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
+    );
+    let labels = diagnostic_label_spans(diagnostic);
+    assert_eq!(
+        labels.len(),
+        3,
+        "both private call hops and the origin remain labeled"
+    );
+    assert!(
+        labels.iter().all(Option::is_some),
+        "the numeric origin and private call hops should retain their source spans"
+    );
 }
 
 #[test]
@@ -3813,117 +3997,210 @@ fn implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected() {
          export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
                  return recursive(value, ready)\n    ;\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a recursive graph still carries numeric origins");
-    assert!(matches!(
-        messages
-            .error_diagnostics()
-            .next()
-            .expect("numeric boundary diagnostic")
-            .payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. },
-        }
-    ));
+        .expect_ast_failure("a recursive graph still carries numeric origins");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
+    );
+    assert!(
+        !diagnostic_label_spans(diagnostic).is_empty(),
+        "recursive numeric origin should remain labeled"
+    );
 }
 
-/// Extract the failure witness behind one boundary rejection.
-///
-/// WHAT: returns the structured witness of the single `MOTH-RULE-0051` boundary diagnostic,
-///       whether it escapes through an exported slot or a custom error slot.
-/// WHY: the recursive regression needs the codes, origin span and call hops themselves rather
-///      than only the rendered message, and every boundary lane shares this shape.
-fn boundary_failure_witness(
-    messages: &CompilerMessages,
-) -> crate::compiler_frontend::compiler_messages::BuiltinFailureWitness {
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1, "unexpected diagnostics: {messages:?}");
-    let witness = match &diagnostics[0].payload {
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason:
-                InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness }
-                | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                    witness,
-                    ..
-                },
-        } => witness,
-        _ => panic!("expected builtin failure witness, got {:?}", diagnostics[0]),
-    };
-    assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0051");
-    // The diagnostic labels render each retained call hop plus the terminal origin, so the
-    // structured witness and its labels must agree exactly.
-    let mut expected_spans = witness.call_spans.clone();
-    expected_spans.push(witness.origin_span);
+#[derive(Debug, PartialEq, Eq)]
+struct FrozenBuiltinFailureSite {
+    role: BuiltinFailureLabelRole,
+    span: SourceSpan,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct BoundaryBuiltinFailureWitness {
+    sites: Vec<FrozenBuiltinFailureSite>,
+}
+
+/// Keep exact frozen label spans for the compact boundary witness.
+fn boundary_failure_witness<T>(failure: &CompilationResult<T>) -> BoundaryBuiltinFailureWitness {
+    let diagnostic = single_ast_error_view(failure);
+    let facts = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("builtin-failure diagnostic should retain fallible facts");
     assert_eq!(
-        diagnostics[0]
-            .labels
-            .iter()
-            .map(|label| label.span)
-            .collect::<Vec<_>>(),
-        expected_spans,
-        "labels must render each witness hop plus the origin"
+        facts.reason,
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
     );
-    (**witness).clone()
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0051");
+    assert!(
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
+        "the boundary should retain its primary source site"
+    );
+    assert_eq!(
+        frozen_builtin_failure_labels(failure),
+        vec![
+            (BuiltinFailureLabelRole::Call, true),
+            (BuiltinFailureLabelRole::OperationOrigin, true),
+        ],
+        "the boundary should retain the call hop and terminal operation origin"
+    );
+    assert_eq!(frozen_elided_call_hops(failure), Some(0));
+
+    let sites = diagnostic
+        .durable_labels()
+        .map(|label| {
+            let span = match label.site {
+                SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+                SiteRef::Absent => panic!("builtin-failure labels should retain their spans"),
+            };
+            FrozenBuiltinFailureSite {
+                role: durable_builtin_failure_label_role(label.message),
+                span,
+            }
+        })
+        .collect();
+
+    BoundaryBuiltinFailureWitness { sites }
+}
+
+fn assert_recursive_witness_fixture_sites(
+    witness: &BoundaryBuiltinFailureWitness,
+    source: &str,
+    expected_call_name: &str,
+) {
+    let [call, origin] = witness.sites.as_slice() else {
+        panic!(
+            "expected one call hop and one operation origin, got {:?}",
+            witness.sites
+        );
+    };
+    assert_eq!(call.role, BuiltinFailureLabelRole::Call);
+    assert_eq!(origin.role, BuiltinFailureLabelRole::OperationOrigin);
+    assert_eq!(call.span.source(), origin.span.source());
+
+    let call_start = source
+        .rfind(expected_call_name)
+        .expect("the boundary call name should appear in the concrete fixture");
+    let multiplication_start = source
+        .find("value * 2")
+        .expect("the multiplication origin should appear in the concrete fixture");
+    let origin_start = multiplication_start + "value ".len();
+    let mut expected_span_builder = ExtendedSpanBuilder::new();
+    let expected_call = SourceSpan::new(
+        call.span.source(),
+        LocalSpan::exact(
+            call_start as u32,
+            expected_call_name.len() as u32,
+            &mut expected_span_builder,
+        )
+        .expect("the fixture call name range should fit in a local span"),
+    );
+    let expected_origin = SourceSpan::new(
+        origin.span.source(),
+        LocalSpan::exact(
+            origin_start as u32,
+            "*".len() as u32,
+            &mut expected_span_builder,
+        )
+        .expect("the fixture multiplication operator should fit in a local span"),
+    );
+    assert_eq!(
+        call.span, expected_call,
+        "the frozen call label should name the boundary callee"
+    );
+    assert_eq!(
+        origin.span, expected_origin,
+        "the frozen operation label should name the fixture multiplication operator"
+    );
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuiltinFailureLabelRole {
+    Call,
+    OperationOrigin,
+    WriteBackOrigin,
+}
+
+fn durable_builtin_failure_label_role(message: DurableLabelMessage<'_>) -> BuiltinFailureLabelRole {
+    match message {
+        DurableLabelMessage::BuiltinFailureCall => BuiltinFailureLabelRole::Call,
+        DurableLabelMessage::BuiltinFailureOrigin => BuiltinFailureLabelRole::OperationOrigin,
+        DurableLabelMessage::BuiltinWriteBackOrigin { .. } => {
+            BuiltinFailureLabelRole::WriteBackOrigin
+        }
+        other => panic!("unexpected label on a builtin-failure boundary: {other:?}"),
+    }
+}
+
+/// The single frozen builtin-failure error's label roles, each with whether it keeps a span.
+fn frozen_builtin_failure_labels<T>(
+    failure: &CompilationResult<T>,
+) -> Vec<(BuiltinFailureLabelRole, bool)> {
+    single_ast_error_view(failure)
+        .durable_labels()
+        .map(|label| {
+            (
+                durable_builtin_failure_label_role(label.message),
+                label.spanned,
+            )
+        })
+        .collect()
+}
+
+/// The elided call-hop count the single frozen builtin-failure error retains.
+fn frozen_elided_call_hops<T>(failure: &CompilationResult<T>) -> Option<usize> {
+    single_ast_error_view(failure)
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("a builtin-failure boundary retains its fallible-handling facts")
+        .count
 }
 
 #[test]
 fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_boundaries() {
     // WHAT: the recursive branch precedes the overflow producer in source order.
     // WHY: both witness walkers must skip only the back-edge and retain the available
-    //      multiplication origin instead of reporting call-only hops with empty codes.
+    //      multiplication origin instead of reporting only call hops.
     const HELPER: &str = "helper |value I32, ready Bool| -> I32:\n\
          if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n";
+    const FAILURE: &str = "Failure = | message String |\n";
+    let concrete_source = format!(
+        "{FAILURE}{HELPER}boundary |value I32, ready Bool| -> I32, Failure!:\n    return helper(value, ready)\n;\n"
+    );
+
     // The concrete boundary exercises HIR summary convergence through a custom error slot.
     // The harness lowers plain exports without public origins, so the slot carries the
     // concrete contract here; the witness walker under test is the same HIR one.
-    const FAILURE: &str = "Failure = | message String |\n";
-    let mut project = failure_project(&format!(
-        "{FAILURE}{HELPER}\
-         boundary |value I32, ready Bool| -> I32, Failure!:\n    return helper(value, ready)\n;\n"
-    ));
+    let mut project = failure_project(&concrete_source);
     let messages = project
-        .failure_contract_result()
-        .expect_err("escaping overflow must be rejected at the concrete boundary");
+        .failure_contract_boundary_result()
+        .expect_diagnosed("escaping overflow must be rejected at the concrete boundary");
     let witness = boundary_failure_witness(&messages);
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
-    assert!(
-        witness.origin_span.is_some(),
-        "the retained origin points at the actual multiplication"
-    );
-    assert_eq!(witness.call_spans.len(), 1);
-    assert_eq!(witness.elided_call_hops, 0);
+    assert_recursive_witness_fixture_sites(&witness, &concrete_source, "helper");
 
     // The dormant generic boundary exercises the AST finalizer over the same helper shape.
     let mut project = failure_project(&format!(
-        "{HELPER}\
-         export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
-                 return helper(value, ready)\n    ;\n;\n"
+        "{HELPER}export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn helper(value, ready)\n    ;\n;\n"
     ));
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("escaping overflow must be rejected at the dormant generic boundary");
-    let dormant = boundary_failure_witness(&messages);
-    assert_eq!(dormant.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(dormant.origin, BuiltinFailureOriginKind::Operation);
-    assert!(
-        dormant.origin_span.is_some(),
-        "the dormant lane retains the same multiplication origin"
+        .expect_ast_failure("escaping overflow must be rejected at the dormant generic boundary");
+    assert_ast_unhandled_builtin_export(&failure);
+    assert_eq!(
+        frozen_builtin_failure_labels(&failure),
+        [
+            (BuiltinFailureLabelRole::Call, true),
+            (BuiltinFailureLabelRole::OperationOrigin, true),
+        ],
+        "the dormant lane retains one call hop and the multiplication origin"
     );
-    assert_eq!(dormant.call_spans.len(), 1);
-    assert_eq!(dormant.elided_call_hops, 0);
+    assert_eq!(frozen_elided_call_hops(&failure), Some(0));
 
-    // Repeated runs produce the same structured witness.
-    let mut project = failure_project(&format!(
-        "{FAILURE}{HELPER}\
-         boundary |value I32, ready Bool| -> I32, Failure!:\n    return helper(value, ready)\n;\n"
-    ));
+    // Repeated runs produce the same compact witness.
+    let mut project = failure_project(&concrete_source);
     let messages = project
-        .failure_contract_result()
-        .expect_err("the repeated run must reject the same boundary");
+        .failure_contract_boundary_result()
+        .expect_diagnosed("the repeated run must reject the same boundary");
     assert_eq!(boundary_failure_witness(&messages), witness);
 }
 
@@ -3933,49 +4210,37 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
          if ready:\n        return second(value, ready)\n    ;\n    return value * 2\n;\n\
          second |value I32, ready Bool| -> I32:\n    return first(value, ready)\n;\n";
     const FAILURE: &str = "Failure = | message String |\n";
-    let mut project = failure_project(&format!(
-        "{FAILURE}{HELPERS}\
-         boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
-    ));
+    let concrete_source = format!(
+        "{FAILURE}{HELPERS}boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
+    );
+    let mut project = failure_project(&concrete_source);
     let messages = project
-        .failure_contract_result()
-        .expect_err("escaping overflow must be rejected at the concrete boundary");
+        .failure_contract_boundary_result()
+        .expect_diagnosed("escaping overflow must be rejected at the concrete boundary");
     let witness = boundary_failure_witness(&messages);
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
-    assert!(
-        witness.origin_span.is_some(),
-        "the retained origin points at the actual multiplication"
-    );
-    assert_eq!(witness.call_spans.len(), 1);
-    assert_eq!(witness.elided_call_hops, 0);
+    assert_recursive_witness_fixture_sites(&witness, &concrete_source, "first");
 
     let mut project = failure_project(&format!(
-        "{HELPERS}\
-         export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
-                 return first(value, ready)\n    ;\n;\n"
+        "{HELPERS}export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn first(value, ready)\n    ;\n;\n"
     ));
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("escaping overflow must be rejected at the dormant generic boundary");
-    let dormant = boundary_failure_witness(&messages);
-    assert_eq!(dormant.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(dormant.origin, BuiltinFailureOriginKind::Operation);
-    assert!(
-        dormant.origin_span.is_some(),
-        "the dormant lane retains the same multiplication origin"
+        .expect_ast_failure("escaping overflow must be rejected at the dormant generic boundary");
+    assert_ast_unhandled_builtin_export(&failure);
+    assert_eq!(
+        frozen_builtin_failure_labels(&failure),
+        [
+            (BuiltinFailureLabelRole::Call, true),
+            (BuiltinFailureLabelRole::OperationOrigin, true),
+        ],
+        "the dormant lane retains one call hop and the multiplication origin"
     );
-    assert_eq!(dormant.call_spans.len(), 1);
-    assert_eq!(dormant.elided_call_hops, 0);
+    assert_eq!(frozen_elided_call_hops(&failure), Some(0));
 
-    let mut project = failure_project(&format!(
-        "{FAILURE}{HELPERS}\
-         boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
-    ));
+    let mut project = failure_project(&concrete_source);
     let messages = project
-        .failure_contract_result()
-        .expect_err("the repeated run must reject the same boundary");
+        .failure_contract_boundary_result()
+        .expect_diagnosed("the repeated run must reject the same boundary");
     assert_eq!(boundary_failure_witness(&messages), witness);
 }
 
@@ -4003,9 +4268,7 @@ fn implicit_failure_dormant_custom_error_generic_receiver_uses_closed_trait_requ
          render type T is DISPLAY_TEXT |value T| -> String, Failure!:\n\
              return value.display()\n;\n",
     );
-    project
-        .ast_result()
-        .expect("a declared success-only requirement cannot gain a private lane");
+    project.ast();
 }
 
 #[test]
@@ -4128,8 +4391,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("private failure summaries must converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -4243,8 +4505,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("private failure summaries must converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -4304,48 +4565,35 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
 
 #[test]
 fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
-    let mut project = failure_project(
-        // The wider U16 callee keeps the write-back a genuinely mixed-domain conversion, so
-        // the escaping failure still has a compound write-back producer.
-        "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+    const ESCAPING_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          export:\n    bump type T |marker T, extra U16| -> U8:\n\
-                 total ~U8 = 250\n        total += risky(extra) catch then extra\n        return total\n    ;\n;\n",
-    );
-    let messages = project
+                 total ~U8 = 250\n        total += risky(extra) catch then extra\n        return total\n    ;\n;\n";
+    const AST_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+         bump |extra U16| -> U8:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n";
+    let mut project = failure_project(ESCAPING_SOURCE);
+    let failure = project
         .ast_result()
-        .err()
-        .expect("the write-back into the compound target must still escape");
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("expected exported write-back witness, got {diagnostic:?}");
-    };
-    // The compound update's own arithmetic yields to its write-back, so the escaping failure
-    // is the store conversion's range check into the declared target.
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntCastOutOfRange]);
-    assert!(witness.call_spans.is_empty());
-    let origin_span = witness
-        .origin_span
-        .expect("the write-back producer keeps its target span");
-    let BuiltinFailureOriginKind::CompoundWriteBack { target } = witness.origin else {
+        .expect_ast_failure("the write-back into the compound target must still escape");
+    assert_ast_unhandled_builtin_export(&failure);
+    let labels = single_ast_error_view(&failure)
+        .durable_labels()
+        .collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1, "the write-back origin is the sole label");
+    let DurableLabelMessage::BuiltinWriteBackOrigin { target_type } = labels[0].message else {
         panic!(
-            "expected compound write-back origin, got {:?}",
-            witness.origin
+            "expected a write-back origin label, got {:?}",
+            labels[0].message
         );
     };
     assert_eq!(
-        target,
-        builtin_type_ids::fixed_scalar(FixedScalar::U8),
-        "the write-back names the canonical compound target"
+        ast_first_error_type_display(&failure, target_type),
+        "U8",
+        "the label names the write-back target instead of the handled arithmetic"
     );
-    let mut project = failure_project(
-        "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
-         bump |extra U16| -> U8:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
-    );
+    let SiteRef::Local(origin_span) = labels[0].site else {
+        panic!("the write-back producer keeps its local target span");
+    };
+    let mut project = failure_project(AST_SOURCE);
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "bump");
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
@@ -4379,21 +4627,11 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
         .into_iter()
         .find(|operand| matches!(operand.operation(), ExpressionOperationView::ValueBlock(_)))
         .expect("compound arithmetic must retain one RHS catch operand");
-    let rhs_span = rhs.span().expect("the handled RHS keeps its span");
     assert_ne!(
-        origin_span, rhs_span,
+        Some(origin_span),
+        rhs.span(),
         "the write-back origin must not point at the handled RHS"
     );
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].span, Some(origin_span));
-    assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::BuiltinWriteBackOrigin {
-            target_type_id: target
-        }),
-        "the label names the write-back target instead of the handled arithmetic"
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
 }
 
 #[test]
@@ -4404,38 +4642,16 @@ fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
         "export:\n    bump type T |marker T, x U8, y U16| -> U8:\n\
                  total ~U8 = x\n        total += y\n        return total\n    ;\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("an unhandled compound update must be rejected");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("boundary diagnosis");
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("expected exported boundary witness, got {diagnostic:?}");
-    };
-    // Even without a catch, the escaping failure is the later write-back into
-    // the target, not the promoted arithmetic that produced it.
-    let BuiltinFailureOriginKind::CompoundWriteBack { target } = witness.origin else {
-        panic!(
-            "expected compound write-back origin, got {:?}",
-            witness.origin
-        );
-    };
-    assert_eq!(target, builtin_type_ids::fixed_scalar(FixedScalar::U8));
-    assert!(witness.origin_span.is_some());
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::BuiltinWriteBackOrigin {
-            target_type_id: target
-        })
+        .expect_ast_failure("an unhandled compound update must be rejected");
+    let diagnostic = assert_ast_unhandled_builtin_export(&failure);
+    let labels = diagnostic_label_spans(diagnostic);
+    assert_eq!(labels.len(), 1, "the write-back origin is the sole label");
+    assert!(
+        labels[0].is_some(),
+        "the compound write-back origin should retain its source span"
     );
-    assert_eq!(diagnostic.labels[0].span, witness.origin_span);
 }
 
 #[test]
@@ -4444,28 +4660,16 @@ fn implicit_failure_plain_return_arithmetic_keeps_operation_origin() {
         "export:\n    bump type T |marker T, x I32, y I32| -> I32:\n\
                  return x + y\n    ;\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("unhandled arithmetic must be rejected");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("boundary diagnosis");
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("expected exported boundary witness, got {diagnostic:?}");
-    };
-    assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
-    assert!(witness.origin_span.is_some());
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::BuiltinFailureOrigin)
+        .expect_ast_failure("unhandled arithmetic must be rejected");
+    let diagnostic = assert_ast_unhandled_builtin_export(&failure);
+    let labels = diagnostic_label_spans(diagnostic);
+    assert_eq!(labels.len(), 1, "the arithmetic origin is the sole label");
+    assert!(
+        labels[0].is_some(),
+        "the arithmetic operation should retain its source span"
     );
-    assert_eq!(diagnostic.labels[0].span, witness.origin_span);
 }
 
 #[test]
@@ -4478,36 +4682,34 @@ fn implicit_failure_custom_slot_keeps_writeback_origin() {
          bump |extra U16| -> U8, Failure!:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let messages = project
-        .failure_contract_result()
-        .expect_err("the write-back must not escape through a custom slot");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("custom slot diagnosis");
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason:
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                witness, ..
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("expected custom-slot write-back witness, got {diagnostic:?}");
-    };
-    let BuiltinFailureOriginKind::CompoundWriteBack { target } = witness.origin else {
+        .failure_contract_boundary_result()
+        .expect_diagnosed("the write-back must not escape through a custom slot");
+    assert_eq!(error_diagnostics(&messages).count(), 1);
+    let boundary_diagnostic = single_ast_error_view(&messages);
+    let facts = boundary_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("custom-slot rejection should retain fallible facts");
+    assert_eq!(
+        facts.reason,
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction
+    );
+    assert!(!matches!(
+        boundary_diagnostic.primary_site(),
+        SiteRef::Absent
+    ));
+    assert_eq!(
+        frozen_builtin_failure_labels(&messages),
+        vec![(BuiltinFailureLabelRole::WriteBackOrigin, true)]
+    );
+    let labels = boundary_diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    let DurableLabelMessage::BuiltinWriteBackOrigin { target_type } = labels[0].message else {
         panic!(
-            "expected compound write-back origin, got {:?}",
-            witness.origin
+            "expected a write-back origin label, got {:?}",
+            labels[0].message
         );
     };
-    assert_eq!(target, builtin_type_ids::fixed_scalar(FixedScalar::U8));
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].span, witness.origin_span);
-    assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::BuiltinWriteBackOrigin {
-            target_type_id: target
-        })
-    );
+    assert_eq!(ast_first_error_type_display(&messages, target_type), "U8");
 }
 #[test]
 fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
@@ -4571,8 +4773,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("private failure summaries must converge");
+    );
     crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
         &mut hir,
         &report,
@@ -4664,12 +4865,11 @@ fn implicit_failure_zero_success_statement_catch_covers_host_argument_evaluation
         "message || -> String, Error!:\n    return \"ok\"\n;\n\
          bad ||:\n    io.line(message())\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a statement boundary must not drop an argument's typed error");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("a statement boundary must not drop an argument's typed error");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::UnhandledErrorReturn,
     );
 }
@@ -4910,12 +5110,11 @@ fn implicit_failure_zero_success_receiver_and_builtin_catches_keep_typed_error_c
          touch |this Box| -> Error!:\n;\n\
          bad |box Box|:\n    box.touch()\n;\n",
     );
-    let messages = project
+    let failure = project
         .ast_result()
-        .err()
-        .expect("a receiver statement cannot discard its typed error");
-    assert_fallible_reason(
-        &messages,
+        .expect_ast_failure("a receiver statement cannot discard its typed error");
+    assert_ast_fallible_reason(
+        &failure,
         InvalidFallibleHandlingReason::UnhandledErrorReturn,
     );
 }
@@ -5020,8 +5219,7 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
         &mut report,
-    )
-    .expect("canonical same-module call summary must converge");
+    );
     assert!(report.analysis.public_call_summaries[&helper.id].escapes_builtin_failure);
     assert!(!report.analysis.public_call_summaries[&caller.id].escapes_builtin_failure);
 }

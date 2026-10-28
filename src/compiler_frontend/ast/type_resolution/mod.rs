@@ -6,10 +6,10 @@
 //!      active `TypeEnvironment`.
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 
-pub(crate) type TypeResolutionResult<T> = Result<T, CompilerDiagnostic>;
+pub(crate) type TypeResolutionResult<T> = Result<T, DiagnosticDraft>;
 
 /// Function signature after resolving all named types and receiver metadata.
 #[derive(Clone)]
@@ -45,9 +45,13 @@ pub(crate) use recursive_types::{
 pub(crate) use collections::fold_collection_capacity;
 pub(crate) use context::{
     ResolvedTypeAlias, ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
+    TypeResolutionFailureKind,
 };
 pub(crate) use maps::validate_map_key_type;
-pub(crate) use resolve_type::{resolve_parsed_type_annotation, reusable_type_id_for_parsed_ref};
+pub(crate) use resolve_type::{
+    resolve_parsed_type_annotation, resolve_parsed_type_annotation_with_failure_kind,
+    reusable_type_id_for_parsed_ref,
+};
 pub(crate) use signatures::{intern_resolved_function_signature, resolve_function_signature};
 pub(crate) use struct_fields::{
     StructFieldResolutionError, resolve_struct_constructor_shell_types, resolve_struct_field_types,

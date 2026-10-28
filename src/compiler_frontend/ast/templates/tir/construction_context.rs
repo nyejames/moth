@@ -16,7 +16,6 @@ use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionSuffix, DeferredNumericExpression, DeferredRangeHeader,
     NumericBindingId, NumericConstructionDomainId, StatementExpression,
 };
-use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -38,7 +37,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_root;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -187,7 +186,7 @@ impl TemplateConstructionContext {
         value_mode: ValueMode,
         suffix: DeferredExpressionSuffix,
         span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let node_id = {
             let mut store = self.store.borrow_mut();
             let expression_site = store.next_expression_site_id();
@@ -244,14 +243,10 @@ impl TemplateConstructionContext {
         self.note_head_origin(origin);
     }
 
-    pub(crate) fn record_slot(
-        &mut self,
-        slot: SlotPlaceholder,
-        span: Option<SourceSpan>,
-    ) -> Result<(), TemplateError> {
+    pub(crate) fn record_slot(&mut self, slot: SlotPlaceholder, span: Option<SourceSpan>) {
         let node_id = {
             let mut store = self.store.borrow_mut();
-            let placeholder = store.tir_slot_placeholder_from_ast(&slot)?;
+            let placeholder = store.tir_slot_placeholder_from_ast(&slot);
             store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Slot { placeholder },
                 span,
@@ -259,7 +254,6 @@ impl TemplateConstructionContext {
         };
 
         self.children.push(node_id);
-        Ok(())
     }
 
     pub(crate) fn record_insert_contribution(
@@ -355,7 +349,7 @@ impl TemplateConstructionContext {
         deferred: DeferredNumericExpression,
         body: TemplateIrNodeId,
         span: Option<SourceSpan>,
-    ) -> Result<TemplateIrNodeId, CompilerError> {
+    ) -> Result<TemplateIrNodeId, InfrastructureFailure> {
         let node_id = {
             let mut store = self.store.borrow_mut();
             let header_sites = TemplateLoopHeaderExpressionSites::Conditional {
@@ -403,7 +397,7 @@ impl TemplateConstructionContext {
         header: DeferredRangeHeader,
         body: TemplateIrNodeId,
         span: Option<SourceSpan>,
-    ) -> Result<TemplateIrNodeId, CompilerError> {
+    ) -> Result<TemplateIrNodeId, InfrastructureFailure> {
         match header {
             DeferredRangeHeader::Ready { bindings, range } => {
                 // The header is already concrete: the loop was retained for its body only, and a
@@ -557,7 +551,7 @@ impl TemplateConstructionContext {
         deferred: DeferredNumericExpression,
         body: TemplateIrNodeId,
         span: Option<SourceSpan>,
-    ) -> Result<TemplateIrNodeId, CompilerError> {
+    ) -> Result<TemplateIrNodeId, InfrastructureFailure> {
         let node_id = {
             let mut store = self.store.borrow_mut();
 
@@ -607,7 +601,7 @@ impl TemplateConstructionContext {
         pattern: Option<Box<DeferredArmPattern>>,
         body: TemplateIrNodeId,
         span: Option<SourceSpan>,
-    ) -> Result<TemplateIrNodeId, CompilerError> {
+    ) -> Result<TemplateIrNodeId, InfrastructureFailure> {
         let node_id = {
             let mut store = self.store.borrow_mut();
             let selector_site_id = store.next_expression_site_id();
@@ -666,7 +660,7 @@ impl TemplateConstructionContext {
         style: Style,
         kind: TemplateType,
         phase: TemplateTirPhase,
-    ) -> Result<TemplateTirReference, CompilerError> {
+    ) -> Result<TemplateTirReference, InfrastructureFailure> {
         let TemplateConstructionContext {
             store,
             mut children,

@@ -2,9 +2,8 @@
 //!
 //! WHAT: defines the data types used by the integration test harness.
 
-use crate::build_system::build::BuildResult;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::CompilationResult;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -325,41 +324,9 @@ impl BackendId {
 pub(crate) struct CaseExecutionResult {
     pub passed: bool,
     pub panic_message: Option<String>,
-    pub build_result: Option<BuildResult>,
-    pub messages: Option<CompilerMessages>,
+    pub messages: Option<CompilationResult<()>>,
     pub failure_reason: Option<String>,
     pub failure_kind: Option<FailureKind>,
-}
-
-impl CaseExecutionResult {
-    /// Move a successful build's warnings into the final diagnostic report owner.
-    ///
-    /// Build assertions consume the `BuildResult` first, but terminal integration reporting must
-    /// render the frozen `CompilerMessages` owner so generated donor spans cannot fall back to the
-    /// requester database. A freeze failure is a harness failure, not an absent warning report.
-    pub(crate) fn finalize_build_result_report(&mut self) {
-        if self.messages.is_some() {
-            return;
-        }
-
-        let Some(build_result) = self.build_result.as_mut() else {
-            return;
-        };
-
-        self.messages = build_result.take_warning_messages();
-        if self
-            .messages
-            .as_ref()
-            .is_some_and(CompilerMessages::has_infrastructure_error)
-        {
-            self.passed = false;
-            self.failure_kind = Some(FailureKind::HarnessFailed);
-            self.failure_reason = Some(
-                "Failed to finalize successful-build diagnostics before integration reporting."
-                    .to_owned(),
-            );
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

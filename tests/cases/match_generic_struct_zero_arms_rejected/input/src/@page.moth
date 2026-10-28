@@ -1,0 +1,8 @@
+Box type T = |
+    value T,
+|
+
+boxed Box of I32 = Box(1)
+
+if boxed is:
+;

@@ -6,14 +6,18 @@
 //!      take precedence over existing-reference, external-call and declaration dispatch.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidStatementPositionReason,
+    DeferredFeatureReason, InvalidStatementPositionReason,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(crate) fn classify_deferred_declared_region_header(
     token_stream: &AstCursor,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     // Statement-position `identifier:` classification reads one token of tag lookahead.
     let next_is_colon = token_stream.peek_next_tag() == Some(TokenTag::COLON);
     if !next_is_colon {
@@ -22,11 +26,11 @@ pub(crate) fn classify_deferred_declared_region_header(
 
     let span = Some(token_stream.current_span());
     match token_stream.current_tag() {
-        TokenTag::SYMBOL => Some(CompilerDiagnostic::deferred_feature_reason(
+        TokenTag::SYMBOL => Some(names_declarations::deferred_feature_reason(
             DeferredFeatureReason::DeclaredRegion,
             span,
         )),
-        TokenTag::WILDCARD => Some(CompilerDiagnostic::invalid_statement_position(
+        TokenTag::WILDCARD => Some(choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::AnonymousDeclaredRegion,
             span,
         )),

@@ -9,32 +9,31 @@
 //! guidance at the point of failure. `as` is also rejected here because it is
 //! called from both signature-members and body-local declaration parsers.
 
-use super::common_syntax_mistake;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
+use crate::compiler_frontend::compiler_messages::CommonSyntaxMistakeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Check for common signature-position mistakes before falling back to a generic error.
 ///
 /// Called from declaration-shell and signature-members parsers when an
 /// unexpected token appears while parsing parameter lists or struct fields.
-pub(crate) fn check_signature_common_mistake(
-    token_stream: &AstCursor,
-) -> Option<CompilerDiagnostic> {
+pub(crate) fn check_signature_common_mistake(token_stream: &AstCursor) -> Option<DiagnosticDraft> {
     let current = token_stream.current_tag();
     let location = token_stream.current_span();
 
     match current {
         // `(` where `|` is expected for parameters/fields
-        TokenTag::OPEN_PARENTHESIS => Some(common_syntax_mistake(
+        TokenTag::OPEN_PARENTHESIS => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::SignatureParenthesisDelimiter,
-            location,
+            Some(location),
         )),
 
         // `as` is not valid in parameter/field or declaration position
-        TokenTag::AS => Some(common_syntax_mistake(
+        TokenTag::AS => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::SignatureAsKeyword,
-            location,
+            Some(location),
         )),
 
         _ => None,

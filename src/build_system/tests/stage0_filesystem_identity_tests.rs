@@ -1,16 +1,51 @@
-//! Phase 1 Stage 0 filesystem-identity tests.
+//! Stage 0 filesystem-identity tests.
 //!
-//! WHAT: exercises the strict UTF-8 filesystem-identity contract added by the codebase
-//!      integrity cleanup plan: non-UTF-8 module roots, source names, folder names,
-//!      extensions, source-package prefixes and single-file entries must surface as File
-//!      infrastructure errors, and source-package canonicalization must be mandatory.
+//! WHAT: exercises the strict UTF-8 filesystem-identity contract. Non-UTF-8 module roots, source
+//!      names, folder names, extensions, source-package prefixes and single-file entries must
+//!      surface as File infrastructure errors, and source-package canonicalization is mandatory.
 //! WHY: these invariants are Stage 0 subsystem-local facts that integration output cannot
 //!      inspect directly, so they own a focused test file beside the create-project-modules
 //!      module rather than living in the oversized Stage 0 orchestration test file.
 
 use super::*;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+fn prepared_failure_reports(
+    failure: PreparedFailure,
+) -> crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    let PreparedFailure::Diagnosed(batch) = failure else {
+        panic!("expected diagnosed reports, got {failure:?}");
+    };
+    assert!(
+        batch.has_errors(),
+        "expected a user-facing error diagnostic"
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("diagnosed reports should freeze")
+}
+
+fn primary_infrastructure_error(failure: PreparedFailure) -> InfrastructureFailure {
+    let PreparedFailure::Infrastructure(errors) = failure else {
+        panic!("expected an infrastructure failure, got {failure:?}");
+    };
+    errors.primary
+}
+
+fn assert_first_boundary_error_code(failure: PreparedFailure, expected_code: &str) {
+    let reports = prepared_failure_reports(failure);
+    let (_, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected a boundary error diagnostic");
+    assert_eq!(diagnostic.descriptor().code, expected_code);
+}
 
 #[cfg(test)]
 fn compile_single_file_for_filesystem_test(
@@ -18,8 +53,12 @@ fn compile_single_file_for_filesystem_test(
     builder_surface: &mut crate::builder_surface::BuilderSurface,
     extension: &std::ffi::OsStr,
     string_table: &mut StringTable,
-) -> Result<crate::build_system::create_project_modules::ProjectFrontendCompilation, CompilerMessages>
-{
+) -> crate::compiler_frontend::compiler_messages::compiler_errors::CompilationResult<
+    crate::build_system::create_project_modules::ProjectFrontendCompilation,
+> {
+    let root_string_table = std::mem::take(string_table);
+    let mut warning_owner =
+        crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(root_string_table);
     let mut project_source_files = None;
     super::compilation::compile_single_file_frontend_with_inputs(
         config,
@@ -27,7 +66,7 @@ fn compile_single_file_for_filesystem_test(
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::default(),
         builder_surface,
         extension,
-        string_table,
+        &mut warning_owner,
         &mut project_source_files,
         &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
         crate::build_system::create_project_modules::FrontendCompilationMode::Canonical,
@@ -37,24 +76,22 @@ fn compile_single_file_for_filesystem_test(
 #[cfg(target_os = "linux")]
 mod non_utf8_filesystem_identity {
     use super::*;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_file_infrastructure_error(failure: PreparedFailure) {
+        let error = primary_infrastructure_error(failure);
         assert_eq!(
-            error.error_type,
-            ErrorType::File,
+            error.kind,
+            InfrastructureFailureKind::Filesystem,
             "non-UTF-8 filesystem name should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains("Non-UTF-8"),
+            error.message.contains("Non-UTF-8"),
             "error message should mention non-UTF-8: {}",
-            error.msg,
+            error.message,
         );
     }
 
@@ -90,9 +127,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 file name should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -127,9 +162,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 folder name should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -166,9 +199,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -200,9 +231,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 name in package boundary traversal should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -237,25 +266,25 @@ mod non_utf8_filesystem_identity {
 #[cfg(unix)]
 mod non_utf8_single_file_identity {
     use super::*;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
-    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_file_infrastructure_error<T>(failure: &CompilationResult<T>) {
+        let errors = match failure {
+            Err(errors) => errors,
+            Ok(_) => panic!("expected filesystem infrastructure failure"),
+        };
         assert_eq!(
-            error.error_type,
-            ErrorType::File,
+            errors.primary.kind,
+            InfrastructureFailureKind::Filesystem,
             "non-UTF-8 single-file input should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains("UTF-8"),
+            errors.primary.message.contains("UTF-8"),
             "error message should mention UTF-8: {}",
-            error.msg,
+            errors.primary.message,
         );
     }
-
     #[test]
     fn single_file_rejects_non_utf8_extension() {
         let temp = tempfile::tempdir().expect("should create temp dir");
@@ -277,10 +306,6 @@ mod non_utf8_single_file_identity {
             extension,
             &mut string_table,
         );
-        let Err(messages) = messages else {
-            panic!("non-UTF-8 extension should be rejected");
-        };
-
         assert_file_infrastructure_error(&messages);
     }
 
@@ -306,10 +331,6 @@ mod non_utf8_single_file_identity {
             extension,
             &mut string_table,
         );
-        let Err(messages) = messages else {
-            panic!("non-UTF-8 entry file name should be rejected");
-        };
-
         assert_file_infrastructure_error(&messages);
     }
 }
@@ -317,22 +338,23 @@ mod non_utf8_single_file_identity {
 #[cfg(windows)]
 mod non_utf8_windows_single_file_identity {
     use super::*;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
-    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_file_infrastructure_error<T>(failure: &CompilationResult<T>) {
+        let errors = match failure {
+            Err(errors) => errors,
+            Ok(_) => panic!("expected filesystem infrastructure failure"),
+        };
         assert_eq!(
-            error.error_type,
-            ErrorType::File,
+            errors.primary.kind,
+            InfrastructureFailureKind::Filesystem,
             "unpaired-wide single-file input should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains("UTF-8"),
+            errors.primary.message.contains("UTF-8"),
             "error message should mention UTF-8: {}",
-            error.msg,
+            errors.primary.message,
         );
     }
 
@@ -357,10 +379,6 @@ mod non_utf8_windows_single_file_identity {
             extension,
             &mut string_table,
         );
-        let Err(messages) = messages else {
-            panic!("unpaired-wide extension should be rejected");
-        };
-
         assert_file_infrastructure_error(&messages);
     }
 }
@@ -370,8 +388,11 @@ mod source_package_boundary_indexes_tests {
     use crate::builder_surface::SourcePackageRegistry;
     use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
     use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
-    use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+    use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+        InvalidConfigCode, InvalidConfigView,
+    };
     #[cfg(unix)]
     use crate::compiler_tests::test_fs::RestrictedDirectory;
     use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
@@ -383,7 +404,7 @@ mod source_package_boundary_indexes_tests {
         string_table: &mut StringTable,
     ) -> Result<
         super::source_package_discovery::SourcePackageBoundaryIndexes,
-        crate::compiler_frontend::compiler_messages::PremergeFailure,
+        crate::compiler_frontend::compiler_messages::PreparedFailure,
     > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
@@ -404,16 +425,18 @@ mod source_package_boundary_indexes_tests {
             .expect("test source root should register");
     }
 
-    fn assert_invalid_config_reason(
-        messages: &CompilerMessages,
-        matcher: impl Fn(&InvalidConfigReason) -> bool,
-    ) {
+    fn assert_invalid_config_reason(failure: PreparedFailure, expected_reason: InvalidConfigCode) {
+        let reports = prepared_failure_reports(failure);
         assert!(
-            messages.error_diagnostics().any(|diagnostic| {
-                matches!(&diagnostic.payload,
-                    DiagnosticPayload::InvalidConfig { reason, .. } if matcher(reason))
-            }),
-            "expected an InvalidConfig diagnostic, got {messages:?}"
+            reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .any(|(_, diagnostic)| {
+                    diagnostic.descriptor().code == "MOTH-CONFIG-0001"
+                        && diagnostic
+                            .family_view::<InvalidConfigView>()
+                            .is_some_and(|facts| facts.reason == expected_reason)
+                }),
+            "expected the typed config failure {expected_reason:?}",
         );
     }
 
@@ -482,15 +505,12 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("nonexistent root should fail canonicalization");
-        let messages = failure.into_messages(&string_table);
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
-        assert_eq!(error.error_type, ErrorType::File);
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
         assert!(
-            error.msg.contains("canonicalize"),
+            error.message.contains("canonicalize"),
             "error message should mention canonicalization: {}",
-            error.msg,
+            error.message,
         );
     }
 
@@ -507,11 +527,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("package root without a normal module root should fail boundary indexing");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
     }
 
     #[test]
@@ -528,11 +544,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("a support root cannot replace the package normal module root");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
     }
 
     #[test]
@@ -550,11 +562,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("one directory cannot contain hash and support roots");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::MultipleModuleRootFiles { .. })
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::MultipleModuleRootFiles);
     }
 
     #[test]
@@ -575,14 +583,7 @@ mod source_package_boundary_indexes_tests {
         let failure = build_indexes(&source_packages, &mut string_table).expect_err(
             "package root with multiple normal module roots should fail boundary indexing",
         );
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(
-                reason,
-                InvalidConfigReason::SourcePackageMultipleRoots { .. }
-            )
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMultipleRoots);
     }
 
     #[cfg(unix)]
@@ -604,11 +605,8 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("unreadable package root should fail boundary indexing");
-        let messages = failure.into_messages(&string_table);
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
-        assert_eq!(error.error_type, ErrorType::File);
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
     }
 
     #[test]
@@ -732,24 +730,22 @@ mod source_package_boundary_indexes_tests {
 mod non_utf8_package_boundary_candidate_tests {
     use super::*;
     use crate::builder_surface::SourcePackageRegistry;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    fn assert_non_utf8_file_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_non_utf8_file_error(failure: PreparedFailure) {
+        let error = primary_infrastructure_error(failure);
         assert_eq!(
-            error.error_type,
-            ErrorType::File,
+            error.kind,
+            InfrastructureFailureKind::Filesystem,
             "non-UTF-8 package boundary candidate should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains("Non-UTF-8"),
+            error.message.contains("Non-UTF-8"),
             "error message should mention non-UTF-8: {}",
-            error.msg,
+            error.message,
         );
     }
 
@@ -758,7 +754,7 @@ mod non_utf8_package_boundary_candidate_tests {
         string_table: &mut StringTable,
     ) -> Result<
         super::source_package_discovery::SourcePackageBoundaryIndexes,
-        crate::compiler_frontend::compiler_messages::PremergeFailure,
+        crate::compiler_frontend::compiler_messages::PreparedFailure,
     > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
@@ -800,14 +796,12 @@ mod non_utf8_package_boundary_candidate_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("valid root plus invalid candidate should still fail");
-        let messages = failure.into_messages(&string_table);
-
-        assert_non_utf8_file_error(&messages);
+        assert_non_utf8_file_error(failure);
         drop(root);
     }
 }
 
-/// Phase 2a module-identity and structural-ancestry tests.
+/// Module-identity and structural-ancestry tests.
 ///
 /// These tests exercise hidden Stage 0 invariants that integration output cannot inspect:
 /// deterministic `ModuleId` ordering by canonical logical path, cosmetic root-filename
@@ -818,7 +812,7 @@ mod module_identity_tests {
     use super::*;
     use crate::builder_surface::PackageOrigin;
     use crate::builder_surface::SourcePackageRegistry;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
     };
@@ -1210,9 +1204,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("missing project root should surface a file error, not a missing facade");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages, "discovering package facade");
+        assert_file_infrastructure_error(failure, "discovering package facade");
     }
 
     #[cfg(unix)]
@@ -1248,25 +1240,22 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("unreadable project root should surface a file error, not a missing facade");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages, "discovering package facade");
+        assert_file_infrastructure_error(failure, "discovering package facade");
     }
-    fn assert_file_infrastructure_error(messages: &CompilerMessages, expected_text: &str) {
-        use crate::compiler_frontend::compiler_errors::ErrorType;
 
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_file_infrastructure_error(failure: PreparedFailure, expected_text: &str) {
+        use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+
+        let error = primary_infrastructure_error(failure);
         assert_eq!(
-            error.error_type,
-            ErrorType::File,
+            error.kind,
+            InfrastructureFailureKind::Filesystem,
             "project root read failure should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains(expected_text),
+            error.message.contains(expected_text),
             "error message should mention {expected_text:?}: {}",
-            error.msg,
+            error.message,
         );
     }
 
@@ -1300,9 +1289,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("mixed normal and support roots should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
+        assert_first_boundary_error_code(failure, "MOTH-CONFIG-0001");
     }
 
     #[test]
@@ -1335,9 +1322,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("multiple support roots should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
+        assert_first_boundary_error_code(failure, "MOTH-CONFIG-0001");
     }
 
     #[test]
@@ -1346,7 +1331,7 @@ mod module_identity_tests {
         assert_eq!(table.module_ids().count(), 0);
     }
 
-    // ---- Phase 2b: stable cross-build origin identity ----
+    // ---- Stable cross-build origin identity ----
 
     /// Discover the module identity table for one checkout root with a configured project name.
     fn discover_table_with_name(
@@ -1589,19 +1574,21 @@ mod module_identity_tests {
 
     #[test]
     fn project_local_package_identity_preserves_configured_name_verbatim() {
-        // No validation or normalization of the project name is added in this slice; the exact
-        // configured name is preserved as the stable package name input.
+        // The project name is not validated or normalized; the exact configured name is preserved
+        // as the stable package name input.
         let identity = StablePackageIdentity::project_local("  weird/name  ");
         assert_eq!(identity.name(), "  weird/name  ");
         assert_eq!(identity.origin(), PackageOrigin::ProjectLocal);
     }
 
-    // ---- Phase 2b correction: invalid logical-path components are rejected ----
+    // ---- Invalid logical-path components are rejected ----
 
     fn stable_origin_from_path(
         relative: &Path,
-    ) -> Result<StableModuleOriginIdentity, crate::compiler_frontend::compiler_errors::CompilerError>
-    {
+    ) -> Result<
+        StableModuleOriginIdentity,
+        crate::compiler_frontend::compiler_errors::InfrastructureFailure,
+    > {
         StableModuleOriginIdentity::from_relative_logical_path(
             StablePackageIdentity::project_local("my-project"),
             relative,
@@ -1612,20 +1599,20 @@ mod module_identity_tests {
     fn assert_internal_identity_error(
         result: Result<
             StableModuleOriginIdentity,
-            crate::compiler_frontend::compiler_errors::CompilerError,
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure,
         >,
         fragment: &str,
     ) {
         let error = result.expect_err("an invalid logical path component must be rejected");
         assert_eq!(
-            error.error_type,
-            ErrorType::Compiler,
+            error.kind,
+            InfrastructureFailureKind::Internal,
             "an invalid logical path component must use the internal compiler-error lane"
         );
         assert!(
-            error.msg.contains(fragment),
+            error.message.contains(fragment),
             "internal error message should mention `{fragment}`: {}",
-            error.msg
+            error.message
         );
     }
 
@@ -1697,14 +1684,6 @@ mod module_identity_tests {
             "synthetic single-file origin must be deterministic"
         );
     }
-
-    fn first_diagnostic_code(messages: &CompilerMessages) -> String {
-        let diagnostic = messages
-            .error_diagnostics()
-            .next()
-            .expect("expected at least one typed error diagnostic");
-        diagnostic.kind.code().to_owned()
-    }
 }
 mod owned_source_inventory_tests {
     use super::module_identity::ModuleId;
@@ -1718,7 +1697,6 @@ mod owned_source_inventory_tests {
     };
     use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
     use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
-    use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::path::{Path, PathBuf};
@@ -2278,9 +2256,9 @@ mod owned_source_inventory_tests {
 
     #[test]
     fn facade_file_inside_entry_root_is_owned_exactly_once_by_facade() {
-        // The current compatibility case: project root equals entry root, so the facade root
-        // file lies inside the traversal. It must appear exactly once, owned only by the facade
-        // module, and must not also appear in the entry-root module's owned source set.
+        // Project root equals entry root, so the facade root file lies inside the traversal. It
+        // must appear exactly once, owned only by the facade module, and must not also appear in
+        // the entry-root module's owned source set.
         let _temp = tempfile::tempdir().expect("should create temp dir");
         let root = _temp.path().to_path_buf();
 
@@ -2589,7 +2567,7 @@ mod owned_source_inventory_tests {
             &self,
             _request: ExternalImportRequest,
             _context: &mut ExternalImportProviderContext,
-        ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+        ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
             Ok(None)
         }
     }
@@ -2754,12 +2732,12 @@ mod owned_source_inventory_tests {
     }
 }
 
-// ---- Phase 5a: canonical structural project module graph ----
+// ---- Canonical structural project module graph ----
 
 mod project_module_graph_tests {
     use super::*;
     use crate::builder_surface::SourcePackageRegistry;
-    use crate::compiler_frontend::compiler_errors::ErrorType;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::path::PathBuf;
@@ -2767,6 +2745,8 @@ mod project_module_graph_tests {
     use super::module_identity::ModuleId;
     use super::project_module_graph::{DependencyEdgeOutcome, ProjectModuleGraph};
     use super::source_tree_index::SourceTreeIndex;
+    use crate::compiler_frontend::compiler_messages::CompilerStage;
+    use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 
     fn discover_index(
         root: &std::path::Path,
@@ -3182,7 +3162,10 @@ mod project_module_graph_tests {
     }
 
     #[test]
-    fn dependency_cycle_reports_blocked_modules_as_internal_error() {
+    fn dependency_cycle_reports_circular_dependency_diagnostic() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
+        use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
+
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
@@ -3209,23 +3192,25 @@ mod project_module_graph_tests {
             .complete()
             .expect("cyclic graph should still complete before scheduling");
 
-        let cycle_error = graph
+        let error = graph
             .compile_waves()
-            .expect_err("a dependency cycle must surface as an internal graph failure");
-        assert_eq!(
-            cycle_error.error_type,
-            ErrorType::Compiler,
-            "a defensive cycle is an internal compiler graph failure"
-        );
-        let message = &cycle_error.msg;
+            .expect_err("an authored module cycle must be diagnosed");
+        let reports = prepared_failure_reports(error);
+        assert_eq!(reports.counts().errors, 1);
+        let (report, view) = reports
+            .iter()
+            .next()
+            .expect("the cycle should retain one diagnostic");
         assert!(
-            message.contains("cycle"),
-            "cycle error must name the cycle: {message}"
+            view.family_view::<CircularDependencyView>().is_some(),
+            "module cycles must use the circular-dependency family"
         );
-        // Deterministic blocked-module reporting includes both modules on the cycle.
+        let rendered =
+            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
         assert!(
-            message.contains("alpha") && message.contains("beta"),
-            "cycle error must name the involved modules: {message}"
+            rendered.contains("Circular dependency at 'alpha'")
+                || rendered.contains("Circular dependency at 'beta'"),
+            "the reported module must lie on the cycle: {rendered}"
         );
     }
 
@@ -3247,13 +3232,13 @@ mod project_module_graph_tests {
         let self_error = graph
             .add_dependency_edge(alpha_id, alpha_id)
             .expect_err("a self-edge must be rejected");
-        assert_eq!(self_error.error_type, ErrorType::Compiler);
+        assert_eq!(self_error.kind, InfrastructureFailureKind::Internal);
 
         let out_of_range = ModuleId::from_index(graph.node_count() + 10);
         let invalid_error = graph
             .add_dependency_edge(out_of_range, alpha_id)
             .expect_err("an out-of-range module id must be rejected");
-        assert_eq!(invalid_error.error_type, ErrorType::Compiler);
+        assert_eq!(invalid_error.kind, InfrastructureFailureKind::Internal);
 
         // The graph remains usable for deterministic waves after rejected edges. Rejected edges
         // do not mutate the graph, so it still completes cleanly with no accepted edges.
@@ -3335,9 +3320,8 @@ mod project_module_graph_tests {
     #[test]
     fn invalid_graph_phase_use_reports_internal_errors() {
         // Hidden invariant: the construction-to-completion phase is an explicit boundary.
-        // Scheduling before completion, mutation after completion and double completion all
-        // surface as internal `CompilerError`s without panicking, and a completed graph still
-        // schedules cleanly from its frozen adjacency.
+        // Compile-wave scheduling before completion is a compiler bug, while mutation after
+        // completion and double completion remain internal `InfrastructureFailure`s.
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
@@ -3352,17 +3336,16 @@ mod project_module_graph_tests {
         let alpha_id = module_id_for(&index, ModuleRootRole::Normal, "alpha");
         let beta_id = module_id_for(&index, ModuleRootRole::Normal, "beta");
 
-        // Scheduling before completion is an internal compiler failure.
+        // Scheduling before completion is a compiler bug.
         let uncompleted = ProjectModuleGraph::from_source_tree_index(&index);
-        let scheduling_error = uncompleted
-            .compile_waves()
-            .expect_err("scheduling before completion must be rejected");
-        assert_eq!(scheduling_error.error_type, ErrorType::Compiler);
-        assert!(
-            scheduling_error.msg.contains("before completion"),
-            "scheduling error must name the phase violation: {}",
-            scheduling_error.msg
-        );
+        let expected_message = "Project module graph compile waves were requested before completion; the graph must complete and freeze its adjacency before compile-wave scheduling reads it";
+        let payload = std::panic::catch_unwind(|| uncompleted.compile_waves())
+            .expect_err("scheduling before completion must raise a compiler bug");
+        let report = payload
+            .downcast::<CompilerBugReport>()
+            .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
+        assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
+        assert_eq!(report.message.as_ref(), expected_message);
 
         // Mutation after completion is an internal compiler failure. Edge insertion and double
         // completion both surface as the same lifecycle violation.
@@ -3375,21 +3358,24 @@ mod project_module_graph_tests {
         let mutation_error = completed
             .add_dependency_edge(beta_id, alpha_id)
             .expect_err("mutation after completion must be rejected");
-        assert_eq!(mutation_error.error_type, ErrorType::Compiler);
+        assert_eq!(mutation_error.kind, InfrastructureFailureKind::Internal);
         assert!(
-            mutation_error.msg.contains("after completion"),
+            mutation_error.message.contains("after completion"),
             "mutation error must name the phase violation: {}",
-            mutation_error.msg
+            mutation_error.message
         );
 
         let double_complete_error = completed
             .complete()
             .expect_err("double completion must be rejected as mutation after completion");
-        assert_eq!(double_complete_error.error_type, ErrorType::Compiler);
+        assert_eq!(
+            double_complete_error.kind,
+            InfrastructureFailureKind::Internal
+        );
         assert!(
-            double_complete_error.msg.contains("after completion"),
+            double_complete_error.message.contains("after completion"),
             "double completion error must name the phase violation: {}",
-            double_complete_error.msg
+            double_complete_error.message
         );
 
         // The completed graph still schedules cleanly from its frozen adjacency.

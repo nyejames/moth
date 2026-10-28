@@ -47,7 +47,7 @@ pub(crate) fn resolve_visible_named_type_path(
     visibility: &FileVisibility,
 ) -> VisibleNamedTypeResolution {
     match type_reference {
-        ParsedNamedTypeReference::Bare(name) => {
+        ParsedNamedTypeReference::Bare { name, .. } => {
             if let Some(target) = visibility
                 .visible_type_alias_names
                 .get(&name)
@@ -62,7 +62,7 @@ pub(crate) fn resolve_visible_named_type_path(
                 VisibleNamedTypeResolution::Unresolved
             }
         }
-        ParsedNamedTypeReference::Qualified(path) => {
+        ParsedNamedTypeReference::Qualified { path, .. } => {
             let Some((&root, members)) = path.split_first() else {
                 return VisibleNamedTypeResolution::Unresolved;
             };
@@ -153,7 +153,10 @@ pub(super) fn canonicalize_local_ordering_hints(
                     .resolve_components(hint.path(), &mut scratch)
                     .to_vec();
                 match resolve_visible_named_type_path(
-                    ParsedNamedTypeReference::Qualified(&components),
+                    ParsedNamedTypeReference::Qualified {
+                        path: &components,
+                        span: None,
+                    },
                     visibility,
                 ) {
                     VisibleNamedTypeResolution::Declaration(path) => {

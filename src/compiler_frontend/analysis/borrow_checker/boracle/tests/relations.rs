@@ -4,7 +4,7 @@ use super::super::{
     OriginRelationKind, OriginRelations, PrecisionLossReason,
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{ProjectionElem, ValueOriginId};
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 
 fn origin(raw: u32) -> ValueOriginId {
     ValueOriginId::new(raw)
@@ -273,9 +273,9 @@ fn relation_rows_are_deterministic() {
 }
 
 #[test]
-fn unknown_origin_ids_are_rejected_as_compiler_errors() {
+fn unknown_origin_ids_are_rejected_as_infrastructure_failures() {
     // Invariant: relation endpoints must belong to the registered origin identity space.
-    assert_compiler_error(
+    assert_infrastructure_failure(
         OriginRelations::new(
             [fresh(0)],
             [OriginRelation::proven_disjoint(
@@ -289,9 +289,9 @@ fn unknown_origin_ids_are_rejected_as_compiler_errors() {
 }
 
 #[test]
-fn forbidden_self_relations_are_rejected_as_compiler_errors() {
+fn forbidden_self_relations_are_rejected_as_infrastructure_failures() {
     // Invariant: identity already expresses self-overlap; relationship rows require two origins.
-    assert_compiler_error(
+    assert_infrastructure_failure(
         OriginRelations::new(
             [fresh(0)],
             [OriginRelation::projection(
@@ -308,7 +308,7 @@ fn forbidden_self_relations_are_rejected_as_compiler_errors() {
 fn copy_source_and_result_must_differ() {
     // Invariant: a copy correspondence is positive independence between distinct source and
     // result generations.
-    assert_compiler_error(
+    assert_infrastructure_failure(
         OriginRelations::new(
             [fresh(0)],
             [OriginRelation::copy_correspondence(
@@ -322,9 +322,9 @@ fn copy_source_and_result_must_differ() {
 }
 
 #[test]
-fn invalid_projection_evidence_is_rejected_as_a_compiler_error() {
+fn invalid_projection_evidence_is_rejected_as_an_infrastructure_failure() {
     // Invariant: projection row endpoints and projection evidence must agree exactly.
-    assert_compiler_error(
+    assert_infrastructure_failure(
         OriginRelations::new(
             [fresh(0), fresh(1)],
             [OriginRelation::new(
@@ -345,9 +345,9 @@ fn invalid_projection_evidence_is_rejected_as_a_compiler_error() {
 }
 
 #[test]
-fn contradictory_overlap_and_disjoint_rows_are_rejected_as_compiler_errors() {
+fn contradictory_overlap_and_disjoint_rows_are_rejected_as_infrastructure_failures() {
     // Invariant: one origin pair cannot be both forced-overlap and positively proven disjoint.
-    assert_compiler_error(
+    assert_infrastructure_failure(
         OriginRelations::new(
             [fresh(0), fresh(1)],
             [
@@ -364,9 +364,9 @@ fn contradictory_overlap_and_disjoint_rows_are_rejected_as_compiler_errors() {
 }
 
 #[test]
-fn contradictory_may_alias_and_disjoint_rows_are_rejected_as_compiler_errors() {
+fn contradictory_may_alias_and_disjoint_rows_are_rejected_as_infrastructure_failures() {
     // Invariant: MayAlias is a forced overlap fact and cannot coexist with proven disjointness.
-    assert_compiler_error(
+    assert_infrastructure_failure(
         OriginRelations::new(
             [fresh(0), fresh(1)],
             [
@@ -382,15 +382,15 @@ fn contradictory_may_alias_and_disjoint_rows_are_rejected_as_compiler_errors() {
     );
 }
 
-fn assert_compiler_error<T: std::fmt::Debug>(
-    result: Result<T, crate::compiler_frontend::compiler_errors::CompilerError>,
+fn assert_infrastructure_failure<T: std::fmt::Debug>(
+    result: Result<T, crate::compiler_frontend::compiler_errors::InfrastructureFailure>,
     message: &str,
 ) {
     let error = result.expect_err("malformed relation rows must fail");
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains(message),
-        "expected CompilerError containing {message:?}, got {:?}",
-        error.msg
+        error.message.contains(message),
+        "expected InfrastructureFailure containing {message:?}, got {:?}",
+        error.message
     );
 }

@@ -51,10 +51,11 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, TypeMismatchContext,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::instrumentation::ast_counters::{AstCounter, increment_ast_counter};
@@ -107,7 +108,7 @@ impl NumericBindingId {
     ///
     /// WHY: the completion driver walks a table by index; the compact ID must be rebuilt only
     ///      from a checked index, never from arbitrary arithmetic.
-    pub(crate) fn from_dense_index(index: usize) -> Result<Self, CompilerError> {
+    pub(crate) fn from_dense_index(index: usize) -> Result<Self, InfrastructureFailure> {
         checked_dense_id(index, "binding").map(Self)
     }
 }
@@ -146,7 +147,7 @@ impl ForwardProducerId {
     }
 
     /// Address one existing registry row by its dense table index.
-    pub(crate) fn from_dense_index(index: usize) -> Result<Self, CompilerError> {
+    pub(crate) fn from_dense_index(index: usize) -> Result<Self, InfrastructureFailure> {
         checked_dense_id(index, "forward producer").map(Self)
     }
 }
@@ -557,7 +558,7 @@ pub(crate) enum DeferredCallArgument<E = ExprId> {
         shape: DeferredCallArgumentShape,
         producer: ForwardProducerId,
         /// The fragment's first and conflicting typed-error producers, captured at registration
-        /// because its items no longer travel with the argument.
+        /// because its items do not travel with the argument.
         typed_errors: (Option<TypedErrorFact>, Option<TypedErrorFact>),
     },
 }
@@ -1575,10 +1576,13 @@ impl BodyDraft {
         position: &str,
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         if self.has_pending() {
-            return Err(CompilerError::compiler_error(format!(
-                "a numeric-dependent statement was retained inside {position}, which has no \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "a numeric-dependent statement was retained inside {position}, which has no \
                  body-root numeric resumption lane"
-            ))
+                ),
+            )
             .into());
         }
         Ok(self
@@ -1587,7 +1591,10 @@ impl BodyDraft {
             .map(|entry| match entry {
                 BodyEntry::Node(node) => node,
                 BodyEntry::Pending(_) => {
-                    unreachable!("a body draft proven free of pending continuations still held one")
+                    crate::compiler_bug!(
+                        CompilerStage::AstConstruction,
+                        "a body draft proven free of pending continuations still held one"
+                    )
                 }
             })
             .collect())
@@ -1712,7 +1719,8 @@ impl NumericConstructionState {
             .len()
             .checked_add(edges.len())
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "numeric construction declared binding table length overflowed",
                 )
             })?;
@@ -1827,10 +1835,10 @@ impl NumericConstructionState {
             | KnownShape::Numeric(_)
             | KnownShape::Map { .. }
             | KnownShape::DeclaredSubstitution { .. }
-            | KnownShape::Optional { .. } => Err(CompilerError::compiler_error(
+            | KnownShape::Optional { .. } => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
                 "a collection loop item was declared over a known shape that is not a collection",
-            )
-            .into()),
+            ),
         }
     }
 
@@ -1848,12 +1856,15 @@ impl NumericConstructionState {
     /// WHAT: the single lifetime guard every registering entry point consults.
     /// WHY: a body root must complete and release exactly once; a registration arriving after
     ///      release belongs to no completion pass and would otherwise never resolve.
-    fn ensure_live(&self, registration: &str) -> Result<(), CompilerError> {
+    fn ensure_live(&self, registration: &str) -> Result<(), InfrastructureFailure> {
         if self.released {
-            return Err(CompilerError::compiler_error(format!(
-                "{registration} was registered after its body root released the numeric \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "{registration} was registered after its body root released the numeric \
                  construction domain"
-            )));
+                ),
+            ));
         }
         Ok(())
     }
@@ -1871,7 +1882,7 @@ impl NumericConstructionState {
     //  Origins and equalities
     // --------------------------
 
-    pub(crate) fn create_class(&mut self) -> Result<NumericClassId, CompilerError> {
+    pub(crate) fn create_class(&mut self) -> Result<NumericClassId, InfrastructureFailure> {
         self.ensure_live("a numeric origin")?;
         let id = NumericClassId(checked_dense_id(self.classes.len(), "origin")?);
         self.classes.push(ClassRow {
@@ -2143,7 +2154,7 @@ impl NumericConstructionState {
     pub(crate) fn register_binding(
         &mut self,
         mut row: PendingBindingRow,
-    ) -> Result<NumericBindingId, CompilerError> {
+    ) -> Result<NumericBindingId, InfrastructureFailure> {
         self.ensure_live("a pending numeric binding")?;
         let id = NumericBindingId(checked_dense_id(self.bindings.len(), "pending binding")?);
         row.origin = self.recipe_origin_queries(row.recipe.as_ref());
@@ -2209,10 +2220,11 @@ impl NumericConstructionState {
     pub(crate) fn take_binding_recipe(
         &mut self,
         id: NumericBindingId,
-    ) -> Result<NumericRecipe, CompilerError> {
+    ) -> Result<NumericRecipe, InfrastructureFailure> {
         let row = &mut self.bindings[id.as_usize()];
         let recipe = row.recipe.take().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a pending numeric binding's recipe was taken twice by body-root completion",
             )
         })?;
@@ -2231,7 +2243,7 @@ impl NumericConstructionState {
     pub(crate) fn register_continuation(
         &mut self,
         continuation: NumericContinuation,
-    ) -> Result<NumericContinuationId, CompilerError> {
+    ) -> Result<NumericContinuationId, InfrastructureFailure> {
         self.ensure_live("a numeric-dependent statement")?;
         let id = NumericContinuationId(checked_dense_id(self.continuations.len(), "continuation")?);
         self.continuations.push(Some(continuation));
@@ -2278,16 +2290,18 @@ impl NumericConstructionState {
         &mut self,
         id: NumericContinuationId,
         value_index: usize,
-    ) -> Result<StatementExpression, CompilerError> {
+    ) -> Result<StatementExpression, InfrastructureFailure> {
         let Some(Some(NumericContinuation::ThenValue(continuation))) =
             self.continuations.get_mut(id.as_usize())
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind producer routing addressed a continuation that is not a live `then`",
             ));
         };
         let Some(slot) = continuation.values.get_mut(value_index) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind producer routing addressed a `then` value outside its slot list",
             ));
         };
@@ -2300,7 +2314,8 @@ impl NumericConstructionState {
             ) => Ok(value),
             other => {
                 *slot = other;
-                Err(CompilerError::compiler_error(
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "multi-bind producer routing tried to complete a `then` value more than once",
                 ))
             }
@@ -2313,16 +2328,18 @@ impl NumericConstructionState {
         id: NumericContinuationId,
         value_index: usize,
         expression: ExprId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(Some(NumericContinuation::ThenValue(continuation))) =
             self.continuations.get_mut(id.as_usize())
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind producer completion addressed a continuation that is not a live `then`",
             ));
         };
         let Some(slot) = continuation.values.get_mut(value_index) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind producer completion addressed a `then` value outside its slot list",
             ));
         };
@@ -2337,7 +2354,8 @@ impl NumericConstructionState {
             }
             other => {
                 *slot = other;
-                Err(CompilerError::compiler_error(
+                Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "multi-bind producer completion had no matching taken `then` value",
                 ))
             }
@@ -2374,16 +2392,18 @@ impl NumericConstructionState {
         id: NumericContinuationId,
         value_index: usize,
         type_id: TypeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(Some(NumericContinuation::ThenValue(continuation))) =
             self.continuations.get_mut(id.as_usize())
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind raw producer routing addressed a continuation that is not a live `then`",
             ));
         };
         let Some(expected_type) = continuation.slot_expected_types.get_mut(value_index) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "multi-bind raw producer routing addressed a `then` slot outside its receiver contract",
             ));
         };
@@ -2414,7 +2434,7 @@ impl NumericConstructionState {
     /// Release every construction table after the body completed.
     ///
     /// WHAT: drops pending bindings, equality state and continuation records once the
-    ///       completed AST no longer needs them.
+    ///       completed AST does not need them.
     /// WHY: no numeric origin, recipe or suspended check may outlive the body boundary.
     pub(crate) fn release(&mut self) {
         self.classes = Vec::new();
@@ -2444,7 +2464,7 @@ impl NumericConstructionState {
         class: NumericClassId,
         shape: KnownShapeId,
         fragment: DeferredNumericExpression,
-    ) -> Result<ForwardProducerId, CompilerError> {
+    ) -> Result<ForwardProducerId, InfrastructureFailure> {
         self.ensure_live("a forward producer")?;
         let id = ForwardProducerId::from_dense_index(self.forward_producers.len())?;
         let authored_order = self.take_authored_order();
@@ -2516,7 +2536,7 @@ impl NumericConstructionState {
     pub(crate) fn next_pending_forward_producer(
         &mut self,
         shape: KnownShapeId,
-    ) -> Result<Option<ForwardProducerId>, CompilerError> {
+    ) -> Result<Option<ForwardProducerId>, InfrastructureFailure> {
         match self.shape(shape) {
             KnownShape::Concrete { .. } => return Ok(None),
             KnownShape::Numeric(class) => {
@@ -2551,7 +2571,7 @@ impl NumericConstructionState {
         &mut self,
         shape: KnownShapeId,
         memo: &mut FxHashMap<KnownShapeId, Option<ForwardProducerId>>,
-    ) -> Result<Option<ForwardProducerId>, CompilerError> {
+    ) -> Result<Option<ForwardProducerId>, InfrastructureFailure> {
         if let Some(next) = memo.get(&shape) {
             return Ok(*next);
         }
@@ -2596,7 +2616,7 @@ impl NumericConstructionState {
     pub(crate) fn claim_pending_forward_producer(
         &mut self,
         producer: ForwardProducerId,
-    ) -> Result<Option<(KnownShapeId, DeferredNumericExpression)>, CompilerError> {
+    ) -> Result<Option<(KnownShapeId, DeferredNumericExpression)>, InfrastructureFailure> {
         let row = self.forward_producer_mut(producer)?;
         if !matches!(row.state, ForwardProducerState::Pending(_)) {
             return Ok(None);
@@ -2604,7 +2624,8 @@ impl NumericConstructionState {
         let ForwardProducerState::Pending(fragment) =
             std::mem::replace(&mut row.state, ForwardProducerState::Resolving)
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a pending forward producer changed state while it was claimed",
             ));
         };
@@ -2616,10 +2637,11 @@ impl NumericConstructionState {
         &mut self,
         producer: ForwardProducerId,
         expression: ExprId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let row = self.forward_producer_mut(producer)?;
         if !matches!(row.state, ForwardProducerState::Resolving) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a forward producer completed without being claimed for resolution",
             ));
         }
@@ -2633,7 +2655,7 @@ impl NumericConstructionState {
     pub(crate) fn take_completed_forward_producer(
         &mut self,
         producer: ForwardProducerId,
-    ) -> Result<Option<ExprId>, CompilerError> {
+    ) -> Result<Option<ExprId>, InfrastructureFailure> {
         let row = self.forward_producer_mut(producer)?;
         if !matches!(row.state, ForwardProducerState::Completed(_)) {
             return Ok(None);
@@ -2641,7 +2663,8 @@ impl NumericConstructionState {
         let ForwardProducerState::Completed(expression) =
             std::mem::replace(&mut row.state, ForwardProducerState::Taken)
         else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a completed forward producer changed state while it was taken",
             ));
         };
@@ -2660,11 +2683,14 @@ impl NumericConstructionState {
     fn forward_producer_mut(
         &mut self,
         producer: ForwardProducerId,
-    ) -> Result<&mut ForwardProducer, CompilerError> {
+    ) -> Result<&mut ForwardProducer, InfrastructureFailure> {
         self.forward_producers
             .get_mut(producer.as_usize())
             .ok_or_else(|| {
-                CompilerError::compiler_error("a forward producer ID named no registered row")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "a forward producer ID named no registered row",
+                )
             })
     }
 }
@@ -2675,11 +2701,12 @@ impl NumericConstructionState {
 ///       error instead of truncating or wrapping.
 /// WHY: dense IDs are the only identity in the body-owned construction tables; a wrapped ID
 ///      would alias an existing row, so an exhausted table is an internal resource failure.
-fn checked_dense_id(len: usize, table: &'static str) -> Result<u32, CompilerError> {
+fn checked_dense_id(len: usize, table: &'static str) -> Result<u32, InfrastructureFailure> {
     u32::try_from(len).map_err(|_| {
-        CompilerError::compiler_error(format!(
-            "numeric construction {table} table exhausted its compact 32-bit ID capacity"
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("numeric construction {table} table exhausted its compact 32-bit ID capacity"),
+        )
     })
 }
 
@@ -2731,17 +2758,10 @@ pub(crate) fn numeric_receiver_conflict(
     found: TypeId,
     receiver_span: Option<SourceSpan>,
     recipe_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        expected,
-        found,
-        TypeMismatchContext::General,
-        receiver_span,
-    );
+) -> DiagnosticDraft {
+    let diagnostic = type_mismatch(expected, found, TypeMismatchContext::General, receiver_span);
     match recipe_span {
-        Some(recipe_span) => {
-            diagnostic.with_labels(vec![DiagnosticLabel::secondary(Some(recipe_span), None)])
-        }
+        Some(recipe_span) => diagnostic.with_label(Some(recipe_span), None),
         None => diagnostic,
     }
 }
@@ -2750,17 +2770,15 @@ pub(crate) fn numeric_receiver_conflict(
 pub(crate) fn conflicting_receiver_diagnostic(
     first: ReceiverWitness,
     second: ReceiverWitness,
-) -> CompilerDiagnostic {
-    let diagnostic = CompilerDiagnostic::type_mismatch(
+) -> DiagnosticDraft {
+    let diagnostic = type_mismatch(
         first.type_id,
         second.type_id,
         TypeMismatchContext::General,
         second.span,
     );
     match first.span {
-        Some(first_span) => {
-            diagnostic.with_labels(vec![DiagnosticLabel::secondary(Some(first_span), None)])
-        }
+        Some(first_span) => diagnostic.with_label(Some(first_span), None),
         None => diagnostic,
     }
 }
@@ -2806,8 +2824,7 @@ pub(crate) fn family_receives_recipe(
 /// Result of one construction-table operation.
 ///
 /// WHAT: reuses the expression parser's existing failure lane: an authored numeric conflict is a
-///       `CompilerDiagnostic` and a broken construction invariant is a typed `CompilerError`.
-/// WHY: completion runs at the body root but reports through the same lane as the statements it
+///       `DiagnosticDraft` and a broken construction invariant is a typed `InfrastructureFailure`.
 ///      resumes, so no second error envelope exists.
 pub(crate) type ConstructionResult<T> = Result<T, ExpressionParseError>;
 

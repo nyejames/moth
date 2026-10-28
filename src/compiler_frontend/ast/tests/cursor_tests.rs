@@ -312,9 +312,7 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
         .subcursor_window(1, 3)
         .expect("interior window should validate against canonical backing");
 
-    let declaration = child
-        .declaration_cursor()
-        .expect("a canonical window should produce a declaration cursor");
+    let declaration = child.declaration_cursor();
 
     assert_eq!(declaration.position(), 1);
     assert_eq!(
@@ -336,9 +334,7 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
         "a declaration cursor must not reach the trailing source EOF"
     );
 
-    let mut walking = child
-        .declaration_cursor()
-        .expect("a canonical window should produce a declaration cursor");
+    let mut walking = child.declaration_cursor();
     assert_eq!(walking.current_tag(), TokenTag::BOOL_LITERAL);
     assert_eq!(walking.peek_next_tag(), Some(TokenTag::BOOL_LITERAL));
     walking.advance();
@@ -385,9 +381,7 @@ fn declaration_cursor_inherits_segmented_parser_window() {
         .subcursor_window(1, 2)
         .expect("dense window should validate against canonical backing");
 
-    let declaration = child
-        .declaration_cursor()
-        .expect("a canonical window should produce a declaration cursor");
+    let declaration = child.declaration_cursor();
 
     assert_eq!(declaration.position(), 1);
     assert_eq!(declaration.length, 2);
@@ -414,9 +408,7 @@ fn declaration_cursor_respects_a_stricter_parent_limit() {
         .set_limit(2)
         .expect("a limit inside the bounded range should be accepted");
 
-    let declaration = cursor
-        .declaration_cursor()
-        .expect("a limited canonical cursor should produce a declaration cursor");
+    let declaration = cursor.declaration_cursor();
     assert_eq!(declaration.length, 2);
     assert_declaration_bool(&declaration, 1, true);
     assert!(
@@ -425,9 +417,7 @@ fn declaration_cursor_respects_a_stricter_parent_limit() {
     );
 
     cursor.restore_limit(restore);
-    let restored = cursor
-        .declaration_cursor()
-        .expect("restoring the limit should keep the cursor usable");
+    let restored = cursor.declaration_cursor();
     assert_eq!(
         restored.length, 4,
         "restoring a limit returns the natural range end"

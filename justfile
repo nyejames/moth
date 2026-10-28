@@ -55,7 +55,7 @@ clippy:
 # Broader coverage is named explicitly rather than hidden inside ordinary `cargo clippy`.
 # The manifest's shared warning policy applies here and to direct commands alike.
 clippy-features:
-    cargo clippy --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/data_layout_memory_probe,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks,moth-cli/timers,moth-cli/detailed_timers,moth-cli/benchmark_counters,moth-cli/data_layout_memory_probe,moth-cli/show_tokens,moth-cli/show_headers,moth-cli/show_ast,moth-cli/show_eval,moth-cli/show_hir,moth-cli/show_codegen,moth-cli/show_borrow_checker,moth-cli/checked_blocks,moth-cli/async_blocks
+    cargo clippy --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/data_layout_memory_probe,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks,moth/test_compiler_bug,moth-cli/timers,moth-cli/detailed_timers,moth-cli/benchmark_counters,moth-cli/data_layout_memory_probe,moth-cli/show_tokens,moth-cli/show_headers,moth-cli/show_ast,moth-cli/show_eval,moth-cli/show_hir,moth-cli/show_codegen,moth-cli/show_borrow_checker,moth-cli/checked_blocks,moth-cli/async_blocks,moth-cli/test_compiler_bug
 
 validate-unit-tests:
     cargo test --workspace --quiet -- --format terse
@@ -150,6 +150,13 @@ boracle-campaign:
     cargo clippy -p moth-cli --all-targets --features boracle,boracle_campaign
     cargo test -p moth --quiet --features boracle,boracle_campaign boracle_generated_differential_campaign -- --format terse
     cargo test -p moth-cli --quiet --features boracle,boracle_campaign -- --format terse
+
+compiler-bug-test:
+    cargo test -p moth --lib --features test_compiler_bug compiler_bug_test_trigger_produces_a_structured_report
+    cargo test -p moth-cli --test cli_exit_status --features test_compiler_bug compiler_bug_exit_is_distinct_and_reported_once
+    cargo test -p moth-cli --test cli_exit_status --features test_compiler_bug build_compiler_bug_exit_is_distinct_and_reported_once
+    cargo test -p moth-cli --test cli_exit_status --features test_compiler_bug unknown_panic_uses_the_previous_hook_without_repeating_details
+    cargo test -p moth-cli --test cli_exit_status --features boracle,test_compiler_bug boracle_compiler_bug_exit_is_distinct_and_reported_once
 
 # Refresh integration inventory before the composed honesty audit reads it.
 test-honesty-audit:

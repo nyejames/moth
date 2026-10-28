@@ -9,6 +9,10 @@
 use super::*;
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::public_interface::{
     PublicGenericParameterSurface, PublicTraitParameterContract, PublicTraitReceiverAccess,
     TraitSurfaceTypeIdentity,
@@ -30,7 +34,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         trait_environment: &mut TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), ExpressionParseError> {
         let mut imported_traits = self
             .binding_environment
             .imported_declarations_by_origin
@@ -49,7 +53,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         imported_traits.sort_by(|left, right| left.0.cmp(&right.0));
 
         for (trait_origin, semantics) in &imported_traits {
-            let trait_path = imported_trait_path(trait_origin, string_table, self.path_fork);
+            let trait_path = imported_trait_path(trait_origin, string_table, self.path_fork)?;
             let trait_name = string_table.intern(trait_origin.defining_name());
             let this_name = string_table.intern("This");
             let this_type = self
@@ -81,9 +85,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 visibility: TraitVisibility::Source { exported: true },
             };
             if trait_environment.insert(definition).is_some() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Two imported trait origins produced the same consumer-local trait path.",
-                ));
+                )
+                .into());
             }
             trait_environment.register_canonical_identity(
                 CanonicalTraitIdentity::Source(trait_origin.clone()),
@@ -97,7 +103,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let trait_id = trait_environment
                 .id_for_canonical_identity(&trait_identity)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported trait projection omitted its canonical local identity.",
                     )
                 })?;
@@ -106,7 +113,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let incompatible_id = trait_environment
                     .id_for_canonical_identity(incompatible_identity)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "Imported trait incompatibility names a trait absent from the provider closure.",
                         )
                     })?;
@@ -136,7 +143,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let trait_id = trait_environment
                 .id_for_canonical_identity(&identity)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "A visible imported trait has no projected canonical definition.",
                     )
                 })?;
@@ -153,12 +161,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         requirement_id: TraitRequirementId,
         requirement: &crate::compiler_frontend::public_interface::PublicTraitRequirementSurface,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedTraitRequirement, CompilerError> {
+    ) -> Result<ResolvedTraitRequirement, ExpressionParseError> {
         let requirement_name = string_table.intern(&requirement.name);
         let requirement_path = self
             .path_fork
             .try_intern_child(*trait_path, requirement_name)
-            .expect("imported trait requirement path table exhausted");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
         let receiver = match requirement.receiver_access {
             PublicTraitReceiverAccess::Immutable => {
                 TraitReceiverRequirement::Immutable { this_type }
@@ -189,7 +197,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 name: self
                     .path_fork
                     .try_intern_child(requirement_path, name)
-                    .expect("imported trait parameter path table exhausted"),
+                    .ok_or_else(token_lexical::logical_path_capacity)?,
                 value_mode: parameter.value_mode,
                 type_id,
                 span: None,
@@ -222,7 +230,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         identity: &TraitSurfaceTypeIdentity,
         this_type: TypeId,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, InfrastructureFailure> {
         match identity {
             TraitSurfaceTypeIdentity::SelfType => Ok(this_type),
             TraitSurfaceTypeIdentity::Concrete(identity) => {
@@ -239,7 +247,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn resolve_imported_bounds_by_local(
         surfaces: &[PublicGenericParameterSurface],
         trait_environment: &TraitEnvironment,
-    ) -> Result<FxHashMap<TypeParameterId, Vec<TraitId>>, CompilerError> {
+    ) -> Result<FxHashMap<TypeParameterId, Vec<TraitId>>, InfrastructureFailure> {
         let mut bounds_by_local = FxHashMap::default();
 
         for (index, parameter) in surfaces.iter().enumerate() {
@@ -249,12 +257,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let trait_id = trait_environment
                     .id_for_canonical_identity(bound)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "An imported generic bound names a trait absent from the provider closure.",
                         )
                     })?;
                 if !seen.insert(trait_id) {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "An imported generic parameter contains a duplicate canonical trait bound.",
                     ));
                 }
@@ -276,7 +285,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn resolve_dependencyed_generic_parameter_bounds(
         &mut self,
         trait_environment: &TraitEnvironment,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let registrations = self.imported_generic_parameter_registrations.clone();
 
         for registration in registrations {
@@ -300,7 +309,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &bounds_by_local,
                 )
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported method contract disagrees with its owner parameter list.",
                     )
                 })?;
@@ -328,7 +338,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         evidence_environment: &mut TraitEvidenceEnvironment,
         string_table: &StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         // Evidence is already keyed by canonical identity and agreement-checked when provider
         // semantics are imported; project it in deterministic identity order.
         let mut unique_evidence = self
@@ -345,12 +355,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let trait_id = trait_environment
                 .id_for_canonical_identity(evidence.identity.trait_identity())
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "Imported reusable evidence names a trait absent from the provider closure.",
                     )
                 })?;
             let trait_definition = trait_environment.get(trait_id).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Imported reusable evidence resolved to a missing local trait definition.",
                 )
             })?;
@@ -360,7 +371,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 if mapping.requirement_identity.trait_identity()
                     != evidence.identity.trait_identity()
                 {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Imported reusable evidence maps a requirement owned by another trait.",
                     ));
                 }
@@ -372,14 +384,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             == mapping.requirement_identity.requirement_name()
                     })
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Imported reusable evidence names a missing trait requirement.",
                         )
                     })?;
                 let method_path = self
                     .imported_method_path(&mapping.method_origin)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "Imported reusable evidence has no visible projected receiver method target.",
                         )
                     })?;
@@ -390,7 +403,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
 
             if requirements.len() != trait_definition.requirements.len() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Imported reusable evidence does not map every trait requirement.",
                 ));
             }
@@ -420,7 +434,7 @@ fn imported_trait_path(
     origin: &OriginTraitId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> PathId {
+) -> Result<PathId, DiagnosticDraft> {
     let package_origin = match origin.module_origin().package().origin() {
         crate::builder_surface::PackageOrigin::Core => "core",
         crate::builder_surface::PackageOrigin::Builder => "builder",
@@ -445,8 +459,8 @@ fn imported_trait_path(
         if !component.is_empty() {
             path = path_fork
                 .try_intern_child(path, string_table.intern(component))
-                .expect("imported trait path table exhausted");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
         }
     }
-    path
+    Ok(path)
 }

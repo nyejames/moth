@@ -55,9 +55,15 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CapacityResource;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCallShapeReason, ValueReceiverContext,
+    DiagnosticBag, InvalidCallShapeReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
@@ -81,7 +87,7 @@ pub(crate) struct GenericFunctionCallParseInput<'a, 'b, 'tokens> {
     pub(crate) value_required: bool,
     pub(crate) allow_boundary_catch: bool,
     pub(crate) call_span: Option<SourceSpan>,
-    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) warnings: Option<&'a mut DiagnosticBag>,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
     pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) const_values: &'a mut ConstValueStore,
@@ -110,7 +116,7 @@ struct GenericFunctionCallFinishInput<'a, 'b, 'tokens> {
     error_return_type_id: Option<TypeId>,
     value_required: bool,
     allow_boundary_catch: bool,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&'a mut DiagnosticBag>,
     type_interner: &'a mut AstTypeInterner<'b>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
@@ -750,7 +756,8 @@ pub(crate) fn verify_completed_error_return(
     if agrees {
         return Ok(());
     }
-    Err(CompilerError::compiler_error(
+    Err(InfrastructureFailure::internal(
+        CompilerStage::GenericMaterialisation,
         "generic call error return changed between retained parse and completion",
     )
     .into())
@@ -772,10 +779,10 @@ pub(crate) fn verify_retained_propagation_error(
         return Ok(());
     };
     let Some(actual_error_type_id) = completed_error_type_id else {
-        return Err(CompilerError::compiler_error(
+        crate::compiler_bug!(
+            CompilerStage::GenericMaterialisation,
             "a retained generic call completed without the error slot it was linked to",
-        )
-        .into());
+        );
     };
     validate_postfix_propagation_contract(
         context,
@@ -801,11 +808,12 @@ fn finish_retained_generic_call(
     let call_span = call.call_span;
     match authored_handling {
         DeferredCallHandling::Propagate { span } => {
-            let error_type = error_return_type_id.ok_or_else(|| {
-                CompilerError::compiler_error(
+            let Some(error_type) = error_return_type_id else {
+                crate::compiler_bug!(
+                    CompilerStage::GenericMaterialisation,
                     "propagating generic call completed without an error contract",
-                )
-            })?;
+                );
+            };
             let expression = expression_builder
                 .handled_fallible_function_call_with_typed_arguments(
                     call.name,
@@ -878,7 +886,7 @@ fn finish_generic_function_call(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
             );
-            return Err(CompilerDiagnostic::invalid_fallible_handling(
+            return Err(invalid_fallible_handling(
                 non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
@@ -1109,6 +1117,7 @@ fn infer_generic_function_call_with_expectations(
         type_arguments.as_ref(),
         path_fork,
         string_table,
+        call_span,
     )?;
 
     Ok(GenericFunctionInference {
@@ -1196,10 +1205,10 @@ fn validate_substituted_route_contracts(
             continue;
         };
         let Some(parameter) = signature.parameters.get(slot) else {
-            return Err(CompilerError::compiler_error(
+            crate::compiler_bug!(
+                CompilerStage::GenericMaterialisation,
                 "a routed generic argument exceeded its substituted signature",
-            )
-            .into());
+            );
         };
         let ParameterContract::Route { input } = parameter.contract else {
             continue;
@@ -1218,7 +1227,7 @@ fn validate_substituted_route_contracts(
             } else {
                 InvalidCallShapeReason::RouteArgumentNotDirect
             };
-            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+            return Err(invalid_call_shape(reason, None, argument.span).into());
         }
 
         if let Some(expected_input_type) = input
@@ -1240,7 +1249,7 @@ fn validate_substituted_route_contracts(
             } else {
                 InvalidCallShapeReason::RouteInputFieldMismatch
             };
-            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+            return Err(invalid_call_shape(reason, None, argument.span).into());
         }
     }
 
@@ -1454,7 +1463,7 @@ fn binding_conflict_diagnostic(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
     span: Option<SourceSpan>,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+) -> DiagnosticDraft {
     let parameter_name = type_environment
         .generic_parameters(template.generic_parameter_list_id)
         .and_then(|list| {
@@ -1522,7 +1531,8 @@ pub(crate) fn generic_function_instance_path(
     type_arguments: &[TypeId],
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<PathId, CompilerError> {
+    call_span: Option<SourceSpan>,
+) -> Result<PathId, DiagnosticDraft> {
     // WHAT: builds an internal-only path for a concrete generic function instance.
     // WHY: instances are emitted into the consuming module's AST/HIR and are not
     //      user-visible, dependency-bindable, or namespace-exposed.
@@ -1537,8 +1547,6 @@ pub(crate) fn generic_function_instance_path(
     path_fork
         .try_intern_child(function_path, component)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "path table exhausted while creating generic function instance",
-            )
+            token_lexical::compiler_capacity_exceeded(CapacityResource::PathNodes, call_span)
         })
 }

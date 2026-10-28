@@ -11,9 +11,13 @@
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_receiver_declaration;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverCallReason, InvalidReceiverDeclarationReason,
+    InvalidReceiverCallReason, InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -23,18 +27,18 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use rustc_hash::FxHashMap;
 
 pub(crate) enum ReceiverMethodCatalogError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(Box<InfrastructureFailure>),
 }
 
-impl From<CompilerDiagnostic> for ReceiverMethodCatalogError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for ReceiverMethodCatalogError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         ReceiverMethodCatalogError::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for ReceiverMethodCatalogError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for ReceiverMethodCatalogError {
+    fn from(error: InfrastructureFailure) -> Self {
         ReceiverMethodCatalogError::Infrastructure(Box::new(error))
     }
 }
@@ -117,7 +121,7 @@ pub(crate) struct BuildReceiverMethodCatalogInput<'a> {
 }
 
 /// Render a human-readable receiver name for diagnostics.
-pub(crate) fn receiver_kind_label(receiver: &ReceiverKey, _string_table: &StringTable) -> String {
+pub(crate) fn receiver_kind_label(receiver: &ReceiverKey) -> String {
     match receiver {
         ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => format!("{path:?}"),
         ReceiverKey::External(type_id) => format!("External({})", type_id.0),
@@ -131,11 +135,11 @@ pub(crate) fn free_function_receiver_method_call_error(
     method_entry: &ReceiverMethodEntry,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    let receiver_label = receiver_kind_label(&method_entry.receiver, string_table);
+) -> DiagnosticDraft {
+    let receiver_label = receiver_kind_label(&method_entry.receiver);
     let receiver_type_id = string_table.intern(&receiver_label);
 
-    CompilerDiagnostic::invalid_receiver_call(
+    invalid_receiver_call(
         InvalidReceiverCallReason::CalledAsFreeFunction,
         Some(receiver_type_id),
         Some(method_name),
@@ -157,18 +161,18 @@ fn validate_source_receiver_method_declaration(
     struct_source_by_path: &FxHashMap<PathId, PathId>,
     choice_source_by_path: &FxHashMap<PathId, PathId>,
     span: Option<SourceSpan>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     match receiver {
         ReceiverKey::Struct(struct_path) => {
             let Some(struct_source_file) = struct_source_by_path.get(struct_path) else {
-                return Err(CompilerDiagnostic::invalid_receiver_declaration(
+                return Err(invalid_receiver_declaration(
                     InvalidReceiverDeclarationReason::UnknownStructTarget,
                     span,
                 ));
             };
 
             if struct_source_file != method_source_file {
-                return Err(CompilerDiagnostic::invalid_receiver_declaration(
+                return Err(invalid_receiver_declaration(
                     InvalidReceiverDeclarationReason::NonlocalSourceType,
                     span,
                 ));
@@ -177,14 +181,14 @@ fn validate_source_receiver_method_declaration(
 
         ReceiverKey::Choice(choice_path) => {
             let Some(choice_source_file) = choice_source_by_path.get(choice_path) else {
-                return Err(CompilerDiagnostic::invalid_receiver_declaration(
+                return Err(invalid_receiver_declaration(
                     InvalidReceiverDeclarationReason::UnknownStructTarget,
                     span,
                 ));
             };
 
             if choice_source_file != method_source_file {
-                return Err(CompilerDiagnostic::invalid_receiver_declaration(
+                return Err(invalid_receiver_declaration(
                     InvalidReceiverDeclarationReason::NonlocalSourceType,
                     span,
                 ));
@@ -192,14 +196,14 @@ fn validate_source_receiver_method_declaration(
         }
 
         ReceiverKey::External(_) => {
-            return Err(CompilerDiagnostic::invalid_receiver_declaration(
+            return Err(invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ExternalOpaqueType,
                 span,
             ));
         }
 
         ReceiverKey::BuiltinScalar(_) => {
-            return Err(CompilerDiagnostic::invalid_receiver_declaration(
+            return Err(invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::BuiltinScalarType,
                 span,
             ));
@@ -245,14 +249,17 @@ pub(crate) fn build_receiver_method_catalog(
             .get(&header.declaration_path)
             .copied()
         else {
-            return Err(CompilerError::compiler_error(format!(
-                "Receiver method '{}' is missing canonical source-file metadata.",
-                input.path_fork.render_portable(
-                    header.declaration_path,
-                    input.string_table,
-                    &mut Vec::new(),
-                )
-            ))
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Receiver method '{}' is missing canonical source-file metadata.",
+                    input.path_fork.render_portable(
+                        header.declaration_path,
+                        input.string_table,
+                        &mut Vec::new(),
+                    )
+                ),
+            )
             .into());
         };
 
@@ -277,7 +284,7 @@ pub(crate) fn build_receiver_method_catalog(
                         .any(|field| input.path_fork.component(field.id) == Some(method_name))
                 })
         {
-            return Err(CompilerDiagnostic::invalid_receiver_declaration(
+            return Err(invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::FieldNameConflict,
                 header.name_span,
             )
@@ -291,7 +298,7 @@ pub(crate) fn build_receiver_method_catalog(
         if let Some(existing_entries) = catalog.by_receiver_and_name.get(&key) {
             for existing_entry in existing_entries {
                 if existing_entry.source_file == method_source_file {
-                    return Err(CompilerDiagnostic::invalid_receiver_declaration(
+                    return Err(invalid_receiver_declaration(
                         InvalidReceiverDeclarationReason::DuplicateMethod,
                         header.name_span,
                     )

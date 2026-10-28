@@ -5,6 +5,7 @@
 //! WHY: the compiler frontend deals with thousands of repeated identifiers, paths, and keywords;
 //!      interning is one of the cheapest ways to lower allocation overhead and speed up lookups.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
@@ -55,8 +56,12 @@ pub(crate) trait StringTableResolver {
 impl StringTableResolver for StringTable {
     #[inline]
     fn resolve(&self, id: StringId) -> &str {
-        StringTable::try_resolve(self, id)
-            .unwrap_or_else(|| panic!("StringTableResolver received invalid {id}"))
+        StringTable::try_resolve(self, id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "StringTableResolver received invalid {id}"
+            )
+        })
     }
 
     #[inline]
@@ -67,9 +72,12 @@ impl StringTableResolver for StringTable {
 impl StringTableResolver for Box<StringTable> {
     #[inline]
     fn resolve(&self, id: StringId) -> &str {
-        self.as_ref()
-            .try_resolve(id)
-            .unwrap_or_else(|| panic!("StringTableResolver received invalid {id}"))
+        self.as_ref().try_resolve(id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "StringTableResolver received invalid {id}"
+            )
+        })
     }
 
     #[inline]
@@ -81,8 +89,12 @@ impl StringTableResolver for Box<StringTable> {
 impl StringTableResolver for FrozenStringTable {
     #[inline]
     fn resolve(&self, id: StringId) -> &str {
-        FrozenStringTable::try_resolve(self, id)
-            .unwrap_or_else(|| panic!("StringTableResolver received invalid {id}"))
+        FrozenStringTable::try_resolve(self, id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "StringTableResolver received invalid {id}"
+            )
+        })
     }
 
     #[inline]
@@ -122,6 +134,11 @@ impl StringIdRemap {
     pub fn is_identity(&self) -> bool {
         self.is_identity
     }
+
+    /// Number of source IDs that are unchanged in the remap.
+    pub(crate) fn identity_prefix_len(&self) -> usize {
+        self.identity_prefix_len
+    }
 }
 
 /// Shared immutable prefix used by module-local string-table forks.
@@ -131,7 +148,7 @@ impl StringIdRemap {
 /// the inherited reverse lookup map.
 #[derive(Debug)]
 struct StringTableBase {
-    strings: Box<[Box<str>]>,
+    strings: Box<[Arc<str>]>,
     string_to_id: FxHashMap<&'static str, StringId>,
 }
 
@@ -139,11 +156,12 @@ impl StringTableBase {
     fn from_table(table: &StringTable) -> Self {
         increment_frontend_counter(FrontendCounter::StringTableForkSourceBaseCopies);
 
-        let strings = table
-            .iter()
-            .map(|(_, string)| Box::<str>::from(string))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+        let mut strings = Vec::with_capacity(table.len());
+        if let Some(base) = &table.base {
+            strings.extend(base.strings.iter().cloned());
+        }
+        strings.extend(table.strings.iter().cloned());
+        let strings = strings.into_boxed_slice();
 
         let mut string_to_id =
             FxHashMap::with_capacity_and_hasher(strings.len(), Default::default());
@@ -215,7 +233,7 @@ impl StringTableFork {
 ///      without keeping a mutable interner or allocating a second copy of every string.
 #[derive(Debug, PartialEq, Eq)]
 pub struct FrozenStringTable {
-    strings: Box<[Box<str>]>,
+    strings: Box<[Arc<str>]>,
 }
 
 impl FrozenStringTable {
@@ -230,7 +248,7 @@ impl FrozenStringTable {
     pub(crate) fn storage_bytes(&self) -> usize {
         self.strings
             .len()
-            .saturating_mul(std::mem::size_of::<Box<str>>())
+            .saturating_mul(std::mem::size_of::<Arc<str>>())
             .saturating_add(
                 self.strings
                     .iter()
@@ -244,8 +262,12 @@ impl FrozenStringTable {
     /// Panics when the ID was not issued by this table.
     #[inline]
     pub fn resolve(&self, id: StringId) -> &str {
-        self.try_resolve(id)
-            .unwrap_or_else(|| panic!("FrozenStringTable::resolve received invalid {id}"))
+        self.try_resolve(id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "FrozenStringTable::resolve received invalid {id}"
+            )
+        })
     }
 
     /// Resolve an interned string ID, or `None` when the handle is not in this table.
@@ -285,7 +307,7 @@ pub struct StringTable {
     ///
     /// Build tables have no base, so this contains every string. Forked tables keep only strings
     /// interned after the fork's base length.
-    strings: Vec<Box<str>>,
+    strings: Vec<Arc<str>>,
 
     /// Local reverse lookup for fast interning.
     ///
@@ -293,7 +315,8 @@ pub struct StringTable {
     /// for forked tables.
     string_to_id: FxHashMap<&'static str, StringId>,
 
-    /// Next available string ID
+    /// Next available string ID. Exhausting the u32 space would need hundreds of gigabytes of
+    /// retained strings, so the checked increment is a guard, not a reachable limit.
     next_id: u32,
 }
 
@@ -309,7 +332,7 @@ impl Clone for StringTable {
 
         let strings = self
             .iter()
-            .map(|(_, string)| Box::<str>::from(string))
+            .map(|(_, string)| Arc::<str>::from(string))
             .collect::<Vec<_>>();
         let mut string_to_id =
             FxHashMap::with_capacity_and_hasher(strings.len(), Default::default());
@@ -341,6 +364,23 @@ impl StringTable {
         }
     }
 
+    /// Create an empty table without reserving storage for an identity already owned elsewhere.
+    pub(crate) fn empty_unallocated() -> Self {
+        Self {
+            base: None,
+            next_id: 0,
+            strings: Vec::new(),
+            string_to_id: FxHashMap::default(),
+        }
+    }
+    /// Move this table to another owner without allocating a replacement string buffer.
+    ///
+    /// Call when the current producer is done interning; the empty replacement has no reserved
+    /// capacity because the transferred identity allocation belongs to the recipient.
+    pub(crate) fn take_for_handoff(&mut self) -> Self {
+        std::mem::replace(self, Self::empty_unallocated())
+    }
+
     /// Create a new string table with a specified initial capacity
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -362,21 +402,17 @@ impl StringTable {
 
     /// Clone this table while retaining any inherited shared prefix.
     ///
-    /// Ordinary [`Clone`] deliberately flattens the table into independent storage. Generated
-    /// preparation contexts instead remain in the same compilation batch, so they can share the
-    /// inherited prefix and copy only their local suffix. A root table has no inherited prefix and
-    /// therefore still performs one full clone.
+    /// Ordinary [`Clone`] deliberately flattens the table into independent string allocations.
+    /// Generated preparation contexts instead remain in the same compilation batch, so they can
+    /// share the inherited prefix and fork local storage while sharing each immutable string.
+    /// For a root table, its full identity becomes the shared inherited prefix.
     pub(crate) fn clone_preserving_inherited_prefix(&self) -> Self {
         if self.base.is_none() {
-            return self.clone();
+            return Self::from_shared_base(Arc::new(StringTableBase::from_table(self)));
         }
 
         let base_len = self.base_len();
-        let strings = self
-            .strings
-            .iter()
-            .map(|string| Box::<str>::from(string.as_ref()))
-            .collect::<Vec<_>>();
+        let strings = self.strings.to_vec();
         let mut string_to_id =
             FxHashMap::with_capacity_and_hasher(strings.len(), Default::default());
         for (index, string) in strings.iter().enumerate() {
@@ -424,22 +460,21 @@ impl StringTable {
     #[cold]
     #[inline(never)]
     fn intern_new(&mut self, s: &str) -> StringId {
-        let new_id = StringId(self.next_id);
-        self.next_id += 1;
+        let new_id = self.allocate_id();
 
-        // Box<str> is more memory efficient than String (no capacity field)
-        let boxed: Box<str> = s.into();
+        // Arc<str> lets frozen snapshots share immutable string bytes with the live table.
+        let shared: Arc<str> = Arc::from(s);
 
-        // SAFETY: the reverse lookup stores a reference into the Box<str> owned by this table.
+        // SAFETY: the reverse lookup stores a reference into the Arc<str> owned by this table.
         // The key is only used while the owning table is alive, strings are never removed, and the
-        // heap allocation behind Box<str> remains stable even if the Vec reallocates.
-        let static_ref = Self::static_str_key(boxed.as_ref());
+        // heap allocation behind Arc remains stable if the Vec reallocates or snapshots are made.
+        let static_ref = Self::static_str_key(shared.as_ref());
 
         // Insert into reverse lookup (uses the static ref as key - no allocation!)
         self.string_to_id.insert(static_ref, new_id);
 
         // Store the owned string
-        self.strings.push(boxed);
+        self.strings.push(shared);
 
         new_id
     }
@@ -452,15 +487,19 @@ impl StringTable {
     /// Panics when the ID was not issued by this table.
     #[inline]
     pub fn resolve(&self, id: StringId) -> &str {
-        self.try_resolve(id)
-            .unwrap_or_else(|| panic!("StringTable::resolve received invalid {id}"))
+        self.try_resolve(id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "StringTable::resolve received invalid {id}"
+            )
+        })
     }
 
     /// Resolve an interned string ID, or `None` when the handle is not in this table.
     ///
     /// WHAT: gives retained-state validators a fallible lookup for interned extensions and
     ///       other handles that may have been remapped incorrectly.
-    /// WHY: malformed retained state must become `CompilerError`, not an unchecked index.
+    /// WHY: malformed retained state must become `InfrastructureFailure`, not an unchecked index.
     #[inline]
     pub fn try_resolve(&self, id: StringId) -> Option<&str> {
         let index = id.0 as usize;
@@ -474,8 +513,7 @@ impl StringTable {
             .map(|string| string.as_ref())
     }
 
-    /// Efficiently intern a String by taking ownership, avoiding an extra allocation
-    /// if the string is new.
+    /// Efficiently intern an owned String.
     ///
     /// Time complexity: O(1) average case
     #[inline]
@@ -499,18 +537,32 @@ impl StringTable {
     #[cold]
     #[inline(never)]
     fn intern_new_owned(&mut self, s: String) -> StringId {
-        let new_id = StringId(self.next_id);
-        self.next_id += 1;
+        let new_id = self.allocate_id();
 
-        // Convert directly to Box<str> to avoid keeping String's capacity overhead
-        let boxed: Box<str> = s.into_boxed_str();
+        let shared: Arc<str> = Arc::from(s);
 
         // SAFETY: Same reasoning as intern_new.
-        let static_ref = Self::static_str_key(boxed.as_ref());
+        let static_ref = Self::static_str_key(shared.as_ref());
 
         self.string_to_id.insert(static_ref, new_id);
-        self.strings.push(boxed);
+        self.strings.push(shared);
 
+        new_id
+    }
+
+    /// Issue the next `StringId`.
+    ///
+    /// Every id names a distinct retained `Arc<str>`, so 2^32 ids need far more memory than the
+    /// compiler can hold: exhausting the space is a broken invariant, not an authored input limit.
+    /// Interning runs in every stage, so the reported stage is nominal.
+    fn allocate_id(&mut self) -> StringId {
+        let new_id = StringId(self.next_id);
+        self.next_id = self.next_id.checked_add(1).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "StringTable exhausted its u32 id space"
+            )
+        });
         new_id
     }
 
@@ -531,10 +583,59 @@ impl StringTable {
             self.base.is_none(),
             "StringTable::freeze requires a merged root table"
         );
+        #[cfg(feature = "data_layout_memory_probe")]
+        self.record_memory_ledger_sample();
         debug_assert_eq!(self.next_id as usize, self.strings.len());
 
         FrozenStringTable {
             strings: self.strings.into_boxed_slice(),
+        }
+    }
+
+    /// Capture an immutable lookup snapshot while retaining this mutable table.
+    ///
+    /// The snapshot clones only Arc handles, so existing string allocations are shared and
+    /// later interning cannot change its prefix or StringId ordering.
+    pub(crate) fn freeze_snapshot(&self) -> FrozenStringTable {
+        #[cfg(feature = "data_layout_memory_probe")]
+        self.record_memory_ledger_sample();
+        let mut strings = Vec::with_capacity(self.len());
+        if let Some(base) = &self.base {
+            strings.extend(base.strings.iter().cloned());
+        }
+        strings.extend(self.strings.iter().cloned());
+        debug_assert_eq!(self.next_id as usize, strings.len());
+
+        FrozenStringTable {
+            strings: strings.into_boxed_slice(),
+        }
+    }
+
+    /// Consume this table into immutable lookup storage, flattening a module fork first.
+    ///
+    /// WHAT: a root table freezes exactly as [`Self::freeze`] does. A module fork moves its
+    /// inherited Arc handles when it holds the last reference to the prefix, and otherwise clones
+    /// only those handles while sharing the immutable string allocations. Its local suffix is
+    /// appended unchanged, so every `StringId` keeps its index.
+    /// WHY: a module-local batch can reach the boundary still holding its fork, and the boundary
+    /// needs one flat table without rebuilding inherited string contents.
+    pub(crate) fn freeze_flattening(mut self) -> FrozenStringTable {
+        if self.base.is_none() {
+            return self.freeze();
+        }
+        #[cfg(feature = "data_layout_memory_probe")]
+        self.record_memory_ledger_sample();
+        let base = self.base.take().expect("the string table base was present");
+        let mut strings = Vec::with_capacity(base.len() + self.strings.len());
+        match Arc::try_unwrap(base) {
+            Ok(base) => strings.extend(Vec::from(base.strings)),
+            Err(shared) => strings.extend(shared.strings.iter().cloned()),
+        }
+        strings.append(&mut self.strings);
+        debug_assert_eq!(self.next_id as usize, strings.len());
+
+        FrozenStringTable {
+            strings: strings.into_boxed_slice(),
         }
     }
 
@@ -558,8 +659,8 @@ impl StringTable {
 
     /// Create a reusable fork source for compiling multiple modules or files against the same prefix.
     ///
-    /// Building the shared base copies the current table once. Each fork after that clones only an
-    /// `Arc` and starts with an empty local delta.
+    /// Building the shared base snapshots the IDs and shares the immutable string allocations.
+    /// Each fork then clones only an `Arc` and starts with an empty local delta.
     pub fn fork_source(&self) -> StringTableForkSource {
         StringTableForkSource {
             base: Arc::new(StringTableBase::from_table(self)),
@@ -569,7 +670,8 @@ impl StringTable {
     /// Create one local fork while remembering the inherited prefix length.
     ///
     /// Directory/module compilation should create one `StringTableForkSource` and reuse it for all
-    /// independent module or file workers so the inherited prefix is copied once for the batch.
+    /// independent module or file workers so the inherited string allocations are shared once
+    /// for the batch.
     pub fn fork_for_module(&self) -> StringTableFork {
         self.fork_source().fork_for_module()
     }
@@ -577,6 +679,8 @@ impl StringTable {
     /// Merge all strings from `other` into `self`. Returns a remap so callers can
     /// rewrite `StringId`s that were issued against `other` to IDs valid in `self`.
     pub fn merge_from(&mut self, other: &StringTable) -> StringIdRemap {
+        #[cfg(feature = "data_layout_memory_probe")]
+        let merge_clock = crate::compiler_frontend::instrumentation::start_merge_remap_clock();
         add_frontend_counter(
             FrontendCounter::StringTableMergeFromSourceEntriesScanned,
             other.len(),
@@ -593,11 +697,14 @@ impl StringTable {
             debug_assert_eq!(old_id.0 as usize, old_to_new.len() - 1);
         }
 
-        StringIdRemap {
+        let remap = StringIdRemap {
             identity_prefix_len: 0,
             mapped_suffix: old_to_new,
             is_identity,
-        }
+        };
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_string_merge_remap(merge_clock);
+        remap
     }
 
     /// Merge only strings added after a module fork's inherited prefix.
@@ -606,6 +713,8 @@ impl StringTable {
     /// build table before local compilation started. The returned remap keeps that prefix implicit
     /// and maps only the local suffix that may collide with strings merged from earlier modules.
     pub fn merge_delta_from(&mut self, other: &StringTable, base_len: usize) -> StringIdRemap {
+        #[cfg(feature = "data_layout_memory_probe")]
+        let merge_clock = crate::compiler_frontend::instrumentation::start_merge_remap_clock();
         debug_assert!(base_len <= self.len());
         debug_assert!(base_len <= other.len());
         increment_frontend_counter(FrontendCounter::StringTableDeltaMergeCalls);
@@ -655,11 +764,14 @@ impl StringTable {
             }
         }
 
-        StringIdRemap {
+        let remap = StringIdRemap {
             identity_prefix_len: base_len,
             mapped_suffix,
             is_identity,
-        }
+        };
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_string_merge_remap(merge_clock);
+        remap
     }
 
     #[inline]
@@ -668,6 +780,25 @@ impl StringTable {
         // reference in its reverse lookup map. The owning storage outlives all lookups through that
         // map, and strings are never removed while the map is alive.
         unsafe { std::mem::transmute::<&str, &'static str>(value) }
+    }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    fn record_memory_ledger_sample(&self) {
+        let inherited = self.base.as_deref();
+        crate::compiler_frontend::instrumentation::record_mutable_string_table(
+            self.strings
+                .capacity()
+                .saturating_mul(std::mem::size_of::<Arc<str>>()),
+            self.strings.iter().map(|string| string.len()).sum(),
+            self.string_to_id.capacity(),
+            inherited.map_or(0, |base| base.strings.len()),
+            inherited.map_or(0, |base| {
+                base.strings
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Arc<str>>())
+            }),
+            inherited.map_or(0, |base| base.string_to_id.capacity()),
+        );
     }
 
     #[inline]

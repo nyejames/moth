@@ -192,7 +192,6 @@ pub(crate) fn build_samply_command(input: &SamplyRunInput) -> Command {
         .arg("-o")
         .arg(&input.output_path);
 
-    // Optional sampling rate.
     if let Some(rate) = input.samply_rate_hz {
         cmd.arg("--rate").arg(rate.to_string());
     }
@@ -255,7 +254,6 @@ pub(crate) fn run_samply(input: &SamplyRunInput) -> Result<ProfileProcessRun, St
         });
     }
 
-    // Verify Samply actually wrote the output file.
     if !input.output_path.exists() {
         return Err(format!(
             "Samply exited successfully but the profile file was not created at '{}'.\n\

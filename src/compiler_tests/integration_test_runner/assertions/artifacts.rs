@@ -580,7 +580,7 @@ fn strip_element_content(html: &str, element: &str) -> String {
 /// Verifies the baseline HTML backend interop/output contract.
 ///
 /// WHAT: requires a built `index.html` HTML artifact that satisfies the document shell contract.
-/// WHY: replacing legacy path assertions still needs a deterministic minimum output guarantee.
+/// WHY: artifact-index assertions need a deterministic minimum output guarantee.
 pub(super) fn validate_html_baseline_contract(index: &BuiltArtifactIndex<'_>) -> Option<String> {
     validate_html_baseline_document(index, "html").err()
 }

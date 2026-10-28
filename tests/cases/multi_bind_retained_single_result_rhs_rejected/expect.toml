@@ -4,7 +4,7 @@ entry = "."
 # multi-bind boundary must reject the accepted retained shape before assuming a
 # call signature. The expected reason is the same structured RHS shape
 # diagnostic the completed classifier reports for a non-tuple RHS; an internal
-# CompilerError instead fails the case through the missing diagnostic contract.
+# InfrastructureFailure instead fails the case through the missing diagnostic contract.
 
 [backends.html]
 mode = "failure"

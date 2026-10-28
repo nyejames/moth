@@ -6,8 +6,11 @@
 //!
 
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 
@@ -59,14 +62,14 @@ impl ProjectPathResolver {
         source_package_roots: PreparedSourcePackageRoots,
         source_file_kinds: &SourceFileKindRegistry,
         module_roots: ModuleRootTable,
-    ) -> Result<Self, CompilerError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             project_root,
             entry_root,
             source_package_roots,
             module_roots,
             source_file_kinds: source_file_kinds.clone(),
-        })
+        }
     }
 
     /// Derive a resolver scoped to one independently compiled source-package boundary.
@@ -182,7 +185,7 @@ impl ProjectPathResolver {
     pub(crate) fn logical_path_for_canonical_file(
         &self,
         canonical_file: &Path,
-    ) -> Result<PathBuf, CompilerError> {
+    ) -> Result<PathBuf, InfrastructureFailure> {
         if let Ok(relative_to_entry_root) = canonical_file.strip_prefix(&self.entry_root) {
             return Ok(relative_to_entry_root.to_path_buf());
         }
@@ -201,7 +204,8 @@ impl ProjectPathResolver {
             return Ok(logical);
         }
 
-        Err(CompilerError::file_error(
+        Err(InfrastructureFailure::filesystem(
+            CompilerStage::DependencyResolution,
             canonical_file,
             format!(
                 "Source file '{}' is outside both entry root '{}' and project root '{}'",
@@ -222,20 +226,26 @@ impl ProjectPathResolver {
         declaring_file: &Path,
         string_table: &mut StringTable,
     ) -> Result<ResolvedDependencyFile, DependencyPathResolutionError> {
+        let mut strings = DiagnosticStringBuilder::new(string_table);
         let (_, canonical) = self.resolve_dependency_as_compile_time_path(
             dependency_path,
             path_fork,
             declaring_file,
-            string_table,
+            &mut strings,
         )?;
         let source_kind = self
             .source_kind_for_canonical_path(&canonical)
             .ok_or_else(|| {
-                CompilerError::file_error(
+                InfrastructureFailure::filesystem(
+                    CompilerStage::DependencyResolution,
                     declaring_file,
                     format!(
                         "Resolved dependency '{}' to '{}' but could not determine its source kind.",
-                        path_fork.render_portable(dependency_path, string_table, &mut Vec::new()),
+                        path_fork.render_portable(
+                            dependency_path,
+                            strings.strings(),
+                            &mut Vec::new(),
+                        ),
                         canonical.display()
                     ),
                 )
@@ -255,25 +265,22 @@ impl ProjectPathResolver {
         dependency_path: PathId,
         path_fork: &PathInternerFork,
         declaring_file: &Path,
-        string_table: &mut StringTable,
+        strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(CompileTimePathBase, PathBuf), DependencyPathResolutionError> {
-        if let Some(extension) = explicit_source_extension(dependency_path, path_fork, string_table)
+        if let Some(extension) =
+            explicit_source_extension(dependency_path, path_fork, strings.strings())
         {
             let diagnostic = if extension == SourceFileKind::Moth.extension() {
-                CompilerDiagnostic::explicit_moth_extension(dependency_path.to_owned(), None)
+                imports::explicit_moth_extension(dependency_path.to_owned(), None)
             } else {
-                let extension_id = string_table.intern(&extension);
-                CompilerDiagnostic::explicit_source_extension(
-                    dependency_path.to_owned(),
-                    extension_id,
-                    None,
-                )
+                let extension_id = strings.intern(&extension);
+                imports::explicit_source_extension(dependency_path.to_owned(), extension_id, None)
             };
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
         }
 
-        if dependency_contains_dotdot(dependency_path, path_fork, string_table) {
-            let diagnostic = CompilerDiagnostic::invalid_import_path(
+        if dependency_contains_dotdot(dependency_path, path_fork, strings.strings()) {
+            let diagnostic = imports::invalid_import_path(
                 dependency_path.to_owned(),
                 InvalidImportPathReason::ParentDirectorySegment,
                 None,
@@ -281,8 +288,12 @@ impl ProjectPathResolver {
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
         }
 
-        let (base_kind, filesystem_base) =
-            self.resolve_path_base(dependency_path, path_fork, declaring_file, string_table)?;
+        let (base_kind, filesystem_base) = self.resolve_path_base(
+            dependency_path,
+            path_fork,
+            declaring_file,
+            strings.strings(),
+        )?;
 
         // Source-backed package roots already include the prefix directory, so skip the first
         // component when joining to avoid double-prefixing (e.g. `lib/helper/helper/...`).
@@ -292,10 +303,10 @@ impl ProjectPathResolver {
             join_and_normalize_components(
                 &filesystem_base,
                 components.get(1..).unwrap_or_default(),
-                string_table,
+                strings.strings(),
             )
         } else {
-            join_and_normalize_components(&filesystem_base, components, string_table)
+            join_and_normalize_components(&filesystem_base, components, strings.strings())
         };
 
         let candidates = candidate_dependency_files_for_source_kinds(
@@ -307,20 +318,19 @@ impl ProjectPathResolver {
         let folder_exists = normalized.is_dir();
 
         if existing_candidates.len() + usize::from(folder_exists) > 1 {
-            let diagnostic =
-                CompilerDiagnostic::ambiguous_import_target(dependency_path.to_owned(), None);
+            let diagnostic = imports::ambiguous_import_target(dependency_path.to_owned(), None);
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
         }
 
         let Some(candidate) = existing_candidates.first() else {
             return Err(DependencyPathResolutionError::Diagnostic(
-                CompilerDiagnostic::missing_import_target(dependency_path, None),
+                imports::missing_import_target(dependency_path, None),
             ));
         };
 
         if candidate.support == DependencyCandidateSupport::RecognizedButUnsupported {
-            let extension_id = string_table.intern(candidate.kind.extension());
-            let diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
+            let extension_id = strings.intern(candidate.kind.extension());
+            let diagnostic = imports::unsupported_source_file_kind(
                 dependency_path.to_owned(),
                 extension_id,
                 None,
@@ -329,11 +339,12 @@ impl ProjectPathResolver {
         }
 
         let canonical = fs::canonicalize(&candidate.path).map_err(|error| {
-            CompilerError::file_error(
+            InfrastructureFailure::filesystem(
+                CompilerStage::DependencyResolution,
                 declaring_file,
                 format!(
                     "Failed to canonicalize resolved dependency '{}': {error}",
-                    path_fork.render_portable(dependency_path, string_table, &mut Vec::new())
+                    path_fork.render_portable(dependency_path, strings.strings(), &mut Vec::new())
                 ),
             )
         })?;
@@ -352,7 +363,7 @@ impl ProjectPathResolver {
             &filesystem_base,
             &canonical,
             candidate.is_parent_fallback,
-            string_table,
+            strings,
         )?;
 
         Ok((base_kind, canonical))
@@ -383,10 +394,11 @@ impl ProjectPathResolver {
         path: PathId,
         path_fork: &PathInternerFork,
         declaring_file: &Path,
-        string_table: &mut StringTable,
-    ) -> Result<(CompileTimePathBase, PathBuf), CompilerError> {
+        string_table: &StringTable,
+    ) -> Result<(CompileTimePathBase, PathBuf), InfrastructureFailure> {
         let declaring_dir = declaring_file.parent().ok_or_else(|| {
-            CompilerError::file_error(
+            InfrastructureFailure::filesystem(
+                CompilerStage::DependencyResolution,
                 declaring_file,
                 "Could not determine parent directory for declaring file.",
             )

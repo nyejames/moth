@@ -8,12 +8,13 @@
 //! and the header-built public export maps.
 
 use super::builder::AstModuleEnvironmentBuilder;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTraitIncompatibilityReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTraitIncompatibilityReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -41,7 +42,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for header in sorted_headers {
             if is_public_export_trait_incompatibility_header(header) {
                 if let HeaderKind::TraitIncompatibility { incompatibility } = &header.kind {
@@ -63,11 +64,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .path_fork
                 .component(header.declaration_path)
                 .ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "Public export header had no source-path name.",
-                        ),
-                        string_table,
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Public export header had no source-path name.",
                     )
                 })?;
 
@@ -85,7 +84,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         &self.header_source_path(header),
                         header_name_span(header),
                         trait_environment,
-                        string_table,
                     )?;
                 }
 
@@ -104,7 +102,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             &self.header_source_path(header),
                             field.binding_span,
                             trait_environment,
-                            string_table,
                         )?;
                     }
                 }
@@ -132,7 +129,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 &self.header_source_path(header),
                                 field.binding_span,
                                 trait_environment,
-                                string_table,
                             )?;
                         }
                     }
@@ -152,7 +148,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         &self.header_source_path(header),
                         header_name_span(header),
                         trait_environment,
-                        string_table,
                     )?;
                 }
 
@@ -169,7 +164,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         &self.header_source_path(header),
                         declaration.span,
                         trait_environment,
-                        string_table,
                     )?;
                 }
 
@@ -192,8 +186,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         public_root_file: &PathId,
         return_span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
-        string_table: &StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for parameter in &signature.parameters {
             for type_id in parameter.semantic_type_ids() {
                 self.validate_public_type_id(
@@ -202,7 +195,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     public_root_file,
                     parameter.binding_span,
                     trait_environment,
-                    string_table,
                 )?;
             }
         }
@@ -218,7 +210,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 public_root_file,
                 return_span,
                 trait_environment,
-                string_table,
             )?;
         }
 
@@ -232,8 +223,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         public_root_file: &PathId,
         span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
-        string_table: &StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         increment_ast_counter(AstCounter::PublicSurfaceValidationChecks);
 
         let mut visited_types = FxHashSet::default();
@@ -246,10 +236,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(());
         }
 
-        Err(self.diagnostic_messages(
-            CompilerDiagnostic::private_type_in_exported_api(exported_name, type_id, span),
-            string_table,
-        ))
+        Err(generics_traits_api::private_type_in_exported_api(exported_name, type_id, span).into())
     }
 
     pub(in crate::compiler_frontend::ast) fn public_type_id_is_nameable(
@@ -452,12 +439,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let visibility = Arc::clone(
-            self.binding_environment
-                .visibility_for(public_root_file)
-                .map_err(|error| self.error_messages(error, string_table))?,
-        );
+    ) -> Result<(), ExpressionParseError> {
+        let visibility = Arc::clone(self.binding_environment.visibility_for(public_root_file)?);
 
         let subject_id = self.resolve_visible_trait_name(
             incompatibility.subject.name,
@@ -496,15 +479,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     });
 
             if subject_is_nameable != incompatible_is_nameable {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::invalid_trait_incompatibility(
-                        incompatibility.subject.name,
-                        Some(incompatible_trait.name),
-                        InvalidTraitIncompatibilityReason::PrivateTraitSurfaceLeak,
-                        Some(incompatible_trait.span),
-                    ),
-                    string_table,
-                ));
+                let diagnostic = generics_traits_api::invalid_trait_incompatibility(
+                    incompatibility.subject.name,
+                    Some(incompatible_trait.name),
+                    InvalidTraitIncompatibilityReason::PrivateTraitSurfaceLeak,
+                    Some(incompatible_trait.span),
+                );
+                return Err(diagnostic.into());
             }
         }
 

@@ -3,6 +3,7 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::ConstructorField;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -46,9 +47,7 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
         opener_index: 0,
     };
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -89,9 +88,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
     );
     let source_path = file_tokens.source_path;
     let scope = source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -315,9 +312,7 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
         )
     };
     let context = constant_template_context(&source_path, &[declaration], &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -381,9 +376,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     };
     let context =
         imported_const_template_context(&source_path, declaration, show_banner, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -434,9 +427,7 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     );
     let card_source_path = card_file_tokens.source_path;
     let card_context = new_constant_context(card_source_path, &path_fork);
-    let canonical_owner = card_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = card_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -486,9 +477,7 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     // the declaration fixture on that topology so the wrapper reference stays
     // resolvable without compatibility reconstruction.
     context.template_ir_store = card_context.template_ir_store.clone();
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -706,9 +695,7 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
         )
     };
     let context = constant_template_context(&source_path, &[declaration], &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -783,9 +770,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     );
     let card_source_path = card_file_tokens.source_path;
     let card_context = new_constant_context(card_source_path, &path_fork);
-    let canonical_owner = card_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = card_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -832,9 +817,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let source_path = file_tokens.source_path;
     let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -886,9 +869,7 @@ fn const_required_template_loop_wraps_aggregate_once() {
     );
     let card_source_path = card_file_tokens.source_path;
     let card_context = new_constant_context(card_source_path, &path_fork);
-    let canonical_owner = card_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = card_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -934,9 +915,7 @@ fn const_required_template_loop_wraps_aggregate_once() {
     let source_path = file_tokens.source_path;
     let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1044,9 +1023,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
         &path_fork,
     );
 
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1115,9 +1092,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
         &path_fork,
     );
 
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1184,9 +1159,7 @@ fn const_required_template_loop_reports_non_const_body() {
         &path_fork,
     );
 
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1279,9 +1252,7 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     );
     let source_path = file_tokens.source_path;
     let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1364,6 +1335,7 @@ fn const_required_template_loop_reports_expansion_limit() {
     let TemplateError::Diagnostic(error) = error else {
         panic!("const loop expansion limit should remain a source diagnostic");
     };
+    let error = compact_template_diagnostic(error);
 
     assert_invalid_template_structure(
         &error,
@@ -1562,9 +1534,7 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1631,9 +1601,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
 
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1694,9 +1662,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
         &path_fork,
     );
 
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -1765,12 +1731,16 @@ fn const_required_template_if_validates_selector_through_tir_view_overlay() {
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const conditional should remain a source diagnostic");
     };
+    let error = compact_template_diagnostic(error);
 
     assert_invalid_template_structure(
         &error,
         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
     );
-    assert_eq!(error.primary_span, Some(override_span));
+    assert!(matches!(
+        error.first().expect("source diagnostic should have one record").primary_site(),
+        SiteRef::Local(span) if span == override_span
+    ));
 }
 
 #[test]
@@ -1815,12 +1785,16 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const loop should remain a source diagnostic");
     };
+    let error = compact_template_diagnostic(error);
 
     assert_invalid_template_structure(
         &error,
         InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
     );
-    assert_eq!(error.primary_span, Some(override_span));
+    assert!(matches!(
+        error.first().expect("source diagnostic should have one record").primary_site(),
+        SiteRef::Local(span) if span == override_span
+    ));
 }
 
 #[test]
@@ -1859,9 +1833,9 @@ fn const_required_validation_reports_missing_effective_node_as_internal_error() 
     };
     let error = &error.primary;
     assert!(
-        error.msg.contains("does not exist in the module store"),
+        error.message.contains("does not exist in the module store"),
         "error message should mention missing node, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1970,22 +1944,19 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
         &expression_builder,
         &const_values,
     )
-    .expect_err("exact-view child cycles must be CompilerError");
+    .expect_err("exact-view child cycles must be InfrastructureFailure");
     let TemplateError::Infrastructure(error) = error else {
         panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
     };
     let error = &error.primary;
-    assert_eq!(
-        error.error_type,
-        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
-    );
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("re-entered while still active"),
+        error.message.contains("re-entered while still active"),
         "cycle error should name exact-view re-entry, got: {}",
-        error.msg
+        error.message
     );
     assert!(
-        !error.msg.contains("runtime_condition"),
+        !error.message.contains("runtime_condition"),
         "structural validation must not import the child's expression overlay"
     );
 }
@@ -2025,11 +1996,15 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("unresolved runtime insert should remain a source diagnostic");
     };
+    let diagnostic = compact_template_diagnostic(diagnostic);
     assert_invalid_template_structure(
         &diagnostic,
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
     );
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
+    assert!(matches!(
+        diagnostic.first().expect("source diagnostic should have one record").primary_site(),
+        SiteRef::Local(span) if span == expected_span
+    ));
 }
 
 #[test]

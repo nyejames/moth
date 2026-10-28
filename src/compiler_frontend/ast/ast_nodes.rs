@@ -6,8 +6,8 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` in this module means an internal compiler invariant or setup failure only.
-//! Source-authored syntax, type, and rule failures are rejected earlier with `CompilerDiagnostic`.
+//! `InfrastructureFailure` in this module means an internal compiler invariant or setup failure only.
+//! Source-authored syntax, type, and rule failures flow through diagnostic drafts.
 
 use crate::compiler_frontend::ast::const_values::ConstValueId;
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -16,7 +16,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -26,7 +27,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::return_compiler_error;
 
 #[derive(Debug, Clone)]
 pub struct Declaration {
@@ -109,7 +109,7 @@ impl DeclarationValue {
     pub fn is_const_record_value(
         &self,
         expressions: &AstExpressionBuilder,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         match self.initializer() {
             Some(id) => Ok(expressions.view(id)?.is_const_record_value()),
             None => Ok(false),
@@ -730,7 +730,7 @@ impl AstNode {
     pub fn expression_is_const_record_value(
         &self,
         expressions: &AstExpressionBuilder,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         match &self.kind {
             NodeKind::VariableDeclaration(declaration) => {
                 declaration.value.is_const_record_value(expressions)
@@ -742,12 +742,13 @@ impl AstNode {
             // Non-expression nodes — compiler invariant violation.
             // This path should never be reached from well-formed AST; it indicates a bug in
             // an earlier stage that allowed a non-expression node into expression context.
-            _ => {
-                return_compiler_error!(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
                     "AST invariant: tried to inspect the const-record value state of a non-expression AST node: {:?}",
-                    &self.kind
-                );
-            }
+                    self.kind
+                ),
+            )),
         }
     }
 }

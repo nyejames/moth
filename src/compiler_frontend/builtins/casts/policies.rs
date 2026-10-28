@@ -17,6 +17,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::number::{
     NumberIntegerConversionError, NumberMaterializationError, NumberValue,
 };
@@ -811,7 +812,10 @@ fn numeric_parse_error(
     // The destination's class chooses the error family: the fixed binary floats report float
     // parse codes, and every integer destination reports integer parse codes.
     let is_binary_float = match scalar {
-        NumericScalar::Number(_) => unreachable!("Number parse failures are classified above"),
+        NumericScalar::Number(_) => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "Number parse failures are classified above"
+        ),
         NumericScalar::Fixed(fixed) => fixed.class() == FixedScalarClass::BinaryFloat,
     };
 

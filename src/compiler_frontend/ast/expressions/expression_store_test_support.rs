@@ -5,7 +5,7 @@
 //! owner-token mint, so production code keeps no reopen path.
 
 use super::{AstExpressionBuilder, ExpressionStore, OwnerToken};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 /// Reopens a frozen store as a builder for fixture mutation.
 ///
@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 /// be used with the reopened store.
 pub(crate) fn reopen_frozen_store_for_fixture(
     mut storage: ExpressionStore,
-) -> Result<AstExpressionBuilder, CompilerError> {
+) -> Result<AstExpressionBuilder, InfrastructureFailure> {
     storage.owner = OwnerToken::mint()?;
     Ok(AstExpressionBuilder {
         storage,

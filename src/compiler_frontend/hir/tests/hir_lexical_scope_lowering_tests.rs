@@ -19,8 +19,10 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast,
+};
 
 /// One exact `I32` literal expression.
 ///

@@ -29,8 +29,8 @@ use super::field_member::{
 };
 use super::map_builtin::{MapBuiltinReceiver, resolve_map_builtin_member};
 use super::parse_chain::{
-    collect_known_member_names, current_token_span, pending_numeric_member_access_error,
-    previous_token_span, type_id_is_external,
+    collect_known_member_names, pending_numeric_member_access_error, previous_token_span,
+    type_id_is_external,
 };
 use super::receiver_access::{
     ReceiverAccessDiagnostic, reject_temporary_receiver_access, validate_place_receiver_access,
@@ -86,10 +86,14 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-    InvalidFieldAccessReason, InvalidReceiverCallReason, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidFieldAccessReason,
+    InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -233,7 +237,7 @@ fn validate_retained_step_access(
     requires_mutable: bool,
     diagnostic: &ReceiverAccessDiagnostic,
     member_span: Option<SourceSpan>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     if receiver.is_place {
         return validate_place_receiver_access(
             chain_access.mode,
@@ -839,11 +843,12 @@ pub(crate) fn retain_pending_operand_member_access(
         expected: operand_expected,
         value_mode: operand_value_mode,
     } = input;
-    let operand_start = trailing_operand_start(expression)?.ok_or_else(|| {
-        CompilerError::compiler_error(
+    let Some(operand_start) = trailing_operand_start(expression)? else {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "a retained operand member step was recorded without an authored operand",
-        )
-    })?;
+        );
+    };
     let operand = expression.split_off(operand_start);
     let item = single_operand(&operand);
 
@@ -1068,7 +1073,7 @@ fn retain_deferred_call_propagation(
                 declared_single_success_type_id.as_ref(),
                 resolved_success_types.as_deref(),
                 generic_slots.as_ref(),
-            )?,
+            ),
             error_return: call.error_return(),
             authored_failure_lane: retained_call_has_private_failure_lane(call, scope_context),
             call_span: call.call_span(),
@@ -1131,7 +1136,7 @@ fn retain_receiver_method_propagation(
                 declared_single_success_type_id.as_ref(),
                 resolved_success_types.as_deref(),
                 generic_slots.as_ref(),
-            )?,
+            ),
             error_return: method.error_return(),
             authored_failure_lane: scope_context
                 .source_call_has_private_failure_lane(method.method_path),
@@ -1207,19 +1212,22 @@ fn retained_success_contract<'a>(
     declared_single: Option<&'a TypeId>,
     resolved_slots: Option<&'a [TypeId]>,
     generic_slots: Option<&'a GenericSuccessSlots>,
-) -> Result<FallibleSuccessContract<'a>, ExpressionParseError> {
+) -> FallibleSuccessContract<'a> {
     if let Some(single) = declared_single {
-        return Ok(FallibleSuccessContract::Known(std::slice::from_ref(single)));
+        return FallibleSuccessContract::Known(std::slice::from_ref(single));
     }
     if let Some(slots) = resolved_slots {
-        return Ok(FallibleSuccessContract::Known(slots));
+        return FallibleSuccessContract::Known(slots);
     }
     // Both callers collect generic facts exactly when the two concrete contracts are absent.
     // Missing facts violate that handoff; they cannot stand in for zero success slots.
-    let generic_slots = generic_slots.ok_or_else(|| {
-        CompilerError::compiler_error("retained call is missing its declared success-slot facts")
-    })?;
-    Ok(match generic_slots {
+    let Some(generic_slots) = generic_slots else {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "retained call is missing its declared success-slot facts",
+        );
+    };
+    match generic_slots {
         GenericSuccessSlots::Single(type_id) => {
             FallibleSuccessContract::Known(std::slice::from_ref(type_id))
         }
@@ -1228,7 +1236,7 @@ fn retained_success_contract<'a>(
             slot_count: *slot_count,
         },
         GenericSuccessSlots::Mixed(slots) => FallibleSuccessContract::Partial(slots.as_slice()),
-    })
+    }
 }
 
 /// The declared facts one retained operation supplies to the shared authored `!` decision.
@@ -1265,7 +1273,7 @@ fn parse_retained_operation_propagation(
     allow_boundary_catch: bool,
     facts: RetainedPropagationFacts<'_>,
 ) -> Result<DeferredCallHandling, ExpressionParseError> {
-    let propagation_span = Some(token_stream.current_postfix_operator_span());
+    let propagation_span = Some(token_stream.current_span());
     let authored_suffix = parse_fragment_handling_suffix(
         token_stream,
         scope_context,
@@ -1284,7 +1292,8 @@ fn parse_retained_operation_propagation(
         path_fork,
     )?;
     let Some(ParsedFallibleSuffix::Ready(FallibleHandling::Propagate)) = authored_suffix else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "an authored operand `!` was not parsed as typed propagation",
         )
         .into());
@@ -1381,11 +1390,12 @@ pub(crate) fn retain_operand_handling_suffix(
     value_mode: &ValueMode,
     expression_builder: &AstExpressionBuilder,
 ) -> Result<(), ExpressionParseError> {
-    let operand_start = trailing_operand_start(expression)?.ok_or_else(|| {
-        CompilerError::compiler_error(
+    let Some(operand_start) = trailing_operand_start(expression)? else {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
             "an authored operand suffix was recorded without an authored operand",
-        )
-    })?;
+        );
+    };
     let mut operand = expression.split_off(operand_start);
 
     // A plain continuation that has not recorded its own suffix yet takes this one in place, so one
@@ -1530,10 +1540,14 @@ fn operand_evaluation_expected(
 ///      of a grouped operand as well as a plain one.
 fn operand_leading_item(
     operand: &[ExpressionRpnItem],
-) -> Result<&ExpressionRpnItem, CompilerError> {
-    operand.first().ok_or_else(|| {
-        CompilerError::compiler_error("a retained operand was recorded without authored items")
-    })
+) -> Result<&ExpressionRpnItem, InfrastructureFailure> {
+    match operand.first() {
+        Some(item) => Ok(item),
+        None => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "a retained operand was recorded without authored items",
+        ),
+    }
 }
 
 /// Complete one retained operand continuation: its operand value, its authored steps, then its
@@ -1634,10 +1648,10 @@ pub(crate) fn complete_retained_postfix_steps<
             }
             RetainedPostfixStep::Method(call) => {
                 let DeferredCallReceiver::Chained = call.receiver else {
-                    return Err(CompilerError::compiler_error(
+                    crate::compiler_bug!(
+                        CompilerStage::AstConstruction,
                         "a retained chained method step carried a site-materialised receiver",
-                    )
-                    .into());
+                    );
                 };
                 // The step's receiver is the value just completed; injecting it resumes the one
                 // shared receiver-call constructor the completed chain also uses.
@@ -1928,7 +1942,7 @@ fn parse_retained_postfix_steps(
             || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
-            return Err(CompilerDiagnostic::invalid_field_access(
+            return Err(calls_data::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
                 None,
@@ -1939,7 +1953,7 @@ fn parse_retained_postfix_steps(
         }
 
         let member_name = parse_member_name_typed(token_stream, string_table)?;
-        let member_span = current_token_span(token_stream);
+        let member_span = Some(token_stream.current_span());
         // A step with no single value leaves no receiver for this member. The member is recorded
         // here and reported by the completed chain once its receiver's type is known.
         let Some(resolved_shape) = current_shape else {
@@ -1992,7 +2006,7 @@ fn parse_retained_postfix_steps(
         if let Some((declared_type_id, field_shape)) = declared_field {
             token_stream.advance();
             if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-                return Err(CompilerDiagnostic::invalid_field_access(
+                return Err(calls_data::invalid_field_access(
                     InvalidFieldAccessReason::FieldNotMethod,
                     Some(member_name),
                     Some(declared_type_id),
@@ -2025,7 +2039,7 @@ fn parse_retained_postfix_steps(
                 scope_context.lookup_generic_function_template(&method_entry.function_path)
         {
             if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                return Err(CompilerDiagnostic::invalid_receiver_call(
+                return Err(calls_data::invalid_receiver_call(
                     InvalidReceiverCallReason::MustUseParentheses,
                     None,
                     Some(member_name),
@@ -2132,7 +2146,7 @@ fn parse_retained_postfix_steps(
         {
             token_stream.advance();
             if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-                return Err(CompilerDiagnostic::invalid_field_access(
+                return Err(calls_data::invalid_field_access(
                     InvalidFieldAccessReason::FieldNotMethod,
                     Some(member_name),
                     Some(type_id),
@@ -2167,7 +2181,7 @@ fn parse_retained_postfix_steps(
             string_table,
         )? {
             if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                return Err(CompilerDiagnostic::invalid_builtin_call(
+                return Err(calls_data::invalid_builtin_call(
                     InvalidBuiltinCallReason::MissingParentheses,
                     Some(member_name),
                     member_span,
@@ -2227,10 +2241,8 @@ fn parse_retained_postfix_steps(
                         path_fork,
                     )?;
                 }
-                return Err(CompilerDiagnostic::invalid_assignment_target(
+                return Err(names_declarations::invalid_assignment_target(
                     InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,
-                    None,
-                    concrete_shape_type(scope_context, member.element_shape),
                     None,
                     None,
                     None,
@@ -2276,7 +2288,7 @@ fn parse_retained_postfix_steps(
 
             if member.op.is_property() {
                 if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
+                    return Err(calls_data::invalid_builtin_call(
                         InvalidBuiltinCallReason::MapLengthIsProperty,
                         Some(member_name),
                         member_span,
@@ -2297,10 +2309,8 @@ fn parse_retained_postfix_steps(
                 token_stream.advance();
 
                 if token_stream.current_tag().is_assignment_operator() {
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
+                    return Err(names_declarations::invalid_assignment_target(
                         InvalidAssignmentTargetReason::ReadOnlyMapProperty,
-                        None,
-                        concrete_shape_type(scope_context, resolved_shape),
                         None,
                         None,
                         None,
@@ -2310,7 +2320,7 @@ fn parse_retained_postfix_steps(
                 }
             } else {
                 if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
+                    return Err(calls_data::invalid_builtin_call(
                         InvalidBuiltinCallReason::MissingParentheses,
                         Some(member_name),
                         member_span,
@@ -2370,10 +2380,8 @@ fn parse_retained_postfix_steps(
                             path_fork,
                         )?;
                     }
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
+                    return Err(names_declarations::invalid_assignment_target(
                         InvalidAssignmentTargetReason::MapGetTargetNotWritable,
-                        None,
-                        concrete_shape_type(scope_context, member.value_shape),
                         None,
                         None,
                         None,
@@ -2412,7 +2420,7 @@ fn parse_retained_postfix_steps(
             )
         {
             if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                return Err(CompilerDiagnostic::invalid_receiver_call(
+                return Err(calls_data::invalid_receiver_call(
                     InvalidReceiverCallReason::MustUseParentheses,
                     None,
                     Some(member_name),
@@ -2654,7 +2662,7 @@ fn unknown_member_diagnostic(
     };
 
     let known_fields = collect_known_member_names(receiver_type_id, type_interner, path_fork);
-    CompilerDiagnostic::invalid_field_access(
+    calls_data::invalid_field_access(
         reason,
         Some(member_name),
         Some(receiver_type_id),
@@ -2685,7 +2693,7 @@ pub(crate) fn authored_propagation_suffix(
 ) -> Option<Option<SourceSpan>> {
     (token_stream.current_tag() == TokenTag::BANG
         && token_stream.peek_next_tag() != Some(TokenTag::ASSIGN))
-    .then(|| Some(token_stream.current_postfix_operator_span()))
+    .then(|| Some(token_stream.current_span()))
 }
 
 /// Parse the authored member syntax of one already-rejected occurrence through the shared owners.
@@ -2713,7 +2721,7 @@ fn consume_invalid_member_access(
     if token_stream.position() >= token_stream.length()
         || token_stream.current_tag() == TokenTag::EOF
     {
-        return Err(CompilerDiagnostic::invalid_field_access(
+        return Err(calls_data::invalid_field_access(
             InvalidFieldAccessReason::ExpectedNameAfterDot,
             None,
             None,
@@ -2778,7 +2786,7 @@ fn consume_rejected_member_steps(
         if token_stream.position() >= token_stream.length()
             || token_stream.current_tag() == TokenTag::EOF
         {
-            return Err(CompilerDiagnostic::invalid_field_access(
+            return Err(calls_data::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
                 None,

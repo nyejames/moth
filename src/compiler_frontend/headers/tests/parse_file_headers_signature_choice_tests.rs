@@ -10,17 +10,17 @@ fn function_signature_reports_missing_arrow_before_return_type() {
         "src/@page.moth",
     );
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "missing arrow before return type must fail"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingArrowOrColon { .. }
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_function_signature.missing_arrow_or_colon")
+    }));
 }
 
 #[test]
@@ -28,17 +28,18 @@ fn function_signature_reports_missing_colon_after_return_list() {
     let result =
         parse_single_file_headers_with_entry("f|| -> I32\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "missing ':' after return declarations must fail"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingColonAfterReturns
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+            .is_some()
+            && diagnostic.reason_key()
+                == Some("invalid_function_signature.missing_colon_after_returns")
+    }));
 }
 
 #[test]
@@ -49,17 +50,17 @@ fn function_signature_reports_missing_return_type_after_arrow_colon() {
     let result =
         parse_single_file_headers_with_entry("f|| -> :\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "an arrow immediately followed by ':' must fail"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingReturnType
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_function_signature.missing_return_type")
+    }));
 }
 
 #[test]
@@ -69,17 +70,17 @@ fn function_signature_reports_missing_return_type_after_arrow_newline() {
     let result =
         parse_single_file_headers_with_entry("f|| ->\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "an arrow immediately followed by a newline must fail"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingReturnType
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+            .is_some()
+            && diagnostic.reason_key() == Some("invalid_function_signature.missing_return_type")
+    }));
 }
 
 #[test]
@@ -92,26 +93,25 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
     let source = "DISPLAYABLE must:\n    display |This| -> :\n;\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "a trait requirement arrow followed by ':' must fail"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
     let diagnostic = errors
         .diagnostics
-        .iter()
+        .views()
         .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidFunctionSignature {
-                    reason: InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
-                }
-            )
+            diagnostic
+                .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+                .is_some()
+                && diagnostic.reason_key()
+                    == Some("invalid_function_signature.missing_trait_requirement_return_type")
         })
         .expect("expected MissingTraitRequirementReturnType");
 
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, ":", 1)),
         "missing return type should point at the authored boundary after `->`",
     );
@@ -125,25 +125,24 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
     let source = "DISPLAYABLE must:\n    display |This| ->\n;\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "a trait requirement arrow followed by a newline must fail"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
     let diagnostic = errors
         .diagnostics
-        .iter()
+        .views()
         .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidFunctionSignature {
-                    reason: InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
-                }
-            )
+            diagnostic
+                .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+                .is_some()
+                && diagnostic.reason_key()
+                    == Some("invalid_function_signature.missing_trait_requirement_return_type")
         })
         .expect("expected MissingTraitRequirementReturnType");
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "\n", 1)),
         "missing return type should point at the authored newline boundary",
     );
@@ -164,16 +163,15 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
     );
 
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "duplicate top-level function names should fail during header parsing"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::DuplicateDeclaration { .. }
-        )
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::DuplicateDeclarationView>()
+            .is_some()
     }));
 }
 
@@ -255,14 +253,16 @@ fn choice_headers_reject_duplicate_variants() {
         "src/@page.moth",
         "src/@page.moth",
     );
-    assert!(result.is_err(), "duplicate choice variants must fail");
-    let errors = result.err().expect("expected parse errors");
+    assert!(
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
+        "duplicate choice variants must fail"
+    );
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::DuplicateDeclaration { .. }
-        )
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::DuplicateDeclarationView>()
+            .is_some()
     }));
 }
 
@@ -275,19 +275,19 @@ fn choice_headers_reject_invalid_payload_forms() {
         "src/@page.moth",
     );
     assert!(
-        payload_shorthand_result.is_err(),
+        matches!(&payload_shorthand_result, HeaderTestOutcome::Diagnostics(_)),
         "shorthand payload variants must be rejected"
     );
-    let payload_errors = payload_shorthand_result
-        .err()
-        .expect("expected payload parse errors");
-    assert!(payload_errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidChoiceVariant {
-            reason: InvalidChoiceVariantReason::PayloadShorthandNotSupported,
-            ..
-        }
-    )));
+    let payload_errors =
+        expect_header_error(payload_shorthand_result, "expected payload parse errors");
+    assert!(payload_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<choices_control_flow::InvalidChoiceVariantView>()
+            .is_some_and(|_| {
+                diagnostic.reason_key()
+                    == Some("invalid_choice_variant.payload_shorthand_not_supported")
+            })
+    }));
 
     // Constructor-style declarations are invalid by design.
     let payload_paren_result = parse_single_file_headers_with_entry(
@@ -296,25 +296,20 @@ fn choice_headers_reject_invalid_payload_forms() {
         "src/@page.moth",
     );
     assert!(
-        payload_paren_result.is_err(),
+        matches!(&payload_paren_result, HeaderTestOutcome::Diagnostics(_)),
         "constructor-style payload variants must be rejected"
     );
-    let payload_paren_errors = payload_paren_result
-        .err()
-        .expect("expected constructor-style payload parse errors");
-    assert!(
-        payload_paren_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidChoiceVariant {
-                    reason: InvalidChoiceVariantReason::ConstructorStyleNotSupported,
-                    ..
-                }
-            ))
+    let payload_paren_errors = expect_header_error(
+        payload_paren_result,
+        "expected constructor-style payload parse errors",
     );
-
+    assert!(payload_paren_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<choices_control_flow::InvalidChoiceVariantView>()
+            .is_some()
+            && diagnostic.reason_key()
+                == Some("invalid_choice_variant.constructor_style_not_supported")
+    }));
     // Default values remain deferred.
     let defaults_result = parse_single_file_headers_with_entry(
         "Status :: Ready = true;\n",
@@ -322,18 +317,17 @@ fn choice_headers_reject_invalid_payload_forms() {
         "src/@page.moth",
     );
     assert!(
-        defaults_result.is_err(),
+        matches!(&defaults_result, HeaderTestOutcome::Diagnostics(_)),
         "choice variant defaults must fail"
     );
-    let default_errors = defaults_result
-        .err()
-        .expect("expected default parse errors");
-    assert!(default_errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::DeferredFeature {
-            reason: DeferredFeatureReason::ChoiceVariantDefaultValue
-        }
-    )));
+    let default_errors = expect_header_error(defaults_result, "expected default parse errors");
+    assert!(default_errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::DeferredFeatureView>()
+            .is_some_and(|facts| {
+                facts.code == names_declarations::DeferredFeatureCode::ChoiceVariantDefaultValue
+            })
+    }));
 }
 
 #[test]
@@ -388,17 +382,11 @@ fn header_parsing_emits_naming_warnings_for_non_camel_type_like_symbols() {
         2,
         "expected warnings for choice name and variant only; uppercase constant should be allowed"
     );
-    assert!(
-        warnings
-            .iter()
-            .all(|warning| matches!(
-                warning.kind,
-                crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
-                    crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-                )
-            )),
-        "expected naming convention warnings for choice name and variant only"
-    );
+    assert!(warnings.views().all(|warning| {
+        warning
+            .family_view::<names_declarations::IdentifierNamingConventionView>()
+            .is_some()
+    }),);
 }
 
 #[test]
@@ -406,18 +394,16 @@ fn header_parsing_rejects_keyword_shadow_constant_name() {
     let result =
         parse_single_file_headers_with_entry("FALSE #= 1\n", "src/@page.moth", "src/@page.moth");
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "keyword-shadow top-level constants must fail during header parsing"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::Keyword,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::ReservedNameCollisionView>()
+            .is_some_and(|facts| facts.reserved_by == ReservedNameOwner::Keyword)
+    }));
 }
 
 #[test]
@@ -442,19 +428,16 @@ fn generic_type_aliases_are_rejected_during_header_parsing() {
     );
 
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "generic type aliases should fail during header parsing"
     );
-    let errors = result.err().expect("expected parse errors");
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| {
-        diagnostic.kind == DiagnosticKind::Rule(RuleDiagnosticKind::InvalidDeclaration)
-            && matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::ParameterizedGenericTypeAlias,
-                    ..
-                }
-            )
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidDeclarationView>()
+            .is_some()
+            && diagnostic.reason_key()
+                == Some("invalid_declaration.parameterized_generic_type_alias")
     }));
 }

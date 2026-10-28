@@ -136,7 +136,6 @@ pub fn update_monthly_summary(
         (Vec::new(), Vec::new())
     };
 
-    // Generate current system block
     let current_block =
         if let (Some(initial), Some(latest)) = (system_runs.first(), system_runs.last()) {
             generate_system_block(
@@ -165,7 +164,6 @@ pub fn update_monthly_summary(
     let month_heading = run.timestamp.format_month_heading();
     let content = build_summary_content(&month_heading, &all_blocks, &existing_runs);
 
-    // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create summaries directory: {}", e))?;
@@ -465,7 +463,7 @@ fn parse_existing_summary(
     current_public_id: &str,
     current_suite_kind: &str,
 ) -> (Vec<String>, Vec<ParsedSummaryRunEntry>) {
-    // Try new format first: dashed separator
+    // The dashed separator is the current format; legacy HTML-comment markers are the fallback.
     if let Some(pos) = content.find(SECTION_SEPARATOR) {
         let summary_section = &content[..pos];
         let runs_section = &content[pos + SECTION_SEPARATOR.len()..];
@@ -482,7 +480,6 @@ fn parse_existing_summary(
     const OLD_SUMMARY_END: &str = "<!-- BENCHMARK_MONTH_SUMMARY_END -->";
     const OLD_RUNS_START: &str = "<!-- BENCHMARK_RUNS_START -->";
 
-    // Extract run entries section
     let run_entries = if let Some(runs_start) = content.find(OLD_RUNS_START) {
         let after_marker = runs_start + OLD_RUNS_START.len();
         let runs_text = &content[after_marker..];
@@ -491,7 +488,6 @@ fn parse_existing_summary(
         Vec::new()
     };
 
-    // Extract summary section between markers
     let summary_section = if let Some(start) = content.find(OLD_SUMMARY_START) {
         if let Some(end) = content.find(OLD_SUMMARY_END) {
             &content[start + OLD_SUMMARY_START.len()..end]
@@ -565,7 +561,7 @@ fn parse_summary_blocks(
         }
     }
 
-    // Don't forget the last block
+    // Flush the block still open when the input ends.
     if !current_block.is_empty()
         && should_keep_summary_block(&current_block, current_public_id, current_suite_kind)
     {
@@ -777,7 +773,6 @@ fn build_summary_content(
 ) -> String {
     let mut content = String::new();
 
-    // Month heading
     content.push_str(&format!("# {} Summary\n\n", month_heading));
 
     // Summary section

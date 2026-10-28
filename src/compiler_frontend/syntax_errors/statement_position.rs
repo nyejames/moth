@@ -1,15 +1,16 @@
 //! Common language-mismatch mistakes in statement position.
 //!
-//! WHAT: Detects patterns like `// comment`, `fn name(...)`, `let x = ...`,
+//! WHAT: Detects patterns like `// comment`, `function name(...)`, `let x = ...`,
 //! `match value {`, `else if`, and `struct Name { ... }` that users from other
 //! languages write when they first encounter Moth.
 //!
 //! WHY: Statement position is where most structural syntax lives (declarations,
 //! control flow, comments), so it is the richest source of language-mismatch errors.
 
-use super::common_syntax_mistake;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
+use crate::compiler_frontend::compiler_messages::CommonSyntaxMistakeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
@@ -20,20 +21,20 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 pub(crate) fn check_statement_common_mistake(
     token_tag: TokenTag,
     token_stream: &AstCursor,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     let location = token_stream.current_span();
 
     match token_tag {
         // `//` is integer division; comments use `--`
-        TokenTag::INT_DIVIDE => Some(common_syntax_mistake(
+        TokenTag::INT_DIVIDE => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::StatementLineComment,
-            location,
+            Some(location),
         )),
 
         // `!` in statement position (not fallible handling)
-        TokenTag::BANG => Some(common_syntax_mistake(
+        TokenTag::BANG => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::BooleanBangNegation,
-            location,
+            Some(location),
         )),
 
         _ => None,
@@ -42,7 +43,7 @@ pub(crate) fn check_statement_common_mistake(
 
 /// Check if a symbol is a common mistaken keyword from another language.
 ///
-/// WHAT: `fn`, `function`, `def`, `let`, `var`, `const`, `match`, and `struct`
+/// WHAT: `function`, `def`, `let`, `var`, `const`, `match`, and `struct`
 /// are not Moth keywords, but newcomers often type them out of habit.
 ///
 /// Called from `parse_symbol_statement` before treating the symbol as a normal
@@ -51,34 +52,34 @@ pub(crate) fn check_mistaken_keyword_symbol(
     symbol_id: StringId,
     token_stream: &AstCursor,
     string_table: &StringTable,
-) -> Option<CompilerDiagnostic> {
+) -> Option<DiagnosticDraft> {
     let name = string_table.resolve(symbol_id);
     let location = token_stream.current_span();
 
     match name {
-        "fn" | "function" | "def" => Some(common_syntax_mistake(
+        "function" | "def" => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::FunctionKeyword { keyword: symbol_id },
-            location,
+            Some(location),
         )),
 
-        "let" | "var" => Some(common_syntax_mistake(
+        "let" | "var" => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::LetOrVarKeyword,
-            location,
+            Some(location),
         )),
 
-        "const" => Some(common_syntax_mistake(
+        "const" => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::ConstKeyword,
-            location,
+            Some(location),
         )),
 
-        "match" => Some(common_syntax_mistake(
+        "match" => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::MatchKeyword,
-            location,
+            Some(location),
         )),
 
-        "struct" => Some(common_syntax_mistake(
+        "struct" => Some(token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::StructKeyword { keyword: symbol_id },
-            location,
+            Some(location),
         )),
 
         _ => None,

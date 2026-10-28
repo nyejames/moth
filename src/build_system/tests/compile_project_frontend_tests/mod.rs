@@ -17,14 +17,13 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
-use crate::compiler_frontend::compiler_messages::render::terse;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidGenericInstantiationReason,
-    SyntaxDiagnosticKind,
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureFailureKind,
 };
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
+use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::display::display_type;
@@ -43,7 +42,6 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_diagnostics::assert_exact_infrastructure_error;
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,11 +76,11 @@ fn module_has_timing(
         .iter()
         .any(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
 }
-fn assert_has_diagnostic_code(messages: &CompilerMessages, expected_code: &str) {
-    let actual_codes = messages
-        .diagnostics
+fn assert_has_diagnostic_code<T>(result: &CompilationResult<T>, expected_code: &str) {
+    let reports = super::create_project_modules_tests::diagnosed_reports(result);
+    let actual_codes = reports
         .iter()
-        .map(|diagnostic| diagnostic.kind.code())
+        .map(|(_, view)| view.descriptor().code)
         .collect::<Vec<_>>();
 
     assert!(

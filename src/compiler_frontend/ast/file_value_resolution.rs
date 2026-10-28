@@ -21,17 +21,42 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
     ScopeContext, Stage0ResolvedFileReferenceOutcome,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::unsupported_source_file_kind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::invalid_compile_time_path;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    invalid_expression, invalid_path,
+};
+use crate::compiler_frontend::compiler_messages::{InvalidExpressionReason, PathKind};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
-use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReferenceClass, ResolvedFileReferenceFailure,
+};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+
+fn file_reference_failure_draft(failure: ResolvedFileReferenceFailure) -> DiagnosticDraft {
+    match failure {
+        ResolvedFileReferenceFailure::InvalidCompileTimePath { path, reason, span } => {
+            invalid_compile_time_path(path, reason, Some(span))
+        }
+        ResolvedFileReferenceFailure::InvalidComponent { span } => {
+            invalid_path(PathKind::InvalidComponent, Some(span))
+        }
+        ResolvedFileReferenceFailure::UnsupportedSourceFileKind {
+            path,
+            extension,
+            span,
+        } => unsupported_source_file_kind(path, extension, Some(span)),
+    }
+}
 
 /// Resolve one path token through the value-position Stage 0 view.
 ///
@@ -63,35 +88,32 @@ pub(crate) fn resolve_file_value(
         .file_value_resolution
         .as_ref()
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "value-position file path reached AST without Stage 0 resolution services",
             )
         })?;
     let stage0_resolution_facts = services.stage0_resolution_facts.as_ref().ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "value-position file path reached AST without Stage 0 resolution services",
         )
     })?;
     let resolved = stage0_resolution_facts
         .lookup(context.shared.declaring_file_id, path_syntax)?
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "value-position file path had no matching Stage 0 resolved-reference row",
             )
         })?;
 
     match resolved.class {
-        PreparedFileReferenceClass::Extensionless => Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::ExtensionlessFileValue,
-            span,
-        )
-        .into()),
+        PreparedFileReferenceClass::Extensionless => {
+            Err(invalid_expression(InvalidExpressionReason::ExtensionlessFileValue, span).into())
+        }
         PreparedFileReferenceClass::SourceKindNoFileValue => {
-            Err(CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::MothFileHasNoValue,
-                span,
-            )
-            .into())
+            Err(invalid_expression(InvalidExpressionReason::MothFileHasNoValue, span).into())
         }
         PreparedFileReferenceClass::SiteRoot => match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => structural_string(
@@ -102,16 +124,17 @@ pub(crate) fn resolve_file_value(
                 value_mode,
             ),
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-                Err(diagnostic.clone().into())
+                Err(file_reference_failure_draft(diagnostic).into())
             }
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "site-root file reference unexpectedly resolved to a physical target",
             )
             .into()),
         },
         PreparedFileReferenceClass::ContentSource => match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-                Err(diagnostic.clone().into())
+                Err(file_reference_failure_draft(diagnostic).into())
             }
             Stage0ResolvedFileReferenceOutcome::Content {
                 logical_path,
@@ -140,7 +163,8 @@ pub(crate) fn resolve_file_value(
                 }
 
                 let logical_path = logical_path.as_ref().ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "ordinary content file reference had no logical source path",
                     )
                 })?;
@@ -150,7 +174,7 @@ pub(crate) fn resolve_file_value(
                     .top_level_declarations
                     .get_by_path(&content_path)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "synthetic content declaration {:?} was not present before file-value resolution",
                             content_path
                         ))
@@ -165,21 +189,23 @@ pub(crate) fn resolve_file_value(
                     span,
                 )
             }
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "content file reference did not resolve to a content target",
             )
             .into()),
         },
         PreparedFileReferenceClass::ResourceFile => match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-                Err(diagnostic.clone().into())
+                Err(file_reference_failure_draft(diagnostic).into())
             }
             Stage0ResolvedFileReferenceOutcome::Resource {
                 source,
                 owner_relative_path,
             } => {
                 let module_origin = services.module_origin.clone().ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "resource file value reached AST without a stable module origin",
                     )
                 })?;
@@ -200,7 +226,8 @@ pub(crate) fn resolve_file_value(
                     value_mode,
                 )
             }
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "resource file reference did not resolve to a resource target",
             )
             .into()),

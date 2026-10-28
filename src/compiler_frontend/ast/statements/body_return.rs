@@ -26,10 +26,15 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ValueReceiverKind, try_parse_value_block_at_receiver,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow, token_lexical, types_borrows_targets,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidControlFlowStatementReason,
-    InvalidReturnShapeReason, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticToken, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
+    TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -127,7 +132,7 @@ pub(crate) fn parse_return_statement(
         .as_deref()
         .filter(|contract| contract.owner == EnclosingCallableOwner::Function)
     else {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ReturnOutsideFunction,
             Some(token_stream.current_span()),
         )
@@ -144,7 +149,7 @@ pub(crate) fn parse_return_statement(
 
     if is_error_return {
         let Some(expected_error_type_id) = contract.error_type else {
-            return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            return Err(choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ReturnBangOutsideErrorFunction,
                 Some(token_stream.current_span()),
             )
@@ -152,7 +157,7 @@ pub(crate) fn parse_return_statement(
         };
 
         if is_return_terminator(token_stream.current_tag()) {
-            return Err(CompilerDiagnostic::invalid_return_shape(
+            return Err(calls_data::invalid_return_shape(
                 InvalidReturnShapeReason::MissingReturnBangValue,
                 Some(token_stream.current_span()),
             )
@@ -183,7 +188,7 @@ pub(crate) fn parse_return_statement(
     }
 
     if token_stream.current_tag() == TokenTag::BANG {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(TokenTag::BANG),
             Some(token_stream.current_span()),
         )
@@ -223,7 +228,8 @@ pub(crate) fn parse_return_statement(
                 let ExpressionParseError::NumericDeferral(deferral) =
                     retained.into_deferral(&ValueMode::ImmutableOwned)
                 else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a retained value-block return lost its numeric deferral",
                     )
                     .into());
@@ -246,7 +252,8 @@ pub(crate) fn parse_return_statement(
                 ast.push_pending(continuation);
                 return Ok(());
             }
-            Some(Ok(ParsedReceiverValue::NeedsSlotInference { .. })) => unreachable!(
+            Some(Ok(ParsedReceiverValue::NeedsSlotInference { .. })) => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
                 "a return receiver knows its result types; a value block cannot ask for slot inference"
             ),
             Some(Err(error)) => return Err(error),
@@ -255,7 +262,7 @@ pub(crate) fn parse_return_statement(
                 // The helper has already advanced past `if` and reported
                 // its own diagnostic, so we should not fall through to
                 // normal return parsing which would produce a secondary error.
-                return Err(CompilerDiagnostic::invalid_control_flow_statement(
+                return Err(choices_control_flow::invalid_control_flow_statement(
                     InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                     Some(token_stream.current_span()),
                 )
@@ -293,7 +300,7 @@ pub(crate) fn parse_return_statement(
 
     if function_return_type_ids.is_empty() {
         if !is_return_terminator(token_stream.current_tag()) {
-            return Err(CompilerDiagnostic::invalid_return_shape(
+            return Err(calls_data::invalid_return_shape(
                 InvalidReturnShapeReason::ReturnValuesWithBareSignature,
                 Some(token_stream.current_span()),
             )
@@ -309,7 +316,7 @@ pub(crate) fn parse_return_statement(
 
     if is_return_terminator(token_stream.current_tag()) {
         let expected_count = function_return_type_ids.len();
-        return Err(CompilerDiagnostic::invalid_return_shape(
+        return Err(calls_data::invalid_return_shape(
             InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count },
             Some(token_stream.current_span()),
         )
@@ -377,7 +384,7 @@ pub(crate) fn parse_return_statement(
         if type_index + 1 < function_return_type_ids.len() {
             if token_stream.current_tag() != TokenTag::COMMA {
                 let expected_count = function_return_type_ids.len();
-                return Err(CompilerDiagnostic::invalid_return_shape(
+                return Err(calls_data::invalid_return_shape(
                     InvalidReturnShapeReason::TooFewReturnValues {
                         expected_count,
                         provided_count: slots.len(),
@@ -393,7 +400,7 @@ pub(crate) fn parse_return_statement(
 
     if token_stream.current_tag() == TokenTag::COMMA {
         let expected_count = function_return_type_ids.len();
-        return Err(CompilerDiagnostic::invalid_return_shape(
+        return Err(calls_data::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues { expected_count },
             Some(token_stream.current_span()),
         )
@@ -416,7 +423,8 @@ pub(crate) fn parse_return_statement(
     let mut coerced_values: Vec<ExprId> = Vec::with_capacity(slots.len());
     for (slot, expected_type_id) in slots.into_iter().zip(function_return_type_ids.iter()) {
         let StatementExpression::Built(returned_value) = slot else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a return slot list without retained fragments held a deferred value",
             )
             .into());
@@ -486,10 +494,10 @@ pub(crate) fn validate_forwarded_return(
     value: ExpressionView<'_>,
     expected_types: &[TypeId],
     type_environment: &TypeEnvironment,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let produced_types = value.success_types();
     if produced_types.len() != expected_types.len() {
-        return Err(CompilerDiagnostic::invalid_value_receiver(
+        return Err(calls_data::invalid_value_receiver(
             ValueReceiverContext::Return,
             expected_types.len(),
             produced_types.len(),
@@ -498,7 +506,7 @@ pub(crate) fn validate_forwarded_return(
     }
     for (&expected, &produced) in expected_types.iter().zip(produced_types) {
         if !is_type_compatible(expected, produced, type_environment) {
-            return Err(CompilerDiagnostic::type_mismatch(
+            return Err(types_borrows_targets::type_mismatch(
                 expected,
                 produced,
                 TypeMismatchContext::ReturnValue,

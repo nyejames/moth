@@ -64,7 +64,7 @@ impl ScopeContext {
 
     /// Clone the shared parser-emitted TIR store handle.
     ///
-    /// Tests use this to inspect B6 draft output without making the store a public
+    /// Tests use this to inspect template-IR draft output without making the store a public
     /// language or HIR-facing API.
     #[cfg(test)]
     pub(crate) fn template_ir_store(&self) -> Rc<RefCell<TemplateIrStore>> {

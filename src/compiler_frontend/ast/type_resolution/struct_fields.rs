@@ -5,32 +5,35 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, resolve_parsed_type_annotation, reusable_type_id_for_parsed_ref,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTypeAnnotationReason, TypeAnnotationContext,
+    InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(crate) enum StructFieldResolutionError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(Box<InfrastructureFailure>),
 }
 
-impl From<CompilerDiagnostic> for StructFieldResolutionError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for StructFieldResolutionError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         StructFieldResolutionError::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for StructFieldResolutionError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for StructFieldResolutionError {
+    fn from(error: InfrastructureFailure) -> Self {
         StructFieldResolutionError::Infrastructure(Box::new(error))
     }
 }
 
-impl From<Box<CompilerError>> for StructFieldResolutionError {
-    fn from(error: Box<CompilerError>) -> Self {
+impl From<Box<InfrastructureFailure>> for StructFieldResolutionError {
+    fn from(error: Box<InfrastructureFailure>) -> Self {
         StructFieldResolutionError::Infrastructure(error)
     }
 }
@@ -97,14 +100,16 @@ fn validate_resolved_field_parent_paths(
 
     for field in resolved_fields {
         let Some(parent) = path_fork.parent(field.id) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Resolved struct field is missing its parent struct path.",
             )
             .into());
         };
 
         if parent != *struct_path {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Resolved struct field parent does not match the enclosing struct declaration.",
             )
             .into());
@@ -148,7 +153,7 @@ fn resolve_struct_field_type_shells(
                     *type_id != type_resolution_context.type_environment.builtins().none
                 })
                 .ok_or_else(|| {
-                    CompilerDiagnostic::invalid_type_annotation(
+                    names_declarations::invalid_type_annotation(
                         TypeAnnotationContext::DeclarationTarget,
                         InvalidTypeAnnotationReason::NoneNotAllowed,
                         field.binding_span,
@@ -162,7 +167,8 @@ fn resolve_struct_field_type_shells(
         {
             field.type_id
         } else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "struct field shell has neither authored type syntax nor a valid canonical type ID",
             )
             .into());
@@ -183,7 +189,8 @@ fn validate_struct_field_defaults(
 ) -> Result<(), StructFieldResolutionError> {
     for field in resolved_fields {
         if field.value.initializer().is_some() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "resolved struct field default was not folded by the strict struct pass",
             )
             .into());
@@ -192,7 +199,8 @@ fn validate_struct_field_defaults(
             continue;
         };
         context.const_values.metadata(default).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "resolved struct field default is outside its constant owner",
             )
         })?;

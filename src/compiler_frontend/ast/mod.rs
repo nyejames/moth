@@ -179,8 +179,9 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, ModuleMaterialisationPreparationBuilder,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDraft, PreparedFailure,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
@@ -245,7 +246,7 @@ pub struct Ast {
     /// Const top-level fragments with their runtime insertion indices.
     /// Builders merge these with the runtime fragment list returned by entry `start()`.
     pub const_top_level_fragments: Vec<AstConstTopLevelFragment>,
-    pub warnings: Vec<CompilerDiagnostic>,
+    pub warnings: Vec<DiagnosticDraft>,
 
     /// Resolved choice definitions for HIR pre-registration.
     ///
@@ -363,7 +364,7 @@ impl Ast {
     pub(in crate::compiler_frontend) fn new(
         input: AstBuildInput,
         context: AstBuildContext,
-    ) -> Result<AstBuildResult, CompilerMessages> {
+    ) -> Result<AstBuildResult, PreparedFailure> {
         let AstBuildInput {
             headers,
             source_token_owners,
@@ -541,7 +542,7 @@ pub(crate) fn function_body_to_ast(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedBody, ExpressionParseError> {

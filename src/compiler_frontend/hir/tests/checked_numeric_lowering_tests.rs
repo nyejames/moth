@@ -769,8 +769,8 @@ fn equal_type_compound_store_emits_no_conversion() {
 
 // WHAT: verifies that a same-type narrow compound update keeps its checked arithmetic failure
 //       and updates the target only through the success continuation.
-// WHY: D15 makes `U8 + U8` potentially fallible inside U8, so the mixed-domain witness (whose
-//      failure lives in the store conversion) no longer proves the write-back gate; a stale
+// WHY: `U8 + U8` is potentially fallible inside U8, so the mixed-domain witness (whose
+//      failure lives in the store conversion) does not prove the write-back gate; a stale
 //      discharged operation or a partial commit on the failing path must fail this test.
 #[test]
 fn compound_same_type_u8_arithmetic_returns_error_before_writing_target() {
@@ -1349,8 +1349,8 @@ fn fixed_u8_addition_keeps_the_operand_domain() {
     assert!(numeric_conversion(&fixture.expressions, left).is_none());
     assert!(numeric_conversion(&fixture.expressions, right).is_none());
     // `255 + 1` overflows U8, so the narrowed domain must stay checked. The fixture lowers in the
-    // non-fallible start function, whose exact delivery is a trap; the old promoted U32 domain
-    // discharged this operation to `Infallible` and must not return.
+    // non-fallible start function, whose exact delivery is a trap; a promoted U32 domain
+    // would discharge this operation to `Infallible` and must not do so.
     assert_eq!(
         fixture.failure_mode,
         Some(NumericDelivery::Statement(NumericFailureMode::Trap)),
@@ -1480,8 +1480,8 @@ fn fixed_i8_negation_keeps_its_operand_domain() {
     assert_eq!(fixture.expressions.expression(operand).ty, i8_type);
     assert!(numeric_conversion(&fixture.expressions, operand).is_none());
     // Negating the I8 minimum overflows I8, so the narrowed domain must stay checked. The fixture
-    // lowers in the non-fallible start function, whose exact delivery is a trap; the old promoted
-    // I32 domain made the negation infallible and must not return.
+    // lowers in the non-fallible start function, whose exact delivery is a trap; a promoted
+    // I32 domain would make the negation infallible, which must not happen.
     assert_eq!(
         fixture.failure_mode,
         Some(NumericDelivery::Statement(NumericFailureMode::Trap)),

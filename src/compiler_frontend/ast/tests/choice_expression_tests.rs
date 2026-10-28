@@ -5,16 +5,16 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
-use crate::compiler_frontend::compiler_messages::{
-    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticPayload,
-    InvalidChoiceVariantReason, NameNamespace,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    names_declarations::TypeUsedAsValueView, token_lexical::CommonSyntaxMistakeView,
 };
+use crate::compiler_frontend::compiler_messages::{ChoiceVariantSeparatorGap, NameNamespace};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 
 #[test]
@@ -122,18 +122,15 @@ fn resolves_choice_variant_expressions_with_choice_types() {
 
 #[test]
 fn reports_unknown_choice_variant_with_targeted_diagnostic() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "Status :: Ready, Busy;\n\
          value = Status::Unknown\n",
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidChoiceVariant {
-            reason: InvalidChoiceVariantReason::UnknownVariant,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0029",
+        Some("invalid_choice_variant.unknown_variant"),
+    );
 }
 
 #[test]
@@ -148,33 +145,27 @@ fn reports_spacing_after_choice_separator_without_variant_text() {
 fn rejects_line_break_or_comment_before_choice_separator() {
     for reference in ["Status\n::Ready", "Status -- note\n::Ready"] {
         let source = format!("Status :: Ready;\nvalue = {reference}\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-
-        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0037");
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::NamespaceMisuse {
-                expected: NameNamespace::Value,
-                found: NameNamespace::Type,
-                ..
-            }
-        ));
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0037", None);
+        let facts = diagnostic
+            .family_view::<TypeUsedAsValueView>()
+            .expect("line-separated qualifier retains its namespace facts");
+        assert_eq!(facts.expected, NameNamespace::Value);
+        assert_eq!(facts.found, NameNamespace::Type);
     }
 }
 
 fn assert_choice_separator_gap(source: &str, expected_gap: ChoiceVariantSeparatorGap) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    assert_eq!(diagnostic.identity().code, "MOTH-SYNTAX-0031");
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::CommonSyntaxMistake {
-                reason: CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
-            } if *gap == expected_gap
-        ),
-        "{:?}",
-        diagnostic.payload
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0031",
+        Some("common_syntax_mistake.invalid_choice_variant_spacing"),
     );
+    let facts = diagnostic
+        .family_view::<CommonSyntaxMistakeView>()
+        .expect("choice separator spacing retains its typed gap");
+    assert_eq!(facts.choice_gap, Some(expected_gap));
 }
 
 #[test]

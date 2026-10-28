@@ -10,18 +10,16 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
-use crate::compiler_frontend::source::SourceSpan;
 
 impl<'a> HirBuilder<'a> {
     pub(super) fn materialize_short_circuit_jump_argument_local(
         &mut self,
         value: HirValueId,
-        source_span: &Option<SourceSpan>,
     ) -> Result<LocalId, HirConstructionFailure> {
         let value = self.materialize_short_circuit_result_value(value)?;
         let value_type = self.module.expressions.expression(value).ty;
         let local = self.allocate_temp_local(value_type, None)?;
-        self.emit_write_statement(HirWriteTarget::DefineLocal(local), value, source_span)?;
+        self.emit_write_statement(HirWriteTarget::DefineLocal(local), value)?;
         Ok(local)
     }
 

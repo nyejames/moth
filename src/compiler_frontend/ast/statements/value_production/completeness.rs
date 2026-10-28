@@ -20,9 +20,8 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     BranchExitSummary, ProducedValues,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::source::SourceSpan;
 
 /// Analyses a body into independent fallthrough, produce and terminate facts.
@@ -283,7 +282,7 @@ fn reject_fallthrough(
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     if exits.can_fall_through {
-        Err(CompilerDiagnostic::invalid_control_flow_statement(
+        Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
             span,
         )
@@ -294,7 +293,7 @@ fn reject_fallthrough(
 }
 
 fn no_producing_path(span: Option<SourceSpan>) -> ExpressionParseError {
-    CompilerDiagnostic::invalid_control_flow_statement(
+    choices_control_flow::invalid_control_flow_statement(
         InvalidControlFlowStatementReason::ValueIfNoProducingPath,
         span,
     )

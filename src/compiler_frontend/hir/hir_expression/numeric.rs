@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
@@ -25,7 +26,6 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use super::fallible::EmittedFallibleResults;
@@ -38,12 +38,11 @@ impl<'a> HirBuilder<'a> {
         value: HirValueId,
         source: NumericScalar,
         conversion: Option<NumericScalar>,
-        span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let Some(target) = conversion else {
             return Ok(value);
         };
-        let target_type = self.lower_type_id(target.type_id(&self.type_environment), span)?;
+        let target_type = self.lower_type_id(target.type_id(&self.type_environment))?;
         let region = self.module.expressions.expression(value).region;
         self.make_expression(
             &None,
@@ -75,8 +74,8 @@ impl<'a> HirBuilder<'a> {
                 span,
             );
         }
-        if self.active_handler_accepts_builtin_failure(span)?
-            || self.numeric_failure_is_recoverable(span)?
+        if self.active_handler_accepts_builtin_failure()?
+            || self.numeric_failure_is_recoverable()?
         {
             self.emit_recoverable_numeric_value(op, operands, success_type, span)
         } else {
@@ -119,7 +118,7 @@ impl<'a> HirBuilder<'a> {
             span,
         )?;
 
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let no_span = None;
         self.make_local_load_expression(result_local, success_type, &no_span, region)
     }
@@ -130,10 +129,10 @@ impl<'a> HirBuilder<'a> {
         cause: RangeStepFailureCause,
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        if self.active_handler_accepts_builtin_failure(span)?
-            || self.numeric_failure_is_recoverable(span)?
+        if self.active_handler_accepts_builtin_failure()?
+            || self.numeric_failure_is_recoverable()?
         {
-            let error_type = self.builtin_error_type_id(span)?;
+            let error_type = self.builtin_error_type_id()?;
             let results = self.emit_fallible_operation(
                 HirFallibleOperation::RangeStepFailure { cause },
                 &[],
@@ -142,7 +141,7 @@ impl<'a> HirBuilder<'a> {
             )?;
             // The range guard always fails. The structural success edge must still terminate.
             self.lower_numeric_results_to_success_values(results, span)?;
-            let block = self.current_block_id_or_error(span)?;
+            let block = self.current_block_id_or_error()?;
             self.emit_terminator(
                 block,
                 HirTerminator::RuntimeFailure {
@@ -163,7 +162,7 @@ impl<'a> HirBuilder<'a> {
                 span,
                 *span,
             )?;
-            let block = self.current_block_id_or_error(span)?;
+            let block = self.current_block_id_or_error()?;
             self.emit_terminator(
                 block,
                 HirTerminator::RuntimeFailure {
@@ -184,7 +183,7 @@ impl<'a> HirBuilder<'a> {
         success_type: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let error_type = self.builtin_error_type_id(span)?;
+        let error_type = self.builtin_error_type_id()?;
         let results = self.emit_fallible_operation(
             HirFallibleOperation::NumericOp { op, operands },
             &[success_type],
@@ -214,7 +213,7 @@ impl<'a> HirBuilder<'a> {
             span: *span,
         };
         self.side_table.map_statement(*span, &statement);
-        self.emit_statement_to_current_block(statement, span)
+        self.emit_statement_to_current_block(statement)
     }
 
     /// Formats a binary-float expression into a `String` using Moth's formatting contract.
@@ -227,8 +226,8 @@ impl<'a> HirBuilder<'a> {
         source: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let recoverable = self.float_integrity_failure_is_recoverable(span)?;
-        let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
+        let recoverable = self.float_integrity_failure_is_recoverable()?;
+        let string_type = self.lower_type_id(self.type_environment.builtins().string)?;
         if recoverable {
             self.emit_recoverable_formatted_float_value(source, string_type, span)
         } else {
@@ -246,7 +245,7 @@ impl<'a> HirBuilder<'a> {
         let result_local = self.allocate_temp_local(string_type, None)?;
         self.emit_format_float_statement(source, NumericFailureMode::Trap, result_local, span)?;
 
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let no_span = None;
         self.make_local_load_expression(result_local, string_type, &no_span, region)
     }
@@ -258,7 +257,7 @@ impl<'a> HirBuilder<'a> {
         string_type: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let error_type = self.builtin_error_type_id(span)?;
+        let error_type = self.builtin_error_type_id()?;
         let results = self.emit_fallible_operation(
             HirFallibleOperation::FormatFloat { source },
             &[string_type],
@@ -277,7 +276,7 @@ impl<'a> HirBuilder<'a> {
         source: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let recoverable = self.float_integrity_failure_is_recoverable(span)?;
+        let recoverable = self.float_integrity_failure_is_recoverable()?;
         let float_type = self.module.expressions.expression(source).ty;
         if recoverable {
             self.emit_recoverable_validated_float_value(source, float_type, span)
@@ -296,7 +295,7 @@ impl<'a> HirBuilder<'a> {
         let result_local = self.allocate_temp_local(float_type, None)?;
         self.emit_validate_float_statement(source, NumericFailureMode::Trap, result_local, span)?;
 
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let no_span = None;
         self.make_local_load_expression(result_local, float_type, &no_span, region)
     }
@@ -308,7 +307,7 @@ impl<'a> HirBuilder<'a> {
         float_type: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let error_type = self.builtin_error_type_id(span)?;
+        let error_type = self.builtin_error_type_id()?;
         let results = self.emit_fallible_operation(
             HirFallibleOperation::ValidateFloat { source },
             &[float_type],
@@ -320,14 +319,11 @@ impl<'a> HirBuilder<'a> {
 
     /// A catch continuation accepts builtin numeric failure only. Custom handlers keep
     /// injected float boundary checks on the function-boundary continuation.
-    fn active_handler_accepts_builtin_failure(
-        &mut self,
-        span: &Option<SourceSpan>,
-    ) -> Result<bool, HirConstructionFailure> {
+    fn active_handler_accepts_builtin_failure(&mut self) -> Result<bool, HirConstructionFailure> {
         let Some(handler) = self.active_catch_handler else {
             return Ok(false);
         };
-        Ok(handler.error_type == self.builtin_error_type_id(span)?)
+        Ok(handler.error_type == self.builtin_error_type_id()?)
     }
 
     fn lower_numeric_results_to_success_value(
@@ -335,7 +331,7 @@ impl<'a> HirBuilder<'a> {
         results: EmittedFallibleResults,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        if self.active_handler_accepts_builtin_failure(span)? {
+        if self.active_handler_accepts_builtin_failure()? {
             self.lower_results_to_active_catch_success_value(results, span)
         } else {
             self.lower_fallible_results_to_success_value(results, span)
@@ -347,7 +343,7 @@ impl<'a> HirBuilder<'a> {
         results: EmittedFallibleResults,
         span: &Option<SourceSpan>,
     ) -> Result<Vec<HirValueId>, HirConstructionFailure> {
-        if self.active_handler_accepts_builtin_failure(span)? {
+        if self.active_handler_accepts_builtin_failure()? {
             self.lower_results_to_active_catch_success_values(results, span)
         } else {
             self.lower_fallible_results_to_success_values(results, span)
@@ -372,7 +368,7 @@ impl<'a> HirBuilder<'a> {
             span: *span,
         };
         self.side_table.map_statement(*span, &statement);
-        self.emit_statement_to_current_block(statement, span)
+        self.emit_statement_to_current_block(statement)
     }
 
     /// Emits the `FormatFloat` statement itself.
@@ -393,7 +389,7 @@ impl<'a> HirBuilder<'a> {
             span: *span,
         };
         self.side_table.map_statement(*span, &statement);
-        self.emit_statement_to_current_block(statement, span)
+        self.emit_statement_to_current_block(statement)
     }
 
     /// Emits a checked numeric operation and writes its success value to `target`.
@@ -412,7 +408,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         let discharged =
             self.pre_conversion_operands_cannot_fail(op.operator, left, Some(right), op.domain);
-        let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right, span)?;
+        let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right)?;
         let operands = HirNumericOperands::Binary { left, right };
         if discharged {
             // Generated loop arithmetic over discharged domains keeps its span but needs no
@@ -425,8 +421,8 @@ impl<'a> HirBuilder<'a> {
                 span,
             );
         }
-        let recoverable = self.active_handler_accepts_builtin_failure(span)?
-            || self.numeric_failure_is_recoverable(span)?;
+        let recoverable = self.active_handler_accepts_builtin_failure()?
+            || self.numeric_failure_is_recoverable()?;
 
         // Generated updates retain the authored span and commit only on the success edge.
         if !recoverable {
@@ -439,7 +435,7 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        let success_type = self.checked_numeric_result_type(op, span)?;
+        let success_type = self.checked_numeric_result_type(op)?;
         let success_value =
             self.emit_recoverable_numeric_value(op, operands, success_type, span)?;
         let write_target = match target {
@@ -448,7 +444,7 @@ impl<'a> HirBuilder<'a> {
                 HirWriteTarget::AssignPlace(HirPlace::local(local))
             }
         };
-        self.emit_write_statement(write_target, success_value, span)
+        self.emit_write_statement(write_target, success_value)
     }
 
     /// Returns the scalar success type for a checked numeric operation.
@@ -459,25 +455,21 @@ impl<'a> HirBuilder<'a> {
     fn checked_numeric_result_type(
         &mut self,
         op: HirNumericOp,
-        span: &Option<SourceSpan>,
     ) -> Result<TypeId, HirConstructionFailure> {
         let domain_type = op.domain.type_id(&self.type_environment);
-        self.lower_type_id(domain_type, span)
+        self.lower_type_id(domain_type)
     }
 
     /// Formatting and incoming-value guards are integrity checks, not implicit numeric failure.
     /// Only a source-declared builtin Error! contract makes these guards recoverable. The exact
     /// start identity is retained from the compiler-generated AST entry, not inferred from a name.
-    fn float_integrity_failure_is_recoverable(
-        &mut self,
-        span: &Option<SourceSpan>,
-    ) -> Result<bool, HirConstructionFailure> {
-        let function_id = self.current_function_id_or_error(span)?;
+    fn float_integrity_failure_is_recoverable(&mut self) -> Result<bool, HirConstructionFailure> {
+        let function_id = self.current_function_id_or_error()?;
         if self.module.start_function == Some(function_id) {
             return Ok(false);
         }
 
-        self.numeric_failure_is_recoverable(span)
+        self.numeric_failure_is_recoverable()
     }
 
     /// Selects function-boundary delivery, independent of numeric statement modes.
@@ -487,10 +479,9 @@ impl<'a> HirBuilder<'a> {
     /// code-carrying producers. Float integrity guards use their separate start policy.
     pub(crate) fn numeric_failure_is_recoverable(
         &mut self,
-        span: &Option<SourceSpan>,
     ) -> Result<bool, HirConstructionFailure> {
-        let current_function_id = self.current_function_id_or_error(span)?;
-        let function = self.function_by_id_or_error(current_function_id, span)?;
+        let current_function_id = self.current_function_id_or_error()?;
+        let function = self.function_by_id_or_error(current_function_id)?;
         let Some(error_type) = function.error_return else {
             return Ok(false);
         };
@@ -523,24 +514,23 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         left: HirValueId,
         right: HirValueId,
-        span: &Option<SourceSpan>,
     ) -> Result<(HirValueId, HirValueId), HirConstructionFailure> {
-        let left = self.convert_numeric_operand_to_domain(left, op.domain, span)?;
+        let left = self.convert_numeric_operand_to_domain(left, op.domain)?;
 
         if op.operator == NumericOperator::Power && matches!(op.domain, NumericScalar::Number(_)) {
             let exponent_type =
                 NumericScalar::Fixed(FixedScalar::I32).type_id(&self.type_environment);
             if self.module.expressions.expression(right).ty != exponent_type {
-                return_hir_transformation_error!(
+                return Err(InfrastructureFailure::hir_transformation(
                     "Dec power exponent must remain the exact I32 type",
-                    self.hir_error_location(span)
-                );
+                )
+                .into());
             }
 
             return Ok((left, right));
         }
 
-        let right = self.convert_numeric_operand_to_domain(right, op.domain, span)?;
+        let right = self.convert_numeric_operand_to_domain(right, op.domain)?;
         Ok((left, right))
     }
 
@@ -554,7 +544,6 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: HirValueId,
         domain: NumericScalar,
-        span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let target_type = domain.type_id(&self.type_environment);
         let value_row = self.module.expressions.expression(value);
@@ -563,10 +552,10 @@ impl<'a> HirBuilder<'a> {
         }
 
         let Some(source) = NumericScalar::from_type_id(value_row.ty, &self.type_environment) else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Numeric operation operand has no numeric conversion domain",
-                self.hir_error_location(span)
-            );
+            )
+            .into());
         };
 
         let region = value_row.region;

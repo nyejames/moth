@@ -9,7 +9,8 @@
 //! syntax, borrow legality or lifetime topology. The alpha checker therefore remains on its
 //! existing metadata path while Boracle and future consumers can use this independent owner.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use super::problem::{
     BindingId, BlockId, BorrowProblem, EventId, EventKind, LoanId, PlaceId, PointId, UseId,
@@ -32,7 +33,7 @@ pub(crate) enum FutureUseStatus {
 pub(crate) enum LastUseSubject {
     Place(PlaceId),
     Binding(BindingId),
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    // Boracle reporting uses this subject for origin last-use observations.
     #[allow(dead_code)]
     Origin(super::problem::ValueOriginId),
     Loan(LoanId),
@@ -111,7 +112,7 @@ pub(crate) struct LastUseAnalysis {
 
 impl LastUseAnalysis {
     /// Derive place, binding and loan observations from a validated problem.
-    pub(crate) fn from_problem(problem: &BorrowProblem) -> Result<Self, CompilerError> {
+    pub(crate) fn from_problem(problem: &BorrowProblem) -> Result<Self, InfrastructureFailure> {
         problem.validate()?;
 
         let mut analysis = Self::empty(problem);
@@ -119,19 +120,25 @@ impl LastUseAnalysis {
 
         for use_row in problem.uses() {
             let Some(event_id) = event_by_use.get(&use_row.id).copied() else {
-                return Err(CompilerError::compiler_error(format!(
-                    "last-use analysis cannot locate owner of normalized use {:?}",
-                    use_row.id
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!(
+                        "last-use analysis cannot locate owner of normalized use {:?}",
+                        use_row.id
+                    ),
+                ));
             };
             let location = *analysis
                 .event_location_by_id
                 .get(&event_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "last-use analysis cannot locate normalized event {:?}",
-                        event_id
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "last-use analysis cannot locate normalized event {:?}",
+                            event_id
+                        ),
+                    )
                 })?;
 
             analysis.add_observation(LastUseObservation {
@@ -141,10 +148,13 @@ impl LastUseAnalysis {
             });
 
             let place = problem.places().get(use_row.place.index()).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "last-use analysis cannot locate normalized place {:?}",
-                    use_row.place
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!(
+                        "last-use analysis cannot locate normalized place {:?}",
+                        use_row.place
+                    ),
+                )
             })?;
             analysis.add_observation(LastUseObservation {
                 subject: LastUseSubject::Binding(place.root),
@@ -156,19 +166,25 @@ impl LastUseAnalysis {
         for loan in problem.loans() {
             for use_id in &loan.uses {
                 let Some(event_id) = event_by_use.get(use_id).copied() else {
-                    return Err(CompilerError::compiler_error(format!(
-                        "last-use analysis cannot locate owner of loan use {:?}",
-                        use_id
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "last-use analysis cannot locate owner of loan use {:?}",
+                            use_id
+                        ),
+                    ));
                 };
                 let location = *analysis
                     .event_location_by_id
                     .get(&event_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "last-use analysis cannot locate loan-use event {:?}",
-                            event_id
-                        ))
+                        InfrastructureFailure::internal(
+                            CompilerStage::BorrowChecking,
+                            format!(
+                                "last-use analysis cannot locate loan-use event {:?}",
+                                event_id
+                            ),
+                        )
                     })?;
                 analysis.add_observation(LastUseObservation {
                     subject: LastUseSubject::Loan(loan.id),
@@ -183,13 +199,13 @@ impl LastUseAnalysis {
     }
 
     /// Add solver-owned observations to the normalized place and binding observations.
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    // Boracle report construction adds origin and loan observations through this extension point.
     #[allow(dead_code)]
     pub(crate) fn with_observations(
         mut self,
         problem: &BorrowProblem,
         observations: impl IntoIterator<Item = LastUseObservation>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         for observation in observations {
             self.validate_observation(problem, observation)?;
             self.add_observation(observation);
@@ -203,7 +219,7 @@ impl LastUseAnalysis {
         &self,
         subject: LastUseSubject,
         location: LastUseLocation,
-    ) -> Result<LastUseResult, CompilerError> {
+    ) -> Result<LastUseResult, InfrastructureFailure> {
         let block = self.block_for_point(location.point)?;
         let start_index = self.start_event_index(block, location)?;
         let local_observations = self
@@ -242,13 +258,19 @@ impl LastUseAnalysis {
             },
             FutureUseStatus::MayBeUsed => LastUseWitness::MayBeUsed {
                 later_use: summaries.later_use.ok_or_else(|| {
-                    CompilerError::compiler_error("last-use MAY result has no later-use witness")
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        "last-use MAY result has no later-use witness",
+                    )
                 })?,
                 no_use_exit: summaries.no_use_exit,
             },
             FutureUseStatus::MustBeUsed => LastUseWitness::MustBeUsed {
                 later_use: summaries.later_use.ok_or_else(|| {
-                    CompilerError::compiler_error("last-use MUST result has no later-use witness")
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        "last-use MUST result has no later-use witness",
+                    )
                 })?,
             },
         };
@@ -303,31 +325,35 @@ impl LastUseAnalysis {
         }
     }
 
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    // Validate solver-owned observations against the normalized problem before adding them.
     #[allow(dead_code)]
     fn validate_observation(
         &self,
         problem: &BorrowProblem,
         observation: LastUseObservation,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let point = problem
             .points()
             .get(observation.location.point.index())
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "last-use observation references unknown point {:?}",
-                    observation.location.point
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!(
+                        "last-use observation references unknown point {:?}",
+                        observation.location.point
+                    ),
+                )
             })?;
         if let Some(event) = observation.location.after_event {
             let event_row = problem.events().get(event.index()).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "last-use observation references unknown event {:?}",
-                    event
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!("last-use observation references unknown event {:?}", event),
+                )
             })?;
             if event_row.point != point.id {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
                     "last-use observation event and point do not match",
                 ));
             }
@@ -354,12 +380,12 @@ impl LastUseAnalysis {
         }
     }
 
-    fn block_for_point(&self, point: PointId) -> Result<BlockId, CompilerError> {
+    fn block_for_point(&self, point: PointId) -> Result<BlockId, InfrastructureFailure> {
         self.point_block.get(&point).copied().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "last-use query cannot locate block for point {:?}",
-                point
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("last-use query cannot locate block for point {:?}", point),
+            )
         })
     }
 
@@ -367,22 +393,25 @@ impl LastUseAnalysis {
         &self,
         block: BlockId,
         location: LastUseLocation,
-    ) -> Result<usize, CompilerError> {
+    ) -> Result<usize, InfrastructureFailure> {
         let events = self.events_by_block.get(&block).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "last-use query cannot locate normalized block {:?}",
-                block
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("last-use query cannot locate normalized block {:?}", block),
+            )
         })?;
         if let Some(event) = location.after_event {
             let index = events
                 .iter()
                 .position(|candidate| *candidate == event)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "last-use query event {:?} is not owned by block {:?}",
-                        event, block
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "last-use query event {:?} is not owned by block {:?}",
+                            event, block
+                        ),
+                    )
                 })?;
             return Ok(index + 1);
         }
@@ -583,17 +612,20 @@ impl LastUseAnalysis {
 }
 
 /// Map each normalized use to its exact owning event.
-// Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+// Boracle reporting uses this mapping to locate the event that owns each normalized use.
 #[allow(dead_code)]
 pub(crate) fn event_for_use(
     problem: &BorrowProblem,
     use_id: UseId,
-) -> Result<EventId, CompilerError> {
+) -> Result<EventId, InfrastructureFailure> {
     use_event_map(problem).get(&use_id).copied().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "last-use analysis cannot locate owner of normalized use {:?}",
-            use_id
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            format!(
+                "last-use analysis cannot locate owner of normalized use {:?}",
+                use_id
+            ),
+        )
     })
 }
 

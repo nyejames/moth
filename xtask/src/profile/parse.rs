@@ -644,7 +644,6 @@ fn parse_thread(
     thread: &Value,
     path: &Path,
 ) -> Result<(), String> {
-    // Extract thread metadata.
     let thread_name = match thread.get("name").and_then(|v| v.as_str()) {
         Some(n) => n.to_owned(),
         None => {
@@ -673,7 +672,6 @@ fn parse_thread(
     // conflicted by a partial move of warnings.
     accumulator.add_warnings(std::mem::take(&mut thread_ctx.warnings));
 
-    // Extract samples from this thread.
     let samples = match thread.get("samples") {
         Some(s) => s,
         None => {
@@ -696,7 +694,6 @@ fn parse_thread(
         }
     };
 
-    // Parse weight type and weights.
     let weight_type = samples
         .get("weightType")
         .and_then(|v| v.as_str())
@@ -772,7 +769,6 @@ fn parse_thread(
 fn parse_thread_tables(thread: &Value, path: &Path) -> Result<ThreadContext, String> {
     let mut warnings = Vec::new();
 
-    // String table
     let string_array = thread
         .get("stringArray")
         .and_then(|v| v.as_array())
@@ -795,7 +791,6 @@ fn parse_thread_tables(thread: &Value, path: &Path) -> Result<ThreadContext, Str
         })
         .collect();
 
-    // Function table
     let func_table = require_object(thread, "funcTable", path)?;
     let func_names = require_array_from_map(func_table, "name", path)?;
     let func_to_name: Vec<usize> = func_names
@@ -810,7 +805,6 @@ fn parse_thread_tables(thread: &Value, path: &Path) -> Result<ThreadContext, Str
         })
         .collect();
 
-    // Frame table
     let frame_table = require_object(thread, "frameTable", path)?;
     let frame_funcs = require_array_from_map(frame_table, "func", path)?;
     let frame_to_func: Vec<usize> = frame_funcs
@@ -825,7 +819,6 @@ fn parse_thread_tables(thread: &Value, path: &Path) -> Result<ThreadContext, Str
         })
         .collect();
 
-    // Stack table
     let stack_table = require_object(thread, "stackTable", path)?;
     let prefix_array = require_array_from_map(stack_table, "prefix", path)?;
     let frame_array = require_array_from_map(stack_table, "frame", path)?;

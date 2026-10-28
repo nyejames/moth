@@ -22,6 +22,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -36,7 +37,6 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 use super::aggregate::RuntimeTemplateAggregateAppend;
 use super::append_context::RuntimeTemplateAppendContext;
@@ -55,7 +55,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LocalId, HirConstructionFailure> {
         let string_ty = builtin_type_ids::STRING;
         let accumulator = self.allocate_temp_local(string_ty, None)?;
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let empty_string = self.make_expression(
             span_ref,
             HirExpressionKind::StringLiteral(String::new()),
@@ -81,7 +81,7 @@ impl<'a> HirBuilder<'a> {
         accumulator: LocalId,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let aggregate_value = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(aggregate)),
@@ -99,7 +99,7 @@ impl<'a> HirBuilder<'a> {
         accumulator: LocalId,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let chunk = self.make_expression(
             span_ref,
             HirExpressionKind::StringLiteral(text),
@@ -126,13 +126,13 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let OwnedFoldedString::Pieces(pieces) = text else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Piece-bearing runtime-template text node carried neither plain text nor pieces.",
-                self.hir_error_location(span_ref)
-            );
+            )
+            .into());
         };
 
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let chunk_kind = HirExpressionKind::StructuralString {
             pieces: self.hir_pieces_from_owned_pieces(pieces, span_ref)?,
         };
@@ -192,21 +192,16 @@ impl<'a> HirBuilder<'a> {
     fn append_unresolved_slot_node_to_accumulator(
         &mut self,
         append_context: RuntimeTemplateAppendContext<'_>,
-        span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         if append_context.rejects_unresolved_slots() {
-            return_hir_transformation_error!(
-                "Runtime template slot application reached HIR with an unresolved slot placeholder. AST slot routing should have converted it to a runtime slot site before HIR lowering.",
-                self.hir_error_location(span_ref)
-            );
+            return Err(InfrastructureFailure::hir_transformation("Runtime template slot application reached HIR with an unresolved slot placeholder. AST slot routing should have converted it to a runtime slot site before HIR lowering.").into());
         }
 
         Ok(RuntimeTemplateEmission::NoOutput)
     }
 
-    // WHAT: Appends an AST-owned runtime-template node into a string accumulator.
-    // WHY: runtime templates now hand HIR an owned tree of runtime-template nodes
-    // so HIR does not need raw TIR IDs or internal AST template-planning state.
+    // WHY: runtime templates hand HIR an owned tree of runtime-template nodes, keeping raw TIR
+    // IDs and internal AST template-planning state outside HIR.
     pub(super) fn append_owned_runtime_template_node_to_accumulator(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
@@ -234,8 +229,8 @@ impl<'a> HirBuilder<'a> {
                         }
                     }
 
-                    let current_block = self.current_block_id_or_error(span_ref)?;
-                    if self.block_has_explicit_terminator(current_block, span_ref)? {
+                    let current_block = self.current_block_id_or_error()?;
+                    if self.block_has_explicit_terminator(current_block)? {
                         break;
                     }
                 }
@@ -350,10 +345,7 @@ impl<'a> HirBuilder<'a> {
 
             OwnedRuntimeTemplateNode::AggregateOutput => {
                 let Some(aggregate) = aggregate_local else {
-                    return_hir_transformation_error!(
-                        "Owned runtime template aggregate output appeared outside an aggregate wrapper context.",
-                        self.hir_error_location(span_ref)
-                    );
+                    return Err(InfrastructureFailure::hir_transformation("Owned runtime template aggregate output appeared outside an aggregate wrapper context.").into());
                 };
 
                 self.append_aggregate_local_to_accumulator(
@@ -371,7 +363,7 @@ impl<'a> HirBuilder<'a> {
 
             OwnedRuntimeTemplateNode::RuntimeSlotSite { site, .. } => {
                 let emission =
-                    self.append_runtime_slot_site_to_accumulator(*site, append_context, span_ref)?;
+                    self.append_runtime_slot_site_to_accumulator(*site, append_context)?;
                 self.mark_owned_runtime_template_output_if_needed(
                     emission,
                     append_context,
@@ -401,7 +393,7 @@ impl<'a> HirBuilder<'a> {
                 // rendering skips them. Inside an active runtime slot application
                 // wrapper the placeholder should have been resolved to a site by AST
                 // routing, so the reject policy raises an internal compiler error.
-                self.append_unresolved_slot_node_to_accumulator(append_context, span_ref)
+                self.append_unresolved_slot_node_to_accumulator(append_context)
             }
         }
     }
@@ -646,22 +638,21 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         site_id: RuntimeSlotSiteId,
         append_context: RuntimeTemplateAppendContext<'_>,
-        span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let Some(slot_sites) = append_context.slot_sites else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Runtime slot site appeared outside an active runtime slot application.",
-                self.hir_error_location(span_ref)
-            );
+            )
+            .into());
         };
         let Some(site) = slot_sites
             .get(site_id.0)
             .filter(|site| site.site == site_id)
         else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Runtime slot application wrapper referenced a missing slot site.",
-                self.hir_error_location(span_ref)
-            );
+            )
+            .into());
         };
 
         self.append_owned_runtime_template_node_to_accumulator(
@@ -679,16 +670,16 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let Some(source_accumulators) = append_context.source_accumulators else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Runtime slot source appeared outside an active runtime slot application.",
-                self.hir_error_location(span_ref)
-            );
+            )
+            .into());
         };
         let Some(source_locals) = source_accumulators.for_source(source_id) else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "Runtime slot site referenced a missing contribution source.",
-                self.hir_error_location(span_ref)
-            );
+            )
+            .into());
         };
 
         // Replay authored bytes even when whitespace-only text did not set the structural flag.
@@ -785,7 +776,7 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let string_ty = builtin_type_ids::STRING;
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let accumulated = self.make_expression(
             span_ref,
             HirExpressionKind::Load(HirPlace::local(accumulator)),

@@ -4,7 +4,7 @@
 //! WHY: whole, decimal and exponent spellings stay distinct until their receiver is known.
 
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, InvalidExpressionReason, TypeMismatchContext,
+    CommonSyntaxMistakeReason, InvalidExpressionReason,
 };
 use crate::compiler_frontend::instrumentation::lock_counter_test;
 use crate::mon::{Field, MonErrorCode, PathSegment, Schema, SchemaType, Value};
@@ -229,10 +229,7 @@ fn numeric_spelling_fixtures() -> Vec<ParityFixture> {
             spelling,
             "I32",
             SchemaType::I32,
-            source_type_mismatch(
-                TypeMismatchContext::ConstructorArgument,
-                in_literal(&literal, spelling, 1),
-            ),
+            source_type_mismatch(in_literal(&literal, spelling, 1)),
             mon_numeric_error(
                 &literal,
                 spelling,

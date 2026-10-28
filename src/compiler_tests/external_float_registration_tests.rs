@@ -34,6 +34,9 @@ use crate::build_system::create_project_modules::{
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalJsLowering,
     ExternalReturnSlot, ExternalSignatureType,
@@ -147,20 +150,35 @@ fn compile_raw_fixed_f64_fixture(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let build_config_inputs = BuildConfigInputSet::new();
     let mut config = Config::new(root);
-    let mut string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut project_source_files = None;
+    let mut project_source_builder = None;
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut surface,
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
+        &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
-    )
-    .expect("the raw fixed F64 registration fixture must compile through the canonical service");
+    );
+    let frontend = match frontend {
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            let diagnostics = format_terse_diagnostic_reports(&reports).join("\n");
+            panic!(
+                "the raw fixed F64 registration fixture should compile successfully:\n{diagnostics}"
+            );
+        }
+        Err(errors) => {
+            panic!(
+                "the raw fixed F64 registration fixture should compile without infrastructure errors: {errors:?}"
+            );
+        }
+    };
 
     let module = frontend
         .project
@@ -180,7 +198,7 @@ fn compile_raw_fixed_f64_fixture(
     let js = lower_hir_to_js(
         &module.executable.hir,
         &module.executable.numeric_proofs,
-        &string_table,
+        warning_owner.string_table(),
         js_config,
         &module.executable.type_environment,
         &module.executable.path_table,
@@ -200,7 +218,9 @@ fn compile_raw_fixed_f64_fixture(
                 .side_table
                 .function_name_path(hir_function.id)
                 .and_then(|path| module.executable.path_table.component(path))
-                .is_some_and(|component| string_table.resolve(component) == source_function)
+                .is_some_and(|component| {
+                    warning_owner.string_table().resolve(component) == source_function
+                })
         })
         .and_then(|hir_function| js.function_name_by_id.get(&hir_function.id).cloned())
         .unwrap_or_else(|| {

@@ -1,5 +1,5 @@
 -- Test case: path-dependent mutable aliasing is valid when each mutable alias ends at its last use
--- This used to model a path-dependent ownership violation, but there is no move here.
+-- There is no move here, so this is not a path-dependent ownership violation.
 
 x = "test_value"
 condition = true

@@ -29,12 +29,16 @@
 use crate::compiler_frontend::ast::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionResult, aliases, context::TypeResolutionContext,
+    TypeResolutionResult, aliases,
+    context::{TypeResolutionContext, TypeResolutionFailureKind},
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    generics_traits_api, names_declarations, project_config,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidGenericInstantiationReason,
-    InvalidTypeAnnotationReason, NameNamespace, NamespaceTypeValueMisuseKind,
-    TypeAnnotationContext,
+    DiagnosticToken, InvalidGenericInstantiationReason, InvalidTypeAnnotationReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -52,6 +56,15 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
+fn unknown_type_name(
+    name: StringId,
+    span: Option<SourceSpan>,
+    failure_kind: &mut TypeResolutionFailureKind,
+) -> DiagnosticDraft {
+    *failure_kind = TypeResolutionFailureKind::UnknownTypeName;
+    names_declarations::unknown_type_name(name, span)
+}
+
 /// Resolve a bare named type from the current type-resolution context.
 ///
 /// WHAT: searches generic parameters, visible type aliases, visible source declarations,
@@ -64,8 +77,8 @@ pub(super) fn resolve_named_type_from_context(
     span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
     string_table: &StringTable,
+    failure_kind: &mut TypeResolutionFailureKind,
 ) -> TypeResolutionResult<Option<TypeId>> {
-    // 1) Generic parameter scope.
     if let Some(generic_scope) = context.generic_parameters
         && let Some(parameter) = generic_scope.resolve(type_name)
     {
@@ -93,7 +106,7 @@ pub(super) fn resolve_named_type_from_context(
         return Ok(Some(alias.target_type_id));
     }
 
-    // Alias hits belong only to the alias counter, matching the previous fallback boundary.
+    // Alias hits return early, so only lookups that reach here count as visible-type attempts.
     increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
 
     // 3) Visible source declarations (path-based first, then name fallback).
@@ -131,7 +144,7 @@ pub(super) fn resolve_named_type_from_context(
     // 5) Traits are static contracts. They are valid in trait declarations,
     // conformances, and generic bounds, but never as ordinary value types.
     if let Some(trait_name) = visible_static_trait_name(type_name, context, string_table) {
-        return Err(CompilerDiagnostic::trait_name_used_as_type(
+        return Err(generics_traits_api::trait_name_used_as_type(
             trait_name, span,
         ));
     }
@@ -143,7 +156,7 @@ pub(super) fn resolve_named_type_from_context(
         return Ok(Some(builtin_type));
     }
 
-    Err(CompilerDiagnostic::unknown_type_name(type_name, span))
+    Err(unknown_type_name(type_name, span, failure_kind))
 }
 
 /// Find a visible trait name matching the supplied identifier.
@@ -185,9 +198,10 @@ pub(super) fn resolve_namespaced_type_from_context(
     path: &[StringId],
     span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
+    failure_kind: &mut TypeResolutionFailureKind,
 ) -> TypeResolutionResult<Option<TypeId>> {
     let Some(root_name) = path.first().copied() else {
-        return Err(CompilerDiagnostic::invalid_type_annotation(
+        return Err(names_declarations::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
                 found: DiagnosticToken::from_static_tag(TokenTag::EOF),
@@ -209,20 +223,18 @@ pub(super) fn resolve_namespaced_type_from_context(
     increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
 
     let Some(visible_namespace_records) = context.visible_namespace_records else {
-        return Err(CompilerDiagnostic::unknown_type_name(final_name, span));
+        return Err(unknown_type_name(final_name, span, failure_kind));
     };
 
     let Some(record) = visible_namespace_records.get(&root_name) else {
-        return Err(CompilerDiagnostic::unknown_type_name(final_name, span));
+        return Err(unknown_type_name(final_name, span, failure_kind));
     };
 
     // Source and module public-surface namespace records remain shallow. Any attempt to traverse
     // deeper than one member in such a record must keep reporting the existing nested
     // traversal diagnostic, which integration fixtures already assert.
     if path.len() > 2 && matches!(record.record_source, NamespaceRecordSource::SourceFile(_)) {
-        return Err(CompilerDiagnostic::nested_dependency_traversal(
-            root_name, span,
-        ));
+        return Err(project_config::nested_dependency_traversal(root_name, span));
     }
 
     let mut current_record = record;
@@ -235,7 +247,7 @@ pub(super) fn resolve_namespaced_type_from_context(
                 current_record = child_record;
             }
             NamespaceMemberLookup::Value(_) => {
-                return Err(CompilerDiagnostic::namespace_type_value_misuse(
+                return Err(project_config::namespace_type_value_misuse(
                     *segment,
                     NamespaceTypeValueMisuseKind::Namespace,
                     NamespaceTypeValueMisuseKind::Value,
@@ -243,7 +255,7 @@ pub(super) fn resolve_namespaced_type_from_context(
                 ));
             }
             NamespaceMemberLookup::Type => {
-                return Err(CompilerDiagnostic::namespace_type_value_misuse(
+                return Err(project_config::namespace_type_value_misuse(
                     *segment,
                     NamespaceTypeValueMisuseKind::Namespace,
                     NamespaceTypeValueMisuseKind::Type,
@@ -251,7 +263,7 @@ pub(super) fn resolve_namespaced_type_from_context(
                 ));
             }
             NamespaceMemberLookup::Missing => {
-                return Err(CompilerDiagnostic::unknown_type_name(*segment, span));
+                return Err(unknown_type_name(*segment, span, failure_kind));
             }
         }
     }
@@ -269,29 +281,27 @@ pub(super) fn resolve_namespaced_type_from_context(
                 reject_bare_generic_type_name(final_name, &declaration.id, span, context)?;
                 return Ok(registered_declaration_type_id(declaration, context));
             }
-            Err(CompilerDiagnostic::unknown_type_name(final_name, span))
+            Err(unknown_type_name(final_name, span, failure_kind))
         }
         Some(NamespaceTypeMember::ExternalSymbol(ExternalSymbolId::Type(type_id))) => {
             Ok(Some(context.type_environment.intern_external(*type_id)))
         }
         _ => match lookup_namespace_member(current_record, final_name) {
-            NamespaceMemberLookup::Value(_) => {
-                Err(CompilerDiagnostic::namespace_type_value_misuse(
-                    final_name,
-                    NamespaceTypeValueMisuseKind::Type,
-                    NamespaceTypeValueMisuseKind::Value,
-                    span,
-                ))
-            }
+            NamespaceMemberLookup::Value(_) => Err(project_config::namespace_type_value_misuse(
+                final_name,
+                NamespaceTypeValueMisuseKind::Type,
+                NamespaceTypeValueMisuseKind::Value,
+                span,
+            )),
             NamespaceMemberLookup::ChildNamespace(_) => {
-                Err(CompilerDiagnostic::namespace_type_value_misuse(
+                Err(project_config::namespace_type_value_misuse(
                     final_name,
                     NamespaceTypeValueMisuseKind::Type,
                     NamespaceTypeValueMisuseKind::Namespace,
                     span,
                 ))
             }
-            _ => Err(CompilerDiagnostic::unknown_type_name(final_name, span)),
+            _ => Err(unknown_type_name(final_name, span, failure_kind)),
         },
     }
 }
@@ -309,9 +319,10 @@ pub(super) fn resolve_generic_base_type(
     span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
     string_table: &StringTable,
+    failure_kind: &mut TypeResolutionFailureKind,
 ) -> TypeResolutionResult<PathId> {
     if let Some(reason) = invalid_carrier_type_syntax(type_name, string_table) {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             Some(type_name),
             reason,
             span,
@@ -321,7 +332,7 @@ pub(super) fn resolve_generic_base_type(
     if let Some(generic_scope) = context.generic_parameters
         && generic_scope.contains_name(type_name)
     {
-        return Err(CompilerDiagnostic::namespace_misuse(
+        return Err(names_declarations::namespace_misuse(
             type_name,
             NameNamespace::Type,
             NameNamespace::Value,
@@ -356,7 +367,7 @@ pub(super) fn resolve_generic_base_type(
     }
 
     if let Some(trait_name) = visible_static_trait_name(type_name, context, string_table) {
-        return Err(CompilerDiagnostic::trait_name_used_as_type(
+        return Err(generics_traits_api::trait_name_used_as_type(
             trait_name, span,
         ));
     }
@@ -364,7 +375,7 @@ pub(super) fn resolve_generic_base_type(
     if let Some(visible_aliases) = context.visible_type_aliases
         && visible_aliases.contains_key(&type_name)
     {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             Some(type_name),
             InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments,
             span,
@@ -377,7 +388,7 @@ pub(super) fn resolve_generic_base_type(
             Some(ExternalSymbolId::Type(_))
         )
     {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             Some(type_name),
             InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported,
             span,
@@ -385,7 +396,7 @@ pub(super) fn resolve_generic_base_type(
     }
 
     if builtin_named_type(type_name, string_table, context.type_environment).is_some() {
-        return Err(CompilerDiagnostic::namespace_misuse(
+        return Err(names_declarations::namespace_misuse(
             type_name,
             NameNamespace::Type,
             NameNamespace::Value,
@@ -393,7 +404,7 @@ pub(super) fn resolve_generic_base_type(
         ));
     }
 
-    Err(CompilerDiagnostic::unknown_type_name(type_name, span))
+    Err(unknown_type_name(type_name, span, failure_kind))
 }
 
 /// Detect deferred public `Option` / `Result` syntax in generic position.
@@ -423,7 +434,7 @@ fn reject_callable_type_name(
         declaration.value,
         DeclarationValue::Shell(DeclarationShell::Function { .. })
     ) {
-        return Err(CompilerDiagnostic::namespace_type_value_misuse(
+        return Err(project_config::namespace_type_value_misuse(
             visible_name,
             NamespaceTypeValueMisuseKind::Type,
             NamespaceTypeValueMisuseKind::Value,
@@ -481,7 +492,7 @@ fn reject_bare_generic_type_name(
         kind,
         GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
     ) {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             Some(visible_name),
             InvalidGenericInstantiationReason::MissingTypeArguments,
             span,
@@ -508,7 +519,7 @@ fn resolve_generic_base_path(
         .generic_declarations_by_path
         .and_then(|generic_declarations| generic_declarations.get(canonical_path))
     else {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             visible_name,
             InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments,
             span,
@@ -519,7 +530,7 @@ fn resolve_generic_base_path(
         kind,
         GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
     ) {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             visible_name,
             InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments,
             span,
@@ -533,7 +544,7 @@ fn resolve_generic_base_path(
         .len();
     let actual = argument_count;
     if actual != expected {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(generics_traits_api::invalid_generic_instantiation(
             visible_name,
             InvalidGenericInstantiationReason::WrongArgumentCount {
                 expected,

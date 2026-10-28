@@ -9,7 +9,8 @@ use crate::backends::js::{
     JsNumericCarrier, builtin_error_code_js_field_name, builtin_error_message_js_field_name,
     external_module_export_glue_function_name,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageId, ExternalSignatureType,
@@ -32,17 +33,20 @@ pub(super) fn generate_glue_module_source(
     exports: &[ReferencedExport],
     package_asset_paths: &HashMap<ExternalPackageId, String>,
     release_build: bool,
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     let mut source = String::new();
 
     // Group imports by asset path so we emit one import statement per asset.
     let mut imports_by_path: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for export in exports {
         let path = package_asset_paths.get(&export.package_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "HTML JS glue could not find a runtime asset for external package {:?}.",
-                export.package_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "HTML JS glue could not find a runtime asset for external package {:?}.",
+                    export.package_id
+                ),
+            )
         })?;
         imports_by_path
             .entry(path.clone())
@@ -100,7 +104,7 @@ pub(super) fn generate_infallible_wrapper(
     export_name: &str,
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     validate_supported_signature(wrapper_name, parameter_types, return_types)?;
     let arguments = prepare_call_arguments(parameter_types);
     let return_adapter = return_adapter_for_signature(return_types);
@@ -134,7 +138,7 @@ pub(super) fn generate_fallible_wrapper(
     release_build: bool,
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
-) -> Result<String, CompilerError> {
+) -> Result<String, InfrastructureFailure> {
     validate_supported_signature(wrapper_name, parameter_types, return_types)?;
     let arguments = prepare_call_arguments(parameter_types);
     let return_adapter = return_adapter_for_signature(return_types);
@@ -260,15 +264,18 @@ fn validate_supported_signature(
     wrapper_name: &str,
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if parameter_types
         .iter()
         .chain(return_types)
         .any(contains_optional_numeric_payload)
     {
-        return Err(CompilerError::compiler_error(format!(
-            "HTML JS glue cannot adapt optional numeric signature metadata for external function '{wrapper_name}'."
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "HTML JS glue cannot adapt optional numeric signature metadata for external function '{wrapper_name}'."
+            ),
+        ));
     }
 
     // Fixed scalars must have an exact adapter before any adapter is selected below.
@@ -276,10 +283,13 @@ fn validate_supported_signature(
         if let ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) = signature_type
             && FixedScalarAdapter::for_scalar(*scalar).is_none()
         {
-            return Err(CompilerError::compiler_error(format!(
-                "HTML JS glue has no JavaScript Number adapter for fixed {} in external function '{wrapper_name}'.",
-                scalar.name()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "HTML JS glue has no JavaScript Number adapter for fixed {} in external function '{wrapper_name}'.",
+                    scalar.name()
+                ),
+            ));
         }
     }
 
@@ -288,9 +298,12 @@ fn validate_supported_signature(
             .iter()
             .any(|value_type| return_adapter_for_type(value_type) != ReturnAdapter::Identity)
     {
-        return Err(CompilerError::compiler_error(format!(
-            "HTML JS glue cannot adapt multiple numeric success slots for external function '{wrapper_name}'."
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "HTML JS glue cannot adapt multiple numeric success slots for external function '{wrapper_name}'."
+            ),
+        ));
     }
 
     Ok(())
@@ -430,7 +443,10 @@ fn adapted_return_body(
                     minimum,
                     maximum,
                 ),
-                _ => unreachable!("only exact-Number fixed integers use the integer result gate"),
+                _ => crate::compiler_bug!(
+                    CompilerStage::Output,
+                    "only exact-Number fixed integers use the integer result gate"
+                ),
             };
             let returned_value = success_value("__moth_external_canonical_integer");
             format!(
@@ -463,7 +479,10 @@ fn adapted_return_body(
                     minimum,
                     maximum,
                 ),
-                _ => unreachable!("only the 64-bit lanes use the safe-Number result gate"),
+                _ => crate::compiler_bug!(
+                    CompilerStage::Output,
+                    "only the 64-bit lanes use the safe-Number result gate"
+                ),
             };
             safe_number64_result_gate(
                 value_expression,
@@ -504,7 +523,10 @@ fn fixed_parameter_check(adapter: FixedScalarAdapter, index: usize) -> String {
             )
         }
         FixedScalarAdapter::SafeNumber64 { .. } => {
-            unreachable!("fixed 64-bit parameters use the safe-Number bridge")
+            crate::compiler_bug!(
+                CompilerStage::Output,
+                "fixed 64-bit parameters use the safe-Number bridge"
+            )
         }
     }
 }
@@ -523,7 +545,10 @@ fn safe_number64_parameter_check(adapter: FixedScalarAdapter, index: usize) -> S
         maximum,
     } = adapter
     else {
-        unreachable!("only I64 and U64 use the fixed safe-Number parameter bridge");
+        crate::compiler_bug!(
+            CompilerStage::Output,
+            "only I64 and U64 use the fixed safe-Number parameter bridge"
+        );
     };
 
     let name = scalar.name();

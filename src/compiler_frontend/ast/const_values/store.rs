@@ -20,8 +20,11 @@ use crate::compiler_frontend::ast::module_ast::environment::declaration_table::{
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::{AstCapacityResource, CompilerDiagnostic};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::AstCapacityResource;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -43,12 +46,12 @@ fn checked_const_value_index(
     prefix: usize,
     offset: usize,
     span: Option<SourceSpan>,
-) -> Result<u32, CompilerDiagnostic> {
+) -> Result<u32, DiagnosticDraft> {
     prefix
         .checked_add(offset)
         .and_then(|index| u32::try_from(index).ok())
         .ok_or_else(|| {
-            CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::ConstValues, span)
+            token_lexical::compiler_capacity_exceeded(AstCapacityResource::ConstValues, span)
         })
 }
 
@@ -102,18 +105,18 @@ pub(crate) enum ConstTemplateValue {
 /// User-facing or infrastructure failure while constructing the module store.
 #[derive(Debug)]
 pub(crate) enum ConstValueStoreError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
-impl From<CompilerDiagnostic> for ConstValueStoreError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for ConstValueStoreError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for ConstValueStoreError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for ConstValueStoreError {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error.into())
     }
 }
@@ -121,7 +124,11 @@ impl From<CompilerError> for ConstValueStoreError {
 impl From<TemplateError> for ConstValueStoreError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
+                Self::Diagnostic(diagnostic)
+            }
             TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
@@ -363,9 +370,11 @@ impl ConstValueCandidate<'_> {
         id: ConstValueId,
     ) -> Result<ConstValueId, ConstValueStoreError> {
         let Some(stored) = self.value(id) else {
-            return Err(
-                CompilerError::compiler_error("Shared constant lacks a stored value.").into(),
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Shared constant lacks a stored value.",
+            )
+            .into());
         };
         let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
             return Ok(id);
@@ -415,11 +424,12 @@ fn visit_payload_children(payload: &ConstValuePayload, mut visitor: impl FnMut(C
 fn validate_payload_children(
     payload: &ConstValuePayload,
     exists: impl Fn(ConstValueId) -> bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut missing = false;
     visit_payload_children(payload, |id| missing |= !exists(id));
     if missing {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Constant child is outside its content owner.",
         ));
     }
@@ -427,7 +437,8 @@ fn validate_payload_children(
         let mut names = rustc_hash::FxHashSet::default();
         for field in fields {
             if !names.insert(field.name) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
                     "Duplicate folded record field.",
                 ));
             }
@@ -476,16 +487,23 @@ enum FoldFrame<'a> {
 /// The missing-id error every folded-value lookup queue reports.
 fn fold_value_missing_error<E>(id: ConstValueId) -> E
 where
-    E: From<CompilerError>,
+    E: From<InfrastructureFailure>,
 {
-    E::from(CompilerError::compiler_error(format!(
-        "ConstValueStore value id {:?} is outside the module value graph.",
-        id
-    )))
+    E::from(InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        format!(
+            "ConstValueStore value id {:?} is outside the module value graph.",
+            id
+        ),
+    ))
 }
 
-fn fold_stack_error<E: From<CompilerError>>() -> E {
-    CompilerError::compiler_error("Folded-value traversal lost a child result.").into()
+fn fold_stack_error<E: From<InfrastructureFailure>>() -> E {
+    InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "Folded-value traversal lost a child result.",
+    )
+    .into()
 }
 
 /// Work item for the iterative constant ingestion walk.
@@ -521,7 +539,7 @@ fn queue_children<'a>(
 }
 
 fn ingest_invariant(message: &'static str) -> ConstValueStoreError {
-    CompilerError::compiler_error(message).into()
+    InfrastructureFailure::internal(CompilerStage::ConstantEvaluation, message).into()
 }
 
 /// Index of the first of the `count` completed child values at the top of `results`.
@@ -610,7 +628,8 @@ impl ConstValueStore {
                 .any(|&root| candidate.value(root).is_none())
             {
                 return Err(E::from(
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Selected constant root is outside its candidate.",
                     )
                     .into(),
@@ -690,10 +709,16 @@ impl ConstValueStore {
     ) -> Result<(), ConstValueStoreError> {
         for declaration_id in resolved_module_constants.iter() {
             let declaration = declaration_table.get_by_id(declaration_id).ok_or_else(|| {
-                CompilerError::compiler_error("Resolved constant has no declaration row.")
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Resolved constant has no declaration row.",
+                )
             })?;
             let value = self.value_for_path(&declaration.id).ok_or_else(|| {
-                CompilerError::compiler_error("Resolved constant has no header-bound value.")
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Resolved constant has no header-bound value.",
+                )
             })?;
             self.bind_module_constant(declaration.id, value)?;
         }
@@ -708,9 +733,11 @@ impl ConstValueStore {
         self.bind_body_local(path, value)?;
         if let Some(row) = self.rows.iter().find(|row| row.path == path) {
             if row.value != value {
-                return Err(
-                    CompilerError::compiler_error("Constant binding changed content.").into(),
-                );
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Constant binding changed content.",
+                )
+                .into());
             }
         } else {
             self.rows.push(ConstValueRow { path, value });
@@ -726,9 +753,11 @@ impl ConstValueStore {
         self.require_value(value)?;
         if let Some(previous) = self.values_by_path.get(&path) {
             if *previous != value {
-                return Err(
-                    CompilerError::compiler_error("Duplicate constant path binding.").into(),
-                );
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "Duplicate constant path binding.",
+                )
+                .into());
             }
         } else {
             self.values_by_path.insert(path, value);
@@ -736,9 +765,10 @@ impl ConstValueStore {
         Ok(())
     }
 
-    fn require_value(&self, value: ConstValueId) -> Result<(), CompilerError> {
+    fn require_value(&self, value: ConstValueId) -> Result<(), InfrastructureFailure> {
         if self.value(value).is_none() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Constant child is outside its content owner.",
             ));
         }
@@ -796,9 +826,11 @@ impl ConstValueStore {
         id: ConstValueId,
     ) -> Result<ConstValueId, ConstValueStoreError> {
         let Some(stored) = self.value(id) else {
-            return Err(
-                CompilerError::compiler_error("Shared constant lacks a stored value.").into(),
-            );
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Shared constant lacks a stored value.",
+            )
+            .into());
         };
         let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
             return Ok(id);
@@ -864,7 +896,8 @@ impl ConstValueStore {
             ExpressionOperationView::Constant(id) => {
                 self.require_value(id)?;
                 if self.metadata(id).map(|metadata| metadata.type_id) != Some(type_id) {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Constant occurrence has a foreign type.",
                     )
                     .into());
@@ -873,7 +906,8 @@ impl ConstValueStore {
             }
             ExpressionOperationView::Reference(path) => {
                 let Some(id) = self.value_for_path(&path) else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Constant reference has no folded binding.",
                     )
                     .into());
@@ -904,7 +938,8 @@ impl ConstValueStore {
             }
             ExpressionOperationView::Choice { tag, fields } => {
                 let nominal_path = *type_environment.nominal_path(type_id).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
                         "Folded choice has no canonical nominal identity.",
                     )
                 })?;
@@ -918,7 +953,8 @@ impl ConstValueStore {
                 );
                 Ok(None)
             }
-            ExpressionOperationView::RouteConstruct { .. } => Err(CompilerError::compiler_error(
+            ExpressionOperationView::RouteConstruct { .. } => Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Constructor routes are runtime-only and cannot enter the constant store.",
             )
             .into()),
@@ -976,7 +1012,8 @@ impl ConstValueStore {
                     metadata.synthetic_interface_provenance.union(&provenance);
                 self.insert_value(metadata, payload).map(Some)
             }
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "Unfolded operation reached constant ingestion.",
             )
             .into()),
@@ -1060,7 +1097,7 @@ impl ConstValueStore {
     pub(crate) fn metadata_from_view(
         expression: ExpressionView<'_>,
         value_kind: ConstValueKind,
-    ) -> Result<ConstValueMetadata, CompilerError> {
+    ) -> Result<ConstValueMetadata, InfrastructureFailure> {
         Ok(Self::metadata_for_type(
             expression,
             expression.value_type_id()?,
@@ -1153,7 +1190,7 @@ impl ConstValueStore {
         visitor: &mut impl FnMut(&ConstValueMetadata, ConstValueVisit<'_, T>) -> Result<T, E>,
     ) -> Result<T, E>
     where
-        E: From<CompilerError>,
+        E: From<InfrastructureFailure>,
     {
         let mut work = Vec::new();
         let mut results: Vec<T> = Vec::new();
@@ -1226,7 +1263,7 @@ impl ConstValueStore {
                 }
                 FoldFrame::Visit(id) | FoldFrame::Field(id) => {
                     let value = self.value(id).ok_or_else(|| match frame {
-                        FoldFrame::Field(_) => E::from(CompilerError::compiler_error(format!(
+                        FoldFrame::Field(_) => E::from(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation, format!(
                             "ConstValueStore field value id {:?} is outside the module value graph.",
                             id
                         ))),
@@ -1316,7 +1353,7 @@ impl ConstValueStore {
         result_start: usize,
     ) -> Result<Vec<ConstValueFieldVisit<'a, T>>, E>
     where
-        E: From<CompilerError>,
+        E: From<InfrastructureFailure>,
     {
         if results.len().checked_sub(result_start) != Some(fields.len()) {
             return Err(fold_stack_error::<E>());
@@ -1336,13 +1373,16 @@ impl ConstValueStore {
     pub(crate) fn validate_type_ids(
         &self,
         type_environment: &TypeEnvironment,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for value in &self.values {
             if type_environment.get(value.metadata.type_id).is_none() {
-                return Err(CompilerError::compiler_error(format!(
-                    "ConstValueStore contains unresolved TypeId({}).",
-                    value.metadata.type_id.0
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    format!(
+                        "ConstValueStore contains unresolved TypeId({}).",
+                        value.metadata.type_id.0
+                    ),
+                ));
             }
         }
         Ok(())

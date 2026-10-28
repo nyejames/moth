@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue,
 };
-use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::UseOfUninitializedLocalView;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -24,7 +24,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_kind, run_borrow_checker,
+    assert_borrow_error_view, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
@@ -548,5 +548,5 @@ fn dead_local_access_reports_borrow_error() {
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("dead local access should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
+    assert_borrow_error_view::<UseOfUninitializedLocalView>(error);
 }

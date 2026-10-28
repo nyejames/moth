@@ -8,10 +8,12 @@
 //! resolves resource and site-root anchors to text. Output-path conflicts belong to the shared
 //! plan, not to a per-document planner.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceDiagnosticSite, ResourceUrlContext, ResourceUseKind,
 };
@@ -35,8 +37,8 @@ pub(super) fn render_structural_content(
     resources: &ModuleResourceTable,
     document_path: &Path,
     plan: &mut HtmlResourceOutputPlan,
-    string_table: &mut StringTable,
-) -> Result<String, CompilerMessages> {
+    diagnostic_strings: &mut DiagnosticStringBuilder,
+) -> Result<String, PreparedFailure> {
     let context = ResourceUrlContext::PageDocument(document_path.to_path_buf());
 
     if let OwnedFoldedString::Pieces(pieces) = content {
@@ -49,12 +51,13 @@ pub(super) fn render_structural_content(
                 .iter()
                 .find(|interned| interned.origin == *origin)
             else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
                         "folded resource origin {origin:?} is absent from its module resource table"
-                    )),
-                    string_table,
-                ));
+                    ),
+                )
+                .into());
             };
             plan.plan_origin(
                 origin.clone(),
@@ -62,7 +65,7 @@ pub(super) fn render_structural_content(
                     .first_authored_span
                     .map(ResourceDiagnosticSite::project),
                 context.clone(),
-                string_table,
+                diagnostic_strings,
                 ResourceUseKind::Executable,
             )?;
         }
@@ -72,7 +75,7 @@ pub(super) fn render_structural_content(
 
     renderer
         .render_owned(content)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+        .map_err(PreparedFailure::from)
 }
 
 /// The document URL path every resource URL is written against.
@@ -82,19 +85,18 @@ pub(super) fn render_structural_content(
 pub(super) fn document_url_context(
     relative_path: Option<&Path>,
     source_path: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+) -> Result<PathBuf, InfrastructureFailure> {
     if let Some(relative) = relative_path {
         return Ok(relative.to_path_buf());
     }
 
     source_path.file_name().map(PathBuf::from).ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(format!(
+        InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
                 "direct Moth template source {source_path:?} has no file name; its document \
-                 URL context needs one"
-            )),
-            string_table,
+             URL context needs one"
+            ),
         )
     })
 }

@@ -1,0 +1,7 @@
+@a alpha
+@b beta
+
+result = alpha(1)
+other = beta(1)
+io.line([: [result]])
+io.line([: [other]])

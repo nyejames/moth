@@ -1,6 +1,5 @@
 //! User-function code section emission.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::emit::helpers::emit_helper_function;
 use crate::backends::wasm::emit::instructions::{
     LirBodyEmitContext, emit_statement, emit_terminator,
@@ -12,14 +11,14 @@ use crate::backends::wasm::lir::instructions::WasmLirTerminator;
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirLocalId, WasmLocalRole,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use rustc_hash::FxHashMap;
 use wasm_encoder::{CodeSection, Function, Instruction, ValType};
 
 pub(crate) fn build_code_section(
     lir_functions: &FxHashMap<u32, &WasmLirFunction>,
     plan: &WasmEmitPlan,
-) -> Result<CodeSection, CompilerError> {
+) -> Result<CodeSection, InfrastructureFailure> {
     let mut section = CodeSection::new();
 
     // WHAT: iterate using the preplanned defined-function order.
@@ -28,10 +27,9 @@ pub(crate) fn build_code_section(
         let body = match key {
             DefinedFunctionKey::Lir(function_id) => {
                 let function = lir_functions.get(&function_id.0).copied().ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::wasm_generation(format!(
                         "Wasm emission missing lowered function body for {function_id:?}"
                     ))
-                    .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
                 })?;
                 emit_lir_function(function, plan)?
             }
@@ -47,7 +45,7 @@ pub(crate) fn build_code_section(
 fn emit_lir_function(
     function: &WasmLirFunction,
     plan: &WasmEmitPlan,
-) -> Result<Function, CompilerError> {
+) -> Result<Function, InfrastructureFailure> {
     // WHAT: build deterministic local declarations and local-id -> local-index maps.
     // WHY: statement/terminator lowering depends on stable local index lookup.
     let local_layout = build_local_layout(function)?;
@@ -66,19 +64,17 @@ fn emit_lir_function(
         .get(&entry_block)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission could not resolve entry block index for {:?} in {:?}",
                 entry_block, function.id
             ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
 
     wasm_function.instruction(&Instruction::I32Const(entry_block_index as i32));
     wasm_function.instruction(&Instruction::LocalSet(local_layout.dispatch_local_index));
     wasm_function.instruction(&Instruction::Block(wasm_encoder::BlockType::Empty));
     wasm_function.instruction(&Instruction::Loop(wasm_encoder::BlockType::Empty));
-    // WHAT: use a dispatcher-loop CFG strategy.
-    // WHY: this supports arbitrary lowered CFG now while keeping a clean seam for a future
+    // WHY: the dispatcher loop supports arbitrary lowered CFG while leaving a seam for a
     // direct structured pass (`if/else/loop` region construction).
 
     let context = LirBodyEmitContext {
@@ -124,7 +120,7 @@ struct LocalLayout {
     dispatch_local_index: u32,
 }
 
-fn build_local_layout(function: &WasmLirFunction) -> Result<LocalLayout, CompilerError> {
+fn build_local_layout(function: &WasmLirFunction) -> Result<LocalLayout, InfrastructureFailure> {
     // WHAT: local ids are sorted and mapped once for the entire function.
     // WHY: all statement lowering can then use fast, deterministic lookups.
     let mut sorted_locals = function.locals.iter().collect::<Vec<_>>();
@@ -139,31 +135,28 @@ fn build_local_layout(function: &WasmLirFunction) -> Result<LocalLayout, Compile
 
     let parameter_count = function.signature.params.len();
     if parameter_count > sorted_locals.len() {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm emission found {} params in signature but only {} declared locals in {:?}",
             parameter_count,
             sorted_locals.len(),
             function.id
-        ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+        )));
     }
 
     // WHAT: enforce Wasm local index contract: params first, then non-params.
     // WHY: this keeps local index mapping explicit and avoids accidental ABI drift.
     for (index, local) in sorted_locals.iter().enumerate() {
         if index < parameter_count && local.role != WasmLocalRole::Param {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission expected local {:?} to be a parameter in {:?}",
                 local.id, function.id
-            ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+            )));
         }
         if index >= parameter_count && local.role == WasmLocalRole::Param {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(InfrastructureFailure::wasm_generation(format!(
                 "Wasm emission found parameter local {:?} after non-parameter locals in {:?}",
                 local.id, function.id
-            ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+            )));
         }
     }
 
@@ -204,15 +197,16 @@ fn build_local_layout(function: &WasmLirFunction) -> Result<LocalLayout, Compile
     })
 }
 
-fn determine_entry_block(function: &WasmLirFunction) -> Result<WasmLirBlockId, CompilerError> {
+fn determine_entry_block(
+    function: &WasmLirFunction,
+) -> Result<WasmLirBlockId, InfrastructureFailure> {
     // WHAT: prefer a unique zero-incoming root block as the entry block.
     // WHY: this reflects canonical CFG roots when lowering produced one clear entry.
     if function.blocks.is_empty() {
-        return Err(CompilerError::compiler_error(format!(
+        return Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm emission requires at least one block for function {:?}",
             function.id
-        ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+        )));
     }
 
     let mut incoming_counts = FxHashMap::default();
@@ -255,9 +249,8 @@ fn determine_entry_block(function: &WasmLirFunction) -> Result<WasmLirBlockId, C
         return Ok(sorted_blocks[0].id);
     }
 
-    Err(CompilerError::compiler_error(format!(
+    Err(InfrastructureFailure::wasm_generation(format!(
         "Wasm emission found multiple entry-block candidates in {:?}: {:?}",
         function.id, roots
-    ))
-    .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)))
+    )))
 }

@@ -24,7 +24,7 @@
 //!
 //! Consumers that need a particular minimum phase (e.g. folding requires at
 //! least `Composed`) use [`TirView::with_minimum_phase`] so the check is
-//! centralized and the error is a structured `CompilerError` rather than a
+//! centralized and the error is a structured `InfrastructureFailure` rather than a
 //! silent downgrade.
 //!
 //! ## Overlay resolution
@@ -46,9 +46,10 @@
 //! lives only as long as the store. It is not exposed to HIR, backends, or
 //! the public API.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::fmt;
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 use super::ids::ChildTemplateOccurrenceId;
 use super::ids::{ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId};
@@ -142,7 +143,7 @@ impl fmt::Display for TemplateTirPhase {
 ///       `tir_reference` to be at least `Finalized`, to resolve its root and
 ///       validate the optional payload IDs carried by its view context against
 ///       the exact module store through `TirView`. Every missing authority condition is an explicit
-///       internal `CompilerError`. No caller may bypass that authority with raw
+///       internal `InfrastructureFailure`. No caller may bypass that authority with raw
 ///       module-store reconstruction.
 /// WHY: after normalization every template that reaches the AST-to-HIR boundary
 ///      owns a Finalized store-backed identity. A missing phase, root or overlay
@@ -153,14 +154,17 @@ impl fmt::Display for TemplateTirPhase {
 pub(crate) fn finalized_tir_view_for_template<'a>(
     template: &Template,
     store: &'a TemplateIrStore,
-) -> Result<TirView<'a>, CompilerError> {
+) -> Result<TirView<'a>, InfrastructureFailure> {
     let reference = &template.tir_reference;
 
     if !reference.phase.is_at_least(TemplateTirPhase::Finalized) {
-        return Err(CompilerError::compiler_error(format!(
-            "finalized_tir_view_for_template: template TIR reference is at phase {:?}, final AST boundary consumers require Finalized",
-            reference.phase
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "finalized_tir_view_for_template: template TIR reference is at phase {:?}, final AST boundary consumers require Finalized",
+                reference.phase
+            ),
+        ));
     }
     TirView::with_minimum_phase(
         store,
@@ -181,7 +185,7 @@ pub(crate) fn finalized_tir_view_for_template<'a>(
 /// WHAT: pairs an immutable borrow of `TemplateIrStore` with a module-local
 ///       root `TemplateIrId`, a pipeline `TemplateTirPhase`, and a
 ///       `TemplateViewContext`. All read access goes through narrow methods
-///       that validate root and overlay IDs and return `CompilerError` on failure.
+///       that validate root and overlay IDs and return `InfrastructureFailure` on failure.
 ///
 /// WHY: this is the single production read API for template consumers. It
 ///      keeps raw store traversal internal and centralizes phase and overlay
@@ -225,19 +229,22 @@ impl<'a> TirView<'a> {
     ///       that each optional overlay ID carried by `context` resolves to a
     ///       payload in the store.
     /// WHY: every consumer should go through a constructor so invalid store
-    ///      IDs produce a structured `CompilerError` instead of a silent
+    ///      IDs produce a structured `InfrastructureFailure` instead of a silent
     ///      placeholder or a later lookup panic.
     pub(crate) fn new(
         store: &'a TemplateIrStore,
         root: TemplateIrId,
         phase: TemplateTirPhase,
         context: TemplateViewContext,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         if store.get_template(root).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TirView::new: root template {} does not exist in the store",
-                root
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TirView::new: root template {} does not exist in the store",
+                    root
+                ),
+            ));
         }
 
         validate_context(store, context, "TirView::new")?;
@@ -266,12 +273,15 @@ impl<'a> TirView<'a> {
         phase: TemplateTirPhase,
         minimum_phase: TemplateTirPhase,
         context: TemplateViewContext,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         if !phase.is_at_least(minimum_phase) {
-            return Err(CompilerError::compiler_error(format!(
-                "TirView::with_minimum_phase: root {} at phase {} does not satisfy minimum phase {}",
-                root, phase, minimum_phase
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TirView::with_minimum_phase: root {} at phase {} does not satisfy minimum phase {}",
+                    root, phase, minimum_phase
+                ),
+            ));
         }
 
         Self::new(store, root, phase, context)
@@ -285,7 +295,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn structural_child(
         &self,
         reference: super::refs::TemplateTirChildReference,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         self.structural_transition(
             reference.root,
             reference.phase,
@@ -298,7 +308,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn wrapper(
         &self,
         reference: super::refs::TemplateWrapperReference,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         self.structural_transition(
             reference.root,
             reference.phase,
@@ -311,7 +321,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn resolved_slot_source(
         &self,
         root: TemplateIrId,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         self.transition(root, self.phase(), self.context(), "resolved_slot_source")
     }
 
@@ -319,7 +329,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn structural_helper(
         &self,
         root: TemplateIrId,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         self.transition(root, self.phase(), self.context(), "structural_helper")
     }
 
@@ -330,7 +340,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn nested_template_value(
         &self,
         reference: super::refs::TemplateTirReference,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         self.transition(
             reference.root,
             reference.phase,
@@ -345,7 +355,7 @@ impl<'a> TirView<'a> {
         phase: TemplateTirPhase,
         referenced_context: TemplateViewContext,
         owner: &str,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         let context = structural_transition_context(self.context(), phase, referenced_context);
         self.transition(root, phase, context, owner)
     }
@@ -356,11 +366,14 @@ impl<'a> TirView<'a> {
         phase: TemplateTirPhase,
         context: TemplateViewContext,
         owner: &str,
-    ) -> Result<TirView<'a>, CompilerError> {
+    ) -> Result<TirView<'a>, InfrastructureFailure> {
         if self.store.get_template(root).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TirView::{owner}: missing root_template {root}; it does not exist in the store"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TirView::{owner}: missing root_template {root}; it does not exist in the store"
+                ),
+            ));
         }
 
         validate_context(self.store, context, format_args!("TirView::{owner}"))?;
@@ -413,9 +426,9 @@ impl<'a> TirView<'a> {
     }
 
     /// Resolves the root template or reports broken store authority.
-    pub(crate) fn root_template(&self) -> Result<&'a TemplateIr, CompilerError> {
+    pub(crate) fn root_template(&self) -> Result<&'a TemplateIr, InfrastructureFailure> {
         self.store.get_template(self.identity.root).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "TirView::root_template: root {} was valid at construction but is now missing; this is a compiler bug",
                 self.identity.root
             ))
@@ -436,12 +449,15 @@ impl<'a> TirView<'a> {
     pub(crate) fn effective_node(
         &self,
         node_ref: TemplateIrNodeId,
-    ) -> Result<&'a TemplateIrNode, CompilerError> {
+    ) -> Result<&'a TemplateIrNode, InfrastructureFailure> {
         self.store.get_node(node_ref).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TirView::effective_node: node {} does not exist in the store",
-                node_ref
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TirView::effective_node: node {} does not exist in the store",
+                    node_ref
+                ),
+            )
         })
     }
 
@@ -459,16 +475,19 @@ impl<'a> TirView<'a> {
     /// Resolves the expression overlay named by this view.
     pub(crate) fn expression_overlay(
         &self,
-    ) -> Result<Option<&'a TirExpressionOverlay>, CompilerError> {
+    ) -> Result<Option<&'a TirExpressionOverlay>, InfrastructureFailure> {
         let Some(overlay_id) = self.identity.context.expression_overlay else {
             return Ok(None);
         };
 
         let overlay = self.store.expression_overlay(overlay_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TirView::expression_overlay: overlay {} does not exist in the store",
-                overlay_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TirView::expression_overlay: overlay {} does not exist in the store",
+                    overlay_id
+                ),
+            )
         })?;
 
         Ok(Some(overlay))
@@ -477,7 +496,7 @@ impl<'a> TirView<'a> {
     /// Resolves the slot-resolution overlay named by this view.
     pub(crate) fn slot_resolution_overlay(
         &self,
-    ) -> Result<Option<&'a TirSlotResolutionOverlay>, CompilerError> {
+    ) -> Result<Option<&'a TirSlotResolutionOverlay>, InfrastructureFailure> {
         let Some(overlay_id) = self.identity.context.slot_resolution else {
             return Ok(None);
         };
@@ -486,10 +505,13 @@ impl<'a> TirView<'a> {
             .store
             .slot_resolution_overlay(overlay_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TirView::slot_resolution_overlay: overlay {} does not exist in the store",
-                    overlay_id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TirView::slot_resolution_overlay: overlay {} does not exist in the store",
+                        overlay_id
+                    ),
+                )
             })?;
 
         Ok(Some(overlay))
@@ -498,7 +520,7 @@ impl<'a> TirView<'a> {
     /// Resolves the wrapper-context overlay named by this view.
     pub(crate) fn wrapper_context_overlay(
         &self,
-    ) -> Result<Option<&'a TirWrapperContextOverlay>, CompilerError> {
+    ) -> Result<Option<&'a TirWrapperContextOverlay>, InfrastructureFailure> {
         let Some(overlay_id) = self.identity.context.wrapper_context else {
             return Ok(None);
         };
@@ -507,10 +529,13 @@ impl<'a> TirView<'a> {
             .store
             .wrapper_context_overlay(overlay_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TirView::wrapper_context_overlay: overlay {} does not exist in the store",
-                    overlay_id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TirView::wrapper_context_overlay: overlay {} does not exist in the store",
+                        overlay_id
+                    ),
+                )
             })?;
 
         Ok(Some(overlay))
@@ -531,7 +556,7 @@ impl<'a> TirView<'a> {
         &self,
         expressions: &'expressions AstExpressionBuilder,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<ExpressionView<'expressions>>, CompilerError> {
+    ) -> Result<Option<ExpressionView<'expressions>>, InfrastructureFailure> {
         let Some(overlay) = self.expression_overlay()? else {
             return Ok(None);
         };
@@ -556,7 +581,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn effective_slot_resolution(
         &self,
         occurrence_id: SlotOccurrenceId,
-    ) -> Result<Option<&'a TirSlotResolution>, CompilerError> {
+    ) -> Result<Option<&'a TirSlotResolution>, InfrastructureFailure> {
         let Some(overlay) = self.slot_resolution_overlay()? else {
             return Ok(None);
         };
@@ -576,7 +601,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn effective_wrapper_context(
         &self,
         occurrence_id: ChildTemplateOccurrenceId,
-    ) -> Result<Option<&'a TirWrapperContext>, CompilerError> {
+    ) -> Result<Option<&'a TirWrapperContext>, InfrastructureFailure> {
         let Some(overlay) = self.wrapper_context_overlay()? else {
             return Ok(None);
         };
@@ -591,29 +616,32 @@ pub(crate) fn validate_context(
     store: &TemplateIrStore,
     context: TemplateViewContext,
     owner: impl std::fmt::Display,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if let Some(id) = context.expression_overlay
         && store.expression_overlay(id).is_none()
     {
-        return Err(CompilerError::compiler_error(format!(
-            "{owner}: expression overlay {id} does not exist in the store"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("{owner}: expression overlay {id} does not exist in the store"),
+        ));
     }
 
     if let Some(id) = context.slot_resolution
         && store.slot_resolution_overlay(id).is_none()
     {
-        return Err(CompilerError::compiler_error(format!(
-            "{owner}: slot resolution overlay {id} does not exist in the store"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("{owner}: slot resolution overlay {id} does not exist in the store"),
+        ));
     }
 
     if let Some(id) = context.wrapper_context
         && store.wrapper_context_overlay(id).is_none()
     {
-        return Err(CompilerError::compiler_error(format!(
-            "{owner}: wrapper context overlay {id} does not exist in the store"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("{owner}: wrapper context overlay {id} does not exist in the store"),
+        ));
     }
 
     Ok(())

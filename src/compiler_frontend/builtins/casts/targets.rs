@@ -122,7 +122,7 @@ pub(crate) enum BuiltinCastPolicyId {
 }
 
 impl BuiltinCastPolicyId {
-    /// Returns whether AST constant folding can materialize this policy's result today.
+    /// Returns whether AST constant folding can materialize this policy's result.
     ///
     /// WHAT: marks the subset of pure builtin policies whose policy-space result maps back to an
     /// AST compile-time expression without extra nominal/const-record construction.

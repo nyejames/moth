@@ -28,10 +28,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationOutcome, TemplateTirPhase, TirView, TirViewIdentity,
     fold_prepared_const_template_pattern, prepare_tir_view,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
@@ -61,7 +61,7 @@ fn collect_expression_templates(
     builder: &AstExpressionBuilder,
     visited: &mut FxHashSet<ExprId>,
     templates: &mut Vec<Template>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut pending = vec![root];
     while let Some(id) = pending.pop() {
         if !visited.insert(id) {
@@ -79,7 +79,7 @@ fn collect_expression_templates(
 fn template_projection_identity(
     template: &Template,
     store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
-) -> Result<TirViewIdentity, CompilerError> {
+) -> Result<TirViewIdentity, InfrastructureFailure> {
     let reference = template.tir_reference;
     Ok(TirView::with_minimum_phase(
         store,
@@ -133,7 +133,8 @@ pub(crate) fn resolve_const_expression_content(
         let projected = projections
             .get(&identity)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
                     "Constant ingestion has no exact-view template projection.",
                 )
             })?
@@ -186,7 +187,7 @@ pub(crate) fn const_template_value_from_projection(
     // never a compile-time constant one. `final_value_kind` alone cannot answer this, because a
     // renderable or wrapper template can carry a runtime outcome.
     let Some(public) = projected.public else {
-        return Err(CompilerDiagnostic::invalid_template_structure(
+        return Err(templates::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
             template.span,
         )
@@ -195,11 +196,12 @@ pub(crate) fn const_template_value_from_projection(
 
     match projected.kind {
         TemplateConstValueKind::RenderableString => {
-            let string = projected.folded.ok_or_else(|| {
-                CompilerError::compiler_error(
+            let string = projected.folded.unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ConstantEvaluation,
                     "Renderable module constant template did not produce a folded string.",
                 )
-            })?;
+            });
             Ok(ConstTemplateValue::Folded {
                 value: string,
                 provenance: projected.provenance,
@@ -209,11 +211,12 @@ pub(crate) fn const_template_value_from_projection(
         // A wrapper stays visible to HIR through its folded string while its structured pieces
         // remain available to the public interface.
         TemplateConstValueKind::WrapperTemplate => {
-            let folded = projected.folded.ok_or_else(|| {
-                CompilerError::compiler_error(
+            let folded = projected.folded.unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ConstantEvaluation,
                     "Wrapper module constant did not complete exact TIR finalization.",
                 )
-            })?;
+            });
             Ok(ConstTemplateValue::Public {
                 template: public,
                 kind: ConstValueKind::TemplateWrapper,
@@ -234,12 +237,10 @@ pub(crate) fn const_template_value_from_projection(
         }),
 
         // Preparation never publishes non-const values, so the guard above already rejected them.
-        TemplateConstValueKind::NonConst => {
-            Err(CompilerError::compiler_error(
-                "A non-const template classification reached module-constant store construction with a public projection.",
-            )
-            .into())
-        }
+        TemplateConstValueKind::NonConst => crate::compiler_bug!(
+            CompilerStage::ConstantEvaluation,
+            "A non-const template classification reached module-constant store construction with a public projection.",
+        ),
     }
 }
 
@@ -336,7 +337,7 @@ fn project_const_template_view(
     module_resources: Option<&ModuleResourceTable>,
 ) -> Result<ProjectedTemplateView, ConstValueStoreError> {
     if !visiting.insert(view.identity()) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
             "Public const-template projection encountered a recursive wrapper view after preparation.",
         )
         .into());
@@ -443,7 +444,7 @@ fn project_owned_string_run(
 
     if has_structural {
         let resources = module_resources.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
                 "Const-template projection reached a structural string without the issuing module resource table.",
             )
         })?;
@@ -464,7 +465,7 @@ fn project_owned_string_run(
                 text.push_str(string_table.resolve(text_id));
             }
             ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
                     "Const-template projection string-run invariant violated: a structural piece reached text-only conversion.",
                 )
                 .into());
@@ -488,7 +489,8 @@ fn project_slot(
     module_resources: Option<&ModuleResourceTable>,
 ) -> Result<PublicConstTemplateSlot, ConstValueStoreError> {
     let placeholder = view.slot_placeholder(occurrence).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Public const-template fold returned a slot occurrence absent from its TIR store.",
         )
     })?;
@@ -531,7 +533,10 @@ fn project_wrapper_set(
         .store()
         .get_wrapper_set(wrapper_set_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error("Public const-template wrapper set is missing.")
+            InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Public const-template wrapper set is missing.",
+            )
         })?;
     let references = &wrapper_set.wrappers;
     let mut wrappers = Vec::with_capacity(references.len());
@@ -570,7 +575,8 @@ fn project_template_kind(
             key,
             string_table,
         ))),
-        _ => Err(CompilerError::compiler_error(
+        _ => Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "Public const-template projection received a non-wrapper template kind.",
         )
         .into()),

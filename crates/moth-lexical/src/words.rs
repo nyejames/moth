@@ -148,7 +148,7 @@ define_source_words! {
     F32Type => ("F32", BuiltinType, None);
     F64Type => ("F64", BuiltinType, None);
     ByteType => ("Byte", BuiltinType, None);
-    @reserved_only ["fn", "config"]
+    @reserved_only ["config"]
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use super::preparation_freeze::ModuleMaterialisationCapture;
 use super::stable_types::{
     GeneratedValueMaterialisationServices, GenericTemplateArtefact, MaterialisationNominalSource,
     StableCallableBinding, StableDeclarationBinding, StableFunctionSignature, StableFunctionTarget,
-    StableNominalBinding,
+    StableNominalBinding, const_store_error_into_prepared_failure,
 };
 use super::visibility::collect_namespace_source_paths;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -20,7 +20,8 @@ use crate::compiler_frontend::ast::statements::functions::{ParameterContract, Re
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -293,7 +294,7 @@ impl StableFunctionSignature {
 pub(super) fn stable_body_symbol_names(
     body: &GenericFunctionBody,
     string_table: &FrozenStringTable,
-) -> Result<FxHashSet<String>, CompilerError> {
+) -> Result<FxHashSet<String>, InfrastructureFailure> {
     let (source_owner, token_range, token_sequence) = body.canonical_view();
     let mut cursor = crate::compiler_frontend::ast::generic_functions::templates::body_cursor(
         source_owner,
@@ -347,7 +348,7 @@ pub(super) fn install_private_semantic_closure(
     template_ir_store: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     string_table: &mut StringTable,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-) -> Result<(), Box<InfrastructureErrors>> {
+) -> Result<(), PreparedFailure> {
     let external_package_registry = services.external_registry;
     for stable_trait in &context.semantic_closure.traits {
         if environment
@@ -413,7 +414,7 @@ pub(super) fn install_private_semantic_closure(
                         },
                     })
                 })
-                .collect::<Result<Vec<_>, CompilerError>>()?;
+                .collect::<Result<Vec<_>, PreparedFailure>>()?;
             let returns = stable_requirement
                 .returns
                 .iter()
@@ -433,7 +434,7 @@ pub(super) fn install_private_semantic_closure(
                         span: returned.span,
                     })
                 })
-                .collect::<Result<Vec<_>, CompilerError>>()?;
+                .collect::<Result<Vec<_>, PreparedFailure>>()?;
             requirements.push(ResolvedTraitRequirement {
                 id: requirement_id,
                 name: string_table.intern(&stable_requirement.name),
@@ -455,10 +456,12 @@ pub(super) fn install_private_semantic_closure(
             declaration_span: stable_trait.declaration_span,
             visibility: TraitVisibility::Source { exported: false },
         };
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         let trait_environment = Rc::make_mut(&mut lookups.trait_environment);
         if trait_environment.insert(definition).is_some() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Private materialisation trait path was registered more than once",
             )
             .into());
@@ -475,13 +478,21 @@ pub(super) fn install_private_semantic_closure(
             nominal_source,
             string_table,
             path_fork,
-        )?;
+        )
+        .map_err(|error| {
+            const_store_error_into_prepared_failure(
+                error,
+                string_table,
+                Some(&environment.type_environment),
+            )
+        })?;
         let trait_id = environment
             .lookups
             .trait_environment
             .id_for_canonical_identity(&stable_evidence.trait_identity)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Private materialisation evidence trait was not reconstructed",
                 )
             })?;
@@ -498,7 +509,8 @@ pub(super) fn install_private_semantic_closure(
             .trait_environment
             .get(trait_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Private materialisation evidence has no reconstructed trait definition",
                 )
             })?;
@@ -513,7 +525,8 @@ pub(super) fn install_private_semantic_closure(
                         string_table.resolve(candidate.name) == requirement.requirement_name
                     })
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Private materialisation evidence requirement is absent from its trait",
                         )
                     })?;
@@ -522,7 +535,7 @@ pub(super) fn install_private_semantic_closure(
                     method_path: requirement.method_path,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         // A private evidence row names a concrete method, which this generated environment needs
         // to call through the row. Several rows can name one method, so a path already present
         // is skipped.
@@ -554,7 +567,8 @@ pub(super) fn install_private_semantic_closure(
             declaration_span: stable_evidence.declaration_span,
             requirements,
         };
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         Rc::make_mut(&mut lookups.trait_evidence_environment).insert_validated(definition);
     }
     Ok(())
@@ -575,7 +589,7 @@ fn intern_stable_trait_type(
     >,
     string_table: &mut StringTable,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-) -> Result<TypeId, CompilerError> {
+) -> Result<TypeId, PreparedFailure> {
     match blueprint {
         StableTraitTypeBlueprint::This => Ok(this_type),
         StableTraitTypeBlueprint::Type(blueprint) => intern_materialisation_type_blueprint(
@@ -586,7 +600,10 @@ fn intern_stable_trait_type(
             external_package_registry,
             string_table,
             path_fork,
-        ),
+        )
+        .map_err(|error| {
+            const_store_error_into_prepared_failure(error, string_table, Some(type_environment))
+        }),
     }
 }
 impl ModuleMaterialisationCapture {
@@ -602,7 +619,7 @@ impl ModuleMaterialisationCapture {
         callable_contracts: &[StableCallableBinding],
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<StableSemanticClosure, CompilerError> {
+    ) -> Result<StableSemanticClosure, InfrastructureFailure> {
         let mut constants = Vec::new();
         for row in const_values.iter_module_constant_views() {
             let path = *row.path;
@@ -645,7 +662,7 @@ impl ModuleMaterialisationCapture {
                     declaration_span: alias.declaration_span,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         aliases.sort_by_key(|row| row.local_path);
 
         let traits = self.stable_private_traits()?;
@@ -658,7 +675,7 @@ impl ModuleMaterialisationCapture {
             evidence,
         })
     }
-    fn stable_private_traits(&self) -> Result<Box<[StablePrivateTrait]>, CompilerError> {
+    fn stable_private_traits(&self) -> Result<Box<[StablePrivateTrait]>, InfrastructureFailure> {
         let mut traits = Vec::new();
         for definition in self.trait_environment.definitions() {
             let Some(identity) = self
@@ -709,7 +726,7 @@ impl ModuleMaterialisationCapture {
                                 },
                             })
                         })
-                        .collect::<Result<Box<[_]>, CompilerError>>()?;
+                        .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
                     let returns = requirement
                         .returns
                         .iter()
@@ -723,7 +740,7 @@ impl ModuleMaterialisationCapture {
                                 span: returned.span,
                             })
                         })
-                        .collect::<Result<Box<[_]>, CompilerError>>()?;
+                        .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
                     let receiver_mutable = matches!(
                         requirement.receiver,
                         crate::compiler_frontend::traits::definitions::TraitReceiverRequirement::Mutable { .. }
@@ -736,7 +753,7 @@ impl ModuleMaterialisationCapture {
                         span: requirement.span,
                     })
                 })
-                .collect::<Result<Box<[_]>, CompilerError>>()?;
+                .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
             traits.push(StablePrivateTrait {
                 identity,
                 name: self.string_table.resolve(definition.name).to_owned(),
@@ -753,7 +770,7 @@ impl ModuleMaterialisationCapture {
     fn stable_private_evidence(
         &self,
         callable_contracts: &[StableCallableBinding],
-    ) -> Result<Box<[StablePrivateEvidence]>, CompilerError> {
+    ) -> Result<Box<[StablePrivateEvidence]>, InfrastructureFailure> {
         let mut evidence = Vec::new();
         for definition in self.trait_evidence_environment.canonical_evidence() {
             let target_type_identity = self.stable_type_identity(definition.target_type_id)?;
@@ -762,7 +779,8 @@ impl ModuleMaterialisationCapture {
                 .canonical_identity_for_id(definition.trait_id)
                 .cloned()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Private materialisation evidence has no canonical trait identity",
                     )
                 })?;
@@ -786,7 +804,8 @@ impl ModuleMaterialisationCapture {
                 self.trait_environment
                     .get(definition.trait_id)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Private materialisation evidence has no trait definition",
                         )
                     })?;
@@ -799,7 +818,8 @@ impl ModuleMaterialisationCapture {
                         .iter()
                         .find(|candidate| candidate.id == requirement.requirement_id)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::GenericMaterialisation,
                                 "Private materialisation evidence has no trait requirement",
                             )
                         })?;
@@ -819,7 +839,7 @@ impl ModuleMaterialisationCapture {
                             .map(|index| callable_contracts[index].clone()),
                     })
                 })
-                .collect::<Result<Box<[_]>, CompilerError>>()?;
+                .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
             evidence.push(StablePrivateEvidence {
                 target_type_identity,
                 trait_identity,
@@ -840,14 +860,15 @@ impl ModuleMaterialisationCapture {
         &self,
         type_id: TypeId,
         this_type: TypeId,
-    ) -> Result<StableTraitTypeBlueprint, CompilerError> {
+    ) -> Result<StableTraitTypeBlueprint, InfrastructureFailure> {
         if type_id == this_type {
             Ok(StableTraitTypeBlueprint::This)
         } else {
             let this_parameter_id = match self.type_environment.get(this_type) {
                 Some(TypeDefinition::GenericParameter(parameter)) => parameter.id,
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Private trait receiver is not represented by a generic parameter",
                     ));
                 }
@@ -888,7 +909,7 @@ impl ModuleMaterialisationCapture {
         source_file: &PathId,
         referenced_names: &FxHashSet<String>,
         path_fork: &PathInternerFork,
-    ) -> Result<FxHashSet<PathId>, CompilerError> {
+    ) -> Result<FxHashSet<PathId>, InfrastructureFailure> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let mut selected = visibility
             .visible_source_names
@@ -914,7 +935,7 @@ impl ModuleMaterialisationCapture {
         // WHY: an imported receiver method is projected under the authored binding path of its
         // nominal (`child(nominal binding, method name)`). A body that reaches the method must
         // therefore also capture that nominal binding; otherwise the restored body projects the
-        // nominal at its deterministic path and the captured method path no longer resolves.
+        // nominal at its deterministic path and the captured method path would not resolve.
         let nominal_paths = selected
             .iter()
             .filter(|path| {
@@ -995,7 +1016,7 @@ impl ModuleMaterialisationCapture {
         &self,
         selected_paths: &FxHashSet<PathId>,
         declarations: &[PublicDeclarationRecord],
-    ) -> Result<Box<[StableDeclarationBinding]>, CompilerError> {
+    ) -> Box<[StableDeclarationBinding]> {
         let mut bindings = Vec::new();
         for path in selected_paths {
             if let Some(origin) = self
@@ -1024,7 +1045,7 @@ impl ModuleMaterialisationCapture {
             }
         }
         bindings.sort_by_key(|binding| binding.local_path);
-        Ok(bindings.into_boxed_slice())
+        bindings.into_boxed_slice()
     }
 
     fn public_origin_for_path(&self, path: &PathId) -> Option<OriginDeclarationId> {
@@ -1061,7 +1082,7 @@ impl ModuleMaterialisationCapture {
         selected_paths: &FxHashSet<PathId>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Box<[StableCallableBinding]>, CompilerError> {
+    ) -> Result<Box<[StableCallableBinding]>, InfrastructureFailure> {
         let mut callables = Vec::new();
         for path in selected_paths {
             if self.generic_function_templates_by_path.contains_key(path) {
@@ -1109,8 +1130,7 @@ impl ModuleMaterialisationCapture {
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
-    ) -> Result<FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>, CompilerError>
-    {
+    ) -> FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint> {
         let mut identities = FxHashSet::default();
         for signature in signatures {
             signature.collect_nominal_identities(&mut identities);
@@ -1232,7 +1252,7 @@ impl ModuleMaterialisationCapture {
                 break;
             }
         }
-        Ok(blueprints)
+        blueprints
     }
 
     /// Add the nominal identities one selected alias target reaches.

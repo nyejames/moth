@@ -1,0 +1,5 @@
+@a alpha
+
+call_alpha |x I32| -> I32:
+    return alpha(x)
+;

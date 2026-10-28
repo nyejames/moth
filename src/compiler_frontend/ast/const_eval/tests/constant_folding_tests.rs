@@ -29,9 +29,13 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidCastView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -116,45 +120,44 @@ fn folding_handled_expressions_preserves_zero_and_multiple_success_shapes() {
 }
 
 fn assert_compile_time_error(
-    error: &ConstantFoldError,
+    error: ConstantFoldError,
     expected_reason: CompileTimeEvaluationErrorReason,
     expected_operation: Option<&str>,
     string_table: &StringTable,
 ) {
     let diagnostic = match error {
-        ConstantFoldError::Diagnostic(diagnostic) => diagnostic,
+        ConstantFoldError::Diagnostic(diagnostic)
+        | ConstantFoldError::NumericFailure(diagnostic) => diagnostic,
         ConstantFoldError::Infrastructure(error) => {
             panic!("expected compile-time diagnostic, found infrastructure error: {error:?}")
         }
     };
-
-    match &diagnostic.payload {
-        DiagnosticPayload::CompileTimeEvaluationError {
-            reason, operation, ..
-        } => {
-            assert_eq!(*reason, expected_reason);
-
-            let operation_text = operation.map(|operation| string_table.resolve(operation));
-            assert_eq!(operation_text, expected_operation);
-        }
-        payload => panic!("expected compile-time evaluation payload, found {payload:?}"),
-    }
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
+    assert_eq!(facts.reason, expected_reason);
+    let operation_text = facts
+        .operation
+        .map(|operation| string_table.resolve(operation));
+    assert_eq!(operation_text, expected_operation);
 }
 
-fn assert_invalid_cast_error(error: &ConstantFoldError, expected_reason: InvalidCastReason) {
+fn assert_invalid_cast_error(error: ConstantFoldError, expected_reason: InvalidCastReason) {
     let diagnostic = match error {
-        ConstantFoldError::Diagnostic(diagnostic) => diagnostic,
+        ConstantFoldError::Diagnostic(diagnostic)
+        | ConstantFoldError::NumericFailure(diagnostic) => diagnostic,
         ConstantFoldError::Infrastructure(error) => {
             panic!("expected invalid-cast diagnostic, found infrastructure error: {error:?}")
         }
     };
-
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidCast { reason, .. } => {
-            assert_eq!(*reason, expected_reason);
-        }
-        payload => panic!("expected invalid-cast payload, found {payload:?}"),
-    }
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<InvalidCastView>()
+        .expect("the diagnostic is an invalid cast");
+    assert_eq!(facts.reason, expected_reason);
 }
 
 /// Builds typed expression fixtures for fold tests. Fields are accessed directly inside the
@@ -532,7 +535,7 @@ impl FoldFixture {
         )? {
             ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => Ok(root),
             ConstantFoldOutcome::Refused { reason, .. } => {
-                Err(ConstantFoldError::Diagnostic(reason.into_diagnostic()))
+                Err(ConstantFoldError::Diagnostic(reason.into_draft()))
             }
         }
     }
@@ -787,21 +790,20 @@ fn structural_string_requirement_has_stable_rule_identity() {
         let diagnostic = require_concrete_text(view, &f.constants, requirement, &mut f.strings)
             .expect_err("structural strings should require a final-text diagnostic");
 
-        let identity = diagnostic.identity();
-        assert_eq!(identity.code, "MOTH-RULE-0053");
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact.first().expect("the diagnostic is retained");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0053");
+        let facts = diagnostic
+            .family_view::<CompileTimeEvaluationErrorView>()
+            .expect("the diagnostic is a compile-time evaluation failure");
         assert_eq!(
-            identity.reason_key,
-            Some("compile_time_evaluation_error.structural_string_requires_final_text")
+            facts.reason,
+            CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText
         );
-        match &diagnostic.payload {
-            DiagnosticPayload::CompileTimeEvaluationError { operation, .. } => {
-                assert_eq!(
-                    operation.map(|id| f.strings.resolve(id)),
-                    Some(operation_name)
-                );
-            }
-            payload => panic!("expected compile-time evaluation payload, found {payload:?}"),
-        }
+        assert_eq!(
+            facts.operation.map(|id| f.strings.resolve(id)),
+            Some(operation_name)
+        );
     }
 }
 
@@ -846,13 +848,18 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
     let ConstantFoldOutcome::Refused { reason, .. } = outcome else {
         panic!("expected structural equality to report unavailable text");
     };
-    let diagnostic = reason.into_diagnostic();
+    let diagnostic = reason.into_draft();
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
     assert_eq!(
-        diagnostic.identity().reason_key,
-        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+        facts.reason,
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText
     );
     let render_context = DiagnosticRenderContext::new(&f.strings);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_guidance_view(diagnostic, render_context);
     assert!(
         guidance
             .iter()
@@ -881,13 +888,18 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
     let ConstantFoldOutcome::Refused { reason, .. } = outcome else {
         panic!("expected constant folding to preserve text-unavailable outcome");
     };
-    let diagnostic = reason.into_diagnostic();
+    let diagnostic = reason.into_draft();
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
     assert_eq!(
-        diagnostic.identity().reason_key,
-        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+        facts.reason,
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText
     );
     let render_context = DiagnosticRenderContext::new(&f.strings);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_guidance_view(diagnostic, render_context);
     assert!(
         guidance
             .iter()
@@ -963,7 +975,7 @@ fn evaluate_operator_rejects_negative_integer_exponent() {
         .fold_binary(Operator::Exponent, None, lhs, rhs)
         .expect_err("negative integer exponent should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::InvalidExponent,
         Some("^"),
         &f.strings,
@@ -1012,7 +1024,7 @@ fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
             .fold_binary(operator, None, lhs, rhs)
             .expect_err("division by zero should fail");
         assert_compile_time_error(
-            &error,
+            error,
             CompileTimeEvaluationErrorReason::DivideByZero,
             None,
             &f.strings,
@@ -1029,7 +1041,7 @@ fn evaluate_operator_rejects_integer_add_overflow() {
         .fold_binary(Operator::Add, None, lhs, rhs)
         .expect_err("integer addition overflow should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("+"),
         &f.strings,
@@ -1109,7 +1121,7 @@ fn evaluate_operator_rejects_int64_add_overflow() {
         .fold_binary(Operator::Add, None, lhs, rhs)
         .expect_err("int64 addition overflow should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("+"),
         &f.strings,
@@ -1125,7 +1137,7 @@ fn evaluate_operator_rejects_integer_subtract_overflow() {
         .fold_binary(Operator::Subtract, None, lhs, rhs)
         .expect_err("integer subtraction overflow should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("-"),
         &f.strings,
@@ -1141,7 +1153,7 @@ fn evaluate_operator_rejects_integer_multiply_overflow() {
         .fold_binary(Operator::Multiply, None, lhs, rhs)
         .expect_err("integer multiplication overflow should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("*"),
         &f.strings,
@@ -1157,7 +1169,7 @@ fn evaluate_operator_rejects_integer_exponent_overflow() {
         .fold_binary(Operator::Exponent, None, lhs, rhs)
         .expect_err("integer exponentiation overflow should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("^"),
         &f.strings,
@@ -1193,7 +1205,7 @@ fn evaluate_operator_folds_trivial_base_exponent_despite_oversized_exponent() {
         .fold_binary(Operator::Exponent, None, lhs, rhs)
         .expect_err("a non-trivial base with an oversized exponent should overflow");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("^"),
         &f.strings,
@@ -1231,7 +1243,7 @@ fn evaluate_operator_rejects_integer_division_overflow() {
         .fold_binary(Operator::IntDivide, None, lhs, rhs)
         .expect_err("signed minimum integer division by -1 should overflow");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("//"),
         &f.strings,
@@ -1262,7 +1274,7 @@ fn evaluate_operator_rejects_non_finite_float_exponent_result() {
         .fold_binary(Operator::Exponent, None, lhs, rhs)
         .expect_err("a non-finite float power should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::FloatOverflow,
         Some("^"),
         &f.strings,
@@ -1278,7 +1290,7 @@ fn evaluate_operator_rejects_non_finite_float_multiply_result() {
         .fold_binary(Operator::Multiply, None, lhs, rhs)
         .expect_err("a non-finite float product should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::FloatOverflow,
         Some("*"),
         &f.strings,
@@ -1294,7 +1306,7 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
         .fold(root)
         .expect_err("negating the signed minimum should overflow");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("-"),
         &f.strings,
@@ -1310,7 +1322,7 @@ fn evaluate_operator_rejects_float_modulo_by_zero() {
         .fold_binary(Operator::Modulus, None, lhs, rhs)
         .expect_err("float modulo by zero should fail");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::DivideByZero,
         None,
         &f.strings,
@@ -1409,10 +1421,8 @@ fn evaluate_operator_folds_fixed_integer_results_in_the_operand_domain() {
         );
     }
 
-    // These exact inputs folded through a wider carrier before D15 (`U8 + U8` into U32,
-    // `I8::MIN // -1` into I32). They must now fail at the operand width, so a carrier-width
-    // overflow check cannot accept them. The wider 510/128 calculations are retained above
-    // with explicit U32/I32 operands.
+    // These inputs must fail at the operand width, so a carrier-width overflow check cannot
+    // accept them. The wider 510/128 calculations above use explicit U32/I32 operands.
     let overflow_cases = [
         (
             "U8 255 + 255 overflows U8",
@@ -1434,7 +1444,7 @@ fn evaluate_operator_folds_fixed_integer_results_in_the_operand_domain() {
             .fold_binary(operator, None, lhs, rhs)
             .expect_err(&format!("{case} should fail during folding"));
         assert_compile_time_error(
-            &error,
+            error,
             CompileTimeEvaluationErrorReason::IntegerOverflow,
             Some(operation),
             &f.strings,
@@ -1495,7 +1505,7 @@ fn evaluate_operator_handles_huge_fixed_integer_exponents_without_host_overflow(
         .fold_binary(Operator::Exponent, None, lhs, rhs)
         .expect_err("a huge non-trivial power should overflow without a host-sized loop");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("^"),
         &f.strings,
@@ -1548,7 +1558,7 @@ fn evaluate_operator_reports_fixed_integer_overflow_and_invalid_exponents() {
         let error = f
             .fold_binary(operator, None, lhs, rhs)
             .expect_err(&format!("{case} should fail during folding"));
-        assert_compile_time_error(&error, reason, Some(symbol), &f.strings);
+        assert_compile_time_error(error, reason, Some(symbol), &f.strings);
     }
 }
 
@@ -1593,7 +1603,7 @@ fn evaluate_operator_reports_fixed_integer_and_float_zero_divisors() {
             .fold_binary(operator, None, lhs, rhs)
             .expect_err(&format!("{case} should fail during folding"));
         assert_compile_time_error(
-            &error,
+            error,
             CompileTimeEvaluationErrorReason::DivideByZero,
             None,
             &f.strings,
@@ -1649,7 +1659,7 @@ fn evaluate_operator_rounds_fixed_float_results_once_in_the_operand_domain() {
         );
     }
 
-    // B20: F16 completes every operation before the next one starts. The ulp at 2048 is 2, so
+    // F16 completes every operation before the next one starts. The ulp at 2048 is 2, so
     // `2048 + 1` is a binary16 midpoint whose ties-to-even result is 2048, and the following
     // subtraction then cancels the chain to zero. A carrier that postponed the F16 rounding
     // until after the chain would keep 2049 and end at 1 instead.
@@ -1760,7 +1770,7 @@ fn evaluate_operator_rejects_fixed_float_overflow() {
             .fold_binary(operator, None, lhs, rhs)
             .expect_err(&format!("{case} should fail during folding"));
         assert_compile_time_error(
-            &error,
+            error,
             CompileTimeEvaluationErrorReason::FloatOverflow,
             Some(operation),
             &f.strings,
@@ -1805,7 +1815,7 @@ fn constant_fold_uses_fixed_integer_and_float_negation_domains() {
         let root = f.unary(operand, Operator::Negate, None);
         let error = f.fold(root).expect_err(case);
         assert_compile_time_error(
-            &error,
+            error,
             CompileTimeEvaluationErrorReason::IntegerOverflow,
             Some("-"),
             &f.strings,
@@ -1920,7 +1930,7 @@ fn number_folding_reports_checked_division_and_exponent_failures() {
         .fold_binary(Operator::Divide, None, lhs, zero)
         .expect_err("a known Dec zero divisor must be a compile-time failure");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::DivideByZero,
         None,
         &f.strings,
@@ -1930,7 +1940,7 @@ fn number_folding_reports_checked_division_and_exponent_failures() {
         .fold_binary(Operator::Modulus, None, lhs, zero)
         .expect_err("a known Dec remainder-by-zero must be a compile-time failure");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::DivideByZero,
         None,
         &f.strings,
@@ -1942,7 +1952,7 @@ fn number_folding_reports_checked_division_and_exponent_failures() {
         .fold_binary(Operator::Exponent, None, base, negative_exponent)
         .expect_err("a negative Dec exponent must use the checked exponent failure");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::InvalidExponent,
         Some("^"),
         &f.strings,
@@ -2116,14 +2126,16 @@ fn constant_fold_reports_static_failure_at_authored_operator_inside_runtime_expr
     let ExpressionTypingError::Diagnostic(diagnostic) = error else {
         panic!("divide by zero should remain a source diagnostic");
     };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
+    assert_eq!(facts.reason, CompileTimeEvaluationErrorReason::DivideByZero);
     assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::CompileTimeEvaluationError {
-            reason: CompileTimeEvaluationErrorReason::DivideByZero,
-            ..
-        }
+        diagnostic.primary_site(),
+        SiteRef::Local(span) if span == operator_span
     ));
-    assert_eq!(diagnostic.primary_span, Some(operator_span));
 }
 
 #[test]
@@ -2489,7 +2501,7 @@ fn fold_structural_string_cast_reports_text_unavailable_rule() {
         .expect_err("structural string cast should require final text");
 
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
         Some("string cast or parse"),
         &f.strings,
@@ -2559,7 +2571,7 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
         .fold_compile_time(cast)
         .expect_err("failed fallible builtin cast should report a const diagnostic");
 
-    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+    assert_invalid_cast_error(error, InvalidCastReason::BuiltinCastFailedInConst);
 }
 
 #[test]
@@ -2588,7 +2600,7 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
         .expect_err("user-defined evidence should not fold in a const context");
 
     assert_invalid_cast_error(
-        &error,
+        error,
         InvalidCastReason::UserDefinedEvidenceNotConstFoldable,
     );
 }
@@ -2612,7 +2624,7 @@ fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
         .expect_err("generic-bound evidence should not fold in a const context");
 
     assert_invalid_cast_error(
-        &error,
+        error,
         InvalidCastReason::GenericBoundEvidenceNotConstFoldable,
     );
 }
@@ -2630,7 +2642,7 @@ fn known_invalid_cast_under_catch_is_diagnostic_in_constant_context() {
         .fold_compile_time(root)
         .expect_err("a known invalid cast must not use its catch fallback");
 
-    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+    assert_invalid_cast_error(error, InvalidCastReason::BuiltinCastFailedInConst);
 }
 
 #[test]
@@ -2646,7 +2658,7 @@ fn known_invalid_cast_under_catch_is_diagnostic_in_runtime_context() {
         .fold(root)
         .expect_err("a known invalid cast must not fall back to runtime catch delivery");
 
-    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+    assert_invalid_cast_error(error, InvalidCastReason::BuiltinCastFailedInConst);
 }
 
 #[test]
@@ -2749,7 +2761,7 @@ fn evaluate_operator_folds_u32_arithmetic_and_rejects_overflow() {
         .fold_binary(Operator::Add, None, max, one)
         .expect_err("u32::MAX + 1 exceeds the U32 boundary");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("+"),
         &f.strings,
@@ -2767,7 +2779,7 @@ fn evaluate_operator_folds_u32_arithmetic_and_rejects_overflow() {
         .fold_binary(Operator::Exponent, None, base, exponent)
         .expect_err("2 ^ 32 exceeds the U32 boundary");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("^"),
         &f.strings,
@@ -2779,7 +2791,7 @@ fn evaluate_operator_folds_u32_arithmetic_and_rejects_overflow() {
         .fold_binary(Operator::Subtract, None, zero, one)
         .expect_err("0 - 1 underflows U32");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("-"),
         &f.strings,
@@ -2791,7 +2803,7 @@ fn evaluate_operator_folds_u32_arithmetic_and_rejects_overflow() {
         .fold_binary(Operator::IntDivide, None, seven, zero)
         .expect_err("U32 // 0 must fail at compile time");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::DivideByZero,
         None,
         &f.strings,
@@ -2856,7 +2868,7 @@ fn evaluate_operator_folds_u64_at_full_bounds_and_rejects_overflow() {
         .fold_binary(Operator::Add, None, max, one)
         .expect_err("u64::MAX + 1 exceeds the U64 boundary");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("+"),
         &f.strings,
@@ -2868,7 +2880,7 @@ fn evaluate_operator_folds_u64_at_full_bounds_and_rejects_overflow() {
         .fold_binary(Operator::Exponent, None, base, exponent)
         .expect_err("2 ^ 64 exceeds the U64 boundary");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("^"),
         &f.strings,
@@ -2880,7 +2892,7 @@ fn evaluate_operator_folds_u64_at_full_bounds_and_rejects_overflow() {
         .fold_binary(Operator::Multiply, None, big, two)
         .expect_err("2^63 * 2 exceeds the U64 boundary");
     assert_compile_time_error(
-        &error,
+        error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("*"),
         &f.strings,
@@ -2924,9 +2936,15 @@ fn speculative_substitution_reports_the_refusal_it_recorded() {
     let reason = result
         .refusal
         .expect("the substitution reports the refusal it recorded");
+    let diagnostic = reason.into_draft();
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
     assert_eq!(
-        reason.into_diagnostic().identity().reason_key,
-        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+        facts.reason,
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText
     );
 }
 

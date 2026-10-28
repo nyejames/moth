@@ -1,5 +1,5 @@
--- C04: text that parses but exceeds the fixed target range is a compile-time
--- diagnostic under catch. Retired: this fixture previously asserted fallback 7.
+-- Text that parses but exceeds the fixed target range is a compile-time
+-- diagnostic under catch.
 
 recovered #U8 = cast "300" catch:
     then 7

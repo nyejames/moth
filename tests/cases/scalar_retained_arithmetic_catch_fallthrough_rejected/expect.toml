@@ -4,7 +4,7 @@ entry = "."
 # this case owns the completion-time validation: the empty fallthrough handler
 # must be rejected as ordinary source with
 # invalid_fallible_handling.catch_handler_can_fall_through. An internal
-# CompilerError instead of this source diagnostic fails the case through the
+# InfrastructureFailure instead of this source diagnostic fails the case through the
 # missing diagnostic contract.
 
 [backends.html]

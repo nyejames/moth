@@ -21,10 +21,12 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CompilerDiagnostic, ValueReceiverContext,
-};
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{AstCapacityResource, ValueReceiverContext};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -39,7 +41,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct OwnerToken(NonZeroU32);
 impl OwnerToken {
-    fn mint() -> Result<Self, CompilerError> {
+    fn mint() -> Result<Self, InfrastructureFailure> {
         static NEXT_OWNER: AtomicU32 = AtomicU32::new(0);
         let previous = NEXT_OWNER
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -171,7 +173,7 @@ macro_rules! typed_range {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub(crate) struct $name { pub(super) start: u32, pub(super) len: u32 }
         impl $name {
-            pub(super) fn bounds(self, size: usize) -> Result<std::ops::Range<usize>, CompilerError> {
+            pub(super) fn bounds(self, size: usize) -> Result<std::ops::Range<usize>, InfrastructureFailure> {
                 let end = self.start.checked_add(self.len).ok_or_else(|| invariant("expression range end overflow"))?;
                 if end as usize > size { return Err(invariant("expression range outside owner")); }
                 Ok(self.start as usize..end as usize)
@@ -542,16 +544,21 @@ pub(crate) struct CompletedExpressionInput {
 }
 #[derive(Debug)]
 pub(crate) enum ExpressionConstructionFailure {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Invariant(Box<InfrastructureErrors>),
 }
-impl From<CompilerError> for ExpressionConstructionFailure {
-    fn from(e: CompilerError) -> Self {
+impl From<DiagnosticDraft> for ExpressionConstructionFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+impl From<InfrastructureFailure> for ExpressionConstructionFailure {
+    fn from(e: InfrastructureFailure) -> Self {
         Self::Invariant(e.into())
     }
 }
-pub(super) fn invariant(message: &str) -> CompilerError {
-    CompilerError::new(message, None, ErrorType::Compiler)
+pub(super) fn invariant(message: &str) -> InfrastructureFailure {
+    InfrastructureFailure::internal(CompilerStage::AstConstruction, message)
 }
 pub(super) fn checked_extent(
     start: usize,
@@ -561,7 +568,7 @@ pub(super) fn checked_extent(
     rows: bool,
 ) -> Result<(u32, u32), ExpressionConstructionFailure> {
     let capacity = || {
-        ExpressionConstructionFailure::Diagnostic(CompilerDiagnostic::compiler_capacity_exceeded(
+        ExpressionConstructionFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
             if rows {
                 AstCapacityResource::ExpressionRows
             } else {
@@ -588,10 +595,10 @@ macro_rules! storage {
             $(pub(super) $field: Vec<$ty>,)*
         }
         impl ExpressionStore {
-            pub(crate) fn new() -> Result<Self, CompilerError> {
+            pub(crate) fn new() -> Result<Self, InfrastructureFailure> {
                 Ok(Self { owner: OwnerToken::mint()?, $($field: Vec::new(),)* })
             }
-            pub(super) fn freeze(mut self) -> Result<Self, CompilerError> {
+            pub(super) fn freeze(mut self) -> Result<Self, InfrastructureFailure> {
                 self.owner = OwnerToken::mint()?;
                 $(self.$field.shrink_to_fit();)*
                 Ok(self)
@@ -651,8 +658,8 @@ storage!(
 /// WHY: the borrow checker keeps views from outliving appends, and `freeze` consumes the builder
 /// at the last-reader boundary.
 ///
-/// Failure contract: an exhausted limit fails the append with a `Diagnostic` from
-/// `CompilerDiagnostic::compiler_capacity_exceeded`. That is an ordinary construction failure.
+/// Failure contract: an exhausted limit fails the append with a `DiagnosticDraft` from
+/// `families::token_lexical::compiler_capacity_exceeded`. That is an ordinary construction failure.
 /// No probe or fallback may turn it into a rejected candidate or a runtime classification.
 /// Generated-constant materialisation and constant import report it as an internal compiler
 /// error instead, because they rebuild values that already fitted once. Compound constructors
@@ -667,7 +674,7 @@ pub(crate) struct AstExpressionBuilder {
     pub(super) limit: u32,
 }
 impl AstExpressionBuilder {
-    pub(crate) fn new() -> Result<Self, CompilerError> {
+    pub(crate) fn new() -> Result<Self, InfrastructureFailure> {
         Ok(Self {
             storage: ExpressionStore::new()?,
             candidate_serial: 0,
@@ -678,7 +685,7 @@ impl AstExpressionBuilder {
     /// left most of their capacity unused on measured modules.
     pub(crate) fn with_capacity_estimate(
         estimate: FrontendArenaCapacityEstimate,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut builder = Self::new()?;
         builder.storage.rows.reserve(estimate.expressions);
         Ok(builder)
@@ -687,7 +694,7 @@ impl AstExpressionBuilder {
         self.storage.rows.len()
     }
     /// Borrows the row at `id` as a view, or returns an invariant error if `id` is out of range.
-    pub(crate) fn view(&self, id: ExprId) -> Result<ExpressionView<'_>, CompilerError> {
+    pub(crate) fn view(&self, id: ExprId) -> Result<ExpressionView<'_>, InfrastructureFailure> {
         self.storage.view(id)
     }
     /// `own` and `own_slice` attach durable IDs at the issuing builder's construction boundary.
@@ -707,27 +714,30 @@ impl AstExpressionBuilder {
     pub(crate) fn check_owned_slice<'a, T>(
         &self,
         values: OwnedExprs<'a, T>,
-    ) -> Result<&'a [T], CompilerError> {
+    ) -> Result<&'a [T], InfrastructureFailure> {
         self.storage.check_owner_token(values.owner)?;
         Ok(values.values)
     }
-    pub(crate) fn check_owner(&self, expression: OwnedExpr) -> Result<(), CompilerError> {
+    pub(crate) fn check_owner(&self, expression: OwnedExpr) -> Result<(), InfrastructureFailure> {
         self.storage.check_owner(expression)
     }
-    pub(crate) fn check_owned(&self, expression: OwnedExpr) -> Result<ExprId, CompilerError> {
+    pub(crate) fn check_owned(
+        &self,
+        expression: OwnedExpr,
+    ) -> Result<ExprId, InfrastructureFailure> {
         self.storage.check_owned(expression)
     }
     pub(crate) fn view_owned(
         &self,
         expression: OwnedExpr,
-    ) -> Result<ExpressionView<'_>, CompilerError> {
+    ) -> Result<ExpressionView<'_>, InfrastructureFailure> {
         self.storage.view_owned(expression)
     }
     #[inline]
     pub(crate) fn check_operation_owned(
         &self,
         operation: ExpressionOp<OwnedExpr>,
-    ) -> Result<ExpressionOp, CompilerError> {
+    ) -> Result<ExpressionOp, InfrastructureFailure> {
         let operation = self.check_operation_owner(operation)?;
         let mut result = Ok(());
         operation.visit_edges(&mut |edge| {
@@ -744,7 +754,7 @@ impl AstExpressionBuilder {
     fn check_operation_owner(
         &self,
         operation: ExpressionOp<OwnedExpr>,
-    ) -> Result<ExpressionOp, CompilerError> {
+    ) -> Result<ExpressionOp, InfrastructureFailure> {
         let mut result = Ok(());
         let operation = operation.map_edges(|edge| {
             if result.is_ok() {
@@ -1021,7 +1031,7 @@ impl AstExpressionBuilder {
     fn validate_external_edges(
         &self,
         visit: impl FnOnce(&mut dyn FnMut(ExprId)),
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut result = Ok(());
         visit(&mut |id| {
             if result.is_ok() {
@@ -1069,7 +1079,7 @@ append_side!(
                 .get(id.index())
                 .ok_or_else(|| invariant("handling ID outside owner"))?;
         }
-        Ok::<_, CompilerError>(())
+        Ok::<_, InfrastructureFailure>(())
     }
 );
 append_side!(
@@ -1133,21 +1143,21 @@ append_side!(
     casts,
     CastFacts,
     CastFactId,
-    |_: &ExpressionStore, _: &CastFacts| Ok::<_, CompilerError>(())
+    |_: &ExpressionStore, _: &CastFacts| Ok::<_, InfrastructureFailure>(())
 );
 append_side!(
     append_handling,
     handling,
     HandlingRecord,
     HandlingId,
-    |_: &ExpressionStore, _: &HandlingRecord| Ok::<_, CompilerError>(())
+    |_: &ExpressionStore, _: &HandlingRecord| Ok::<_, InfrastructureFailure>(())
 );
 append_side!(
     append_template,
     templates,
     Template,
     TemplateFactId,
-    |_: &ExpressionStore, _: &Template| Ok::<_, CompilerError>(())
+    |_: &ExpressionStore, _: &Template| Ok::<_, InfrastructureFailure>(())
 );
 append_side!(
     append_value_block,
@@ -1162,7 +1172,7 @@ append_side!(
     runtime_templates,
     OwnedRuntimeTemplateHandoff,
     RuntimeTemplateId,
-    |_: &ExpressionStore, _: &OwnedRuntimeTemplateHandoff| Ok::<_, CompilerError>(()),
+    |_: &ExpressionStore, _: &OwnedRuntimeTemplateHandoff| Ok::<_, InfrastructureFailure>(()),
     edges |value: &OwnedRuntimeTemplateHandoff, visit: &mut dyn FnMut(ExprId)| value.visit_expression_ids(visit)
 );
 append_side!(
@@ -1170,7 +1180,7 @@ append_side!(
     runtime_slots,
     OwnedRuntimeSlotApplicationHandoff,
     RuntimeSlotApplicationId,
-    |_: &ExpressionStore, _: &OwnedRuntimeSlotApplicationHandoff| Ok::<_, CompilerError>(()),
+    |_: &ExpressionStore, _: &OwnedRuntimeSlotApplicationHandoff| Ok::<_, InfrastructureFailure>(()),
     edges |value: &OwnedRuntimeSlotApplicationHandoff, visit: &mut dyn FnMut(ExprId)| value.visit_expression_ids(visit)
 );
 
@@ -1185,22 +1195,22 @@ impl ExpressionStore {
         self.owner
     }
     /// Borrows the row at `id` as a view, or returns an invariant error if `id` is out of range.
-    pub(crate) fn view(&self, id: ExprId) -> Result<ExpressionView<'_>, CompilerError> {
+    pub(crate) fn view(&self, id: ExprId) -> Result<ExpressionView<'_>, InfrastructureFailure> {
         self.rows
             .get(id.index())
             .ok_or_else(|| invariant("expression ID outside owner"))?;
         Ok(ExpressionView { owner: self, id })
     }
-    pub(super) fn check_owner_token(&self, owner: OwnerToken) -> Result<(), CompilerError> {
+    pub(super) fn check_owner_token(&self, owner: OwnerToken) -> Result<(), InfrastructureFailure> {
         if owner != self.owner {
             return Err(invariant("expression handle from another owner"));
         }
         Ok(())
     }
-    fn check_owner(&self, expression: OwnedExpr) -> Result<(), CompilerError> {
+    fn check_owner(&self, expression: OwnedExpr) -> Result<(), InfrastructureFailure> {
         self.check_owner_token(expression.owner)
     }
-    fn check_owned(&self, expression: OwnedExpr) -> Result<ExprId, CompilerError> {
+    fn check_owned(&self, expression: OwnedExpr) -> Result<ExprId, InfrastructureFailure> {
         self.check_owner(expression)?;
         self.view(expression.id)?;
         Ok(expression.id)
@@ -1208,14 +1218,14 @@ impl ExpressionStore {
     pub(crate) fn view_owned(
         &self,
         expression: OwnedExpr,
-    ) -> Result<ExpressionView<'_>, CompilerError> {
+    ) -> Result<ExpressionView<'_>, InfrastructureFailure> {
         self.check_owner(expression)?;
         self.view(expression.id)
     }
     fn validate_place_edges(
         &self,
         visit: impl FnOnce(&mut dyn FnMut(PlaceId)),
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut result = Ok(());
         visit(&mut |id| {
             if result.is_ok() {
@@ -1228,7 +1238,7 @@ impl ExpressionStore {
         &self,
         id: PlaceId,
         visit: &mut dyn FnMut(ExprId),
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let place = self
             .places
             .get(id.index())
@@ -1245,7 +1255,7 @@ impl ExpressionStore {
         &self,
         operation: ExpressionOp,
         success: SuccessShape,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let SuccessShape::Multiple(range) = success {
             if range.len < 2 {
                 return Err(invariant(
@@ -1279,7 +1289,10 @@ impl ExpressionStore {
                 ExpressionOp::NumericBinary { left, right, .. }
                 | ExpressionOp::Compare { left, right, .. } => (left, Some(right)),
                 ExpressionOp::Range { start, end, .. } => (start, Some(end)),
-                _ => unreachable!(),
+                _ => crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "fact lookup only yields NumericUnary, NumericBinary, Compare, or Range; other operations have fact=None"
+                ),
             };
             if self.rows[left.index()].success != SuccessShape::One(fact.left_type)
                 || right.map(|id| self.rows[id.index()].success)
@@ -1296,7 +1309,7 @@ impl ExpressionStore {
         &self,
         operation: ExpressionOp,
         visit: &mut dyn FnMut(ExprId),
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         macro_rules! get {
             ($field:ident,$id:expr) => {
                 self.$field
@@ -1439,7 +1452,7 @@ impl<'a> ExpressionView<'a> {
     pub(crate) fn visit_child_ids(
         self,
         visit: &mut dyn FnMut(ExprId),
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.owner
             .visit_operation_edges(self.row().operation, visit)
     }
@@ -1460,10 +1473,10 @@ impl<'a> ExpressionView<'a> {
     pub(crate) fn require_single(
         self,
         receiver: ValueReceiverContext,
-    ) -> Result<TypeId, CompilerDiagnostic> {
+    ) -> Result<TypeId, DiagnosticDraft> {
         match self.row().success {
             SuccessShape::One(id) => Ok(id),
-            _ => Err(CompilerDiagnostic::invalid_value_receiver(
+            _ => Err(calls_data::invalid_value_receiver(
                 receiver,
                 1,
                 self.success_types().len(),
@@ -1535,11 +1548,6 @@ pub(crate) struct ExpressionStorageStatistics {
 mod freeze;
 pub(crate) use freeze::ExpressionFreezeRoots;
 
-impl From<CompilerDiagnostic> for ExpressionConstructionFailure {
-    fn from(e: CompilerDiagnostic) -> Self {
-        Self::Diagnostic(e)
-    }
-}
 #[path = "expression_store_snapshot.rs"]
 mod snapshot;
 

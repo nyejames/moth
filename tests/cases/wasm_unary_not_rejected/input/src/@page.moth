@@ -1,0 +1,3 @@
+flag = true
+inverted = not flag
+[:inverted=[inverted]]

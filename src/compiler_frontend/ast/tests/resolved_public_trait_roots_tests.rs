@@ -9,7 +9,7 @@
 //! or ordering.
 
 use super::environment::resolved_public_trait_roots::build_resolved_public_trait_roots;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -37,8 +37,7 @@ fn trait_header(
     let declaration_path = path_fork
         .try_intern_portable_path(name, string_table)
         .expect("test path fits");
-    let token_index =
-        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
+    let token_index = TokenIndex::from_raw(0);
     Header {
         kind: HeaderKind::Trait {
             declaration: TraitDeclarationSyntax {
@@ -72,8 +71,7 @@ fn function_header(
     let declaration_path = path_fork
         .try_intern_portable_path(name, string_table)
         .expect("test path fits");
-    let token_index =
-        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
+    let token_index = TokenIndex::from_raw(0);
     Header {
         kind: HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -334,7 +332,7 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     let error = result.expect_err("a source header must not project a compiler-owned core trait");
     assert!(
         error
-            .msg
+            .message
             .contains("resolved to a compiler-owned core trait")
     );
 }
@@ -390,7 +388,7 @@ fn excludes_non_trait_declarations() {
 }
 
 #[test]
-fn missing_trait_definition_is_compiler_error() {
+fn missing_trait_definition_is_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let trait_environment = TraitEnvironment::new();
@@ -411,8 +409,8 @@ fn missing_trait_definition_is_compiler_error() {
     );
 
     assert!(
-        matches!(result, Err(CompilerError { .. })),
-        "a public trait header with no registered definition must be a CompilerError"
+        matches!(result, Err(InfrastructureFailure { .. })),
+        "a public trait header with no registered definition must be an InfrastructureFailure"
     );
 }
 

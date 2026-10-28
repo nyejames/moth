@@ -50,7 +50,7 @@ fn function_node(
     )
 }
 
-use crate::compiler_frontend::hir::hir_builder::build_ast_with_registered_types;
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 fn find_function_id_by_path(
     module: &crate::compiler_frontend::hir::module::HirModule,
@@ -336,7 +336,7 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
     )
     .expect_err("two origins mapped to one local function must fail HIR validation");
 
-    let message = error.msg;
+    let message = error.message;
     assert!(
         message.contains("both map to local function"),
         "validation error should name the injectivity violation, got: {message}"

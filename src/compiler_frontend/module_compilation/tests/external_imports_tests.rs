@@ -3,7 +3,10 @@
 use super::*;
 use crate::builder_surface::external_import_providers::provider::ResolvedExternalImport;
 use crate::builder_surface::{BuilderSurface, PackageOrigin};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::module_compilation::generated::test_fixtures::assert_compiler_bug;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
     StableResourceOwnerId,
@@ -48,7 +51,6 @@ fn provider_record(package_id: ExternalPackageId) -> ResolvedExternalImport {
         exported_types: Vec::new(),
         exported_free_functions: Vec::new(),
         runtime_asset: Some(runtime_asset()),
-        diagnostics: Vec::new(),
         required_runtime_imports: vec![
             runtime_import("@moth/runtime", &["mothOk", "mothErr"]),
             runtime_import("@test/empty", &[]),
@@ -134,11 +136,6 @@ fn runtime_candidates_reject_conflicting_provider_builder_facts() {
         .register_package("@test/runtime", PackageOrigin::ProjectLocal)
         .expect("fixture package registers");
     let provider = provider_record(package_id);
-    let canonical_span = provider
-        .runtime_asset
-        .as_ref()
-        .expect("fixture asset")
-        .source_span;
     let mut table = ExternalImportResolutionTable::new();
     table.insert("provider.moth", "runtime.js", provider.clone());
     let requested = FxHashSet::from_iter([package_id]);
@@ -202,25 +199,24 @@ fn runtime_candidates_reject_conflicting_provider_builder_facts() {
             &registry,
         )
         .expect_err("incompatible trusted runtime metadata must fail");
-        assert_eq!(error.error_type, ErrorType::Compiler, "{fact}");
-        assert!(error.msg.contains("@test/runtime"), "{}", error.msg);
-        assert!(error.msg.contains(fact), "{}", error.msg);
+        assert_eq!(error.kind, InfrastructureFailureKind::Internal, "{fact}");
+        assert!(error.message.contains("@test/runtime"), "{}", error.message);
+        assert!(error.message.contains(fact), "{}", error.message);
         assert!(
-            error.msg.contains("Canonical asset/provenance"),
+            error.message.contains("Canonical asset/provenance"),
             "{}",
-            error.msg
+            error.message
         );
         assert!(
-            error.msg.contains("conflicting asset/provenance"),
+            error.message.contains("conflicting asset/provenance"),
             "{}",
-            error.msg
+            error.message
         );
-        assert_eq!(error.source_span, canonical_span, "{fact}");
         if fact != "presence" {
             assert!(
-                error.msg.contains(&format!("{:?}", authored_span(40))),
+                error.message.contains(&format!("{:?}", authored_span(40))),
                 "{}",
-                error.msg
+                error.message
             );
         }
     }
@@ -238,9 +234,9 @@ fn runtime_candidates_reject_conflicting_provider_builder_facts() {
         collect_external_import_candidates_for_packages(&requested, &table, &[builder], &registry)
             .expect_err("None versus Some must conflict in both directions");
     assert!(
-        error.msg.contains("runtime asset presence"),
+        error.message.contains("runtime asset presence"),
         "{}",
-        error.msg
+        error.message
     );
 }
 
@@ -261,8 +257,7 @@ fn finalized_external_calls_check_registry_and_allow_core_helpers_without_assets
             span: Some(authored_span(40)),
         },
     ];
-    let packages = collect_external_import_package_ids(calls.iter(), registry)
-        .expect("Core helper definition and owner are valid");
+    let packages = collect_external_import_package_ids(calls.iter(), registry);
     assert_eq!(packages.len(), 1, "package demand deduplicates call sites");
     let candidates = collect_external_import_candidates_for_packages(
         &packages,
@@ -277,12 +272,14 @@ fn finalized_external_calls_check_registry_and_allow_core_helpers_without_assets
         function_id: ExternalFunctionId::Synthetic(u32::MAX),
         span: Some(authored_span(70)),
     };
-    let error = collect_external_import_package_ids(std::iter::once(&missing), registry)
-        .expect_err("unknown finalized callable is not an optional dependency");
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert_eq!(error.source_span, missing.span);
-    assert!(error.msg.contains("not registered"));
-
+    assert_compiler_bug(
+        CompilerStage::ProjectBuildAssembly,
+        &format!(
+            "Runtime-import inventory: finalized external function {:?} is not registered",
+            missing.function_id
+        ),
+        || collect_external_import_package_ids(std::iter::once(&missing), registry),
+    );
     let unknown_packages = FxHashSet::from_iter([ExternalPackageId(u32::MAX)]);
     let error = collect_external_import_candidates_for_packages(
         &unknown_packages,
@@ -291,6 +288,6 @@ fn finalized_external_calls_check_registry_and_allow_core_helpers_without_assets
         registry,
     )
     .expect_err("candidate metadata cannot refer to an unregistered owner");
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert!(error.msg.contains("candidate package"));
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+    assert!(error.message.contains("candidate package"));
 }

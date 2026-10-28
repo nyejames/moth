@@ -1,14 +1,25 @@
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidStyleDirectiveView, UnescapedImplicitTemplateCloseView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    self, CommonSyntaxMistakeCode, InvalidCharacterView, InvalidNumberLiteralView,
+    InvalidStringEscapeCode, InvalidStringEscapeView, SourceSpanCapacityView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, terminal::format_payload_guidance,
+    DiagnosticRenderContext, terminal::format_guidance_view,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
-    DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidStringEscapeReason,
-    MissingWhitespace, SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
-    SyntaxDiagnosticKind,
+    CommonSyntaxMistakeReason, DiagnosticBag, DiagnosticCompoundAssignmentOperator,
+    DiagnosticOperator, InvalidStringEscapeReason, MissingWhitespace, SourceSpanCapacityResource,
+    SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -71,16 +82,18 @@ fn tokenize_html_source(source: &str) -> (LexedSource, StringTable) {
     tokenize_source_with_registry(source, &style_directives)
 }
 
-fn expect_lexical_diagnostic(failure: TokenizeFailure) -> CompilerDiagnostic {
+fn expect_lexical_diagnostic(failure: TokenizeFailure) -> CompactDiagnosticBagForTest {
     match failure {
-        TokenizeFailure::Diagnosed(diagnostic) => diagnostic,
+        TokenizeFailure::Diagnosed(diagnostic) => {
+            compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
+        }
         TokenizeFailure::Infrastructure(error) => {
             panic!("lexical diagnosis fixture encountered infrastructure failure: {error:?}")
         }
     }
 }
 
-fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
+fn tokenize_source_error(source: &str) -> (CompactDiagnosticBagForTest, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -115,14 +128,21 @@ fn assert_invalid_character_at_dollar(source: &str) {
             .expect("the short test span fits"),
     );
 
+    let diagnostic = first_diagnostic_view(&diagnostic);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0007");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharacter)
+        diagnostic
+            .family_view::<InvalidCharacterView>()
+            .expect("the diagnostic is an invalid character")
+            .character,
+        '$',
     );
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0007");
+    let primary_span = match diagnostic.primary_site() {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("invalid character diagnostics retain their source position"),
+    };
     assert_eq!(
-        diagnostic.primary_span,
-        Some(dollar_span),
+        primary_span, dollar_span,
         "the removed marker should retain its exact authored location",
     );
 }
@@ -200,7 +220,7 @@ fn tokenize_moth_template_source(source: &str) -> (LexedSource, StringTable) {
     (lexed, string_table)
 }
 
-fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTable) {
+fn tokenize_moth_template_error(source: &str) -> (CompactDiagnosticBagForTest, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let style_directives = frontend_test_style_directives();
@@ -256,71 +276,68 @@ fn token_byte_range(token: TokenRef<'_>) -> (u32, u32) {
     span_byte_range(token.span())
 }
 
-fn diagnostic_byte_range(diagnostic: &CompilerDiagnostic) -> (u32, u32) {
-    let span = diagnostic
-        .primary_span
-        .expect("tokenizer diagnostics should retain an authored source span");
+fn first_diagnostic_view(diagnostics: &CompactDiagnosticBagForTest) -> DiagnosticView<'_> {
+    diagnostics
+        .first()
+        .expect("the diagnostic bag contains one record")
+}
+
+fn diagnostic_byte_range(diagnostics: &CompactDiagnosticBagForTest) -> (u32, u32) {
+    let span = match first_diagnostic_view(diagnostics).primary_site() {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("tokenizer diagnostics should retain an authored source span"),
+    };
     span_byte_range(span.local())
 }
 
 fn assert_invalid_number_literal(
-    diagnostic: &CompilerDiagnostic,
+    diagnostics: &CompactDiagnosticBagForTest,
     string_table: &StringTable,
     expected_literal: &str,
     expected_reason: NumberLiteralErrorReason,
 ) {
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidNumberLiteral {
-            literal_text,
-            reason,
-        } => {
-            assert_eq!(string_table.resolve(*literal_text), expected_literal);
-            assert_eq!(*reason, expected_reason);
-        }
-        payload => panic!("expected invalid number literal payload, found {payload:?}"),
-    }
+    let facts = first_diagnostic_view(diagnostics)
+        .family_view::<InvalidNumberLiteralView>()
+        .expect("the diagnostic is an invalid number literal");
+    assert_eq!(string_table.resolve(facts.literal_text), expected_literal);
+    assert_eq!(
+        facts.code.to_reason(facts.scalar, facts.scale),
+        Some(expected_reason),
+    );
 }
 
 fn assert_common_syntax_mistake(
-    diagnostic: &CompilerDiagnostic,
+    diagnostics: &CompactDiagnosticBagForTest,
     expected_reason: CommonSyntaxMistakeReason,
 ) {
+    let facts = first_diagnostic_view(diagnostics)
+        .family_view::<token_lexical::CommonSyntaxMistakeView>()
+        .expect("the diagnostic is a common syntax mistake");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake)
+        facts
+            .reason
+            .to_reason(facts.keyword, facts.spacing_error, facts.choice_gap),
+        Some(expected_reason),
     );
-
-    match &diagnostic.payload {
-        DiagnosticPayload::CommonSyntaxMistake { reason } => {
-            assert_eq!(*reason, expected_reason);
-        }
-        payload => panic!("expected common syntax mistake payload, found {payload:?}"),
-    }
 }
 
 fn assert_symbolic_spacing(
-    diagnostic: &CompilerDiagnostic,
+    diagnostics: &CompactDiagnosticBagForTest,
     construct: SymbolicSpacingConstruct,
     missing: MissingWhitespace,
 ) {
+    let facts = first_diagnostic_view(diagnostics)
+        .family_view::<token_lexical::CommonSyntaxMistakeView>()
+        .expect("the diagnostic is a common syntax mistake");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake)
+        facts.reason,
+        CommonSyntaxMistakeCode::InvalidSymbolicSpacing,
     );
-
-    match &diagnostic.payload {
-        DiagnosticPayload::CommonSyntaxMistake { reason } => match reason {
-            CommonSyntaxMistakeReason::InvalidSymbolicSpacing { error } => {
-                assert_eq!(
-                    error,
-                    &SymbolicSpacingError { construct, missing },
-                    "symbolic spacing construct or missing side mismatch"
-                );
-            }
-            other => panic!("expected InvalidSymbolicSpacing, found {other:?}"),
-        },
-        payload => panic!("expected common syntax mistake payload, found {payload:?}"),
-    }
+    assert_eq!(
+        facts.spacing_error,
+        Some(SymbolicSpacingError { construct, missing }),
+        "symbolic spacing construct or missing side mismatch",
+    );
 }
 
 fn numeric_literal_signs(lexed: &LexedSource) -> Vec<NumericLiteralSign> {
@@ -429,27 +446,21 @@ fn normal_template_body_preserves_backtick_as_literal_text() {
 }
 
 fn assert_invalid_string_escape(source: &str, expected_reason: InvalidStringEscapeReason) {
-    let (diagnostic, _string_table) = tokenize_source_error(source);
+    let (diagnostics, _string_table) = tokenize_source_error(source);
     let expected_span_width = match expected_reason {
         InvalidStringEscapeReason::UnsupportedEscape { .. } => 2,
         InvalidStringEscapeReason::PhysicalNewline
         | InvalidStringEscapeReason::TrailingBackslash => 1,
     };
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStringEscape)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0034");
-    let (start, end) = diagnostic_byte_range(&diagnostic);
+    let diagnostic = first_diagnostic_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0034");
+    let (start, end) = diagnostic_byte_range(&diagnostics);
     assert_eq!(end - start, expected_span_width);
-
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidStringEscape { reason } => {
-            assert_eq!(*reason, expected_reason);
-        }
-        payload => panic!("expected invalid string escape payload, found {payload:?}"),
-    }
+    let facts = diagnostic
+        .family_view::<InvalidStringEscapeView>()
+        .expect("the diagnostic is an invalid string escape");
+    assert_eq!(facts.reason.to_reason(facts.escaped), expected_reason);
 }
 
 #[test]
@@ -491,8 +502,8 @@ fn quoted_string_without_a_trailing_backslash_stays_unterminated() {
     let (diagnostic, _string_table) = tokenize_source_error("value = \"ab");
 
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
+        first_diagnostic_view(&diagnostic).descriptor().code,
+        "MOTH-SYNTAX-0006",
     );
 }
 
@@ -527,30 +538,23 @@ fn raw_string_preserves_backslashes_and_newlines_without_escape_decoding() {
 #[test]
 fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
     let source = "]";
-    let (diagnostic, string_table) = tokenize_moth_template_error(source);
+    let (diagnostics, string_table) = tokenize_moth_template_error(source);
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
-    );
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::UnescapedImplicitTemplateClose {
-            source_kind: SourceFileKind::MothTemplate
-        }
-    ));
-    let (start, end) = diagnostic_byte_range(&diagnostic);
+    let diagnostic = first_diagnostic_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0032");
+    let facts = diagnostic
+        .family_view::<UnescapedImplicitTemplateCloseView>()
+        .expect("the diagnostic is an unescaped implicit template close");
+    assert_eq!(facts.source_kind, SourceFileKind::MothTemplate);
+    let (start, end) = diagnostic_byte_range(&diagnostics);
     assert_eq!(
         source.get(start as usize..end as usize),
         Some("]"),
         "unescaped template close should retain its authored byte",
     );
 
-    let guidance = format_payload_guidance(
-        &diagnostic.payload,
-        DiagnosticRenderContext::new(&string_table),
-    )
-    .join("\n");
+    let guidance =
+        format_guidance_view(diagnostic, DiagnosticRenderContext::new(&string_table)).join("\n");
     assert!(guidance.contains("Moth template `.mtf` source"));
     assert!(guidance.contains(r#"["]"]"#));
 }
@@ -678,18 +682,16 @@ fn rejects_non_ascii_numeric_leads_as_invalid_characters() {
         ("value = -٣\n", '٣'),
         ("value = -½\n", '½'),
     ] {
-        let (diagnostic, _string_table) = tokenize_source_error(source);
+        let (diagnostics, _string_table) = tokenize_source_error(source);
+        let diagnostic = first_diagnostic_view(&diagnostics);
+        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0007");
         assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharacter)
+            diagnostic
+                .family_view::<InvalidCharacterView>()
+                .expect("the diagnostic is an invalid character")
+                .character,
+            expected_character,
         );
-        assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0007");
-        match diagnostic.payload {
-            DiagnosticPayload::InvalidCharacter { character } => {
-                assert_eq!(character, expected_character);
-            }
-            payload => panic!("expected invalid character payload, found {payload:?}"),
-        }
     }
 }
 
@@ -1612,12 +1614,17 @@ fn rejects_legacy_reset_style_directive_name() {
     };
     let error = expect_lexical_diagnostic(diagnostic);
 
-    match &error.payload {
-        DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
-            assert_eq!(string_table.resolve(*directive_name), "reset");
-        }
-        payload => panic!("expected invalid style directive payload, found {payload:?}"),
-    }
+    let diagnostic = first_diagnostic_view(&error);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<InvalidStyleDirectiveView>()
+        .expect("the diagnostic is an invalid style directive");
+    assert_eq!(string_table.resolve(facts.directive_name), "reset");
+    let supported = style_directives.supported_directives_for_diagnostic();
+    assert_eq!(
+        string_table.resolve(facts.supported_directives),
+        supported.as_str()
+    );
     let (start, end) = diagnostic_byte_range(&error);
     assert_eq!(
         source.get(start as usize..end as usize),
@@ -1630,12 +1637,20 @@ fn rejects_legacy_reset_style_directive_name() {
 fn rejects_unknown_style_directive_name() {
     let (error, string_table) = tokenize_source_error("[$unknown_formatter: body]");
 
-    match &error.payload {
-        DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
-            assert_eq!(string_table.resolve(*directive_name), "unknown_formatter");
-        }
-        payload => panic!("expected invalid style directive payload, found {payload:?}"),
-    }
+    let diagnostic = first_diagnostic_view(&error);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<InvalidStyleDirectiveView>()
+        .expect("the diagnostic is an invalid style directive");
+    assert_eq!(
+        string_table.resolve(facts.directive_name),
+        "unknown_formatter"
+    );
+    let supported = StyleDirectiveRegistry::built_ins().supported_directives_for_diagnostic();
+    assert_eq!(
+        string_table.resolve(facts.supported_directives),
+        supported.as_str()
+    );
 }
 
 #[test]
@@ -1755,12 +1770,17 @@ fn unknown_style_directives_fail_under_strict_registry() {
     };
     let error = expect_lexical_diagnostic(diagnostic);
 
-    match &error.payload {
-        DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
-            assert_eq!(string_table.resolve(*directive_name), "unknown");
-        }
-        payload => panic!("expected invalid style directive payload, found {payload:?}"),
-    }
+    let diagnostic = first_diagnostic_view(&error);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<InvalidStyleDirectiveView>()
+        .expect("the diagnostic is an invalid style directive");
+    assert_eq!(string_table.resolve(facts.directive_name), "unknown");
+    let supported = style_directives.supported_directives_for_diagnostic();
+    assert_eq!(
+        string_table.resolve(facts.supported_directives),
+        supported.as_str()
+    );
     let (start, end) = diagnostic_byte_range(&error);
     assert_eq!(
         source.get(start as usize..end as usize),
@@ -2286,9 +2306,8 @@ fn token_byte_ranges_recover_the_authored_text() {
 
 /// Tokens returned while skipping trivia must span the token, never the trivia before it.
 ///
-/// Whitespace runs, comments and discarded template bodies are consumed without producing a
-/// token, so each of these sources previously left the following token anchored at the start of
-/// the discarded text.
+/// Whitespace runs, comments and discarded template bodies are consumed without producing a token.
+/// A following token's range starts at its first authored character, after all skipped text.
 #[test]
 fn skipped_trivia_is_excluded_from_the_following_token_range() {
     let cases: &[(&str, &[&str])] = &[
@@ -2332,8 +2351,8 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
     let (string_diagnostic, _string_table) = tokenize_source_error(string_source);
 
     assert_eq!(
-        string_diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
+        first_diagnostic_view(&string_diagnostic).descriptor().code,
+        "MOTH-SYNTAX-0006",
     );
     let (string_start, string_end) = diagnostic_byte_range(&string_diagnostic);
     assert_eq!(
@@ -2352,8 +2371,10 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
     let (template_diagnostic, _template_string_table) = tokenize_source_error(template_source);
 
     assert_eq!(
-        template_diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
+        first_diagnostic_view(&template_diagnostic)
+            .descriptor()
+            .code,
+        "MOTH-SYNTAX-0017",
     );
     let (template_start, template_end) = diagnostic_byte_range(&template_diagnostic);
     assert_eq!(
@@ -2627,12 +2648,12 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
     )
     .expect_err("the unsupported escape should abort tokenization");
     let diagnostic = expect_lexical_diagnostic(diagnostic);
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStringEscape {
-            reason: InvalidStringEscapeReason::UnsupportedEscape { escaped: '🦋' }
-        }
-    ));
+    let diagnostic_view = first_diagnostic_view(&diagnostic);
+    let facts = diagnostic_view
+        .family_view::<InvalidStringEscapeView>()
+        .expect("the diagnostic is an invalid string escape");
+    assert_eq!(facts.reason, InvalidStringEscapeCode::UnsupportedEscape);
+    assert_eq!(facts.escaped, '🦋');
     assert_eq!(
         span_builder.len(),
         1,
@@ -2643,9 +2664,11 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
         .find("\\🦋")
         .expect("fixture should contain the escape") as u32;
     let expected_end = expected_start + "\\🦋".len() as u32;
-    let span = diagnostic
-        .primary_span
-        .expect("tokenize must capture its diagnosed range");
+    let span = match diagnostic_view.primary_site() {
+        SiteRef::Local(span) => span,
+        SiteRef::Foreign { .. } => panic!("tokenize must capture a local source span"),
+        SiteRef::Absent => panic!("tokenize must capture its diagnosed range"),
+    };
     assert_eq!(span.source(), file_id);
     let resolved = span.local().resolve_with(span_builder.resolver());
     assert_eq!(
@@ -2659,9 +2682,15 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
         .retain_text(file_id, source.clone())
         .expect("the diagnosed source should retain its snapshot");
     database_builder.retain_span_builder(file_id, span_builder);
+    database_builder
+        .finish_source(file_id)
+        .expect("the tokenizer fixture should finalize after its producer returns");
+    database_builder
+        .assemble_finalized_tables()
+        .expect("the frozen tokenizer span table should assemble");
     let installed = database_builder
         .finish()
-        .expect("the original builder should install once");
+        .expect("the already-finalized source table should validate");
     let resolved = span.byte_range(&installed);
     assert_eq!(
         (resolved.start(), resolved.end()),
@@ -2680,9 +2709,8 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
 /// WHY: lexer tests must exercise the compact canonical store and inspect typed payloads directly.
 #[test]
 fn lexed_canonical_shapes_retain_typed_payloads() {
-    // The raw-string branch runs before trivia skipping, so a backtick first reached after
-    // whitespace on the same line is not recognized as a raw literal in code mode (pre-existing
-    // lexer behavior, unchanged by this phase); the raw token leads the source instead.
+    // The raw-string branch runs before trivia skipping, so a backtick reached after same-line
+    // whitespace is not recognized as a raw literal in code mode; the raw token leads the source.
     let (file_tokens, string_table) = tokenize_source(
         "`raw`\nvalue = -1_000\nsecond = 1.0e-10\npath = @core/math\ntext = \"text\"\nletter = 'q'\nflag = true\n",
     );
@@ -2849,16 +2877,13 @@ fn token_count_exhaustion_reports_a_typed_user_capacity_diagnostic() {
             panic!("capacity must map to the user lane, found infrastructure: {error:?}")
         }
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::SourceSpanCapacity)
-    );
-    match diagnostic.payload {
-        DiagnosticPayload::SourceSpanCapacity { resource, .. } => {
-            assert_eq!(resource, SourceSpanCapacityResource::Token);
-        }
-        payload => panic!("expected token capacity payload, found {payload:?}"),
-    }
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = first_diagnostic_view(&diagnostics);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0036");
+    let facts = diagnostic
+        .family_view::<SourceSpanCapacityView>()
+        .expect("the diagnostic is a source-span capacity failure");
+    assert_eq!(facts.resource, SourceSpanCapacityResource::Token);
 }
 
 /// A malformed trusted compact payload stays on the infrastructure invariant lane.

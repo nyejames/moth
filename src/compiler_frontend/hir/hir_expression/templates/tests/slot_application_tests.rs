@@ -76,7 +76,6 @@ fn slot_application_with_false_conditional_source(
                 span: None,
             },
             renders_wrapper_unconditionally: false,
-            span: None,
         }],
         slot_sites: Vec::new(),
     }

@@ -30,7 +30,8 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, validate_context};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -69,12 +70,12 @@ pub(crate) fn conditional_wrapper_set_for_control_flow(
     applied_child_wrapper_set: Option<TemplateWrapperSetId>,
     skip_parent_child_wrappers: bool,
     shape: ContributionShape,
-) -> Result<Option<TemplateWrapperSetId>, CompilerError> {
+) -> Result<Option<TemplateWrapperSetId>, InfrastructureFailure> {
     let mut combined = Vec::new();
 
     if let Some(wrapper_set_id) = child_wrapper_set {
         let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR slot composition: conditional child wrapper set ID was not present in the store.",
             )
         })?;
@@ -86,7 +87,7 @@ pub(crate) fn conditional_wrapper_set_for_control_flow(
 
     if let Some(wrapper_set_id) = applied_child_wrapper_set {
         let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR slot composition: conditional applied wrapper set ID was not present in the store.",
             )
         })?;
@@ -111,12 +112,12 @@ pub(crate) fn merge_wrapper_sets(
     store: &mut TemplateIrStore,
     existing: Option<TemplateWrapperSetId>,
     additional: TemplateWrapperSetId,
-) -> Result<TemplateWrapperSetId, CompilerError> {
+) -> Result<TemplateWrapperSetId, InfrastructureFailure> {
     let mut combined = Vec::new();
 
     if let Some(existing_id) = existing {
         let existing_set = store.get_wrapper_set(existing_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "TIR slot composition: existing conditional wrapper set ID was not present in the store.",
             )
         })?;
@@ -124,7 +125,7 @@ pub(crate) fn merge_wrapper_sets(
     }
 
     let additional_set = store.get_wrapper_set(additional).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "TIR slot composition: additional conditional wrapper set ID was not present in the store.",
         )
     })?;
@@ -145,7 +146,7 @@ pub(crate) fn merge_wrapper_sets(
 pub(crate) fn wrapper_reference_for_template(
     template: &Template,
     current_store: &TemplateIrStore,
-) -> Result<TemplateWrapperReference, CompilerError> {
+) -> Result<TemplateWrapperReference, InfrastructureFailure> {
     let reference = &template.tir_reference;
     validate_context(
         current_store,
@@ -153,10 +154,13 @@ pub(crate) fn wrapper_reference_for_template(
         "wrapper-reference normalization",
     )?;
     current_store.get_template(reference.root).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "wrapper-reference normalization: template {} was missing from the current store.",
-            reference.root
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "wrapper-reference normalization: template {} was missing from the current store.",
+                reference.root
+            ),
+        )
     })?;
 
     Ok(TemplateWrapperReference::new(
@@ -184,7 +188,7 @@ pub(crate) fn wrapper_reference_for_template(
 /// keeps the orchestrator focused on ordering and lets the wrapper owner enforce
 /// required authority and propagate failures.
 ///
-/// Semantics preserved from the prior local implementation:
+/// Overlay rules:
 /// - `$fresh` suppresses only the immediate parent's wrappers.
 /// - Ordinary children use `Always`; structurally control-flow children use
 ///   `IfChildEmits`.
@@ -192,13 +196,13 @@ pub(crate) fn wrapper_reference_for_template(
 /// - No contexts means no wrapper overlay is attached.
 ///
 /// Missing owning template, root node, traversed node, child store, child
-/// template, or overlay composition failures return `CompilerError` instead of
+/// template, or overlay composition failures return `InfrastructureFailure` instead of
 /// silently skipping.
 pub(crate) fn attach_wrapper_context_overlay(
     tir_reference: &mut TemplateTirReference,
     inherited_wrapper_refs: &[TemplateWrapperReference],
     store_handle: &Rc<RefCell<TemplateIrStore>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // Validate ownership and read the root before mutating anything. Required
     // authority is proven before durable wrapper or overlay state is allocated.
     let root = {
@@ -211,10 +215,13 @@ pub(crate) fn attach_wrapper_context_overlay(
         store
             .get_template(tir_reference.root)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "wrapper-context overlay: owning template {} not found in store.",
-                    tir_reference.root
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "wrapper-context overlay: owning template {} not found in store.",
+                        tir_reference.root
+                    ),
+                )
             })?
             .root
     };
@@ -320,12 +327,15 @@ fn collect_wrapper_contexts(
     node_id: TemplateIrNodeId,
     inherited_wrapper_refs: &[TemplateWrapperReference],
     contexts: &mut Vec<PendingWrapperContext>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "wrapper-context overlay: traversed TIR node {} not found in store.",
-            node_id
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "wrapper-context overlay: traversed TIR node {} not found in store.",
+                node_id
+            ),
+        )
     })?;
 
     match &node.kind {
@@ -386,14 +396,20 @@ fn collect_wrapper_contexts(
                         (body, Some(aggregate_wrapper))
                     }
                     Some(RetainedControlFlowRenderUnit::Conditional) => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "wrapper-context overlay: retained loop position {node_id} has a conditional render unit.",
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "wrapper-context overlay: retained loop position {node_id} has a conditional render unit.",
+                            ),
+                        ));
                     }
                     None => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "wrapper-context overlay: retained loop position {node_id} has no prepared render unit.",
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "wrapper-context overlay: retained loop position {node_id} has no prepared render unit.",
+                            ),
+                        ));
                     }
                 },
                 RetainedNumericIntakeRole::ConditionalSelector {
@@ -401,20 +417,29 @@ fn collect_wrapper_contexts(
                 } => match render_unit {
                     Some(RetainedControlFlowRenderUnit::Conditional) => (body, None),
                     Some(RetainedControlFlowRenderUnit::Loop { .. }) => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "wrapper-context overlay: retained conditional position {node_id} has a loop render unit.",
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "wrapper-context overlay: retained conditional position {node_id} has a loop render unit.",
+                            ),
+                        ));
                     }
                     None => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "wrapper-context overlay: retained conditional position {node_id} has no prepared render unit.",
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "wrapper-context overlay: retained conditional position {node_id} has no prepared render unit.",
+                            ),
+                        ));
                     }
                 },
                 RetainedNumericIntakeRole::HeadExpression { .. } => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "wrapper-context overlay: retained expression position {node_id} was reported as control flow.",
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "wrapper-context overlay: retained expression position {node_id} was reported as control flow.",
+                        ),
+                    ));
                 }
             };
 
@@ -452,17 +477,20 @@ struct ChildWrapperMetadata {
 fn resolve_child_wrapper_metadata(
     current_store: &TemplateIrStore,
     reference: &TemplateTirChildReference,
-) -> Result<ChildWrapperMetadata, CompilerError> {
+) -> Result<ChildWrapperMetadata, InfrastructureFailure> {
     validate_context(
         current_store,
         reference.context,
         "wrapper-context child reference",
     )?;
     let child = current_store.get_template(reference.root).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "wrapper-context overlay: child template {} not found in current store.",
-            reference.root
-        ))
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "wrapper-context overlay: child template {} not found in current store.",
+                reference.root
+            ),
+        )
     })?;
     Ok(ChildWrapperMetadata {
         has_control_flow: child.summary.has_control_flow(),

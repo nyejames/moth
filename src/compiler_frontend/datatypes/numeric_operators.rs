@@ -170,7 +170,7 @@ fn fixed_binary_operation_domain(
         if operator == NumericOperator::IntegerDivide {
             return None;
         }
-        // D15: different precisions keep the wider one and equal precisions keep their own
+        // Different precisions keep the wider one and equal precisions keep their own
         // type, so `F16` has no minimum-`F32` semantic domain.
         let wider = if left.bit_width() >= right.bit_width() {
             left
@@ -266,7 +266,7 @@ pub(crate) fn common_fixed_integer(left: FixedScalar, right: FixedScalar) -> Opt
         (false, true) => right.bit_width().max(left.bit_width() + 1),
     };
 
-    // D15: the smallest supported width that contains both complete operand ranges. A `U64`
+    // The smallest supported width that contains both complete operand ranges. A `U64`
     // paired with a signed type needs 65 bits and therefore has no common type.
     match (required_bits, left_signed || right_signed) {
         (0..=8, true) => Some(FixedScalar::I8),

@@ -9,7 +9,7 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
+//! `InfrastructureFailure::hir_transformation` in this module means an internal
 //! HIR transformation or lowering invariant failure only. The typed construction lane also
 //! carries source diagnostics when authored input exceeds compact HIR store capacity; other
 //! source failures are emitted by AST or earlier stages.
@@ -20,7 +20,9 @@ use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -45,27 +47,55 @@ use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 mod metadata;
 
 // -----------
 // Entry Point
 // -----------
+#[cfg(test)]
 pub(in crate::compiler_frontend) fn lower_module(
-    mut ast: Ast,
+    ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     capacity_estimate: FrontendArenaCapacityEstimate,
     external_packages: &ExternalPackageRegistry,
-) -> Result<HirLoweringResult, CompilerMessages> {
+) -> Result<HirLoweringResult, PreparedFailure> {
+    lower_module_with_owner(
+        ast,
+        string_table,
+        path_fork,
+        function_origin_lookup,
+        module_resources,
+        capacity_estimate,
+        external_packages,
+        None,
+        None,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "HIR lowering keeps the AST, mutable string and path tables, origin lookup, module resources, arena estimate, external packages and the owner that failures capture against separate"
+)]
+pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
+    mut ast: Ast,
+    string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
+    function_origin_lookup: HirFunctionOriginLookup,
+    module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+    capacity_estimate: FrontendArenaCapacityEstimate,
+    external_packages: &ExternalPackageRegistry,
+    frozen_identity_handle: Option<&FrozenIdentityHandle>,
+    prior_diagnostics: Option<&'a mut DiagnosticBag>,
+) -> Result<HirLoweringResult, PreparedFailure> {
     // The builder owns the module environment for lowering and publication; `build_hir_module`
     // never reads the AST copy, so take it instead of cloning every module-local type table.
     let type_environment = std::mem::take(&mut ast.type_environment);
@@ -76,7 +106,9 @@ pub(in crate::compiler_frontend) fn lower_module(
         function_origin_lookup,
         capacity_estimate,
     );
+    ctx.set_prior_diagnostics(prior_diagnostics);
 
+    ctx.set_frozen_identity_handle(frozen_identity_handle.cloned());
     ctx.set_module_resources(module_resources);
     ctx.build_hir_module(ast, external_packages)
 }
@@ -92,10 +124,8 @@ pub(super) struct LoopTargets {
 mod hir_builder_test_support;
 #[cfg(test)]
 pub(crate) use hir_builder_test_support::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
-    build_ast_with_registered_types, expressions_to_owned_render_node,
-    expressions_to_owned_render_node_with_resources, fixture_resource, lower_ast,
-    lower_ast_with_metadata, register_local, runtime_template_expression, setup_builder,
+    expressions_to_owned_render_node, expressions_to_owned_render_node_with_resources,
+    fixture_resource, register_local, runtime_template_expression, setup_builder,
     validate_module_for_tests,
 };
 // -------------------
@@ -136,6 +166,8 @@ pub struct HirBuilder<'a> {
     /// WHAT: carries the AST-built type environment while lowering one module.
     /// WHY: HIR stores frontend `TypeId`s directly and queries this table for type facts.
     pub(super) type_environment: TypeEnvironment,
+    frozen_identity_handle: Option<FrozenIdentityHandle>,
+    prior_diagnostics: Option<&'a mut DiagnosticBag>,
 
     /// Shared module resource table for re-interning handoff resource origins.
     ///
@@ -301,6 +333,8 @@ impl<'a> HirBuilder<'a> {
             string_table,
             path_fork,
             type_environment,
+            frozen_identity_handle: None,
+            prior_diagnostics: None,
             module_resources: None,
             function_origin_lookup,
             next_block_id: 0,
@@ -355,16 +389,53 @@ impl<'a> HirBuilder<'a> {
         self.module.expressions = HirExpressionStore::with_test_limits(limits);
     }
 
-    fn lower_error_messages(&self, error: impl Into<HirConstructionFailure>) -> CompilerMessages {
-        let messages = match error.into() {
-            HirConstructionFailure::Diagnosed(diagnostic) => {
-                CompilerMessages::from_diagnostic_ref(diagnostic, self.string_table)
+    fn lower_error_messages(
+        &mut self,
+        error: impl Into<HirConstructionFailure>,
+    ) -> PreparedFailure {
+        match error.into() {
+            HirConstructionFailure::Diagnosed(mut diagnostic) => {
+                let warnings = self
+                    .prior_diagnostics
+                    .take()
+                    .map(|diagnostics| {
+                        if let Some(handle) = &self.frozen_identity_handle {
+                            for warning in diagnostics.iter_mut() {
+                                warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                            }
+                        }
+                        diagnostics.take_diagnostics()
+                    })
+                    .unwrap_or_default();
+                if let Some(handle) = &self.frozen_identity_handle {
+                    diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
+                }
+                let mut diagnostics = DiagnosticBag::from_diagnostics(warnings);
+                diagnostics.push(diagnostic);
+                PreparedFailure::capture_diagnosed(
+                    diagnostics,
+                    self.string_table.take_for_handoff(),
+                    Some(&self.type_environment),
+                    Some(Arc::new(self.path_fork.shared_table())),
+                )
             }
-            HirConstructionFailure::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(error, self.string_table)
-            }
-        };
-        messages.with_type_context_for_all_diagnostics(self.type_environment.clone())
+            // Infrastructure failures keep no prior warnings: the AST lane never renders warnings
+            // beside infrastructure, and the caller's prior bag stays untouched.
+            HirConstructionFailure::Infrastructure(error) => PreparedFailure::from(error),
+        }
+    }
+
+    pub(in crate::compiler_frontend) fn set_frozen_identity_handle(
+        &mut self,
+        frozen_identity_handle: Option<FrozenIdentityHandle>,
+    ) {
+        self.frozen_identity_handle = frozen_identity_handle;
+    }
+    pub(crate) fn set_prior_diagnostics(
+        &mut self,
+        prior_diagnostics: Option<&'a mut DiagnosticBag>,
+    ) {
+        self.prior_diagnostics = prior_diagnostics;
     }
 
     /// Installs the shared module resource table captured by the lowering entry point.
@@ -388,9 +459,9 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         origin: &StableResourceOriginId,
         location: &Option<SourceSpan>,
-    ) -> Result<ResourceId, CompilerError> {
+    ) -> Result<ResourceId, InfrastructureFailure> {
         let module_resources = self.module_resources.as_ref().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::HirConstruction,
                 "HIR lowering reached a structural string piece without the issuing module resource table.",
             )
         })?;
@@ -448,7 +519,7 @@ impl<'a> HirBuilder<'a> {
         mut self,
         mut ast: Ast,
         external_packages: &ExternalPackageRegistry,
-    ) -> Result<HirLoweringResult, CompilerMessages> {
+    ) -> Result<HirLoweringResult, PreparedFailure> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);
@@ -517,9 +588,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         // 3. Resolve documentation fragments
-        if let Err(error) = self.resolve_doc_fragments(&ast) {
-            return Err(self.lower_error_messages(error));
-        }
+        self.resolve_doc_fragments(&ast);
 
         // 4. Lower AST nodes to HIR expressions/statements
         for node in &ast.nodes {
@@ -537,7 +606,6 @@ impl<'a> HirBuilder<'a> {
             return Err(self.lower_error_messages(error));
         }
 
-        let string_table = &*self.string_table;
         self.module.side_table = self.side_table;
         // Scalar calls recorded under catch handlers keep their handler routes for the lane
         // installer; block ids are remapped like every other terminator target.
@@ -547,8 +615,7 @@ impl<'a> HirBuilder<'a> {
         self.module.compact_block_ids();
 
         if let Err(error) = self.module.refresh_function_provenance_from_blocks() {
-            return Err(CompilerMessages::from_error_ref(error, string_table)
-                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
+            return Err(error.into());
         }
 
         // 6. Validate the final HIR module. HIR validation checks executable HIR only; non-HIR
@@ -557,8 +624,7 @@ impl<'a> HirBuilder<'a> {
         if let Err(error) =
             validate_hir_module(&self.module, &self.type_environment, external_packages)
         {
-            return Err(CompilerMessages::from_error_ref(error, string_table)
-                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
+            return Err(error.into());
         }
 
         record_hir_counters(&self.module);
@@ -644,9 +710,8 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         block_id: BlockId,
         local: crate::compiler_frontend::hir::blocks::HirLocal,
-        location: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
-        let block_index = self.block_index_or_error(block_id, location)?;
+    ) -> Result<(), InfrastructureFailure> {
+        let block_index = self.block_index_or_error(block_id)?;
         let local_index = self.module.blocks[block_index].locals.len();
         self.local_index_by_id
             .insert(local.id, (block_index, local_index));
@@ -661,14 +726,13 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn local_type_id_or_error(
         &self,
         local_id: LocalId,
-        location: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, InfrastructureFailure> {
         let Some((block_index, local_index)) = self.local_index_by_id.get(&local_id).copied()
         else {
-            return_hir_transformation_error!(
-                format!("Local {:?} is not registered in HIR blocks", local_id),
-                *location
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Local {:?} is not registered in HIR blocks",
+                local_id
+            )));
         };
 
         Ok(self.module.blocks[block_index].locals[local_index].ty)
@@ -677,13 +741,12 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn block_index_or_error(
         &self,
         block_id: BlockId,
-        location: &Option<SourceSpan>,
-    ) -> Result<usize, CompilerError> {
+    ) -> Result<usize, InfrastructureFailure> {
         let Some(index) = self.block_index_by_id.get(&block_id).copied() else {
-            return_hir_transformation_error!(
-                format!("Block {:?} is not registered in HIR module", block_id),
-                *location
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Block {:?} is not registered in HIR module",
+                block_id
+            )));
         };
 
         Ok(index)
@@ -692,13 +755,12 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn function_index_or_error(
         &self,
         function_id: FunctionId,
-        location: &Option<SourceSpan>,
-    ) -> Result<usize, CompilerError> {
+    ) -> Result<usize, InfrastructureFailure> {
         let Some(index) = self.function_index_by_id.get(&function_id).copied() else {
-            return_hir_transformation_error!(
-                format!("Function {:?} is not registered in HIR module", function_id),
-                *location
-            );
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Function {:?} is not registered in HIR module",
+                function_id
+            )));
         };
 
         Ok(index)
@@ -707,36 +769,32 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn block_by_id_or_error(
         &self,
         block_id: BlockId,
-        location: &Option<SourceSpan>,
-    ) -> Result<&HirBlock, CompilerError> {
-        let index = self.block_index_or_error(block_id, location)?;
+    ) -> Result<&HirBlock, InfrastructureFailure> {
+        let index = self.block_index_or_error(block_id)?;
         Ok(&self.module.blocks[index])
     }
 
     pub(super) fn block_mut_by_id_or_error(
         &mut self,
         block_id: BlockId,
-        location: &Option<SourceSpan>,
-    ) -> Result<&mut HirBlock, CompilerError> {
-        let index = self.block_index_or_error(block_id, location)?;
+    ) -> Result<&mut HirBlock, InfrastructureFailure> {
+        let index = self.block_index_or_error(block_id)?;
         Ok(&mut self.module.blocks[index])
     }
 
     pub(super) fn function_by_id_or_error(
         &self,
         function_id: FunctionId,
-        location: &Option<SourceSpan>,
-    ) -> Result<&HirFunction, CompilerError> {
-        let index = self.function_index_or_error(function_id, location)?;
+    ) -> Result<&HirFunction, InfrastructureFailure> {
+        let index = self.function_index_or_error(function_id)?;
         Ok(&self.module.functions[index])
     }
 
     pub(super) fn function_mut_by_id_or_error(
         &mut self,
         function_id: FunctionId,
-        location: &Option<SourceSpan>,
-    ) -> Result<&mut HirFunction, CompilerError> {
-        let index = self.function_index_or_error(function_id, location)?;
+    ) -> Result<&mut HirFunction, InfrastructureFailure> {
+        let index = self.function_index_or_error(function_id)?;
         Ok(&mut self.module.functions[index])
     }
 
@@ -747,14 +805,13 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn enter_function(
         &mut self,
         function_id: FunctionId,
-        location: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
-        let entry_block = self.function_by_id_or_error(function_id, location)?.entry;
+    ) -> Result<(), InfrastructureFailure> {
+        let entry_block = self.function_by_id_or_error(function_id)?.entry;
 
         self.current_function = Some(function_id);
         self.locals_by_name.clear();
         self.loop_targets.clear();
-        self.set_current_block(entry_block, location)
+        self.set_current_block(entry_block)
     }
 
     pub(crate) fn leave_function(&mut self) {
@@ -792,48 +849,38 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn set_current_block(
         &mut self,
         block_id: BlockId,
-        location: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
-        let region = self.block_by_id_or_error(block_id, location)?.region;
+    ) -> Result<(), InfrastructureFailure> {
+        let region = self.block_by_id_or_error(block_id)?.region;
         self.current_block = Some(block_id);
         self.current_region = Some(region);
         Ok(())
     }
 
-    pub(crate) fn current_block_id_or_error(
-        &self,
-        location: &Option<SourceSpan>,
-    ) -> Result<BlockId, CompilerError> {
+    pub(crate) fn current_block_id_or_error(&self) -> Result<BlockId, InfrastructureFailure> {
         let Some(block_id) = self.current_block else {
-            return_hir_transformation_error!("No current HIR block is active", *location);
+            return Err(InfrastructureFailure::hir_transformation(
+                "No current HIR block is active",
+            ));
         };
 
         Ok(block_id)
     }
 
-    pub(crate) fn current_function_id_or_error(
-        &self,
-        location: &Option<SourceSpan>,
-    ) -> Result<FunctionId, CompilerError> {
+    pub(crate) fn current_function_id_or_error(&self) -> Result<FunctionId, InfrastructureFailure> {
         let Some(function_id) = self.current_function else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "No current HIR function is active",
-                self.hir_error_location(location)
-            );
+            ));
         };
 
         Ok(function_id)
     }
 
-    pub(crate) fn current_region_or_error(
-        &self,
-        location: &Option<SourceSpan>,
-    ) -> Result<RegionId, CompilerError> {
+    pub(crate) fn current_region_or_error(&self) -> Result<RegionId, InfrastructureFailure> {
         let Some(region) = self.current_region else {
-            return_hir_transformation_error!(
+            return Err(InfrastructureFailure::hir_transformation(
                 "No current HIR region is active",
-                self.hir_error_location(location)
-            );
+            ));
         };
 
         Ok(region)
@@ -848,18 +895,18 @@ impl<'a> HirBuilder<'a> {
         block_id: BlockId,
         terminator: HirTerminator,
         source_location: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let operation_source = match &terminator {
             HirTerminator::Invoke { id, span, .. } => Some((*id, *span)),
             _ => None,
         };
         {
-            let block = self.block_mut_by_id_or_error(block_id, source_location)?;
+            let block = self.block_mut_by_id_or_error(block_id)?;
             if !Self::is_placeholder_terminator(&block.terminator) {
-                return_hir_transformation_error!(
-                    format!("Block {} already has an explicit terminator", block_id),
-                    *source_location
-                );
+                return Err(InfrastructureFailure::hir_transformation(format!(
+                    "Block {} already has an explicit terminator",
+                    block_id
+                )));
             }
 
             block.terminator = terminator;
@@ -877,9 +924,8 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn block_has_explicit_terminator(
         &self,
         block_id: BlockId,
-        location: &Option<SourceSpan>,
-    ) -> Result<bool, CompilerError> {
-        let block = self.block_by_id_or_error(block_id, location)?;
+    ) -> Result<bool, InfrastructureFailure> {
+        let block = self.block_by_id_or_error(block_id)?;
         Ok(!Self::is_placeholder_terminator(&block.terminator))
     }
 

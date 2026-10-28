@@ -433,7 +433,7 @@ pub struct ValueMatchBlock {
 ///
 /// WHAT: wraps a handled fallible expression whose catch handler body uses
 /// `ThenValue` statements to produce the recovered success values.
-/// WHY: catch recovery now shares the same value-block lowering target as `if`
+/// WHY: catch recovery shares the same value-block lowering target as `if`
 /// and match blocks, instead of carrying catch-specific terminal fallback values.
 #[derive(Clone, Debug)]
 pub struct ValueCatchBlock {

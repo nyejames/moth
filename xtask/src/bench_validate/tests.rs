@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use crate::benchmark_execution::format_case_failures;
-use crate::benchmark_execution::{BenchmarkCaseFailure, BenchmarkFailureKind};
+use crate::benchmark_execution::{
+    BenchmarkCaseFailure, BenchmarkCaseFailureDetails, BenchmarkFailureEvidence,
+    BenchmarkFailureKind,
+};
 use crate::benchmark_manifest::{BenchmarkRunner, CliBenchmarkCommand, FrontendBenchmarkProfile};
 
 #[test]
@@ -37,12 +40,14 @@ fn failure(case_id: &str, runner: BenchmarkRunner) -> BenchmarkCaseFailure {
     BenchmarkCaseFailure {
         case_id: case_id.to_owned(),
         workload_id: format!("{case_id}_workload"),
-        runner,
-        entry: PathBuf::from(format!("benchmarks/{case_id}.moth")),
-        kind: BenchmarkFailureKind::NonZeroProcessStatus,
-        exit_code: Some(1),
-        benchmark_status: None,
-        stdout_evidence: None,
-        stderr_evidence: None,
+        details: Box::new(BenchmarkCaseFailureDetails {
+            runner,
+            entry: PathBuf::from(format!("benchmarks/{case_id}.moth")),
+            kind: BenchmarkFailureKind::NonZeroProcessStatus,
+            evidence: BenchmarkFailureEvidence {
+                exit_code: Some(1),
+                ..BenchmarkFailureEvidence::default()
+            },
+        }),
     }
 }

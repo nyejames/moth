@@ -7,10 +7,15 @@
 //! multiline context and the source span of authored closing tokens, and the
 //! shell must distinguish an authored `=` with no initializer from an omitted `=`.
 
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidDeclarationReason,
-    RuleDiagnosticKind,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    InvalidDeclarationCode, InvalidDeclarationView, MissingDeclarationInitializerView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticCategory};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
 use crate::compiler_frontend::headers::HeaderParseFailure;
@@ -68,10 +73,9 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
         .cursor(full_range)
         .expect("tokenized test stream must expose canonical tokens");
     canonical_cursor
-        .set_position(TokenIndex::try_from_raw(2).expect("fixture index should fit"))
+        .set_position(TokenIndex::from_raw(2))
         .expect("tokenized test stream must seek to the initializer");
-    let mut declaration_cursor = DeclarationCursor::new(canonical_cursor)
-        .expect("tokenized test stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(canonical_cursor);
     let declaration_syntax = parse_declaration_syntax(
         &mut declaration_cursor,
         name,
@@ -296,7 +300,7 @@ fn tokenize_for_declaration(
 
 /// Parses the declaration shell and returns the rejection diagnostic plus the interned
 /// declaration name so callers can assert the structured payload facts.
-fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
+fn parse_shell_error(source: &str) -> (CompactDiagnosticBagForTest, StringId) {
     let mut span_builder = ExtendedSpanBuilder::new();
     let (mut string_table, token_stream, name, _) =
         tokenize_for_declaration(source, &mut span_builder);
@@ -309,10 +313,9 @@ fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
         .cursor(full_range)
         .expect("tokenized test stream must expose canonical tokens");
     canonical_cursor
-        .set_position(TokenIndex::try_from_raw(2).expect("fixture index should fit"))
+        .set_position(TokenIndex::from_raw(2))
         .expect("tokenized test stream must seek to the declaration initializer");
-    let mut declaration_cursor = DeclarationCursor::new(canonical_cursor)
-        .expect("tokenized test stream must expose canonical tokens");
+    let mut declaration_cursor = DeclarationCursor::new(canonical_cursor);
     let failure = parse_declaration_syntax(
         &mut declaration_cursor,
         name,
@@ -326,7 +329,8 @@ fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
             panic!("declaration shell infrastructure failure: {error:?}")
         }
     };
-    (diagnostic, name)
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    (diagnostics, name)
 }
 
 /// Span of the token immediately after the first authored `=`.
@@ -371,73 +375,67 @@ fn first_boundary_span_after_name(source: &str) -> SourceSpan {
 /// Asserts the diagnostic is the authored-`=` rejection, names the declaration, and
 /// points at the given boundary rather than the declaration name or target type.
 fn assert_missing_initializer_expression(
-    diagnostic: &CompilerDiagnostic,
+    diagnostic: &DiagnosticView<'_>,
     expected_name: StringId,
     expected_boundary: &SourceSpan,
     case: &str,
 ) {
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidDeclaration),
-        "{case}: authored `=` with no initializer must use the InvalidDeclaration kind",
+        diagnostic.category(),
+        DiagnosticCategory::Rule,
+        "{case}: authored `=` with no initializer must use the InvalidDeclaration category",
     );
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-RULE-0043",
         "{case}: authored `=` with no initializer must keep the InvalidDeclaration stable code",
     );
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidDeclaration { reason, name } => {
-            assert_eq!(
-                *reason,
-                InvalidDeclarationReason::MissingInitializerExpression,
-                "{case}: authored `=` with no initializer must carry the MissingInitializerExpression reason",
-            );
-            assert_eq!(
-                *name,
-                Some(expected_name),
-                "{case}: authored `=` with no initializer must name the declaration",
-            );
-        }
-        other => panic!("{case}: expected InvalidDeclaration payload, got {other:?}"),
-    }
+    let facts = diagnostic
+        .family_view::<InvalidDeclarationView>()
+        .expect("authored `=` with no initializer must have InvalidDeclaration facts");
     assert_eq!(
-        diagnostic.primary_span,
-        Some(*expected_boundary),
+        facts.code,
+        InvalidDeclarationCode::MissingInitializerExpression,
+        "{case}: authored `=` with no initializer must carry the MissingInitializerExpression reason",
+    );
+    assert_eq!(
+        facts.name,
+        Some(expected_name),
+        "{case}: authored `=` with no initializer must name the declaration",
+    );
+    assert!(
+        matches!(diagnostic.primary_site(), SiteRef::Local(span) if span == *expected_boundary),
         "{case}: authored `=` with no initializer must point at the real boundary after `=`, not the declaration name or target type",
     );
 }
 
 /// Asserts the diagnostic is the no-`=` rejection: the declaration omitted `=` entirely
-/// and must use the renamed `MissingDeclarationInitializer` kind and stable code.
+/// and must use the `MissingDeclarationInitializer` kind and stable code.
 fn assert_missing_declaration_initializer(
-    diagnostic: &CompilerDiagnostic,
+    diagnostic: &DiagnosticView<'_>,
     expected_name: StringId,
     expected_boundary: &SourceSpan,
     case: &str,
 ) {
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::MissingDeclarationInitializer),
-        "{case}: a declaration that omits `=` must use the MissingDeclarationInitializer kind",
+        diagnostic.category(),
+        DiagnosticCategory::Rule,
+        "{case}: a declaration that omits `=` must use the MissingDeclarationInitializer category",
     );
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-RULE-0031",
         "{case}: a declaration that omits `=` must keep the MOTH-RULE-0031 stable code",
     );
-    match &diagnostic.payload {
-        DiagnosticPayload::MissingDeclarationInitializer { name } => {
-            assert_eq!(
-                *name, expected_name,
-                "{case}: the no-`=` diagnostic must name the declaration",
-            );
-        }
-        other => panic!("{case}: expected MissingDeclarationInitializer payload, got {other:?}"),
-    }
+    let facts = diagnostic
+        .family_view::<MissingDeclarationInitializerView>()
+        .expect("a declaration that omits `=` must have MissingDeclarationInitializer facts");
     assert_eq!(
-        diagnostic.primary_span,
-        Some(*expected_boundary),
+        facts.name, expected_name,
+        "{case}: the no-`=` diagnostic must name the declaration",
+    );
+    assert!(
+        matches!(diagnostic.primary_site(), SiteRef::Local(span) if span == *expected_boundary),
         "{case}: the no-`=` diagnostic must point at the boundary where `=` was expected",
     );
 }
@@ -452,7 +450,8 @@ fn authored_assign_with_no_initializer_rejects_inferred_declarations_at_each_bou
     ];
 
     for (source, case) in cases {
-        let (diagnostic, name) = parse_shell_error(source);
+        let (diagnostics, name) = parse_shell_error(source);
+        let diagnostic = diagnostics.first().expect("diagnostic should be retained");
         let boundary = boundary_span_after_assign(source);
         assert_missing_initializer_expression(&diagnostic, name, &boundary, case);
     }
@@ -468,7 +467,8 @@ fn authored_assign_with_no_initializer_rejects_explicit_type_and_binding_modes()
     ];
 
     for (source, case) in cases {
-        let (diagnostic, name) = parse_shell_error(source);
+        let (diagnostics, name) = parse_shell_error(source);
+        let diagnostic = diagnostics.first().expect("diagnostic should be retained");
         let boundary = boundary_span_after_assign(source);
         assert_missing_initializer_expression(&diagnostic, name, &boundary, case);
     }
@@ -482,7 +482,8 @@ fn omitted_assign_rejects_at_each_boundary_and_binding_mode() {
     ];
 
     for (source, case) in cases {
-        let (diagnostic, name) = parse_shell_error(source);
+        let (diagnostics, name) = parse_shell_error(source);
+        let diagnostic = diagnostics.first().expect("diagnostic should be retained");
         let boundary = first_boundary_span_after_name(source);
         assert_missing_declaration_initializer(&diagnostic, name, &boundary, case);
     }

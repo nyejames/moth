@@ -7,25 +7,29 @@
 //!
 //! ## Diagnostic boundary
 //!
-//! `CompilerError` in this module means an internal compiler invariant or setup failure only.
-//! Source-authored syntax failures are rejected earlier with `CompilerDiagnostic`.
+//! `InfrastructureFailure` in this module means an internal compiler invariant or setup failure only.
+//! Source-authored syntax failures are rejected earlier as diagnostic drafts.
 
 use super::evaluator::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::{eval_log, return_compiler_error};
+use crate::eval_log;
 
 /// Order a parsed expression fragment into RPN and return its authored span anchor.
 pub(super) fn order_expression_nodes(
     nodes: Vec<ExpressionRpnItem>,
     expressions: &AstExpressionBuilder,
-) -> Result<(Vec<ExpressionRpnItem>, Option<SourceSpan>), CompilerError> {
+) -> Result<(Vec<ExpressionRpnItem>, Option<SourceSpan>), InfrastructureFailure> {
     if nodes.is_empty() {
-        return_compiler_error!("No nodes found in expression. This should never happen.");
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "No nodes found in expression. This should never happen.",
+        ));
     }
 
     let span = extract_expression_span(expressions, &nodes)?;
@@ -50,7 +54,10 @@ pub(super) fn order_expression_nodes(
             ExpressionRpnItem::GroupClose { .. } => {
                 output_queue.extend(operator_stack.drain(operator_floor..).rev());
                 let Some(parent_floor) = parent_floors.pop() else {
-                    return_compiler_error!("Expression ordering found an unmatched group close.");
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Expression ordering found an unmatched group close.",
+                    ));
                 };
                 operator_floor = parent_floor;
             }
@@ -81,14 +88,18 @@ pub(super) fn order_expression_nodes(
                 operator_stack.push(operator_item);
             }
             ExpressionRpnItem::ResolvedOperator(_) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Resolved operation reached transient infix expression ordering.",
                 ));
             }
         }
     }
     if !parent_floors.is_empty() {
-        return_compiler_error!("Expression ordering ended inside an unclosed group.");
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "Expression ordering ended inside an unclosed group.",
+        ));
     }
     output_queue.extend(operator_stack.drain(operator_floor..).rev());
     add_ast_counter(AstCounter::ExpressionOrderingInputItems, processed_items);
@@ -104,7 +115,7 @@ fn pop_higher_precedence(
     current_precedence: u32,
     left_associative: bool,
     operator_floor: usize,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     while operator_stack.len() > operator_floor {
         // The floor guard proves that the active group owns the top operator.
         let top_operator = operator_stack
@@ -120,9 +131,10 @@ fn pop_higher_precedence(
 
         if should_pop {
             let Some(operator) = operator_stack.pop() else {
-                return_compiler_error!(
-                    "Expression ordering lost operator stack state during shunting-yard pop."
-                );
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Expression ordering lost operator stack state during shunting-yard pop.",
+                ));
             };
             output_queue.push(operator);
         } else {
@@ -133,9 +145,12 @@ fn pop_higher_precedence(
     Ok(())
 }
 
-fn operator_from_item(item: &ExpressionRpnItem) -> Result<&Operator, CompilerError> {
+fn operator_from_item(item: &ExpressionRpnItem) -> Result<&Operator, InfrastructureFailure> {
     let ExpressionRpnItem::Operator { operator, .. } = item else {
-        return_compiler_error!("Expression ordering stored an operand on the operator stack.");
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "Expression ordering stored an operand on the operator stack.",
+        ));
     };
 
     Ok(operator)
@@ -147,9 +162,12 @@ fn operator_from_item(item: &ExpressionRpnItem) -> Result<&Operator, CompilerErr
 pub(crate) fn extract_expression_span(
     expressions: &AstExpressionBuilder,
     nodes: &[ExpressionRpnItem],
-) -> Result<Option<SourceSpan>, CompilerError> {
+) -> Result<Option<SourceSpan>, InfrastructureFailure> {
     if nodes.is_empty() {
-        return_compiler_error!("No nodes found in expression. This should never happen.");
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "No nodes found in expression. This should never happen.",
+        ));
     }
 
     // Skip operator nodes and return the span of the first expression node.

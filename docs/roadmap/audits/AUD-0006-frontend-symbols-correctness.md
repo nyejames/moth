@@ -33,8 +33,7 @@ Executed evidence (throwaway fixtures under `tmp/`, debug binary):
 ## Authorities read
 
 - `AGENTS.md` core contracts and failure-lane rule
-- `docs/compiler-data-layout-design.md`: `Hard representation invariants`, `Compilation identity context`, `Genuine path interning`, `Deterministic parallel construction`, `Failure architecture`
-- `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`: current slice status, Phase 1 standing contracts (path foundation 1A, registration 1B, spans 1C), Phase 2 slices and exit criteria
+- `docs/compiler-data-layout-design.md`: `Hard representation invariants`, `Compilation identity context`, `Genuine path interning`, `Deterministic parallel construction`, `Failure architecture`, and source, token and diagnostic data-layout contracts
 - `docs/src/docs/progress/@page.moth`: `Entry-selected module roots and implicit start` and `Structured diagnostics` rows
 - `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`: naming conventions, top-level work becoming dormant `start`
 - `docs/src/docs/project-structure/entry-runtime-and-fragments.mtf`: compiler-synthesised start, helper files have no independent start
@@ -261,7 +260,7 @@ is now a valid build-input name. `just validate` passed.
 
 #### Counter-explanation tested
 
-**"It is a documented API for a planned consumer."** Rejected: unlike `try_intern_portable_path`, which carries `#[allow(dead_code)] // Phase 2 migrates semantic path producers to this table.`, this method has no deferral marker, and no plan slice in `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md` names a consumer for it.
+**"It is a documented API for a planned consumer."** Rejected: unlike `try_intern_portable_path`, which carries `#[allow(dead_code)] // Phase 2 migrates semantic path producers to this table.`, this method has no deferral marker, and no current architecture authority identifies a consumer for it.
 
 **"It is reachable through a trait or dynamic dispatch a name search would miss."** Rejected: `StringIdRemap` is a concrete struct with no trait implementations beyond the derived `Debug`/`Clone`, so all calls are by name.
 

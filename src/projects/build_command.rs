@@ -13,56 +13,55 @@ use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureFailure,
+};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
-use std::env;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// One completed build command, ready for caller-owned terminal presentation.
 pub struct BuildCommandReport {
     pub duration: Duration,
-    pub outcome: BuildCommandOutcome,
+    pub outcome: CompilationResult<BuildCommandSuccess>,
 }
 
-/// The successful output summary or preserved diagnostic set from a build command.
-pub enum BuildCommandOutcome {
-    Success {
-        output_file_count: usize,
-        warning_count: usize,
-        warnings: Option<CompilerMessages>,
-    },
-    Failure {
-        messages: CompilerMessages,
-        diagnostic_counts: Option<ProjectDiagnosticCounts>,
-    },
+pub struct BuildCommandSuccess {
+    pub output_file_count: usize,
+    pub output_warnings: Vec<String>,
 }
 
-impl BuildCommandOutcome {
-    fn completion(&self) -> ProjectCommandCompletion {
-        match self {
-            BuildCommandOutcome::Success { warning_count, .. } => ProjectCommandCompletion {
+impl BuildCommandReport {
+    fn completion(outcome: &CompilationResult<BuildCommandSuccess>) -> ProjectCommandCompletion {
+        match outcome {
+            Ok(CompilationOutcome::Success { warnings, .. }) => ProjectCommandCompletion {
                 status: ProjectCommandStatus::Success,
                 diagnostic_counts: Some(ProjectDiagnosticCounts {
                     errors: 0,
-                    warnings: *warning_count,
+                    warnings: warnings
+                        .as_ref()
+                        .map_or(0, |reports| reports.counts().warnings as usize),
                 }),
             },
-            BuildCommandOutcome::Failure {
-                diagnostic_counts, ..
-            } => ProjectCommandCompletion {
+            Ok(CompilationOutcome::Diagnosed(reports)) => ProjectCommandCompletion {
                 status: ProjectCommandStatus::Failure,
-                diagnostic_counts: *diagnostic_counts,
+                diagnostic_counts: Some(ProjectDiagnosticCounts::from_reports(reports)),
+            },
+            Err(_) => ProjectCommandCompletion {
+                status: ProjectCommandStatus::Failure,
+                diagnostic_counts: None,
             },
         }
     }
 }
 
 enum BuildOutputFailure {
-    Plan(CompilerError),
-    Write(CompilerMessages),
+    Plan(InfrastructureFailure),
+    Write(PreparedFailure),
 }
 
 /// Execute, classify and write one build before presenting its outcome to the caller.
@@ -70,11 +69,15 @@ enum BuildOutputFailure {
 /// The presentation callback runs after the single command duration is captured and before the
 /// timing session is finished. This preserves the established order while keeping all build
 /// orchestration and output ownership on the compiler side of the CLI boundary.
+/// The caller resolves `entry_path` and the single-file `output_root` before invoking the service, so output
+/// planning does not consult process-global current-directory state. Directory builds retain their
+/// validated project output plan.
 pub fn run_build_command(
     builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
+    output_root: &Path,
     present: impl FnOnce(BuildCommandReport),
 ) -> ProjectCommandCompletion {
     run_build_command_with_output_plan(
@@ -82,7 +85,7 @@ pub fn run_build_command(
         entry_path,
         flags,
         build_config_inputs,
-        create_build_output_plan,
+        |build_result| create_build_output_plan(build_result, output_root),
         present,
     )
 }
@@ -92,7 +95,7 @@ fn run_build_command_with_output_plan(
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
     present: impl FnOnce(BuildCommandReport),
 ) -> ProjectCommandCompletion {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
@@ -104,7 +107,7 @@ fn run_build_command_with_output_plan(
         build_config_inputs,
         output_plan_builder,
     );
-    let completion = outcome.completion();
+    let completion = BuildCommandReport::completion(&outcome);
     let duration =
         capture_command_duration!(crate::timing::TimingMetric::CommandBuildTotal, started,);
     let report = BuildCommandReport { duration, outcome };
@@ -123,43 +126,43 @@ fn build_command_outcome(
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
-) -> BuildCommandOutcome {
-    match build_project(
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
+) -> CompilationResult<BuildCommandSuccess> {
+    let build_result = match build_project(
         builder_selection.backend.as_ref(),
         entry_path,
         flags,
         build_config_inputs,
-    ) {
-        Ok(mut build_result) => {
-            write_build_outputs_with_plan(&mut build_result, output_plan_builder)
+    )
+    .unwrap_or_else(|never| match never {})?
+    {
+        CompilationOutcome::Success { value, .. } => value,
+        CompilationOutcome::Diagnosed(reports) => {
+            return Ok(CompilationOutcome::Diagnosed(reports));
         }
-        Err(messages) => {
-            let diagnostic_counts = ProjectDiagnosticCounts::from_messages(&messages);
-            BuildCommandOutcome::Failure {
-                messages,
-                diagnostic_counts,
-            }
-        }
-    }
+    };
+    write_build_outputs_with_plan(build_result, output_plan_builder)
 }
 
 fn write_build_outputs_with_plan(
-    build_result: &mut BuildResult,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
-) -> BuildCommandOutcome {
+    build_result: BuildResult,
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
+) -> CompilationResult<BuildCommandSuccess> {
+    let mut build_result = build_result;
     let output_result = crate::timed_stage!(
         crate::timing::TimingMetric::BuildOutputTotal,
         (|| {
             let output_plan =
-                output_plan_builder(build_result).map_err(BuildOutputFailure::Plan)?;
+                output_plan_builder(&mut build_result).map_err(BuildOutputFailure::Plan)?;
+            let mut diagnostic_strings =
+                DiagnosticStringBuilder::new(build_result.warning_accumulator.string_table_mut());
             write_project_outputs(
                 &mut build_result.project,
                 &WriteOptions {
                     output_plan,
                     write_mode: WriteMode::AlwaysWrite,
                 },
-                &mut build_result.string_table,
+                &mut diagnostic_strings,
             )
             .map_err(BuildOutputFailure::Write)
         })()
@@ -168,82 +171,90 @@ fn write_build_outputs_with_plan(
     match output_result {
         Ok(write_summary) => {
             let output_file_count = write_summary.emitted_count();
-            let warning_count = build_result.warnings.len();
-            let warnings = match build_result.take_warning_messages() {
-                Some(messages) if messages.infrastructure_errors().is_some() => {
-                    return BuildCommandOutcome::Failure {
-                        messages,
-                        diagnostic_counts: None,
-                    };
+            let output_warnings = write_summary.into_warning_messages();
+            let warnings = match build_result.finish_output(Ok(()))? {
+                CompilationOutcome::Success { warnings, .. } => warnings,
+                CompilationOutcome::Diagnosed(reports) => {
+                    return Ok(CompilationOutcome::Diagnosed(reports));
                 }
-                warnings => warnings,
             };
-            BuildCommandOutcome::Success {
-                output_file_count,
-                warning_count,
+            Ok(CompilationOutcome::Success {
+                value: BuildCommandSuccess {
+                    output_file_count,
+                    output_warnings,
+                },
                 warnings,
+            })
+        }
+        Err(BuildOutputFailure::Write(failure)) => {
+            match build_result.finish_output(Err(failure))? {
+                CompilationOutcome::Diagnosed(reports) => {
+                    Ok(CompilationOutcome::Diagnosed(reports))
+                }
+                CompilationOutcome::Success { .. } => crate::compiler_bug!(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::Output,
+                    "a failed output write unexpectedly finalized a successful build"
+                ),
             }
         }
-        Err(BuildOutputFailure::Write(messages)) => BuildCommandOutcome::Failure {
-            messages: build_result.take_output_failure_messages(messages),
-            diagnostic_counts: None,
-        },
-        Err(BuildOutputFailure::Plan(error)) => {
-            let messages = CompilerMessages::from_error(error, StringTable::new());
-            BuildCommandOutcome::Failure {
-                messages: build_result.take_output_failure_messages(messages),
-                diagnostic_counts: None,
-            }
-        }
+        Err(BuildOutputFailure::Plan(error)) => Err(error.into()),
     }
 }
 
-fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan, CompilerError> {
+fn create_build_output_plan(
+    build_result: &mut BuildResult,
+    output_root: &Path,
+) -> Result<OutputPlan, InfrastructureFailure> {
     if let Some(plan) = build_result.directory_output_plan.as_ref() {
         return Ok(OutputPlan::Directory(plan.clone()));
     }
 
-    let output_root = env::current_dir().map_err(|error| {
-        CompilerError::compiler_error(format!(
-            "Could not resolve current directory for build outputs: {error}"
-        ))
-    })?;
     let project_root = single_file_project_entry_dir(&build_result.config.entry_dir)?;
 
     Ok(OutputPlan::SingleFile(SingleFileOutputPlan {
-        output_root,
+        output_root: output_root.to_path_buf(),
         project_root: Some(project_root),
         owner: build_result.output_owner.clone(),
-        setting_span: None,
     }))
 }
 
-fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, CompilerError> {
+fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, InfrastructureFailure> {
     let Some(parent) = entry_path.parent() else {
-        return Err(CompilerError::compiler_error(format!(
-            "Could not resolve containing directory for single-file build entry '{}'",
-            entry_path.display()
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Could not resolve containing directory for single-file build entry '{}'",
+                entry_path.display()
+            ),
+        ));
     };
 
     if parent.as_os_str().is_empty() {
-        return env::current_dir().map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "Could not resolve containing directory for single-file build entry '{}': {error}",
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Could not resolve containing directory for single-file build entry '{}': its path must be absolute",
                 entry_path.display()
-            ))
-        });
+            ),
+        ));
     }
 
-    if parent.is_dir() {
-        return Ok(parent.to_path_buf());
-    }
-
-    Err(CompilerError::compiler_error(format!(
-        "Could not resolve containing directory for single-file build entry '{}': '{}' is not a directory",
-        entry_path.display(),
-        parent.display()
-    )))
+    // The directory can disappear or become unreadable after source validation, so this is host
+    // filesystem state rather than a compiler invariant. The OS error names the exact cause.
+    let problem = match std::fs::metadata(parent) {
+        Ok(metadata) if metadata.is_dir() => return Ok(parent.to_path_buf()),
+        Ok(_) => String::from("it is not a directory"),
+        Err(error) => error.to_string(),
+    };
+    Err(InfrastructureFailure::filesystem(
+        CompilerStage::ProjectBuildAssembly,
+        parent,
+        format!(
+            "Could not use containing directory '{}' for single-file build entry '{}': {problem}",
+            parent.display(),
+            entry_path.display()
+        ),
+    ))
 }
 
 #[cfg(test)]

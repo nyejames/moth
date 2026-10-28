@@ -12,21 +12,198 @@ use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 
-/// Immutable path trie storage shared by the mutable builder and frozen readers.
-///
-/// The table owns only parent links, component IDs and depths. The builder owns the reverse
-/// lookup while paths are being interned, then moves this table out when it freezes.
-#[derive(Debug, PartialEq, Eq)]
-pub struct PathTable {
+/// One immutable contiguous run of path nodes.
+#[derive(Debug)]
+struct PathTableSegment {
     nodes: Vec<PathNode>,
     depths: Vec<u32>,
 }
 
+/// Immutable path storage shared by builders, forks and captured readers.
+///
+/// Segments let a builder publish a new prefix by moving only its local suffix into shared
+/// storage. Existing path rows remain in their original allocations.
+#[derive(Debug)]
+pub(super) struct PathTableBase {
+    segments: Box<[Arc<PathTableSegment>]>,
+    segment_ends: Box<[usize]>,
+    len: usize,
+    max_component_index: usize,
+}
+
+impl PathTableBase {
+    pub(super) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
+        let segment = Arc::new(PathTableSegment { nodes, depths });
+        let len = segment.nodes.len();
+        let max_component_index = segment
+            .nodes
+            .iter()
+            .map(|node| node.component.index() as usize)
+            .max()
+            .unwrap_or(0);
+        Self {
+            segments: vec![segment].into_boxed_slice(),
+            segment_ends: vec![len].into_boxed_slice(),
+            len,
+            max_component_index,
+        }
+    }
+
+    fn with_segment(&self, segment: Arc<PathTableSegment>) -> Self {
+        let mut segments = Vec::with_capacity(self.segments.len() + 1);
+        segments.extend(self.segments.iter().cloned());
+        segments.push(segment);
+
+        let segment_len = segments.last().expect("new segment exists").nodes.len();
+        let len = self.len + segment_len;
+        let mut segment_ends = Vec::with_capacity(segments.len());
+        segment_ends.extend(self.segment_ends.iter().copied());
+        segment_ends.push(len);
+        let max_component_index = segments
+            .last()
+            .expect("new segment exists")
+            .nodes
+            .iter()
+            .map(|node| node.component.index() as usize)
+            .max()
+            .map_or(self.max_component_index, |max| {
+                self.max_component_index.max(max)
+            });
+
+        Self {
+            segments: segments.into_boxed_slice(),
+            segment_ends: segment_ends.into_boxed_slice(),
+            len,
+            max_component_index,
+        }
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.len
+    }
+
+    pub(super) fn node(&self, index: usize) -> Option<PathNode> {
+        if index >= self.len {
+            return None;
+        }
+        if self.segments.len() == 1 {
+            return self.segments[0].nodes.get(index).copied();
+        }
+        let last_segment = self.segments.last()?;
+        let last_segment_start = self.len - last_segment.nodes.len();
+        if index >= last_segment_start {
+            return last_segment.nodes.get(index - last_segment_start).copied();
+        }
+
+        let segment_index = self.segment_ends.partition_point(|end| *end <= index);
+        let start = if segment_index == 0 {
+            0
+        } else {
+            self.segment_ends[segment_index - 1]
+        };
+        self.segments
+            .get(segment_index)?
+            .nodes
+            .get(index - start)
+            .copied()
+    }
+
+    pub(super) fn depth(&self, index: usize) -> Option<u32> {
+        if index >= self.len {
+            return None;
+        }
+        if self.segments.len() == 1 {
+            return self.segments[0].depths.get(index).copied();
+        }
+        let last_segment = self.segments.last()?;
+        let last_segment_start = self.len - last_segment.depths.len();
+        if index >= last_segment_start {
+            return last_segment.depths.get(index - last_segment_start).copied();
+        }
+
+        let segment_index = self.segment_ends.partition_point(|end| *end <= index);
+        let start = if segment_index == 0 {
+            0
+        } else {
+            self.segment_ends[segment_index - 1]
+        };
+        self.segments
+            .get(segment_index)?
+            .depths
+            .get(index - start)
+            .copied()
+    }
+
+    pub(super) fn snapshot_with_suffix(&self, nodes: &[PathNode], depths: &[u32]) -> Arc<Self> {
+        let copied_bytes = nodes
+            .len()
+            .saturating_mul(std::mem::size_of::<PathNode>())
+            .saturating_add(depths.len().saturating_mul(std::mem::size_of::<u32>()));
+        record_path_table_copy(nodes.len(), copied_bytes);
+        Arc::new(self.with_segment(Arc::new(PathTableSegment {
+            nodes: nodes.to_vec(),
+            depths: depths.to_vec(),
+        })))
+    }
+
+    pub(super) fn copy_into(&self, nodes: &mut Vec<PathNode>, depths: &mut Vec<u32>) {
+        for segment in self.segments.iter() {
+            nodes.extend_from_slice(&segment.nodes);
+            depths.extend_from_slice(&segment.depths);
+        }
+    }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    fn storage_bytes(&self) -> usize {
+        self.segments
+            .iter()
+            .map(|segment| {
+                segment
+                    .nodes
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<PathNode>())
+                    .saturating_add(
+                        segment
+                            .depths
+                            .capacity()
+                            .saturating_mul(std::mem::size_of::<u32>()),
+                    )
+            })
+            .sum()
+    }
+}
+
+/// Immutable path trie storage shared by the mutable builder and frozen readers.
+///
+/// A table retains its inherited prefix through `base` and owns only its producer-local suffix.
+#[derive(Debug)]
+pub struct PathTable {
+    base: Arc<PathTableBase>,
+    nodes: Vec<PathNode>,
+    depths: Vec<u32>,
+}
+
+impl PartialEq for PathTable {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len()
+            && (0..self.len()).all(|index| {
+                self.node(index) == other.node(index)
+                    && self.depth_at(index) == other.depth_at(index)
+            })
+    }
+}
+
+impl Eq for PathTable {}
+
 impl Clone for PathTable {
     fn clone(&self) -> Self {
-        record_path_table_copy(self.nodes.len(), self.copied_bytes());
+        if !self.nodes.is_empty() {
+            record_path_table_copy(self.nodes.len(), self.copied_delta_bytes());
+        }
         Self {
+            base: Arc::clone(&self.base),
             nodes: self.nodes.clone(),
             depths: self.depths.clone(),
         }
@@ -35,10 +212,48 @@ impl Clone for PathTable {
 
 impl PathTable {
     pub(super) fn from_parts(nodes: Vec<PathNode>, depths: Vec<u32>) -> Self {
-        Self { nodes, depths }
+        Self {
+            base: Arc::new(PathTableBase::from_parts(nodes, depths)),
+            nodes: Vec::new(),
+            depths: Vec::new(),
+        }
     }
+
+    pub(super) fn from_shared_parts(
+        base: Arc<PathTableBase>,
+        nodes: Vec<PathNode>,
+        depths: Vec<u32>,
+    ) -> Self {
+        if !nodes.is_empty() {
+            let copied_bytes = nodes
+                .len()
+                .saturating_mul(std::mem::size_of::<PathNode>())
+                .saturating_add(depths.len().saturating_mul(std::mem::size_of::<u32>()));
+            record_path_table_copy(nodes.len(), copied_bytes);
+        }
+        Self {
+            base,
+            nodes,
+            depths,
+        }
+    }
+
     /// Rewrite component IDs after the owning diagnostic string table merges.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if !remap.is_identity() && self.base.max_component_index >= remap.identity_prefix_len() {
+            let node_count = self.base.len();
+            let copied_bytes = node_count
+                .saturating_mul(std::mem::size_of::<PathNode>())
+                .saturating_add(node_count.saturating_mul(std::mem::size_of::<u32>()));
+            record_path_table_copy(node_count, copied_bytes);
+            let mut nodes = Vec::with_capacity(node_count);
+            let mut depths = Vec::with_capacity(node_count);
+            self.base.copy_into(&mut nodes, &mut depths);
+            for node in &mut nodes {
+                node.component = remap.get(node.component);
+            }
+            self.base = Arc::new(PathTableBase::from_parts(nodes, depths));
+        }
         for node in &mut self.nodes {
             node.component = remap.get(node.component);
         }
@@ -51,10 +266,7 @@ impl PathTable {
             parent: None,
             component: StringId::from_index(0),
         };
-        Self {
-            nodes: vec![root],
-            depths: vec![0],
-        }
+        Self::from_parts(vec![root], vec![0])
     }
 
     /// Append one child node and return its complete-path identity.
@@ -72,7 +284,7 @@ impl PathTable {
             // never reach this method and keep succeeding.
             return None;
         }
-        let child = PathId::try_from_index(self.nodes.len())?;
+        let child = PathId::try_from_index(self.len())?;
         let child_depth = self.depth(parent).checked_add(1)?;
 
         self.nodes.push(PathNode {
@@ -85,25 +297,77 @@ impl PathTable {
 
     /// Return the number of path nodes in this table, including the root.
     pub fn len(&self) -> usize {
-        self.nodes.len()
+        self.base.len() + self.nodes.len()
     }
-    /// Return the backing vector storage used by this table, excluding the `Arc` header.
+
+    /// Return the backing storage represented by this table, excluding Arc headers.
     #[cfg(feature = "data_layout_memory_probe")]
     pub(crate) fn storage_bytes(&self) -> usize {
-        self.nodes
-            .capacity()
-            .saturating_mul(std::mem::size_of::<PathNode>())
+        self.base
+            .storage_bytes()
+            .saturating_add(
+                self.nodes
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<PathNode>()),
+            )
             .saturating_add(
                 self.depths
                     .capacity()
                     .saturating_mul(std::mem::size_of::<u32>()),
             )
     }
-    fn copied_bytes(&self) -> usize {
+
+    fn copied_delta_bytes(&self) -> usize {
         self.nodes
             .len()
             .saturating_mul(std::mem::size_of::<PathNode>())
             .saturating_add(self.depths.len().saturating_mul(std::mem::size_of::<u32>()))
+    }
+
+    fn node(&self, index: usize) -> Option<PathNode> {
+        if index < self.base.len() {
+            self.base.node(index)
+        } else {
+            self.nodes.get(index - self.base.len()).copied()
+        }
+    }
+
+    fn depth_at(&self, index: usize) -> Option<u32> {
+        if index < self.base.len() {
+            self.base.depth(index)
+        } else {
+            self.depths.get(index - self.base.len()).copied()
+        }
+    }
+
+    pub(super) fn shared_base(&self) -> Arc<PathTableBase> {
+        Arc::clone(&self.base)
+    }
+
+    /// Share the current prefix and clone only this table's local suffix into a new prefix.
+    pub(super) fn snapshot_base(&self) -> Arc<PathTableBase> {
+        if self.nodes.is_empty() {
+            return Arc::clone(&self.base);
+        }
+        let copied_bytes = self.copied_delta_bytes();
+        record_path_table_copy(self.nodes.len(), copied_bytes);
+        let segment = Arc::new(PathTableSegment {
+            nodes: self.nodes.clone(),
+            depths: self.depths.clone(),
+        });
+        Arc::new(self.base.with_segment(segment))
+    }
+
+    /// Move this table's mutable suffix into an immutable shared prefix.
+    pub(super) fn seal_shared_base(&mut self) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let segment = Arc::new(PathTableSegment {
+            nodes: std::mem::take(&mut self.nodes),
+            depths: std::mem::take(&mut self.depths),
+        });
+        self.base = Arc::new(self.base.with_segment(segment));
     }
 
     /// Return whether the numeric index of `path` is addressable by this table.
@@ -112,17 +376,19 @@ impl PathTable {
     /// address the same numeric index with different components. Path identity is meaningful
     /// only together with the string table that issued the component IDs.
     pub fn contains(&self, path: PathId) -> bool {
-        path.index() < self.nodes.len()
+        path.index() < self.len()
     }
 
     /// Return the parent path, or `None` for the root.
     pub fn parent(&self, path: PathId) -> Option<PathId> {
-        self.nodes[path.index()].parent
+        self.node(path.index())
+            .expect("path ID is addressable")
+            .parent
     }
 
     /// Return the parent path, or `None` when `path` is the root or was not issued here.
     pub fn try_parent(&self, path: PathId) -> Option<PathId> {
-        self.nodes.get(path.index())?.parent
+        self.node(path.index())?.parent
     }
 
     /// Return the final component, or `None` for the root path.
@@ -130,7 +396,11 @@ impl PathTable {
         if path == PathId::ROOT {
             return None;
         }
-        Some(self.nodes[path.index()].component)
+        Some(
+            self.node(path.index())
+                .expect("path ID is addressable")
+                .component,
+        )
     }
 
     /// Return the final component, or `None` for the root and for foreign IDs.
@@ -138,17 +408,17 @@ impl PathTable {
         if path == PathId::ROOT {
             return None;
         }
-        Some(self.nodes.get(path.index())?.component)
+        Some(self.node(path.index())?.component)
     }
 
     /// Return the number of components in `path`.
     pub fn depth(&self, path: PathId) -> u32 {
-        self.depths[path.index()]
+        self.depth_at(path.index()).expect("path ID is addressable")
     }
 
     /// Return the depth, or `None` when `path` was not issued by this table.
     pub fn try_depth(&self, path: PathId) -> Option<u32> {
-        self.depths.get(path.index()).copied()
+        self.depth_at(path.index())
     }
 
     /// Return whether `path` descends from `prefix` without allocating.
@@ -315,15 +585,6 @@ impl PathTable {
         }
 
         native
-    }
-
-    /// Clone the dense node arrays into an immutable fork base.
-    pub(super) fn snapshot(&self) -> (Box<[PathNode]>, Box<[u32]>) {
-        record_path_table_copy(self.nodes.len(), self.copied_bytes());
-        (
-            self.nodes.clone().into_boxed_slice(),
-            self.depths.clone().into_boxed_slice(),
-        )
     }
 }
 #[cfg(feature = "data_layout_memory_probe")]

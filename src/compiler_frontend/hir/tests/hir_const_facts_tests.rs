@@ -13,7 +13,9 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast,
+};
 
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;

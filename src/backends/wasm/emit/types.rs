@@ -1,11 +1,10 @@
 //! ABI and Wasm value-type conversion helpers.
 
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::lir::types::WasmAbiType;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use wasm_encoder::ValType;
 
-pub(crate) fn abi_to_val_type(abi: WasmAbiType) -> Result<ValType, CompilerError> {
+pub(crate) fn abi_to_val_type(abi: WasmAbiType) -> Result<ValType, InfrastructureFailure> {
     // WHAT: map backend ABI types onto concrete core-Wasm value types.
     // WHY: the current emitter uses an `i32` handle ABI for linear-memory objects to keep interop
     // simple.
@@ -14,9 +13,8 @@ pub(crate) fn abi_to_val_type(abi: WasmAbiType) -> Result<ValType, CompilerError
         WasmAbiType::I64 => Ok(ValType::I64),
         WasmAbiType::F32 => Ok(ValType::F32),
         WasmAbiType::F64 => Ok(ValType::F64),
-        WasmAbiType::Void => Err(CompilerError::compiler_error(
+        WasmAbiType::Void => Err(InfrastructureFailure::wasm_generation(
             "Wasm emission cannot lower `Void` to a concrete Wasm value type",
-        )
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))),
+        )),
     }
 }

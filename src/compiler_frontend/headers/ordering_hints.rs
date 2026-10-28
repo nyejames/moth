@@ -10,7 +10,9 @@
 use crate::compiler_frontend::builtins::error_type::{
     is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
@@ -20,8 +22,8 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
-    DependencySelection, Header, HeaderBuildContext, HeaderKind, LocalDeclarationOrderingHint,
-    SyntheticContentPayload,
+    DependencySelection, Header, HeaderBuildContext, HeaderKind, HeaderParseFailure,
+    LocalDeclarationOrderingHint, SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
@@ -44,7 +46,7 @@ pub(super) fn collect_constant_type_hints(
     context: &mut HeaderBuildContext<'_>,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
-) -> Result<(), CompilerError> {
+) -> Result<(), HeaderParseFailure> {
     // A `#Config of T` type belongs to the provider-independent contract shell, not to the
     // ordinary declaration type graph. The resolution barrier will materialize the declaration
     // after provider binding, so retaining this as a local ordering edge would leak contract
@@ -95,9 +97,12 @@ pub(super) fn collect_named_type_ordering_hint(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
-) -> Result<(), CompilerError> {
+) -> Result<(), HeaderParseFailure> {
     match type_reference {
-        ParsedNamedTypeReference::Bare(type_name) => {
+        ParsedNamedTypeReference::Bare {
+            name: type_name,
+            span,
+        } => {
             if is_reserved_builtin_symbol(string_table.resolve(type_name))
                 || is_reserved_parameter_contract_symbol(string_table.resolve(type_name))
             {
@@ -117,8 +122,11 @@ pub(super) fn collect_named_type_ordering_hint(
                     let path = path_fork
                         .try_intern_child(source_file, type_name)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "path table exhausted while interning a source-owned type path",
+                            HeaderParseFailure::Diagnostic(
+                                token_lexical::compiler_capacity_exceeded(
+                                    CapacityResource::PathNodes,
+                                    span,
+                                ),
                             )
                         })?;
                     LocalDeclarationOrderingHint::source_owned(path)
@@ -126,7 +134,7 @@ pub(super) fn collect_named_type_ordering_hint(
             };
             hints.insert(hint);
         }
-        ParsedNamedTypeReference::Qualified(path) => {
+        ParsedNamedTypeReference::Qualified { path, span } => {
             if path.is_empty() {
                 return Ok(());
             }
@@ -135,9 +143,10 @@ pub(super) fn collect_named_type_ordering_hint(
             // visibility environment owns the mapping from this local path to its canonical
             // source declaration once provider binding has completed.
             let path = path_fork.try_intern_components(path).ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "path table exhausted while interning a qualified type path",
-                )
+                HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                    CapacityResource::PathNodes,
+                    span,
+                ))
             })?;
             hints.insert(LocalDeclarationOrderingHint::qualified_type_spelling(path));
         }
@@ -157,7 +166,7 @@ pub(super) fn dependency_path_for_local_name(
     dependency_selections: &[DependencySelection],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Option<PathId>, CompilerError> {
+) -> Result<Option<PathId>, HeaderParseFailure> {
     for dependency in file_dependency_clauses {
         let selections = dependency.selections(dependency_selections)?;
         if selections.is_empty() {
@@ -176,9 +185,10 @@ pub(super) fn dependency_path_for_local_name(
             let path = path_fork
                 .try_intern_child(dependency.dependency.path, selection.source_name)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "path table exhausted while interning a selected dependency path",
-                    )
+                    HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                        CapacityResource::PathNodes,
+                        Some(selection.source_span),
+                    ))
                 })?;
             return Ok(Some(path));
         }
@@ -206,7 +216,7 @@ pub(super) fn collect_content_source_ordering_hints(
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let content_targets =
         content_source_targets(file_references, path_syntax, string_table, path_fork)?;
 
@@ -324,7 +334,7 @@ fn content_source_targets(
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>, CompilerError> {
+) -> Result<FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>, InfrastructureFailure> {
     let mut targets = FxHashMap::default();
     for reference in file_references.iter() {
         if reference.class != PreparedFileReferenceClass::ContentSource {
@@ -350,14 +360,18 @@ fn scan_token_range_for_content_sources(
     source_tokens: &SourceTokens,
     content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if range.source() != source_tokens.source() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "content ordering range belongs to a different source token owner",
         ));
     }
     let cursor = source_tokens.cursor(range).map_err(|_| {
-        CompilerError::compiler_error("content ordering range exceeds its source token owner")
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "content ordering range exceeds its source token owner",
+        )
     })?;
     scan_source_range_for_content_sources(cursor, content_targets, hints);
     Ok(())

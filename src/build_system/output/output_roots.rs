@@ -9,7 +9,8 @@
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, ConfigSchemaNodeId, NamedConfigSectionSchema,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// Schema field name for the development output root.
 pub(crate) const DEV_OUTPUT_FIELD: &str = "dev_output";
@@ -43,7 +44,7 @@ pub(crate) struct OutputRootSettings {
 pub(crate) fn register_output_root_fields(
     schema: &mut ConfigSchema,
     root: ConfigSchemaNodeId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     schema.register_field(
         root,
         ConfigSchemaField::string_with_default(DEV_OUTPUT_FIELD, DEFAULT_DEV_OUTPUT),
@@ -63,7 +64,7 @@ pub(crate) fn register_output_root_fields(
 ///      owners would replace each other's value and lose each other's provenance.
 pub(crate) fn ensure_single_output_root_owner(
     sections: &[NamedConfigSectionSchema],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut owners = sections.iter().filter(|section| {
         let root = section.schema.root();
         section
@@ -86,8 +87,11 @@ pub(crate) fn ensure_single_output_root_owner(
         return Ok(());
     };
 
-    Err(CompilerError::compiler_error(format!(
-        "config sections '{}' and '{}' both own the output roots",
-        first.name, second.name
-    )))
+    Err(InfrastructureFailure::internal(
+        CompilerStage::ProjectBuildAssembly,
+        format!(
+            "config sections '{}' and '{}' both own the output roots",
+            first.name, second.name
+        ),
+    ))
 }

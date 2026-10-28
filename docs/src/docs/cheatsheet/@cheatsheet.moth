@@ -1,9 +1,10 @@
 @moth-language-cheatsheet content as cheatsheet_content
+@reserved-names-list content as reserved_names_list
 
 @styles navbar, section, language_theme_head
 
 page_title #= "Language cheatsheet"
-page_description #= "The whole accepted Moth language surface on one page, for humans and coding models."
+page_description #= "A single page, compact reference for the full Moth language surface."
 page_head #= language_theme_head
 
 #[navbar]
@@ -18,3 +19,5 @@ page_head #= language_theme_head
 ]
 
 #[section, cheatsheet_content]
+
+#[section, reserved_names_list]

@@ -12,23 +12,24 @@ use crate::compiler_frontend::ast::templates::tir::node::{
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{TirView, TirViewIdentity};
 use crate::compiler_frontend::ast::templates::tir::{TemplateIrNodeId, TemplateTirReference};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::HashSet;
 
 pub(crate) fn walk_tir_view_expression_payloads<'expressions>(
     view: &TirView<'_>,
     expressions: &'expressions AstExpressionBuilder,
-    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), CompilerError>,
-) -> Result<(), CompilerError> {
+    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), InfrastructureFailure>,
+) -> Result<(), InfrastructureFailure> {
     walk_view(view, expressions, visitor, &mut HashSet::new())
 }
 
 fn walk_view<'expressions>(
     view: &TirView<'_>,
     expressions: &'expressions AstExpressionBuilder,
-    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), CompilerError>,
+    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), InfrastructureFailure>,
     visited: &mut HashSet<TirViewIdentity>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if !visited.insert(view.identity()) {
         return Ok(());
     }
@@ -47,8 +48,8 @@ pub(crate) fn walk_expression_payloads_with_nested_tir_views<'expressions>(
     expression: ExpressionView<'expressions>,
     store: &TemplateIrStore,
     expressions: &'expressions AstExpressionBuilder,
-    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), CompilerError>,
-) -> Result<(), CompilerError> {
+    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), InfrastructureFailure>,
+) -> Result<(), InfrastructureFailure> {
     let mut visited = HashSet::new();
     let mut pending = Vec::new();
     inspect_expression(expression, visitor, &mut pending)?;
@@ -62,9 +63,9 @@ pub(crate) fn walk_expression_payloads_with_nested_tir_views<'expressions>(
 
 fn inspect_expression<'expressions>(
     expression: ExpressionView<'expressions>,
-    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), CompilerError>,
+    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), InfrastructureFailure>,
     pending: &mut Vec<TemplateTirReference>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match expression.operation() {
         ExpressionOperationView::Template(template) => pending.push(template.tir_reference),
         ExpressionOperationView::Coerce { value, .. } => {
@@ -93,7 +94,7 @@ fn effective<'expressions>(
     expressions: &'expressions AstExpressionBuilder,
     site: super::ids::ExpressionSiteId,
     structural: ExprId,
-) -> Result<ExpressionView<'expressions>, CompilerError> {
+) -> Result<ExpressionView<'expressions>, InfrastructureFailure> {
     match view.effective_expression_for_site(expressions, site)? {
         Some(expression) => Ok(expression),
         None => expressions.view(structural),
@@ -104,9 +105,9 @@ fn walk_node<'expressions>(
     view: &TirView<'_>,
     node: TemplateIrNodeId,
     expressions: &'expressions AstExpressionBuilder,
-    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), CompilerError>,
+    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), InfrastructureFailure>,
     visited: &mut HashSet<TirViewIdentity>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match &view.effective_node(node)?.kind {
         TemplateIrNodeKind::Sequence { children } => {
             for &child in children {
@@ -177,8 +178,8 @@ fn visit_loop_header<'expressions>(
     expressions: &'expressions AstExpressionBuilder,
     header: &TemplateLoopHeader,
     sites: TemplateLoopHeaderExpressionSites,
-    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), CompilerError>,
-) -> Result<(), CompilerError> {
+    visitor: &mut impl FnMut(ExpressionView<'expressions>) -> Result<(), InfrastructureFailure>,
+) -> Result<(), InfrastructureFailure> {
     match (header, sites) {
         (
             TemplateLoopHeader::Conditional { condition },
@@ -204,14 +205,16 @@ fn visit_loop_header<'expressions>(
                 }
                 (None, None) => {}
                 _ => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR expression walk found mismatched range step site.",
                     ));
                 }
             }
         }
         _ => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression walk found mismatched loop-header expression sites.",
             ));
         }

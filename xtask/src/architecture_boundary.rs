@@ -70,7 +70,7 @@ const FRONTEND_SEMANTIC_STAGE_OWNERS: &[&str] = &[
 /// What production `compiler_frontend` code must not name.
 ///
 /// The project tool's settings module is not banned wholesale: the compiler reads authored-name
-/// constants such as the implicit start function from it today. The banned name is the mutable
+/// constants such as the implicit start function from it. The banned name is the mutable
 /// configuration container itself, which is what the layering rule is about.
 const BUILD_AND_PROJECT_CONTAINERS: &[&str] = &["crate::build_system", "settings::Config"];
 
@@ -148,7 +148,7 @@ const BORACLE_ORACLE_STATIC_SOLVER_NAMES: &[&str] = &[
 
 /// Import prefixes that reach the static-solver modules through a module path.
 ///
-/// WHY: the name table pins the items that are load-bearing today, but the modules are the
+/// WHY: the name table pins the items that are load-bearing, but the modules are the
 ///      boundary, and a module-path import such as `use super::loans::{LoanSolver, LoanFact}` or
 ///      `use crate::...::borrow_checker::boracle::origins::OriginSolver` reaches items the name
 ///      table may not list. Matching each module segment together with its `::` catches the

@@ -26,7 +26,9 @@
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -282,7 +284,7 @@ impl ModuleSymbols {
         &'a self,
         source_file: &PathId,
         clause: &RetainedDependencyClause,
-    ) -> Result<&'a [DependencySelection], CompilerError> {
+    ) -> Result<&'a [DependencySelection], InfrastructureFailure> {
         let selections = self
             .dependency_selections_by_source
             .get(source_file)
@@ -360,7 +362,7 @@ impl ModuleSymbols {
         sorted_headers: &[Header],
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) {
+    ) -> Result<(), DiagnosticDraft> {
         self.ordered_semantic_declarations.clear();
         self.compiler_owned_declarations.clear();
 
@@ -380,7 +382,7 @@ impl ModuleSymbols {
                                 .expect("header body range has no prepared source-path identity"),
                             string_table,
                             path_fork,
-                        ),
+                        )?,
                     });
             } else if let Some(declaration) = declaration_from_header(
                 header,
@@ -388,7 +390,7 @@ impl ModuleSymbols {
                     .expect("header body range has no prepared source-path identity"),
                 string_table,
                 path_fork,
-            ) {
+            )? {
                 self.compiler_owned_declarations.push(declaration);
             }
         }
@@ -396,6 +398,7 @@ impl ModuleSymbols {
         // Append staged builtin declarations after all user-defined declarations.
         self.compiler_owned_declarations
             .append(&mut self.builtin_declarations);
+        Ok(())
     }
 }
 
@@ -421,9 +424,9 @@ fn declaration_from_header(
     source_file: PathId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Option<Declaration> {
+) -> Result<Option<Declaration>, DiagnosticDraft> {
     match &header.kind {
-        HeaderKind::Function { .. } => Some(Declaration {
+        HeaderKind::Function { .. } => Ok(Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
             type_syntax: None,
@@ -431,13 +434,13 @@ fn declaration_from_header(
             value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
             binding_span: header.name_span,
             config_qualifier: None,
-        }),
-        HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
+        })),
+        HeaderKind::Constant { declaration, .. } => Ok(Some(constant_declaration_placeholder(
             &header.declaration_path,
             declaration,
             header.name_span,
-        )),
-        HeaderKind::Struct { .. } => Some(Declaration {
+        ))),
+        HeaderKind::Struct { .. } => Ok(Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
             type_syntax: None,
@@ -445,8 +448,8 @@ fn declaration_from_header(
             value: DeclarationValue::Shell(DeclarationShell::Struct),
             binding_span: header.name_span,
             config_qualifier: None,
-        }),
-        HeaderKind::Choice { .. } => Some(Declaration {
+        })),
+        HeaderKind::Choice { .. } => Ok(Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
             type_syntax: None,
@@ -454,14 +457,14 @@ fn declaration_from_header(
             value: DeclarationValue::Shell(DeclarationShell::Choice),
             binding_span: header.name_span,
             config_qualifier: None,
-        }),
+        })),
         HeaderKind::StartFunction => {
             // The implicit start function is a compiler-owned synthetic declaration scoped under
             // the entry source file.
             let start_name = path_fork
                 .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
-                .expect("path table exhausted while interning implicit start path");
-            Some(Declaration {
+                .ok_or_else(token_lexical::logical_path_capacity)?;
+            Ok(Some(Declaration {
                 id: start_name,
                 type_id: builtin_type_ids::NONE,
                 type_syntax: None,
@@ -469,13 +472,13 @@ fn declaration_from_header(
                 value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
                 config_qualifier: None,
-            })
+            }))
         }
-        HeaderKind::TypeAlias { .. } => None,
-        HeaderKind::ConstTemplate { .. } => None,
+        HeaderKind::TypeAlias { .. } => Ok(None),
+        HeaderKind::ConstTemplate { .. } => Ok(None),
         HeaderKind::Trait { .. }
         | HeaderKind::TraitConformance { .. }
-        | HeaderKind::TraitIncompatibility { .. } => None,
+        | HeaderKind::TraitIncompatibility { .. } => Ok(None),
     }
 }
 

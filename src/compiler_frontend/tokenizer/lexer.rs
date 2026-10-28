@@ -4,10 +4,15 @@
 //! WHY: lexing owns the first precise source-location mapping and all delimiter-balancing rules;
 //! callers can run it against worker-local string tables before deterministic module aggregation.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    templates, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
-    DiagnosticOperator, MissingWhitespace, SymbolicSpacingConstruct, SymbolicSpacingError,
+    CommonSyntaxMistakeReason, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
+    MissingWhitespace, SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::keywords::{
     attached_bang_keyword_token_tag, token_tag_for_source_word,
@@ -38,26 +43,23 @@ use moth_lexical::numeric::parse::parse_numeric_literal;
 use moth_lexical::words::classify_source_word;
 use std::iter::Peekable;
 use std::str::Chars;
-
-pub const END_SCOPE_CHAR: char = ';';
-
 /// Lexical source diagnoses and infrastructure failures leave preparation through separate lanes.
 #[derive(Debug)]
 pub(crate) enum TokenizeFailure {
-    Diagnosed(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnosed(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
 pub(crate) type TokenizeResult<T> = Result<T, TokenizeFailure>;
 
-impl From<CompilerDiagnostic> for TokenizeFailure {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for TokenizeFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnosed(diagnostic)
     }
 }
 
-impl From<CompilerError> for TokenizeFailure {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for TokenizeFailure {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
@@ -71,9 +73,21 @@ pub(crate) fn map_span_capacity_error(
     error: SpanCapacityError,
 ) -> TokenizeFailure {
     let source_start = SourceSpan::new(source, LocalSpan::source_start());
-    match CompilerDiagnostic::from_span_capacity_error(error, Some(source_start)) {
-        Ok(diagnostic) => TokenizeFailure::Diagnosed(diagnostic),
-        Err(error) => TokenizeFailure::Infrastructure(error),
+    if error.reason().reports_as_source_diagnostic() {
+        TokenizeFailure::Diagnosed(token_lexical::source_span_capacity(
+            error.start(),
+            error.length(),
+            SourceSpanCapacityResource::ExtendedSpan,
+            Some(source_start),
+        ))
+    } else {
+        crate::compiler_bug!(
+            CompilerStage::Tokenization,
+            "span at byte offset {} with length {} ends past u32::MAX in a source \
+             that was accepted as addressable; this is a compiler bug",
+            error.start(),
+            error.length(),
+        )
     }
 }
 
@@ -104,25 +118,33 @@ pub(crate) fn map_token_emit_error(error: TokenEmitError, source: SourceId) -> T
         TokenEmitError::Build(error) => map_source_token_build_error(error),
         TokenEmitError::Path(
             crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Capacity(_),
-        ) => TokenizeFailure::Diagnosed(CompilerDiagnostic::source_table_capacity(
-            crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::PathSyntax,
+        ) => TokenizeFailure::Diagnosed(token_lexical::source_span_capacity(
+            0,
+            u32::MAX,
+            SourceSpanCapacityResource::PathSyntax,
+            None,
         )),
         TokenEmitError::Path(
             crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen,
-        ) => TokenizeFailure::Infrastructure(CompilerError::compiler_error(
+        ) => crate::compiler_bug!(
+            CompilerStage::Tokenization,
             "path syntax table was frozen during tokenization",
-        )),
+        ),
         TokenEmitError::Path(
             crate::compiler_frontend::paths::path_syntax::PathSyntaxError::ForeignSource {
                 ..
             },
-        ) => TokenizeFailure::Infrastructure(CompilerError::compiler_error(
+        ) => crate::compiler_bug!(
+            CompilerStage::Tokenization,
             "path syntax table received a path row from another source",
-        )),
+        ),
         TokenEmitError::Numeric(
             crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::Capacity(_),
-        ) => TokenizeFailure::Diagnosed(CompilerDiagnostic::source_table_capacity(
-            crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::NumericLiteral,
+        ) => TokenizeFailure::Diagnosed(token_lexical::source_span_capacity(
+            0,
+            u32::MAX,
+            SourceSpanCapacityResource::NumericLiteral,
+            None,
         )),
         TokenEmitError::Numeric(
             crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::Frozen
@@ -133,11 +155,14 @@ pub(crate) fn map_token_emit_error(error: TokenEmitError, source: SourceId) -> T
             | crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::ForeignSource {
                 ..
             },
-        ) => TokenizeFailure::Infrastructure(CompilerError::compiler_error(
+        ) => crate::compiler_bug!(
+            CompilerStage::Tokenization,
             "numeric literal store rejected a lexer-owned record",
-        )),
+        ),
     }
 }
+
+pub const END_SCOPE_CHAR: char = ';';
 
 fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
@@ -531,9 +556,9 @@ fn symbolic_spacing_error(
     stream: &mut TokenStream<'_>,
     construct: SymbolicSpacingConstruct,
     missing: MissingWhitespace,
-) -> TokenizeResult<CompilerDiagnostic> {
+) -> TokenizeResult<DiagnosticDraft> {
     let span = Some(current_source_span(stream)?);
-    Ok(CompilerDiagnostic::common_syntax_mistake(
+    Ok(token_lexical::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidSymbolicSpacing {
             error: SymbolicSpacingError { construct, missing },
         },
@@ -551,11 +576,9 @@ fn missing_whitespace_side(missing_left: bool, missing_right: bool) -> Option<Mi
     }
 }
 
-fn unary_negation_spacing_error(
-    stream: &mut TokenStream<'_>,
-) -> TokenizeResult<CompilerDiagnostic> {
+fn unary_negation_spacing_error(stream: &mut TokenStream<'_>) -> TokenizeResult<DiagnosticDraft> {
     let span = Some(current_source_span(stream)?);
-    Ok(CompilerDiagnostic::common_syntax_mistake(
+    Ok(token_lexical::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing,
         span,
     ))
@@ -666,8 +689,8 @@ pub(crate) fn tokenize(
             context,
         ) {
             Ok(next_tag) => next_tag,
-            Err(TokenizeFailure::Diagnosed(mut diagnostic)) => {
-                if let Err(error) = diagnostic.capture_preparation_span(file_id) {
+            Err(TokenizeFailure::Diagnosed(diagnostic)) => {
+                if let Err(error) = crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(&diagnostic, file_id) {
                     return Err(TokenizeFailure::Infrastructure(error));
                 }
                 return Err(TokenizeFailure::Diagnosed(diagnostic));
@@ -682,9 +705,7 @@ pub(crate) fn tokenize(
     ));
     let numeric_literals = std::mem::take(&mut stream.numeric_literals);
     let builder = stream.take_source_tokens_builder();
-    let source_tokens = builder
-        .finish(numeric_literals)
-        .map_err(TokenizeFailure::Infrastructure)?;
+    let source_tokens = builder.finish(numeric_literals);
     let tokens = std::sync::Arc::new(source_tokens);
     #[cfg(feature = "data_layout_memory_probe")]
     crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
@@ -701,11 +722,14 @@ pub(crate) fn tokenize(
 
 fn map_source_token_build_error(error: SourceTokenBuildError) -> TokenizeFailure {
     match error {
-        SourceTokenBuildError::Capacity => TokenizeFailure::Diagnosed(
-            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::source_table_capacity(
-                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::Token,
-            ),
-        ),
+        SourceTokenBuildError::Capacity => {
+            TokenizeFailure::Diagnosed(token_lexical::source_span_capacity(
+                0,
+                u32::MAX,
+                SourceSpanCapacityResource::Token,
+                None,
+            ))
+        }
         SourceTokenBuildError::Invariant(error) => TokenizeFailure::Infrastructure(error),
     }
 }
@@ -817,7 +841,7 @@ fn get_token_tag(
 
         if current_char == ']' {
             if let Some(source_kind) = stream.initial_template_close_rejection() {
-                return Err(CompilerDiagnostic::unescaped_implicit_template_close(
+                return Err(templates::unescaped_implicit_template_close(
                     source_kind,
                     Some(current_source_span(stream)?),
                 )
@@ -881,7 +905,7 @@ fn get_token_tag(
             };
 
             return Err(
-                CompilerDiagnostic::invalid_char_literal(Some(current_source_span(stream)?)).into(),
+                token_lexical::invalid_char_literal(Some(current_source_span(stream)?)).into(),
             );
         }
 
@@ -1092,7 +1116,7 @@ fn get_token_tag(
                 return emit_static(stream, TokenTag::ADD);
             }
 
-            return Err(CompilerDiagnostic::common_syntax_mistake(
+            return Err(token_lexical::common_syntax_mistake(
                 CommonSyntaxMistakeReason::UnsupportedUnaryPlus,
                 Some(current_source_span(stream)?),
             )
@@ -1381,7 +1405,7 @@ fn get_token_tag(
             return tokenize_identifier_or_keyword(&mut token_value, stream, string_table);
         }
 
-        return Err(CompilerDiagnostic::invalid_character(
+        return Err(token_lexical::invalid_character(
             current_char,
             Some(current_source_span(stream)?),
         )
@@ -1396,12 +1420,12 @@ fn tokenize_style_directive(
 ) -> TokenizeResult<TokenTag> {
     if stream.mode != TokenizeMode::TemplateHead {
         return Err(
-            CompilerDiagnostic::invalid_character('$', Some(current_source_span(stream)?)).into(),
+            token_lexical::invalid_character('$', Some(current_source_span(stream)?)).into(),
         );
     }
 
     let Some(&first_char) = stream.peek() else {
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
+        return Err(token_lexical::unexpected_end_of_file(
             None,
             Some(current_source_span(stream)?),
         )
@@ -1409,7 +1433,7 @@ fn tokenize_style_directive(
     };
 
     if !first_char.is_alphabetic() && first_char != '_' {
-        return Err(CompilerDiagnostic::invalid_character(
+        return Err(token_lexical::invalid_character(
             first_char,
             Some(current_source_span(stream)?),
         )
@@ -1439,7 +1463,7 @@ fn tokenize_style_directive(
         // This is diagnostic-only string-table mutation.
         let supported =
             string_table.intern(&style_directives.supported_directives_for_diagnostic());
-        return Err(CompilerDiagnostic::invalid_style_directive(
+        return Err(templates::invalid_style_directive(
             directive,
             supported,
             Some(current_source_span(stream)?),
@@ -1496,9 +1520,7 @@ pub(crate) fn tokenize_identifier_or_keyword(
             return emit_symbol(stream, interned_symbol);
         }
 
-        return Err(
-            CompilerDiagnostic::invalid_identifier(Some(current_source_span(stream)?)).into(),
-        );
+        return Err(token_lexical::invalid_identifier(Some(current_source_span(stream)?)).into());
     }
 }
 

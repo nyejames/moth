@@ -18,9 +18,15 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ImportPublicSurfaceType, InvalidDependencyClauseReason,
+    CapacityResource, ImportPublicSurfaceType, InvalidDependencyClauseReason,
     InvalidReceiverDeclarationReason, ReservedNameOwner, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -91,7 +97,8 @@ fn intern_public_surface_path(
         .try_intern_filesystem_path(path, string_table)
         .map_err(|error| match error {
             PathInternError::NonUtf8(non_utf8) => HeaderParseFailure::Infrastructure(
-                CompilerError::file_error(
+                InfrastructureFailure::filesystem(
+                    CompilerStage::HeaderParsing,
                     &non_utf8.path,
                     format!(
                         "{path_role} {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
@@ -99,12 +106,10 @@ fn intern_public_surface_path(
                 ),
             ),
             PathInternError::TableFull => HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::source_table_capacity(
-                    SourceSpanCapacityResource::LogicalPath,
-                ),
+                token_lexical::source_span_capacity(0, u32::MAX, SourceSpanCapacityResource::LogicalPath, None),
             ),
             PathInternError::BaseMismatch { .. } => HeaderParseFailure::Infrastructure(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                     "logical path merge base is not a structural prefix of the destination table",
                 ),
             ),
@@ -478,7 +483,7 @@ fn build_module_root_public_dependencies(
             }
             let clause_kind = dependency.binding.clause_kind();
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_dependency_clause(
+                project_config::invalid_dependency_clause(
                     clause_kind,
                     InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed,
                     Some(dependency.dependency.span),
@@ -590,8 +595,9 @@ fn resolve_public_export_dependency_or_provider(
         let diagnostic_path = path_fork
             .try_intern_child(dependency.dependency.path, selection.source_name)
             .ok_or_else(|| {
-                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                    "public export path table exhausted",
+                HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                    CapacityResource::PathNodes,
+                    Some(selection.source_span),
                 ))
             })?;
 
@@ -628,7 +634,7 @@ fn resolve_public_export_dependency_or_provider(
             crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider { .. }
         )
     {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+        return Err(HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(CompilerStage::HeaderParsing,
             "external provider dependency is missing its checked target fact",
         )));
     }
@@ -640,7 +646,7 @@ fn resolve_public_export_dependency_or_provider(
         {
             if !provider_target.remaining_components().is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::direct_symbol_path_import(
+                    imports::direct_symbol_path_import(
                         dependency.dependency.path,
                         Some(dependency.dependency.span),
                     ),
@@ -649,7 +655,7 @@ fn resolve_public_export_dependency_or_provider(
             let package = external_package_registry
                 .get_package_by_id(resolved.package_id)
                 .ok_or_else(|| {
-                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::missing_import_target(
+                    HeaderParseFailure::Diagnostic(imports::missing_import_target(
                         dependency.dependency.path,
                         Some(dependency.dependency.span),
                     ))
@@ -661,15 +667,15 @@ fn resolve_public_export_dependency_or_provider(
                 let diagnostic_path = path_fork
                     .try_intern_child(dependency.dependency.path, selection.source_name)
                     .ok_or_else(|| {
-                        HeaderParseFailure::Diagnostic(CompilerDiagnostic::source_table_capacity(
+                        HeaderParseFailure::Diagnostic(token_lexical::source_span_capacity(
+                            0,
+                            u32::MAX,
                             SourceSpanCapacityResource::LogicalPath,
+                            None,
                         ))
                     })?;
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::missing_import_target(
-                        diagnostic_path,
-                        Some(selection.source_span),
-                    ),
+                    imports::missing_import_target(diagnostic_path, Some(selection.source_span)),
                 ));
             };
             return Ok(PublicExportTarget::External(symbol_id));
@@ -710,7 +716,7 @@ fn reject_source_receiver_method_export(
 ) -> PublicExportDataResult<()> {
     if module_symbols.receiver_method_paths.contains(method_path) {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_receiver_declaration(
+            generics_traits_api::invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
                 span,
             ),
@@ -748,8 +754,9 @@ fn resolve_public_export_dependency(
     let selected_path = path_fork
         .try_intern_child(dependency.dependency.path, selection.source_name)
         .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "public export path table exhausted",
+            HeaderParseFailure::Diagnostic(token_lexical::compiler_capacity_exceeded(
+                CapacityResource::PathNodes,
+                Some(selection.source_span),
             ))
         })?;
 
@@ -768,7 +775,7 @@ fn resolve_public_export_dependency(
             symbol_name,
         } => {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::missing_package_symbol(
+                imports::missing_package_symbol(
                     symbol_name,
                     package_path,
                     Some(selection.source_span),
@@ -791,7 +798,8 @@ fn resolve_public_export_dependency(
         path_fork,
     };
 
-    if let Some(public_boundary_result) = resolve_public_export_boundary(&mut public_boundary_input)
+    if let Some(public_boundary_result) =
+        resolve_public_export_boundary(&mut public_boundary_input)?
     {
         match public_boundary_result {
             PublicExportLookupResult::ExportedSource { path, .. } => {
@@ -833,7 +841,7 @@ fn resolve_public_export_dependency(
                         PublicExportSurfaceType::ModuleRoot => ImportPublicSurfaceType::ModuleRoot,
                     };
                     return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::not_exported_by_public_surface(
+                        imports::not_exported_by_public_surface(
                             selected_path,
                             public_surface_name_id,
                             diagnostic_public_surface_type,
@@ -928,7 +936,7 @@ impl PublicExportCollector {
         let export_name_text = string_table.resolve(export_name);
         if is_core_cast_trait_name(export_name_text) {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::reserved_name_collision(
+                names_declarations::reserved_name_collision(
                     export_name,
                     ReservedNameOwner::CoreTrait,
                     span,
@@ -938,7 +946,7 @@ impl PublicExportCollector {
 
         if let Some(first_span) = self.seen_names.get(&export_name) {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::duplicate_public_export(export_name, Some(*first_span), span),
+                generics_traits_api::duplicate_public_export(export_name, Some(*first_span), span),
             ));
         }
         if let Some(span) = span {

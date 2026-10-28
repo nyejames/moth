@@ -47,7 +47,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -134,7 +134,7 @@ fn dynamic_site_id(store: &TemplateIrStore, node_id: TemplateIrNodeId) -> Expres
 fn collect_view(
     view: &TirView<'_>,
     expressions: &AstExpressionBuilder,
-) -> Result<Vec<ExprId>, CompilerError> {
+) -> Result<Vec<ExprId>, InfrastructureFailure> {
     let mut payloads = Vec::new();
     walk_tir_view_expression_payloads(view, expressions, &mut |expression| {
         payloads.push(expression.id());
@@ -153,7 +153,7 @@ impl TirExpressionPayloadMutator for CountingMutator {
         &mut self,
         expressions: &mut AstExpressionBuilder,
         expression: &mut ExprId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.count += 1;
         // WHY: the walker tests need real regular-division provenance, which only the operator
         // path creates, so self-division stands in for an authored divide.
@@ -527,10 +527,10 @@ fn expression_overlay_rejects_unallocated_site() {
         .expect_err("unallocated overlay keys must be rejected at commit");
     assert!(
         error
-            .msg
+            .message
             .contains("out-of-range expression-site overlay key"),
         "expected a store-owned range error, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -629,7 +629,7 @@ fn missing_child_template_is_reported() {
         &mut mutator,
     )
     .expect_err("missing child should fail");
-    assert!(error.msg.contains("missing child template"));
+    assert!(error.message.contains("missing child template"));
 }
 
 // -------------------------
@@ -651,7 +651,7 @@ fn mutate_from_root(
     store: &mut TemplateIrStore,
     expressions: &mut AstExpressionBuilder,
     root: TemplateIrNodeId,
-) -> Result<CountingMutator, CompilerError> {
+) -> Result<CountingMutator, InfrastructureFailure> {
     let mut mutator = CountingMutator::default();
     mutate_finalized_tir_body_root_expression_payloads(store, expressions, root, &mut mutator)?;
     Ok(mutator)
@@ -734,7 +734,7 @@ fn collect_nested_expression_payloads(
     expression: ExprId,
     store: &TemplateIrStore,
     expressions: &AstExpressionBuilder,
-) -> Result<Vec<ExprId>, CompilerError> {
+) -> Result<Vec<ExprId>, InfrastructureFailure> {
     let mut payloads = Vec::new();
     let view = expressions
         .view(expression)
@@ -906,7 +906,7 @@ fn mutates_runtime_slot_plan_wrapper_source_and_site_render_piece() {
 }
 
 #[test]
-fn reports_missing_runtime_slot_site_as_compiler_error() {
+fn reports_missing_runtime_slot_site_as_infrastructure_failure() {
     let mut store = TemplateIrStore::new();
     let mut expressions = AstExpressionBuilder::new().unwrap();
 
@@ -925,7 +925,7 @@ fn reports_missing_runtime_slot_site_as_compiler_error() {
     let error = mutate_from_root(&mut store, &mut expressions, root)
         .expect_err("missing slot site should fail");
 
-    assert!(error.msg.contains("missing runtime slot site"));
+    assert!(error.message.contains("missing runtime slot site"));
 }
 
 // -------------------------
@@ -1136,7 +1136,7 @@ fn replacement_preserves_other_context_dimensions_and_rejects_duplicate_sites() 
         ],
     )
     .expect_err("duplicate replacement sites must fail before allocation");
-    assert!(error.msg.contains("duplicate expression site"));
+    assert!(error.message.contains("duplicate expression site"));
 }
 
 #[test]
@@ -1580,14 +1580,14 @@ fn view_walker_reports_missing_insert_contribution_template() {
         .expect_err("a missing insert contribution template must fail explicitly");
 
     assert!(
-        error.msg.contains("root_template"),
+        error.message.contains("root_template"),
         "error must come from the required insert view root resolution: {}",
-        error.msg,
+        error.message,
     );
     assert!(
-        error.msg.contains("missing"),
+        error.message.contains("missing"),
         "error must report the missing insert template: {}",
-        error.msg
+        error.message
     );
 }
 

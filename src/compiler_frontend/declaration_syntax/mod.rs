@@ -19,6 +19,7 @@ pub(crate) mod record_body;
 pub(crate) mod signature_members;
 pub(crate) mod r#struct;
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -50,19 +51,17 @@ pub(crate) struct DeclarationCursor<'a> {
 }
 
 impl<'a> DeclarationCursor<'a> {
-    pub(crate) fn new(
-        cursor: TokenCursor<'a>,
-    ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
+    pub(crate) fn new(cursor: TokenCursor<'a>) -> Self {
         let index = cursor.parser_position();
         let length = cursor.parser_length();
         let current_tag = cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF);
-        Ok(Self {
+        Self {
             cursor,
             index,
             length,
             current_tag,
             payload_origin: None,
-        })
+        }
     }
 
     pub(crate) fn with_payload_origin(mut self, origin: Option<TokenPayloadOrigin<'a>>) -> Self {
@@ -88,12 +87,14 @@ impl<'a> DeclarationCursor<'a> {
         &self,
         index: usize,
         destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::InfrastructureFailure>
+    {
         if index < self.cursor.parser_window_start() || index >= self.length {
             return Ok(None);
         }
         let token = self.cursor.parser_token_at(index).ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "indexed symbol token is missing its canonical source view",
             )
         })?;
@@ -170,7 +171,8 @@ impl<'a> DeclarationCursor<'a> {
         &self,
         token: TokenRef<'a>,
         destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::InfrastructureFailure>
+    {
         let Some(id) = token.string_id() else {
             return Ok(None);
         };
@@ -178,9 +180,10 @@ impl<'a> DeclarationCursor<'a> {
             return Ok(Some(id));
         };
         let spelling = origin.strings.try_resolve(id).ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
-                "donor string handle {id:?} is outside its issuing frozen table"
-            ))
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("donor string handle {id:?} is outside its issuing frozen table"),
+            )
         })?;
         Ok(Some(destination.intern(spelling)))
     }
@@ -189,18 +192,21 @@ impl<'a> DeclarationCursor<'a> {
     pub(crate) fn current_string_id_in(
         &self,
         destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::InfrastructureFailure>
+    {
         if self.current_tag != TokenTag::SYMBOL {
             return Ok(None);
         }
         let token = self.current_token_ref().ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "symbol token is missing its canonical source view",
             )
         })?;
         if token.string_id().is_none() {
             return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "canonical symbol token is missing its payload",
                 ),
             );
@@ -212,18 +218,21 @@ impl<'a> DeclarationCursor<'a> {
     pub(crate) fn peek_next_string_id_in(
         &self,
         destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::CompilerError> {
+    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::InfrastructureFailure>
+    {
         if self.peek_next_tag() != Some(TokenTag::SYMBOL) {
             return Ok(None);
         }
         let token = self.peek_next_token_ref().ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "next symbol token is missing its canonical source view",
             )
         })?;
         if token.string_id().is_none() {
             return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "canonical next symbol token is missing its payload",
                 ),
             );

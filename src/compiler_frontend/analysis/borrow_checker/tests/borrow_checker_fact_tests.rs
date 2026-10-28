@@ -18,6 +18,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    SharedMutableConflictView, UseOfUninitializedLocalView,
+};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::{
@@ -47,7 +50,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     param_with_type_id, symbol, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_kind, assert_invalid_mutable_access_reason, run_borrow_checker,
+    assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
@@ -766,8 +769,6 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
 
 #[test]
 fn mutable_alias_final_read_in_same_statement_blocks_source_read() {
-    use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
-
     for comparison in ["data is writer", "writer is data"] {
         let source = format!("data ~= 1\nwriter ~= data\nsame = {comparison}\n");
         let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
@@ -780,14 +781,12 @@ fn mutable_alias_final_read_in_same_statement_blocks_source_read() {
         );
         let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
             .expect_err("exclusive holder is still active during its final-read statement");
-        assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+        assert_borrow_error_view::<SharedMutableConflictView>(error);
     }
 }
 
 #[test]
 fn mutable_alias_reachable_write_keeps_loan_active() {
-    use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
-
     for body in [
         "snapshot = copy data\nif flag:\nwriter = 2\n;\n",
         "observed = writer\nsnapshot = copy data\nif flag:\nwriter = 2\n;\n",
@@ -804,7 +803,7 @@ fn mutable_alias_reachable_write_keeps_loan_active() {
         );
         let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
             .expect_err("a reachable write through the holder keeps its exclusive loan active");
-        assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+        assert_borrow_error_view::<SharedMutableConflictView>(error);
     }
 }
 
@@ -1121,9 +1120,7 @@ fn check_unequal_path_alias_activity(
     mutable_alias: bool,
     later_branch_use: bool,
 ) {
-    use crate::compiler_frontend::compiler_messages::{
-        BorrowDiagnosticKind, InvalidMutableAccessReason,
-    };
+    use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
     use crate::compiler_frontend::tests::hir_fixture_support::{
         bool_expression, expression, statement,
     };
@@ -1294,10 +1291,10 @@ fn check_unequal_path_alias_activity(
     if later_branch_use {
         let error = report.expect_err("one later-use branch must keep the alias active");
         if mutable_alias {
-            assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+            assert_borrow_error_view::<SharedMutableConflictView>(error);
         } else {
             assert_invalid_mutable_access_reason(
-                &error,
+                error,
                 InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
             );
         }
@@ -3321,8 +3318,6 @@ fn catch_handler_numeric_failure_returns_outward_without_success_local() {
 
 #[test]
 fn catch_handler_cannot_load_never_initialised_success_call_result() {
-    use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
-
     let source = "identity |input String| -> String:\nreturn input\n;\n\
                   combine |text String, count I32| -> String:\nreturn text\n;\n\
                   probe |input String, trigger I32| -> String:\n\
@@ -3388,7 +3383,7 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
     );
     let error = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect_err("the handler must not read the skipped outer call's result");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
+    assert_borrow_error_view::<UseOfUninitializedLocalView>(error);
 }
 
 #[test]

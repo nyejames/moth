@@ -109,7 +109,7 @@ pub(crate) enum UseKind {
     /// A write access paired with an explicit HIR local definition or place update.
     BindingWrite(BindingDestination),
     Write,
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    // HIR extraction emits Read, Write and BindingWrite uses; the model retains explicit loan observations.
     #[allow(dead_code)]
     LoanObservation,
 }
@@ -156,7 +156,7 @@ pub(crate) struct Loan {
 }
 
 /// Why a normalized loan stops being usable.
-// Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+// HIR extraction does not emit loan-kill events; bounded oracle generation supplies explicit kills.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KillReason {
@@ -207,13 +207,13 @@ pub(crate) struct Call {
 /// A rebinding preserves an explicit value meaning instead of mutating an old origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RebindValue {
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // Bounded oracle generation uses this rebind form; HIR extraction currently emits AliasFromPlace.
     #[allow(dead_code)]
     Fresh(ValueOriginId),
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // The normalized solver accepts this form; HIR extraction currently emits AliasFromPlace.
     #[allow(dead_code)]
     Alias(Box<[ValueOriginId]>),
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // HIR extraction uses this when an rvalue rebind preserves a source place's provenance.
     #[allow(dead_code)]
     AliasFromPlace(PlaceId),
 }
@@ -225,7 +225,7 @@ pub(crate) enum EventKind {
         destination: BindingDestination,
         origin: ValueOriginId,
     },
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // Explicit-origin alias events are supported by normalized inputs; HIR extraction emits FromPlace variants.
     #[allow(dead_code)]
     Alias {
         source: PlaceId,
@@ -236,7 +236,7 @@ pub(crate) enum EventKind {
         source: PlaceId,
         destination: BindingDestination,
     },
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // Explicit-origin exclusive aliases are supported by normalized inputs; HIR extraction emits FromPlace variants.
     #[allow(dead_code)]
     ExclusiveAlias {
         source: PlaceId,
@@ -257,7 +257,7 @@ pub(crate) enum EventKind {
         destination: BindingDestination,
         origin: ValueOriginId,
     },
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // HIR extraction emits this event to preserve explicit value provenance across a rebind.
     #[allow(dead_code)]
     Rebind {
         destination: BindingDestination,
@@ -288,12 +288,12 @@ pub(crate) enum EventKind {
     Access {
         use_id: UseId,
     },
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // HIR extraction does not emit loan-issue events; bounded oracle generation does.
     #[allow(dead_code)]
     LoanIssue {
         loan: LoanId,
     },
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // HIR extraction does not emit loan-kill events; bounded oracle generation does.
     #[allow(dead_code)]
     LoanKill {
         loan: LoanId,

@@ -23,9 +23,8 @@
 // Each enabled service is reached through the re-exports below, so no submodule is a crate-wide
 // path and no caller can enter part-way through its stage sequence.
 mod config;
-// WHY: The direct Moth template service is accepted design but has no production consumer today.
-// Real `.mtf` files use the integrated Stage 0 `module_preparation`/`canonical` dependency path,
-// so this service compiles only for its own tests until a consumer lands.
+// WHY: production `.mtf` compilation uses the integrated Stage 0
+// `module_preparation`/`canonical` dependency path; this direct service is used only by its tests.
 #[cfg(test)]
 mod moth_template;
 
@@ -33,10 +32,8 @@ pub(crate) use config::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest,
     FoldedConfigDeclaration, compile_config_source,
 };
-// WHY: The direct Moth template service is accepted design but has no production consumer today.
-// Real `.mtf` files use the integrated Stage 0 `module_preparation`/`canonical` dependency path,
-// so this re-export compiles only for its own tests until a consumer lands.
 #[cfg(test)]
 pub(crate) use moth_template::{
-    MothTemplateCompilationRequest, MothTemplateFileValueBundle, compile_moth_template_source,
+    MothTemplateCompilationFailure, MothTemplateCompilationRequest, MothTemplateFileValueBundle,
+    compile_moth_template_source,
 };

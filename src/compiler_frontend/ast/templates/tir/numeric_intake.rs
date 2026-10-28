@@ -17,6 +17,7 @@
 //! - a position node carries no expression until completion installs the completed value
 //! - body-root completion drains by owning numeric domain, so no probe walks a template subtree
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::HashMap;
 
 use crate::compiler_frontend::ast::ScopeContext;
@@ -45,7 +46,7 @@ use crate::compiler_frontend::ast::templates::tir::node::{
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -398,7 +399,7 @@ impl TemplateIrStore {
         expected: ExpectedType,
         value_mode: ValueMode,
         suffix: DeferredExpressionSuffix,
-    ) -> Result<NumericTemplateIntakeSiteId, CompilerError> {
+    ) -> Result<NumericTemplateIntakeSiteId, InfrastructureFailure> {
         debug_assert!(
             items.iter().any(is_pending_numeric_intake_item),
             "numeric template intake registration requires at least one pending numeric item"
@@ -413,9 +414,10 @@ impl TemplateIrStore {
             .get(position.node_id().index())
             .is_some_and(|node| node.sites[slot].is_some())
         {
-            return Err(CompilerError::compiler_error(format!(
-                "numeric template intake position {position:?} was registered twice."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("numeric template intake position {position:?} was registered twice."),
+            ));
         }
 
         let site = self.next_numeric_template_intake_site_id();
@@ -563,7 +565,7 @@ impl TemplateIrStore {
         &mut self,
         node: TemplateIrNodeId,
         item: Declaration,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let record = self
             .numeric_intake_index
             .nodes
@@ -572,19 +574,21 @@ impl TemplateIrStore {
             .map(|index| &mut self.retained_collection_headers[index])
             .filter(|record| record.state == NumericTemplateIntakeState::Retained)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "no retained collection header at {node:?} awaits a pending item."
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("no retained collection header at {node:?} awaits a pending item."),
+                )
             })?;
         let bindings = record.bindings.as_mut().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "retained collection header at {node:?} lost its bindings before its pending item."
             ))
         })?;
         if bindings.item.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "retained collection header at {node:?} received its pending item twice."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("retained collection header at {node:?} received its pending item twice."),
+            ));
         }
         bindings.item = Some(item);
         Ok(())
@@ -597,7 +601,7 @@ impl TemplateIrStore {
     fn pending_collection_bindings(
         &mut self,
         node: TemplateIrNodeId,
-    ) -> Result<Option<Box<LoopBindings>>, CompilerError> {
+    ) -> Result<Option<Box<LoopBindings>>, InfrastructureFailure> {
         let Some(record) = self
             .numeric_intake_index
             .nodes
@@ -612,9 +616,12 @@ impl TemplateIrStore {
             return Ok(None);
         };
         if record.pending_item.is_some() && bindings.item.is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "collection loop header at {node:?} completed before its pending item was installed."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "collection loop header at {node:?} completed before its pending item was installed."
+                ),
+            ));
         }
         record.state = NumericTemplateIntakeState::Installed;
         Ok(Some(bindings))
@@ -631,11 +638,14 @@ impl TemplateIrStore {
         node_id: TemplateIrNodeId,
         body_root: TemplateIrNodeId,
         render_unit: RetainedControlFlowRenderUnit,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.get_node(body_root).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "retained control-flow position {node_id} received missing render body {body_root}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "retained control-flow position {node_id} received missing render body {body_root}."
+                ),
+            ));
         }
 
         let aggregate_wrapper = match render_unit {
@@ -643,9 +653,12 @@ impl TemplateIrStore {
             RetainedControlFlowRenderUnit::Loop { aggregate_wrapper } => Some(aggregate_wrapper),
         };
         if aggregate_wrapper.is_some_and(|wrapper| self.get_node(wrapper).is_none()) {
-            return Err(CompilerError::compiler_error(format!(
-                "retained control-flow position {node_id} received a missing aggregate wrapper."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "retained control-flow position {node_id} received a missing aggregate wrapper."
+                ),
+            ));
         }
 
         let node = self.node_mut(node_id)?;
@@ -671,22 +684,31 @@ impl TemplateIrStore {
                 },
             ) => (body, render_unit, false),
             _ => {
-                return Err(CompilerError::compiler_error(format!(
-                    "render-unit preparation targeted non-control-flow retained position {node_id}."
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "render-unit preparation targeted non-control-flow retained position {node_id}."
+                    ),
+                ));
             }
         };
 
         if stored_render_unit.is_some() {
-            return Err(CompilerError::compiler_error(format!(
-                "retained control-flow position {node_id} received render-unit preparation twice."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "retained control-flow position {node_id} received render-unit preparation twice."
+                ),
+            ));
         }
 
         if needs_loop != matches!(render_unit, RetainedControlFlowRenderUnit::Loop { .. }) {
-            return Err(CompilerError::compiler_error(format!(
-                "retained control-flow position {node_id} received a render unit with the wrong shape."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "retained control-flow position {node_id} received a render unit with the wrong shape."
+                ),
+            ));
         }
 
         *body = body_root;
@@ -797,24 +819,29 @@ impl TemplateIrStore {
         site: NumericTemplateIntakeSiteId,
         value: ExprId,
         selector_pattern: Option<MatchPattern>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let Some(record) = self.numeric_template_intakes.get(site.index()) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store has no numeric template intake site {site}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("TIR store has no numeric template intake site {site}."),
+            ));
         };
 
         match record.state {
             NumericTemplateIntakeState::Taken => {}
             NumericTemplateIntakeState::Retained => {
-                return Err(CompilerError::compiler_error(format!(
-                    "numeric template intake site {site} was not taken before installation."
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "numeric template intake site {site} was not taken before installation."
+                    ),
+                ));
             }
             NumericTemplateIntakeState::Installed => {
-                return Err(CompilerError::compiler_error(format!(
-                    "numeric template intake site {site} was installed twice."
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("numeric template intake site {site} was installed twice."),
+                ));
             }
         }
 
@@ -832,24 +859,30 @@ impl TemplateIrStore {
         position: NumericTemplateIntakePosition,
         value: ExprId,
         selector_pattern: Option<MatchPattern>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let node_id = position.node_id();
 
         let role = match self.get_node(node_id) {
             Some(node) => match &node.kind {
                 TemplateIrNodeKind::RetainedNumericIntake(role) => *role,
                 _ => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "numeric template intake site {site} no longer matches its recorded \
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "numeric template intake site {site} no longer matches its recorded \
                          position."
-                    )));
+                        ),
+                    ));
                 }
             },
             None => {
-                return Err(CompilerError::compiler_error(format!(
-                    "numeric template intake site {site} names a position node that is not in the \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "numeric template intake site {site} names a position node that is not in the \
                      store."
-                )));
+                    ),
+                ));
             }
         };
 
@@ -857,10 +890,13 @@ impl TemplateIrStore {
             // Range operands do not install one by one: the owning body root assembles the range
             // spec from every operand through the shared range policy and installs it with
             // `install_completed_numeric_range_header`.
-            return Err(CompilerError::compiler_error(format!(
-                "numeric template intake site {site} is one operand of a retained range loop \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "numeric template intake site {site} is one operand of a retained range loop \
                  header, which installs through the range-header entry point."
-            )));
+                ),
+            ));
         }
         let render_unit = match role {
             RetainedNumericIntakeRole::HeadExpression { .. }
@@ -885,16 +921,22 @@ impl TemplateIrStore {
                 },
                 None,
             ) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "numeric template intake site {site} completed an option-present selector \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "numeric template intake site {site} completed an option-present selector \
                      without its capture pattern."
-                )));
+                    ),
+                ));
             }
             (_, Some(_)) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "numeric template intake site {site} received a capture pattern for a \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "numeric template intake site {site} received a capture pattern for a \
                      position that takes none."
-                )));
+                    ),
+                ));
             }
             (_, None) => None,
         };
@@ -903,7 +945,8 @@ impl TemplateIrStore {
         let collection_bindings = match role {
             RetainedNumericIntakeRole::LoopCollection { .. } => {
                 let bindings = self.pending_collection_bindings(node_id)?.ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "collection loop iterable completion lost the header's concrete bindings.",
                     )
                 })?;
@@ -951,10 +994,13 @@ impl TemplateIrStore {
                         })
                     }
                     (TemplateBranchSelectorKind::OptionPresent, None) => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "numeric template intake site {site} completed an option-present \
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "numeric template intake site {site} completed an option-present \
                              selector without its capture pattern."
-                        )));
+                            ),
+                        ));
                     }
                 };
 
@@ -971,7 +1017,7 @@ impl TemplateIrStore {
                 let aggregate_wrapper =
                     require_retained_loop_aggregate_wrapper(render_unit, node_id)?;
                 let bindings = collection_bindings.ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "numeric template intake site {site} completed a collection loop iterable \
                          without its header bindings."
                     ))
@@ -989,10 +1035,13 @@ impl TemplateIrStore {
             }
 
             RetainedNumericIntakeRole::LoopRange { .. } => {
-                return Err(CompilerError::compiler_error(format!(
-                    "numeric template intake site {site} is one operand of a retained range loop \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "numeric template intake site {site} is one operand of a retained range loop \
                      header, which installs through the range-header entry point."
-                )));
+                    ),
+                ));
             }
         };
 
@@ -1032,7 +1081,7 @@ impl TemplateIrStore {
         let node_id = self.retained_range_headers
             .get(header_index)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "TIR range-header completion targeted a position without a retained header row.",
                 )
             })?
@@ -1054,7 +1103,8 @@ impl TemplateIrStore {
             };
 
             if !completed {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR range-header completion installed a header whose retained operand was \
                      never completed.",
                 )
@@ -1062,12 +1112,13 @@ impl TemplateIrStore {
             }
         }
 
-        // Phase 1: take the parse-time header data. The borrow ends before the node write below.
+        // Take the parse-time header data. The borrow ends before the node write below.
         let (end_kind, omitted_start_span, start, end, step, bindings) = {
             let header = &mut self.retained_range_headers[header_index];
 
             if header.state != NumericTemplateIntakeState::Retained {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR range-header completion installed a retained range loop header twice.",
                 )
                 .into());
@@ -1080,7 +1131,8 @@ impl TemplateIrStore {
                 built_operands,
             }) = header.completion.take()
             else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR range-header completion reached a bound range header through the operand \
                      entry point; a bound header installs with its finished spec and counter \
                      declaration.",
@@ -1091,7 +1143,8 @@ impl TemplateIrStore {
             let [built_start, built_end, built_step] = *built_operands;
             let start = completed_start.or(built_start);
             let end = completed_end.or(built_end).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR range-header completion reached a range loop header without an end \
                      operand.",
                 )
@@ -1138,7 +1191,8 @@ impl TemplateIrStore {
                     record.state = NumericTemplateIntakeState::Installed;
                 }
                 NumericTemplateIntakeState::Retained => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "TIR range-header completion installed a header whose operand was never \
                          taken for completion.",
                     )
@@ -1172,7 +1226,8 @@ impl TemplateIrStore {
             .and_then(|node| node.header)
             .map(|id| id.0)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR bound range-header completion targeted a position without a retained \
                      header row.",
                 )
@@ -1183,7 +1238,8 @@ impl TemplateIrStore {
             let header = &mut self.retained_range_headers[header_index];
 
             if header.state != NumericTemplateIntakeState::Retained {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR bound range-header completion installed a retained range loop header \
                      twice.",
                 )
@@ -1193,7 +1249,8 @@ impl TemplateIrStore {
             let Some(RetainedRangeCompletion::RetainedCounter { counter, index }) =
                 header.completion.take()
             else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR bound range-header completion reached a header that owns its own operand \
                      slots.",
                 )
@@ -1252,12 +1309,13 @@ impl TemplateIrStore {
     fn range_header_render_data(
         &self,
         node_id: TemplateIrNodeId,
-    ) -> Result<RetainedRangeRenderData, CompilerError> {
+    ) -> Result<RetainedRangeRenderData, InfrastructureFailure> {
         let role = self
             .retained_numeric_intake_role(node_id)
             .copied()
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR range-header completion found a position that is no longer retained.",
                 )
             })?;
@@ -1273,7 +1331,8 @@ impl TemplateIrStore {
                     node_id,
                 )?,
             }),
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR range-header completion found a retained position that is not a range header.",
             )),
         }
@@ -1297,7 +1356,7 @@ impl TemplateIrStore {
         &mut self,
         source_node_id: TemplateIrNodeId,
         copied_node_id: TemplateIrNodeId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.retained_numeric_intake_role(copied_node_id).is_none() {
             return Ok(());
         }
@@ -1318,7 +1377,8 @@ impl TemplateIrStore {
         });
 
         if source.sites.iter().all(Option::is_none) && !has_pending_retained_counter_header {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR copy duplicated a retained position whose source owns neither a numeric \
                  template intake record nor a pending retained-counter range header.",
             ));
@@ -1351,7 +1411,8 @@ impl TemplateIrStore {
             increment_ast_counter(AstCounter::TirNumericCopyRowsInspected);
             let source_row = &self.retained_collection_headers[index];
             let bindings = source_row.bindings.clone().ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR copy duplicated a collection loop header that was already installed.",
                 )
             })?;
@@ -1366,7 +1427,8 @@ impl TemplateIrStore {
             let source_header = &self.retained_range_headers[header.0];
             let domain = source_header.domain;
             let Some(completion) = source_header.completion.clone() else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR copy duplicated a range loop header that was already installed.",
                 ));
             };
@@ -1416,30 +1478,35 @@ impl TemplateIrStore {
 fn require_retained_control_flow_render_unit(
     role: RetainedNumericIntakeRole,
     node_id: TemplateIrNodeId,
-) -> Result<RetainedControlFlowRenderUnit, CompilerError> {
+) -> Result<RetainedControlFlowRenderUnit, InfrastructureFailure> {
     let render_unit = match role {
         RetainedNumericIntakeRole::ConditionalLoopCondition { render_unit, .. }
         | RetainedNumericIntakeRole::LoopRange { render_unit, .. }
         | RetainedNumericIntakeRole::LoopCollection { render_unit, .. }
         | RetainedNumericIntakeRole::ConditionalSelector { render_unit, .. } => render_unit,
         RetainedNumericIntakeRole::HeadExpression { .. } => {
-            return Err(CompilerError::compiler_error(format!(
-                "non-control-flow retained position {node_id} requested a render unit."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("non-control-flow retained position {node_id} requested a render unit."),
+            ));
         }
     };
 
     let Some(render_unit) = render_unit else {
-        return Err(CompilerError::compiler_error(format!(
-            "retained control-flow position {node_id} has no prepared render unit."
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("retained control-flow position {node_id} has no prepared render unit."),
+        ));
     };
 
     let expects_loop = !matches!(role, RetainedNumericIntakeRole::ConditionalSelector { .. });
     if expects_loop != matches!(render_unit, RetainedControlFlowRenderUnit::Loop { .. }) {
-        return Err(CompilerError::compiler_error(format!(
-            "retained control-flow position {node_id} has a render unit with the wrong shape."
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "retained control-flow position {node_id} has a render unit with the wrong shape."
+            ),
+        ));
     }
 
     Ok(render_unit)
@@ -1448,14 +1515,16 @@ fn require_retained_control_flow_render_unit(
 fn require_retained_loop_aggregate_wrapper(
     render_unit: Option<RetainedControlFlowRenderUnit>,
     node_id: TemplateIrNodeId,
-) -> Result<TemplateIrNodeId, CompilerError> {
+) -> Result<TemplateIrNodeId, InfrastructureFailure> {
     match render_unit {
         Some(RetainedControlFlowRenderUnit::Loop { aggregate_wrapper }) => Ok(aggregate_wrapper),
-        Some(RetainedControlFlowRenderUnit::Conditional) => Err(CompilerError::compiler_error(
+        Some(RetainedControlFlowRenderUnit::Conditional) => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             format!("retained loop position {node_id} received a conditional render unit."),
         )),
-        None => Err(CompilerError::compiler_error(format!(
-            "retained loop position {node_id} has no prepared render unit."
-        ))),
+        None => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("retained loop position {node_id} has no prepared render unit."),
+        )),
     }
 }

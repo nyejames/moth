@@ -47,11 +47,15 @@ use crate::compiler_frontend::ast::{
     statements::value_production::{ValueReceiverKind, try_parse_value_block_at_receiver},
 };
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow, names_declarations, project_config, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
-    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidFallibleHandlingReason, TypeMismatchContext, ValueReceiverContext,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, DiagnosticToken, InvalidCollectionTypeReason,
+    InvalidConfigReason, InvalidDeclarationReason, InvalidFallibleHandlingReason,
+    TypeMismatchContext, ValueReceiverContext,
 };
 
 use crate::compiler_frontend::build_config::BuildInputName;
@@ -83,7 +87,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 ///
 /// A declaration initializer or signature default can require a temporary substream over a
 /// frozen file table. If that retained-table invariant fails, the error must reach module
-/// emission as `CompilerError`, not become an authored declaration diagnostic.
+/// emission as `InfrastructureFailure`, not become an authored declaration diagnostic.
 type DeclarationResult<T> = Result<T, ExpressionParseError>;
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.
@@ -192,7 +196,10 @@ fn register_pending_declaration(
     annotation_type_id: Option<TypeId>,
 ) -> DeclarationResult<NumericContinuationId> {
     let name = path_fork.component(qualified_name).ok_or_else(|| {
-        CompilerError::compiler_error("a body-local declaration has no terminal declaration name")
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a body-local declaration has no terminal declaration name",
+        )
     })?;
     let directed_shape = directed_recipe_shape(
         context,
@@ -269,7 +276,7 @@ pub(crate) fn new_declaration(
         token_stream.peek_next_tag(),
         Some(TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::TYPE)
     ) {
-        return Err(CompilerDiagnostic::invalid_declaration(
+        return Err(names_declarations::invalid_declaration(
             InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
             Some(symbol_id),
             Some(token_stream.current_span()),
@@ -284,7 +291,7 @@ pub(crate) fn new_declaration(
     )?;
 
     if is_reserved_builtin_symbol(&declaration_name) {
-        return Err(CompilerDiagnostic::invalid_declaration(
+        return Err(names_declarations::invalid_declaration(
             InvalidDeclarationReason::ReservedBuiltinName,
             Some(symbol_id),
             Some(token_stream.current_span()),
@@ -304,7 +311,7 @@ pub(crate) fn new_declaration(
 
     let qualified_name = path_fork
         .try_intern_child(context.scope, symbol_id)
-        .expect("path table exhausted while creating declaration scope");
+        .ok_or_else(token_lexical::logical_path_capacity)?;
 
     if let Some(error) = check_signature_common_mistake(token_stream) {
         return Err(error.into());
@@ -316,7 +323,7 @@ pub(crate) fn new_declaration(
     let mut span_builder = ExtendedSpanBuilder::new();
     let declaration_syntax = {
         let (syntax, next_index) = {
-            let mut declaration_cursor = token_stream.declaration_cursor()?;
+            let mut declaration_cursor = token_stream.declaration_cursor();
             let syntax = parse_declaration_syntax(
                 &mut declaration_cursor,
                 symbol_id,
@@ -472,25 +479,23 @@ pub fn resolve_declaration_syntax(
         && (config_resolution_context || source_build_config_context)
         && build_input_type_from_parsed(&qualifier.type_annotation).is_none()
     {
-        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+        return Err(project_config::invalid_config_reason(
             path_fork.component(qualified_name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
             parsed_type_span(&qualifier.type_annotation),
-        );
-        diagnostic.primary_span = parsed_type_span(&qualifier.type_annotation);
-        return Err(diagnostic.into());
+        )
+        .into());
     }
     if let Some(qualifier) = &declaration_syntax.config_qualifier
         && !config_resolution_context
         && !source_build_config_context
     {
-        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+        return Err(project_config::invalid_config_reason(
             path_fork.component(qualified_name),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
             qualifier.qualifier_span,
-        );
-        diagnostic.primary_span = qualifier.qualifier_span;
-        return Err(diagnostic.into());
+        )
+        .into());
     }
 
     // ----------------------------
@@ -498,7 +503,7 @@ pub fn resolve_declaration_syntax(
     // ----------------------------
     let value_mode = declaration_syntax.value_mode();
     if declaration_syntax.binding_mode.is_mutable() && context.kind.is_constant_context() {
-        return Err(CompilerDiagnostic::invalid_declaration(
+        return Err(names_declarations::invalid_declaration(
             InvalidDeclarationReason::ConstantCannotBeMutable,
             None,
             declaration_syntax.span,
@@ -524,8 +529,7 @@ pub fn resolve_declaration_syntax(
             Some(&*context),
             type_interner.environment_mut_for_derived_types(),
             const_values,
-        )
-        .map_err(|diagnostic| diagnostic.into_diagnostic())?;
+        )?;
 
         let mut initializer_stream = declaration_initializer_stream(
             source_owner,
@@ -535,7 +539,7 @@ pub fn resolve_declaration_syntax(
 
         // Shorthand requires an immediate collection literal initializer.
         if initializer_stream.current_tag() != TokenTag::OPEN_CURLY {
-            return Err(CompilerDiagnostic::invalid_collection_type(
+            return Err(calls_data::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandNonLiteralRhs,
                 Some(initializer_stream.current_span()),
             )
@@ -624,7 +628,7 @@ pub fn resolve_declaration_syntax(
         if declaration_syntax.binding_mode.is_compile_time()
             && !initializer_is_compile_time_constant
         {
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
+            return Err(choices_control_flow::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(qualified_name),
                 declaration_syntax.span,
@@ -710,33 +714,38 @@ pub fn resolve_declaration_syntax(
         }));
     }
     if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
-        let name = path_fork.component(qualified_name).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "source #Config declaration has no terminal declaration name",
+        let name = path_fork.component(qualified_name).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "source #Config declaration has no terminal declaration name"
             )
-        })?;
+        });
         let name_text = string_table.resolve(name);
         let input_name = BuildInputName::new(name_text).map_err(|_| {
-            CompilerError::compiler_error(format!(
-                "source #Config declaration has invalid build-input name '{name_text}'"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("source #Config declaration has invalid build-input name '{name_text}'"),
+            )
         })?;
+        let config_span = declaration_syntax.config_qualifier.as_ref().map_or_else(
+            || declaration_syntax.span,
+            |qualifier| qualifier.qualifier_span,
+        );
         let resolved = context
             .shared
             .source_build_config_values
             .as_ref()
             .and_then(|values| values.get(&input_name))
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "source #Config declaration '{name_text}' has no resolved boundary value"
-                ))
+                project_config::invalid_config_reason(
+                    Some(name),
+                    crate::compiler_frontend::compiler_messages::InvalidConfigReason::MissingConfigInput,
+                    config_span,
+                )
             })?;
         let value = expression_for_resolved_build_config_value(
             resolved,
-            declaration_syntax.config_qualifier.as_ref().map_or_else(
-                || declaration_syntax.span,
-                |qualifier| qualifier.qualifier_span,
-            ),
+            config_span,
             type_interner,
             expression_builder,
             const_values,
@@ -767,10 +776,10 @@ pub fn resolve_declaration_syntax(
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
             let constant_context = ScopeContext::new_constant(qualified_name, context);
-            let mut field_warnings = Vec::new();
+            let mut field_warnings = DiagnosticBag::new();
             let field_syntax = {
                 let (field_syntax, next_index) = {
-                    let mut declaration_cursor = initializer_stream.declaration_cursor()?;
+                    let mut declaration_cursor = initializer_stream.declaration_cursor();
                     let field_syntax = parse_struct_shell(
                         &mut declaration_cursor,
                         string_table,
@@ -783,11 +792,12 @@ pub fn resolve_declaration_syntax(
                 initializer_stream.set_position(next_index)?;
                 field_syntax
             };
-            for warning in field_warnings {
+            for warning in field_warnings.into_diagnostics() {
                 context.emit_warning(warning);
             }
             let source_owner = source_owner.ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "struct field defaults have no canonical source token owner",
                 )
             })?;
@@ -812,7 +822,7 @@ pub fn resolve_declaration_syntax(
             ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
             // A struct definition is nominal declaration syntax, never a foldable initializer.
             if declaration_syntax.binding_mode.is_compile_time() {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                return Err(choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                     path_fork.component(qualified_name),
                     declaration_syntax.span,
@@ -919,7 +929,8 @@ pub fn resolve_declaration_syntax(
                         return Ok(DeclarationLowering::PendingNumeric(continuation));
                     }
                     Ok(ParsedReceiverValue::NeedsSlotInference { .. }) => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "a declaration initializer receiver knows its slot types; a value \
                              block cannot ask for slot inference",
                         )
@@ -1029,7 +1040,7 @@ pub fn resolve_declaration_syntax(
     )?;
 
     if declaration_syntax.binding_mode.is_compile_time() && !initializer_is_compile_time_constant {
-        return Err(CompilerDiagnostic::compile_time_evaluation_error(
+        return Err(choices_control_flow::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
             path_fork.component(qualified_name),
             declaration_syntax.span,
@@ -1051,7 +1062,7 @@ pub fn resolve_declaration_syntax(
             )
             .is_some()
     {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
             Some(initializer_stream.current_span()),
         )
@@ -1071,7 +1082,7 @@ pub fn resolve_declaration_syntax(
                 expression_builder.view(parsed_initializer)?.operation()
             && items.len() == 0
         {
-            return Err(CompilerDiagnostic::invalid_collection_type(
+            return Err(calls_data::invalid_collection_type(
                 InvalidCollectionTypeReason::EmptyImmutableFixedCollection,
                 expression_builder.view(parsed_initializer)?.span(),
             )
@@ -1108,13 +1119,13 @@ fn ensure_initializer_stream_ends(
         let found = initializer_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
+                InfrastructureFailure::malformed_token_projection(
                     "declaration initializer diagnostic",
+                    error,
                 )
             })?
             .unwrap_or_else(|| DiagnosticToken::from_static_tag(initializer_stream.current_tag()));
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             found,
             Some(initializer_stream.current_span()),
         )
@@ -1132,19 +1143,27 @@ fn declaration_initializer_stream<'tokens>(
     initializer_range: Option<TokenRange>,
     declaration_span: Option<SourceSpan>,
 ) -> DeclarationResult<AstCursor<'tokens>> {
-    let range = initializer_range
-        .ok_or_else(|| CompilerError::compiler_error("declaration initializer range is missing"))?;
+    let range = initializer_range.ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "declaration initializer range is missing",
+        )
+    })?;
     let eof_span = declaration_span
         .map(SourceSpan::local)
         .unwrap_or_else(LocalSpan::source_start);
 
     let source_owner = source_owner.ok_or_else(|| {
-        CompilerError::compiler_error("declaration initializer has no canonical source owner")
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "declaration initializer has no canonical source owner",
+        )
     })?;
     let cursor = source_owner.nested_cursor(range).map_err(|error| {
-        ExpressionParseError::from(CompilerError::compiler_error(format!(
-            "declaration initializer range cursor construction failed: {error:?}"
-        )))
+        ExpressionParseError::from(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!("declaration initializer range cursor construction failed: {error:?}"),
+        ))
     })?;
     let source_id = cursor.source_id();
     Ok(cursor.with_synthetic_eof_span(SourceSpan::new(source_id, eof_span)))

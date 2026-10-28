@@ -1,4 +1,4 @@
--- TODO(display): Replace this failure fixture once io.line([: []]) accepts Display-style struct values.
+-- io.line([: []]) does not accept struct values through Display-style coercion.
 -- AST currently rejects struct values passed to io.line([: []]).
 
 Point = |

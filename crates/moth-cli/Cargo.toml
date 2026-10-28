@@ -27,6 +27,7 @@ boracle = ["moth/boracle"]
 boracle_campaign = ["boracle", "moth/boracle_campaign"]
 checked_blocks = ["moth/checked_blocks"]
 async_blocks = ["moth/async_blocks"]
+test_compiler_bug = ["moth/test_compiler_bug"]
 
 [dependencies]
 lappet = { path = "../lappet" }

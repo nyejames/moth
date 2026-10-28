@@ -58,14 +58,15 @@ pub(crate) mod test_support;
 #[cfg(feature = "data_layout_memory_probe")]
 pub(crate) use database::SourceDatabaseRetentionMetrics;
 pub(crate) use database::{
-    FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError,
-    SourceSpanBuilders,
+    FrozenSourceDatabase, SourceCapacityError, SourceDatabase, SourceDatabaseBuilder,
+    SourceDatabaseError, SourceSpanBuilders,
 };
 pub(crate) use frozen_identity::{FrozenIdentityContext, FrozenIdentityHandle};
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;
+#[cfg(test)]
+pub(crate) use span::SpanCapacityReason;
 pub(crate) use span::{
-    ExtendedSpanBuilder, LocalSpan, SourceSpan, SpanCapacityError, SpanCapacityReason,
-    SpanJoinError,
+    ExtendedSpanBuilder, LocalSpan, SourceSpan, SpanCapacityError, SpanJoinError,
 };

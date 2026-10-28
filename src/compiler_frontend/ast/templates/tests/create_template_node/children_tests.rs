@@ -2,8 +2,8 @@ use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTemplateDirectiveReason,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -22,9 +22,7 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         &mut path_fork,
     );
     let wrapper_source_path = wrapper_file_tokens.source_path;
-    let canonical_owner = wrapper_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -57,9 +55,7 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -107,9 +103,7 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -185,9 +179,7 @@ fn children_directive_accepts_const_string_reference() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -272,9 +264,7 @@ fn children_directive_rejects_runtime_values() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -304,13 +294,15 @@ fn children_directive_rejects_runtime_values() {
     .expect_err("children directive should reject runtime values");
     let error = expect_template_diagnostic(error);
 
-    match &error.payload {
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-            ..
-        } => {}
-        payload => panic!("expected invalid template directive payload, found {payload:?}"),
-    }
+    let facts = error
+        .first()
+        .expect("children error should compact to one record")
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("children error should retain typed directive facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateDirectiveCode::InvalidChildrenArgument
+    );
 }
 
 #[test]
@@ -404,9 +396,7 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
@@ -430,13 +420,62 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
     .expect_err("empty $children argument at a template boundary should fail to parse");
     let error = expect_template_diagnostic(error);
 
-    match &error.payload {
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-            ..
-        } => {}
-        payload => panic!(
-            "expected InvalidChildrenArgument for $children argument ending at a template boundary, found {payload:?}"
-        ),
-    }
+    let facts = error
+        .first()
+        .expect("boundary error should compact to one record")
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("boundary error should retain typed directive facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateDirectiveCode::InvalidChildrenArgument,
+        "empty $children boundary arguments should use the children-specific family reason"
+    );
+}
+
+#[test]
+fn children_rewrites_nested_empty_argument_error() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens = template_tokens_from_source(
+        "[$children([$slot()]): body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = new_constant_context(source_path, &path_fork);
+
+    let error = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        &mut expression_builder,
+        &mut const_values,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("nested empty $slot arguments should fail the $children argument");
+    let error = expect_template_diagnostic(error);
+    let facts = error
+        .first()
+        .expect("nested empty-argument failure should compact to one record")
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("nested empty-argument failure should retain directive facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateDirectiveCode::InvalidChildrenArgument
+    );
 }

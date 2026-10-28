@@ -9,6 +9,8 @@
 //! results run those actions before returning. Statement, block and template walkers use
 //! recursion bounded by block and template nesting.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
@@ -39,10 +41,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     walk_tir_view_expression_payloads,
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic,
-    InvalidFallibleHandlingReason,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -73,30 +75,32 @@ impl<'a> From<&'a ExpressionStore> for FailureClassificationExpressions<'a> {
 }
 
 impl<'a> FailureClassificationExpressions<'a> {
-    fn view(self, id: ExprId) -> Result<ExpressionView<'a>, CompilerError> {
+    fn view(self, id: ExprId) -> Result<ExpressionView<'a>, InfrastructureFailure> {
         match self {
             Self::Building(owner) => owner.view(id),
             Self::Frozen(owner) => owner.view(id),
         }
     }
 
-    fn validate_view(self, view: ExpressionView<'_>) -> Result<(), CompilerError> {
+    fn validate_view(self, view: ExpressionView<'_>) -> Result<(), InfrastructureFailure> {
         let owner = match self {
             Self::Building(owner) => owner.store(),
             Self::Frozen(owner) => owner,
         };
         if owner.owner_token() != view.owner_token() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Failure classification received an expression from another owner.",
             ));
         }
         Ok(())
     }
 
-    fn builder(self) -> Result<&'a AstExpressionBuilder, CompilerError> {
+    fn builder(self) -> Result<&'a AstExpressionBuilder, InfrastructureFailure> {
         match self {
             Self::Building(owner) => Ok(owner),
-            Self::Frozen(_) => Err(CompilerError::compiler_error(
+            Self::Frozen(_) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Build-only Template reached frozen failure classification.",
             )),
         }
@@ -140,7 +144,7 @@ pub(crate) fn classify_enclosing_exit_effect<'a>(
     template_ir_store: &TemplateIrStore,
     classification: ExitClassification,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     expression_builder.validate_view(expression)?;
     let purpose = match classification {
@@ -158,7 +162,7 @@ pub(crate) fn pending_body_failure_facts<'a>(
     nodes: &[AstNode],
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<ExpressionFailureFacts, CompilerError> {
+) -> Result<ExpressionFailureFacts, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     let mut state = TraversalState::new(
         TraversalPurpose::PendingSummary(ExpressionFailureFacts::default()),
@@ -168,7 +172,10 @@ pub(crate) fn pending_body_failure_facts<'a>(
 
     // Traversal mutates the selected job's result, never replaces its purpose.
     let TraversalPurpose::PendingSummary(facts) = state.purpose else {
-        unreachable!("pending-summary traversal retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "pending-summary traversal retains its purpose"
+        );
     };
     Ok(facts)
 }
@@ -177,7 +184,7 @@ pub(crate) fn pending_expression_failure_facts<'a>(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<ExpressionFailureFacts, CompilerError> {
+) -> Result<ExpressionFailureFacts, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     expression_builder.validate_view(expression)?;
     let mut state = TraversalState::new(
@@ -188,7 +195,10 @@ pub(crate) fn pending_expression_failure_facts<'a>(
 
     // Traversal mutates the selected job's result, never replaces its purpose.
     let TraversalPurpose::PendingSummary(facts) = state.purpose else {
-        unreachable!("pending-summary traversal retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "pending-summary traversal retains its purpose"
+        );
     };
     Ok(facts)
 }
@@ -219,7 +229,7 @@ pub(crate) fn collect_expression_failure_facts<'a>(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<PendingFailureFacts, CompilerError> {
+) -> Result<PendingFailureFacts, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     expression_builder.validate_view(expression)?;
     let mut state = TraversalState::new(
@@ -230,7 +240,10 @@ pub(crate) fn collect_expression_failure_facts<'a>(
 
     // Traversal mutates the selected job's result, never replaces its purpose.
     let TraversalPurpose::ExpressionProjection(facts) = state.purpose else {
-        unreachable!("expression projection retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "expression projection retains its purpose"
+        );
     };
     Ok(facts)
 }
@@ -239,7 +252,7 @@ pub(crate) fn pending_function_failure_facts<'a>(
     nodes: &[AstNode],
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<PendingFunctionFailureFacts, CompilerError> {
+) -> Result<PendingFunctionFailureFacts, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     let mut state = TraversalState::new(
         TraversalPurpose::FunctionProjection(PendingFunctionFailureFacts::default()),
@@ -249,7 +262,10 @@ pub(crate) fn pending_function_failure_facts<'a>(
 
     // Traversal mutates the selected job's result, never replaces its purpose.
     let TraversalPurpose::FunctionProjection(facts) = state.purpose else {
-        unreachable!("function projection retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "function projection retains its purpose"
+        );
     };
     Ok(facts)
 }
@@ -260,7 +276,7 @@ fn pending_function_failure_facts_with_call_summaries(
     known_function_paths: &HashSet<PathId>,
     summary_dependencies: &RefCell<HashSet<PathId>>,
     expression_builder: FailureClassificationExpressions<'_>,
-) -> Result<PendingFunctionFailureFacts, CompilerError> {
+) -> Result<PendingFunctionFailureFacts, InfrastructureFailure> {
     increment_ast_counter(AstCounter::FailureSummaryBodiesClassified);
     add_ast_counter(AstCounter::FailureSummaryBodyNodesClassified, nodes.len());
     let mut state = TraversalState::new(
@@ -274,7 +290,10 @@ fn pending_function_failure_facts_with_call_summaries(
     );
     classify_nodes(nodes, template_ir_store, &mut state)?;
     let TraversalPurpose::FunctionProjection(facts) = state.purpose else {
-        unreachable!("function projection retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "function projection retains its purpose"
+        );
     };
     Ok(facts)
 }
@@ -298,7 +317,7 @@ impl AstBuiltinFailureSummaries {
         node_groups: &[&[AstNode]],
         template_ir_store: &TemplateIrStore,
         expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let expression_builder = expression_builder.into();
         let mut bodies = HashMap::new();
         for nodes in node_groups {
@@ -443,7 +462,6 @@ impl AstBuiltinFailureSummaries {
         entered: &mut HashSet<PathId>,
     ) -> BuiltinFailureWitness {
         let mut witness = BuiltinFailureWitness {
-            codes: Vec::new(),
             call_spans: Vec::new(),
             origin_span: None,
             origin: BuiltinFailureOriginKind::Operation,
@@ -457,13 +475,11 @@ impl AstBuiltinFailureSummaries {
                 match contributor.source {
                     ImplicitFailureSource::NumericOperation
                     | ImplicitFailureSource::AuthoredCastConversion => {
-                        witness.codes.extend_from_slice(contributor.codes);
                         witness.origin_span = contributor.span;
                         witness.origin = BuiltinFailureOriginKind::Operation;
                         break;
                     }
                     ImplicitFailureSource::CompoundWriteBack { target, .. } => {
-                        witness.codes.extend_from_slice(contributor.codes);
                         witness.origin_span = contributor.span;
                         witness.origin = BuiltinFailureOriginKind::CompoundWriteBack { target };
                         break;
@@ -517,7 +533,7 @@ pub(crate) fn explicit_propagation_catch_diagnostic<'a>(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     expression_builder.validate_view(expression)?;
     if expression
@@ -539,7 +555,7 @@ pub(crate) fn explicit_propagation_catch_diagnostic<'a>(
             }
             _ => InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict,
         };
-        CompilerDiagnostic::invalid_fallible_handling(reason, effect.span())
+        choices_control_flow::invalid_fallible_handling(reason, effect.span())
     }))
 }
 
@@ -696,7 +712,7 @@ fn collect_deferred_check(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if state.projection_mut().is_none() {
         return Ok(());
     }
@@ -726,7 +742,10 @@ fn collect_deferred_check(
 
     // The scoped candidate job cannot turn into a projection or collect another deferred check.
     let TraversalPurpose::PrivateCallCandidates(candidates) = candidates.purpose else {
-        unreachable!("candidate traversal retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "candidate traversal retains its purpose"
+        );
     };
     if let Some(projection) = state.projection_mut() {
         projection
@@ -739,7 +758,10 @@ fn collect_deferred_check(
                     || match facts.disposition {
                         FailureDisposition::HandledByCatch { error_type_id } => error_type_id,
                         FailureDisposition::Pending => {
-                            unreachable!("eligibility check owns a catch")
+                            crate::compiler_bug!(
+                                CompilerStage::AstConstruction,
+                                "eligibility check owns a catch"
+                            )
                         }
                     },
                     |check| check.error_type_id,
@@ -758,7 +780,7 @@ fn classify_expression(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     classify_expression_with_root_protection(
         expression,
         template_ir_store,
@@ -811,7 +833,7 @@ fn classify_expression_with_root_protection<'a>(
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'a>,
     root_protection: RootProtection,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     // Bind the scratch views to their retained owner rather than the caller's short borrow.
     let expression = state.expression_builder.view(expression.id())?;
     // Value blocks and templates can start nested walks while the outer frames are active.
@@ -881,7 +903,7 @@ fn enter_expression<'a>(
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
     steps: &mut Vec<ExpressionStep<'a>>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     let default_facts = ExpressionFailureFacts::default();
     let expression_facts = expression.failure_facts().unwrap_or(&default_facts);
     let ignores_root = matches!(root_protection, RootProtection::Ignore);
@@ -1237,7 +1259,7 @@ fn open_expression_frame<'a>(
     exit: ExpressionExit<'a>,
     relation: ChildRelation,
     children: impl IntoIterator<Item = ExpressionStep<'a>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     state.protected_failure_depth += usize::from(exit.recovers);
     let mut children = children.into_iter().peekable();
     if children.peek().is_none() {
@@ -1262,7 +1284,7 @@ fn finish_expression(
     exit: ExpressionExit<'_>,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if exit.recovers {
         state.protected_failure_depth -= 1;
     }
@@ -1291,10 +1313,10 @@ fn finish_expression(
 fn unwind_expression_steps(
     steps: &mut Vec<ExpressionStep<'_>>,
     mut relation: ChildRelation,
-    mut produced: Result<Option<EnclosingExitEffect>, CompilerError>,
+    mut produced: Result<Option<EnclosingExitEffect>, InfrastructureFailure>,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     while let Some(step) = steps.pop() {
         if let ExpressionStep::Exit {
             exit,
@@ -1320,7 +1342,7 @@ fn classify_expressions(
     expressions: &[ExprId],
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     for expression in expressions {
         if let Some(effect) = classify_expression(
             state.expression_builder.view(*expression)?,
@@ -1337,7 +1359,7 @@ fn classify_value_block(
     block: &ValueBlock,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     match block {
         ValueBlock::If(value_if) => {
             if let Some(effect) = classify_expression(
@@ -1379,7 +1401,7 @@ fn classify_value_block(
                 TraversalPurpose::ExpressionProjection(_) | TraversalPurpose::FunctionProjection(_)
             ) && let FallibleHandling::Handler { body, .. } = &value_catch.handler
             {
-                // Catch completion historically published handler checks before protected checks.
+                // Catch completion publishes handler checks before protected checks.
                 // Protected work contributes no escaping origins, so visiting it second preserves
                 // that diagnostic order without changing the escaping contributor order.
                 classify_catch_handler(
@@ -1446,7 +1468,7 @@ fn classify_catch_handler(
     protected: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     let dead_handler = if state.classifies_exits() {
         false
     } else {
@@ -1462,7 +1484,7 @@ fn catch_protected_expression_can_fail(
     protected: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     state: &TraversalState<'_>,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, InfrastructureFailure> {
     let mut candidates = state.with_purpose(TraversalPurpose::CatchFailureCandidates(Vec::new()));
     classify_expression_with_root_protection(
         protected,
@@ -1472,7 +1494,10 @@ fn catch_protected_expression_can_fail(
     )?;
     let typed_error_seen = candidates.typed_error_seen;
     let TraversalPurpose::CatchFailureCandidates(contributors) = candidates.purpose else {
-        unreachable!("catch candidate traversal retains its purpose");
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "catch candidate traversal retains its purpose"
+        );
     };
     Ok(typed_error_seen
         || contributors
@@ -1484,7 +1509,7 @@ fn classify_match_arm(
     arm: &MatchArm,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     if let Some(guard) = &arm.guard
         && let Some(effect) = classify_expression(
             state.expression_builder.view(*guard)?,
@@ -1501,7 +1526,7 @@ fn classify_declarations(
     declarations: &[Declaration],
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     for declaration in declarations {
         if let Some(initializer) = declaration.value.initializer()
             && let Some(effect) = classify_expression(
@@ -1520,7 +1545,7 @@ fn classify_nodes(
     nodes: &[AstNode],
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     for node in nodes {
         let effect = match &node.kind {
             NodeKind::Return(values) if !state.classifies_exits() => {
@@ -1542,12 +1567,14 @@ fn classify_nodes(
             // control node would indicate a broken AST boundary rather than source syntax
             // that can target an ordinary loop surrounding the assertion.
             NodeKind::Break => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Assertion-message AST invariant: depth-zero `break` cannot appear because assertion call arguments reject value-producing blocks.",
                 ));
             }
             NodeKind::Continue => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Assertion-message AST invariant: depth-zero `continue` cannot appear because assertion call arguments reject value-producing blocks.",
                 ));
             }
@@ -1701,7 +1728,7 @@ fn classify_loop_body(
     body: &[AstNode],
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     state.loop_depth += 1;
     let result = classify_nodes(body, template_ir_store, state);
     state.loop_depth -= 1;
@@ -1712,7 +1739,7 @@ fn classify_runtime_template_handoff(
     handoff: &OwnedRuntimeTemplateHandoff,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     let mut effect = None;
     let mut visit = |node: &OwnedRuntimeTemplateNode| {
         if effect.is_none() {
@@ -1728,7 +1755,7 @@ fn classify_runtime_slot_application_handoff(
     handoff: &OwnedRuntimeSlotApplicationHandoff,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     let mut effect = None;
     let mut visit = |node: &OwnedRuntimeTemplateNode| {
         if effect.is_none() {
@@ -1744,7 +1771,7 @@ fn classify_owned_runtime_node(
     node: &OwnedRuntimeTemplateNode,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => Ok(classify_expression(
             state.expression_builder.view(*expression)?,
@@ -1775,7 +1802,7 @@ fn classify_branch_selector(
     selector: &TemplateBranchSelector,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     match selector {
         TemplateBranchSelector::Bool(condition) => classify_expression(
             state.expression_builder.view(*condition)?,
@@ -1799,7 +1826,7 @@ fn classify_loop_header(
     header: &TemplateLoopHeader,
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
-) -> Result<Option<EnclosingExitEffect>, CompilerError> {
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
     match header {
         TemplateLoopHeader::Conditional { condition } => classify_expression(
             state.expression_builder.view(*condition)?,

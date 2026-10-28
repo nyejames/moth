@@ -1,6 +1,7 @@
 //! Tests for the JS-only HTML rendering path.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -179,7 +180,7 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
         origin.clone(),
         None,
         context.clone(),
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
         ResourceUseKind::Metadata,
     )
     .expect("resource should be planned");
@@ -243,11 +244,10 @@ fn no_runtime_fragments_still_emits_start_call() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
-        &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
+        &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &module.executable.hir,
             page_metadata_plan: &page_metadata_plan,
             const_fragments: &[],
-            string_table: &mut string_table,
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
             route: &route,
@@ -295,7 +295,6 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
         String::from("start_entry"),
     )]);
 
-    let mut string_table = crate::compiler_frontend::symbols::string_interning::StringTable::new();
     let route =
         derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
@@ -303,11 +302,10 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
-        &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
+        &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
             page_metadata_plan: &page_metadata_plan,
             const_fragments: &[],
-            string_table: &mut string_table,
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
             route: &route,

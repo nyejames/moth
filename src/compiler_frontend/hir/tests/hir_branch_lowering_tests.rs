@@ -33,11 +33,9 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
-};
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    runtime_expr, runtime_function_call_item, runtime_operand_item, runtime_operator_item,
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast, runtime_expr,
+    runtime_function_call_item, runtime_operand_item, runtime_operator_item,
 };
 
 /// One exact `I32` literal expression.

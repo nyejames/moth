@@ -29,7 +29,7 @@ fn default_whitespace_normalizer_preserves_leading_spaces_without_initial_newlin
 
 #[test]
 fn default_whitespace_normalizer_preserves_middle_run_newline_boundaries() {
-    // A child template in the body is now an opaque TIR anchor that skips the
+    // A child template in the body is an opaque TIR anchor that skips the
     // content mirror. Verify whitespace normalization through the folded TIR
     // output instead of the content-mirror render plan.
     let rendered = folded_template_output("[:\n    before\n    [:dynamic]\n    after\n]");
@@ -79,9 +79,7 @@ fn escape_html_preserves_runtime_head_references() {
         &mut string_table,
         &mut path_fork,
     );
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
+    let canonical_owner = file_tokens.canonical_owner();
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");

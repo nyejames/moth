@@ -7,7 +7,8 @@
 //!           symbols, or produce runtime fragments.
 
 use crate::compiler_frontend::arena::TokenStats;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
@@ -39,7 +40,7 @@ pub(crate) fn prepare_plain_markdown_file(
     input: PlainMarkdownPrepareInput<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<FileFrontendPrepareOutput, CompilerError> {
+) -> Result<FileFrontendPrepareOutput, InfrastructureFailure> {
     let rendered = render_plain_markdown(input.source_code);
     let rendered_html_id = string_table.intern(&rendered.html);
 
@@ -73,7 +74,7 @@ pub(crate) fn prepare_plain_markdown_file(
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
-        warnings: Vec::new(),
+        warnings: DiagnosticBag::new(),
     })
 }
 

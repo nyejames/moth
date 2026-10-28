@@ -1,4 +1,4 @@
--- Test fn keyword
+-- An ordinary fn identifier followed by an invalid declaration shape
 fn hello():
     io.line("hi")
 ;

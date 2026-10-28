@@ -4,6 +4,10 @@ Use a source package for reusable Moth code and a host package for functions or
 resources implemented outside Moth. Both enter normal package resolution.
 Neither grants special access to another module's private implementation.
 
+**Current status:** The SDK exposes manual `moth::host` descriptors only. The
+macros, Rust-call adapters, resource registration, host-context API and
+executable runtime below describe accepted target design, not available APIs.
+
 ### Provide a source package
 
 `SourcePackage::new` assigns the public package root. `from_dir` supplies its

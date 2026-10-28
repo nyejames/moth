@@ -39,7 +39,9 @@ use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -68,6 +70,23 @@ pub(crate) struct PublicInterfaceDraftBuildResult {
     pub(crate) draft: PublicInterfaceDraft,
     pub(crate) function_origin_seeds: Vec<FunctionOriginSeed>,
     pub(crate) callable_seeds: Vec<CallableSeed>,
+}
+#[derive(Debug)]
+pub(crate) enum PublicInterfaceDraftBuildFailure {
+    Infrastructure(InfrastructureFailure),
+    Diagnostic(DiagnosticDraft),
+}
+
+impl From<InfrastructureFailure> for PublicInterfaceDraftBuildFailure {
+    fn from(failure: InfrastructureFailure) -> Self {
+        Self::Infrastructure(failure)
+    }
+}
+
+impl From<DiagnosticDraft> for PublicInterfaceDraftBuildFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
 }
 
 // ===========================================================================
@@ -141,11 +160,14 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
     ///    defining path.
     /// 5. project reusable evidence from the completed declaration records.
     ///
-    /// Each step is total: a missing, duplicate, unmatched or malformed fact is a
-    /// `CompilerError` rather than a silent omission. The transient projection indexes and
-    /// the seed are consumed before the draft boundary: the draft never stores a
-    /// `DefinedPublic*` component.
-    pub(crate) fn build(self) -> Result<PublicInterfaceDraftBuildResult, CompilerError> {
+    /// Each step is total: invalid generic receiver ownership/alignment and duplicate canonical
+    /// bounds produce typed diagnostics; all other missing, duplicate, unmatched or malformed
+    /// facts remain `InfrastructureFailure` rather than a silent omission.
+    /// The transient projection indexes and the seed are consumed before the draft boundary:
+    /// the draft never stores a `DefinedPublic*` component.
+    pub(crate) fn build(
+        self,
+    ) -> Result<PublicInterfaceDraftBuildResult, PublicInterfaceDraftBuildFailure> {
         let PublicInterfaceDraftBuilderInput {
             export_seed,
             public_interface_projection_input,
@@ -168,14 +190,16 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
         } = public_interface_projection_input;
 
         let trait_environment = trait_environment.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "public-interface draft construction: AST finalization did not retain its \
                  resolved trait environment; the reusable-evidence projection cannot look up \
                  trait definitions without it",
             )
         })?;
         let trait_evidence_environment = trait_evidence_environment.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "public-interface draft construction: AST finalization did not retain its \
                  validated trait evidence environment; the reusable-evidence projection cannot \
                  iterate source-authored evidence without it",
@@ -213,6 +237,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
 
         // Build the one transient callable seed table at the post-AST boundary where the
         // resolved root table, receiver entries, generic-template classification and stable
+        // origins are all available.
         let callable_seeds = build_callable_seed_table(
             export_seed.export_bindings(),
             export_seed.module_origin(),
@@ -275,10 +300,14 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
                 continue;
             };
             if !seen_method_origins.insert(seed.origin.clone()) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft join: two callable seeds share method origin {:?}; a duplicate must not silently overwrite the first",
-                    seed.origin
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface draft join: two callable seeds share method origin {:?}; a duplicate must not silently overwrite the first",
+                        seed.origin
+                    ),
+                )
+                .into());
             }
             receiver_seeds_by_receiver
                 .entry(receiver_origin.clone())
@@ -309,6 +338,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             type_environment,
             string_table,
             path_fork,
+            generic_function_templates,
             folded_value_context: &folded_value_context,
         };
         let mut state = DeclarationRecordProjectionState {
@@ -402,6 +432,7 @@ struct DeclarationTypeProjectionContext<'a> {
     type_environment: &'a TypeEnvironment,
     string_table: &'a StringTable,
     path_fork: &'a PathInternerFork,
+    generic_function_templates: &'a FxHashMap<PathId, GenericFunctionTemplate>,
     folded_value_context: &'a FoldedValueJoinContext<'a>,
 }
 
@@ -443,7 +474,7 @@ fn project_declaration_records<'a>(
     root_table: &'a crate::compiler_frontend::ast::ResolvedPublicTypeRootTable,
     type_context: &DeclarationTypeProjectionContext<'_>,
     state: &mut DeclarationRecordProjectionState<'a, '_>,
-) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+) -> Result<Vec<PublicDeclarationRecord>, PublicInterfaceDraftBuildFailure> {
     let mut root_index = RootIndex::new(
         &root_table.roots,
         type_context.string_table,
@@ -476,7 +507,8 @@ fn project_declaration_records<'a>(
                 else {
                     return Err(super::type_projection::origin_category_mismatch_error(
                         "function", binding,
-                    ));
+                    )
+                    .into());
                 };
                 let default_provenance = project_defaults_provenance(
                     signature
@@ -496,6 +528,10 @@ fn project_declaration_records<'a>(
                     type_context.string_table,
                     type_context.path_fork,
                     type_context.folded_value_context,
+                    type_context
+                        .generic_function_templates
+                        .get(&root.path)
+                        .and_then(|template| template.declaration_span),
                 )?;
                 declarations.push(PublicDeclarationRecord {
                     origin: binding.origin().clone(),
@@ -513,7 +549,8 @@ fn project_declaration_records<'a>(
                     else {
                         return Err(super::type_projection::origin_category_mismatch_error(
                             "struct", binding,
-                        ));
+                        )
+                        .into());
                     };
                     let field_default_provenance = project_defaults_provenance(
                         fields.iter().map(|field| field.value.default()),
@@ -557,7 +594,8 @@ fn project_declaration_records<'a>(
                     else {
                         return Err(super::type_projection::origin_category_mismatch_error(
                             "choice", binding,
-                        ));
+                        )
+                        .into());
                     };
                     let (generic_parameters, variants) = project_choice_parts(
                         type_origin.clone(),
@@ -593,7 +631,8 @@ fn project_declaration_records<'a>(
                     else {
                         return Err(super::type_projection::origin_category_mismatch_error(
                             "alias", binding,
-                        ));
+                        )
+                        .into());
                     };
                     let target_type_identity = project_alias_target(
                         *target_type_id,
@@ -618,7 +657,8 @@ fn project_declaration_records<'a>(
                 else {
                     return Err(super::type_projection::origin_category_mismatch_error(
                         "constant", binding,
-                    ));
+                    )
+                    .into());
                 };
                 let type_identity = project_constant_type_identity(
                     *type_id,
@@ -655,23 +695,29 @@ fn project_declaration_records<'a>(
     // Deterministic name reporting avoids unordered hash-map iteration.
     let leftover_roots = root_index.remaining_names();
     if !leftover_roots.is_empty() {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft join: the public type root(s) {} have no matching export binding; every non-trait root must join exactly one binding",
-            leftover_roots.join(", ")
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft join: the public type root(s) {} have no matching export binding; every non-trait root must join exactly one binding",
+                leftover_roots.join(", ")
+            ),
+        )
+        .into());
     }
-
     // Every trait root must have joined a binding.
     let leftover_traits = state.trait_projection.remaining_names();
     if !leftover_traits.is_empty() {
         let mut names: Vec<String> = leftover_traits.into_iter().map(String::from).collect();
         names.sort();
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft join: the trait root(s) {} have no matching trait export binding; every direct trait root must join exactly one binding",
-            names.join(", ")
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft join: the trait root(s) {} have no matching trait export binding; every direct trait root must join exactly one binding",
+                names.join(", ")
+            ),
+        )
+        .into());
     }
-
     // Every receiver method must have attached to its owning nominal record.
     let leftover_receiver_methods: usize = state
         .receiver_seeds_by_receiver
@@ -679,12 +725,15 @@ fn project_declaration_records<'a>(
         .map(Vec::len)
         .sum();
     if leftover_receiver_methods > 0 {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft join: {} receiver method(s) have no matching struct or choice export binding",
-            leftover_receiver_methods
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft join: {} receiver method(s) have no matching struct or choice export binding",
+                leftover_receiver_methods
+            ),
+        )
+        .into());
     }
-
     Ok(declarations)
 }
 
@@ -705,7 +754,7 @@ fn receiver_methods_for_origin(
         Vec<super::model::PublicReceiverMethodSemantics>,
         SyntheticInterfaceProvenance,
     ),
-    CompilerError,
+    InfrastructureFailure,
 > {
     let seeds = receiver_seeds_by_receiver
         .remove(type_origin)
@@ -717,17 +766,20 @@ fn receiver_methods_for_origin(
         let method_index = match &seed.kind {
             CallableSeedKind::ReceiverMethod { method_index, .. } => *method_index,
             CallableSeedKind::FreeFunction => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft join: free-function callable seed {:?} was indexed \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public-interface draft join: free-function callable seed {:?} was indexed \
                      under receiver origin {:?}",
-                    seed.origin, type_origin
-                )));
+                        seed.origin, type_origin
+                    ),
+                ));
             }
         };
         let signature = receiver_method_signatures
             .get(&method_index)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "public-interface draft join: receiver-method seed with method_index {} has no \
                  projected signature",
                     method_index
@@ -753,7 +805,7 @@ fn fold_constant_value(
     defining_path: PathId,
     consumed_const_values: &mut FxHashSet<ConstValueId>,
     context: &FoldedValueJoinContext,
-) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), CompilerError> {
+) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), InfrastructureFailure> {
     let Some(value_id) = context.const_values.value_for_path(&defining_path) else {
         let mut scratch = Vec::new();
         let defining_path = context.path_fork.render_portable(
@@ -773,18 +825,24 @@ fn fold_constant_value(
             })
             .collect::<Vec<_>>();
         available_paths.sort();
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft join: constant export binding {defining_path:?} has no \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft join: constant export binding {defining_path:?} has no \
              matching finalized module constant declaration; available defining paths are \
              {available_paths:?} and the folded value cannot be projected without the \
              donor-local AST expression"
-        )));
+            ),
+        ));
     };
 
     if !consumed_const_values.insert(value_id) {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft join: constant export binding {defining_path:?} consumed its finalized store value more than once"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft join: constant export binding {defining_path:?} consumed its finalized store value more than once"
+            ),
+        ));
     }
 
     convert_const_value_to_folded_value_with_provenance(

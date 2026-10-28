@@ -14,9 +14,8 @@ use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TirView, TirViewIdentity,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use std::collections::HashSet;
 
 /// Rejects slot composition artifacts that would otherwise reach runtime
@@ -171,7 +170,7 @@ fn validate_runtime_tir_view_control_flow_body(
     let mut escaped_insert_visiting = HashSet::from([view.identity()]);
 
     if tir_view_subtree_contains_escaped_insert(view, body_root, &mut escaped_insert_visiting)? {
-        return Err(CompilerDiagnostic::invalid_template_structure(
+        return Err(templates::invalid_template_structure(
             InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
             span,
         )

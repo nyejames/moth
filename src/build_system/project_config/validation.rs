@@ -21,16 +21,17 @@ use crate::builder_surface::config_schema::{
     ConfigSchemas, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, InvalidConfigReason, InvalidOutputFolderReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicFoldedField, PublicFoldedValue,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::projects::settings::{
     Config, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
     TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
@@ -47,8 +48,8 @@ use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug)]
 pub(super) enum ConfigApplyError {
-    Diagnostics(Vec<CompilerDiagnostic>),
-    Compiler(CompilerError),
+    Diagnostics(Vec<DiagnosticDraft>),
+    Compiler(InfrastructureFailure),
 }
 
 /// Validate folded config declarations and apply accepted values to the runtime config.
@@ -60,7 +61,7 @@ pub(super) fn validate_and_apply_config_declarations(
     config: &mut Config,
     compiled_config: &CompiledConfigSource,
     config_schemas: &ConfigSchemas,
-    string_table: &mut StringTable,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<(), ConfigApplyError> {
     debug_assert!(
         {
@@ -83,11 +84,10 @@ pub(super) fn validate_and_apply_config_declarations(
         .project_sections()
         .iter()
         .map(|section| section.name.as_ref())
-        .filter(|name: &&str| {
-            compiled_config
-                .declarations
-                .iter()
-                .any(|declaration| string_table.resolve(declaration.name) == *name)
+        .filter(|section_name| {
+            compiled_config.declarations.iter().any(|declaration| {
+                diagnostic_strings.strings().resolve(declaration.name) == *section_name
+            })
         })
         .collect();
 
@@ -106,7 +106,7 @@ pub(super) fn validate_and_apply_config_declarations(
             config,
             section,
             &section_indexes[section_index],
-            string_table,
+            diagnostic_strings,
             &mut errors,
         ) {
             return Err(ConfigApplyError::Compiler(error));
@@ -114,9 +114,7 @@ pub(super) fn validate_and_apply_config_declarations(
     }
 
     for declaration in &compiled_config.declarations {
-        let key = string_table.resolve(declaration.name).to_string();
-
-        if key == "project" {
+        if diagnostic_strings.strings().resolve(declaration.name) == "project" {
             saw_project_record = true;
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 validate_and_apply_project_record(
@@ -124,14 +122,14 @@ pub(super) fn validate_and_apply_config_declarations(
                     declaration,
                     config_schemas.project(),
                     &project_field_indexes,
-                    string_table,
+                    diagnostic_strings,
                     &mut errors,
                 );
             } else {
                 errors.push(config_diagnostic(
                     Some(declaration.name),
                     InvalidConfigReason::InvalidConfigValueShape {
-                        expected: string_table.intern("a record value"),
+                        expected: diagnostic_strings.intern("a record value"),
                     },
                     declaration.span,
                 ));
@@ -143,7 +141,9 @@ pub(super) fn validate_and_apply_config_declarations(
             .project_sections()
             .iter()
             .enumerate()
-            .find(|(_, section)| section.name == key)
+            .find(|(_, section)| {
+                section.name.as_ref() == diagnostic_strings.strings().resolve(declaration.name)
+            })
         {
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 if let Err(error) = validate_and_apply_named_section(
@@ -151,7 +151,7 @@ pub(super) fn validate_and_apply_config_declarations(
                     declaration,
                     section,
                     &section_indexes[section_index],
-                    string_table,
+                    diagnostic_strings,
                     &mut errors,
                 ) {
                     return Err(ConfigApplyError::Compiler(error));
@@ -160,7 +160,7 @@ pub(super) fn validate_and_apply_config_declarations(
                 errors.push(config_diagnostic(
                     Some(declaration.name),
                     InvalidConfigReason::InvalidConfigValueShape {
-                        expected: string_table.intern("a record value"),
+                        expected: diagnostic_strings.intern("a record value"),
                     },
                     declaration.span,
                 ));
@@ -168,7 +168,7 @@ pub(super) fn validate_and_apply_config_declarations(
             continue;
         }
 
-        if is_retired_flat_config_key(&key) {
+        if is_retired_flat_config_key(diagnostic_strings.strings().resolve(declaration.name)) {
             errors.push(config_diagnostic(
                 Some(declaration.name),
                 InvalidConfigReason::UnknownKey {
@@ -197,7 +197,7 @@ pub(super) fn validate_and_apply_config_declarations(
             errors.push(config_diagnostic(
                 None,
                 InvalidConfigReason::MissingActiveBuilderSection {
-                    section: string_table.intern(section.name.as_ref()),
+                    section: diagnostic_strings.intern(section.name.as_ref()),
                 },
                 None,
             ));
@@ -256,8 +256,8 @@ fn validate_and_apply_project_record(
     declaration: &FoldedConfigDeclaration,
     project_schema: &ConfigSchema,
     field_indexes: &SchemaFieldIndexes<'_>,
-    string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) {
     let span = declaration.span;
     let view = ConfigSchemaView {
@@ -266,7 +266,7 @@ fn validate_and_apply_project_record(
     };
     let mut diagnostics = ValueDiagnosticContext {
         span,
-        string_table,
+        string_table: diagnostic_strings,
         errors,
     };
 
@@ -276,7 +276,7 @@ fn validate_and_apply_project_record(
         project_schema.root(),
         &declaration.value,
         Some(&declaration.direct_field_spans),
-    ) && let Err(apply_errors) = apply_project_record_fields(config, fields, string_table)
+    ) && let Err(apply_errors) = apply_project_record_fields(config, fields, diagnostic_strings)
     {
         errors.extend(apply_errors);
     }
@@ -285,8 +285,8 @@ fn validate_and_apply_project_record(
 fn apply_project_record_fields(
     config: &mut Config,
     fields: Vec<ValidatedRecordField>,
-    string_table: &mut StringTable,
-) -> Result<(), Vec<CompilerDiagnostic>> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<(), Vec<DiagnosticDraft>> {
     let mut errors = Vec::new();
     config.extra_project_fields.clear();
 
@@ -310,7 +310,7 @@ fn apply_project_record_fields(
         match (field.name.as_str(), field.value) {
             ("name", ValidatedConfigValue::String(value)) => {
                 if let Err(diagnostic) =
-                    assign_project_name(config, value, field.span, string_table)
+                    assign_project_name(config, value, field.span, diagnostic_strings)
                 {
                     errors.push(diagnostic);
                 }
@@ -318,7 +318,7 @@ fn apply_project_record_fields(
 
             ("entry_root", ValidatedConfigValue::String(value)) => {
                 if let Err(mut diagnostics) =
-                    assign_entry_root(config, value, field.span, string_table)
+                    assign_entry_root(config, value, field.span, diagnostic_strings)
                 {
                     errors.append(&mut diagnostics);
                 }
@@ -337,8 +337,11 @@ fn apply_project_record_fields(
             ("license", ValidatedConfigValue::OptionNone) => config.license = None,
 
             ("template_const_loop_iteration_limit", ValidatedConfigValue::FixedScalar(value)) => {
-                match validate_template_const_loop_iteration_limit(value, field.span, string_table)
-                {
+                match validate_template_const_loop_iteration_limit(
+                    value,
+                    field.span,
+                    diagnostic_strings,
+                ) {
                     Ok(limit) => config.template_const_loop_iteration_limit = limit,
                     Err(mut limit_errors) => errors.append(&mut limit_errors),
                 }
@@ -369,14 +372,14 @@ fn assign_project_name(
     config: &mut Config,
     value: String,
     span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> Result<(), CompilerDiagnostic> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<(), DiagnosticDraft> {
     if value.is_empty() || !is_identifier(&value) {
         return Err(config_diagnostic(
-            Some(string_table.intern("name")),
+            Some(diagnostic_strings.intern("name")),
             InvalidConfigReason::InvalidProjectSettingValue {
-                value: string_table.intern(&value),
-                expected: string_table.intern("a valid Moth project identifier"),
+                value: diagnostic_strings.intern(&value),
+                expected: diagnostic_strings.intern("a valid Moth project identifier"),
             },
             span,
         ));
@@ -395,9 +398,9 @@ fn validate_and_apply_named_section(
     declaration: &FoldedConfigDeclaration,
     section: &NamedConfigSectionSchema,
     field_indexes: &SchemaFieldIndexes<'_>,
-    string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
-) -> Result<(), CompilerError> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    errors: &mut Vec<DiagnosticDraft>,
+) -> Result<(), InfrastructureFailure> {
     let span = declaration.span;
     let view = ConfigSchemaView {
         schema: &section.schema,
@@ -405,7 +408,7 @@ fn validate_and_apply_named_section(
     };
     let mut diagnostics = ValueDiagnosticContext {
         span,
-        string_table,
+        string_table: diagnostic_strings,
         errors,
     };
 
@@ -433,16 +436,16 @@ fn apply_omitted_section_defaults(
     config: &mut Config,
     section: &NamedConfigSectionSchema,
     field_indexes: &SchemaFieldIndexes<'_>,
-    string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
-) -> Result<(), CompilerError> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    errors: &mut Vec<DiagnosticDraft>,
+) -> Result<(), InfrastructureFailure> {
     let view = ConfigSchemaView {
         schema: &section.schema,
         field_indexes,
     };
     let mut diagnostics = ValueDiagnosticContext {
         span: None,
-        string_table,
+        string_table: diagnostic_strings,
         errors,
     };
     let root = section.schema.node(section.schema.root());
@@ -477,125 +480,77 @@ fn apply_builder_section_fields(
     config: &mut Config,
     section_name: &str,
     fields: Vec<ValidatedRecordField>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for field in fields {
         apply_builder_section_field(config, section_name, field)?;
     }
     Ok(())
 }
 
-/// Apply one validated builder section field to the config.
+/// Apply one validated builder field to its shared settings owner.
 ///
-/// WHAT: output roots and the typed html fields store on their own config fields and keep their
-///       authored spans under the field name. Any other field of a builder section lands in the
-///       generic builder settings store, which records no span.
-/// WHY: a generic field must not replace or remove a project record span that shares its name,
-///      such as `name`, so only the fields this function owns update the span map.
+/// Output roots stay in their project-wide owner. Other string and bool fields, including HTML
+/// fields, use the same schema-driven value store.
 fn apply_builder_section_field(
     config: &mut Config,
     section_name: &str,
     field: ValidatedRecordField,
-) -> Result<(), CompilerError> {
-    let name = field.name;
-    let field_span = field.span;
-    match (name.as_str(), field.value) {
-        (DEV_OUTPUT_FIELD, ValidatedConfigValue::String(text)) => {
-            config.output_roots.dev_output = Some(text);
-        }
-        (RELEASE_OUTPUT_FIELD, ValidatedConfigValue::String(text)) => {
-            config.output_roots.release_output = Some(text);
-        }
-        (_, value) if section_name == "html" => {
-            apply_html_section_value(config, &name, value)?;
-        }
-        (_, value) => return apply_generic_builder_value(config, section_name, &name, value),
+) -> Result<(), InfrastructureFailure> {
+    let ValidatedRecordField { name, value, span } = field;
+
+    if name == DEV_OUTPUT_FIELD {
+        return match value {
+            ValidatedConfigValue::String(text) => {
+                config.output_roots.dev_output = Some(text);
+                apply_output_root_span(config, name, span);
+                Ok(())
+            }
+            other => apply_generic_builder_value(config, section_name, name, other, span),
+        };
+    }
+    if name == RELEASE_OUTPUT_FIELD {
+        return match value {
+            ValidatedConfigValue::String(text) => {
+                config.output_roots.release_output = Some(text);
+                apply_output_root_span(config, name, span);
+                Ok(())
+            }
+            other => apply_generic_builder_value(config, section_name, name, other, span),
+        };
     }
 
-    if let Some(span) = field_span {
+    apply_generic_builder_value(config, section_name, name, value, span)
+}
+
+fn apply_output_root_span(config: &mut Config, name: String, span: Option<SourceSpan>) {
+    if let Some(span) = span {
         config.setting_spans.insert(name, span);
     } else {
         config.setting_spans.remove(&name);
     }
-    Ok(())
 }
 
-/// Store one validated builder field in the generic builder settings store.
-///
-/// WHAT: strings and bools land under the field name, and an absent optional value clears any
-///       value already stored under that name.
-/// WHY: the store holds the value shapes that builders read by name. Any other shape is a
-///      builder schema the store cannot hold, so it fails loudly rather than being dropped.
+/// Store one validated non-output-root field using its registered name.
 fn apply_generic_builder_value(
     config: &mut Config,
     section_name: &str,
-    name: &str,
+    name: String,
     value: ValidatedConfigValue,
-) -> Result<(), CompilerError> {
+    span: Option<SourceSpan>,
+) -> Result<(), InfrastructureFailure> {
     match value {
-        ValidatedConfigValue::String(text) => config.builder_settings.set_string(name, text),
-        ValidatedConfigValue::Bool(enabled) => config.builder_settings.set_bool(name, enabled),
-        ValidatedConfigValue::OptionNone => config.builder_settings.clear(name),
+        ValidatedConfigValue::String(text) => config.builder_settings.set_string(name, text, span),
+        ValidatedConfigValue::Bool(enabled) => {
+            config.builder_settings.set_bool(name, enabled, span)
+        }
+        ValidatedConfigValue::OptionNone => config.builder_settings.clear(&name),
         _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "builder section '{section_name}' field '{name}' has an unstorable value shape"
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Store one validated html section field on the typed html section config.
-///
-/// WHAT: matches each typed html field to its storage slot. Output roots never reach this point.
-/// WHY: the HTML builder's readers consume the typed section directly, so html values must not be
-///      stringified into the generic store. An unmatched field means the schema and typed storage
-///      drifted, which is a compiler bug.
-fn apply_html_section_value(
-    config: &mut Config,
-    name: &str,
-    value: ValidatedConfigValue,
-) -> Result<(), CompilerError> {
-    match (name, value) {
-        ("origin", ValidatedConfigValue::String(text)) => {
-            config.html_section.origin = Some(text);
-        }
-        ("page_url_style", ValidatedConfigValue::String(text)) => {
-            config.html_section.page_url_style = Some(text);
-        }
-        ("redirect_index_html", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.redirect_index_html = Some(enabled);
-        }
-        ("html_lang", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_lang = Some(text);
-        }
-        ("html_title_prefix", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_title_prefix = Some(text);
-        }
-        ("html_title_postfix", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_title_postfix = Some(text);
-        }
-        ("html_favicon", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_favicon = Some(text);
-        }
-        ("html_inject_charset", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_charset = Some(enabled);
-        }
-        ("html_inject_viewport", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_viewport = Some(enabled);
-        }
-        ("html_inject_color_scheme", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_color_scheme = Some(enabled);
-        }
-        ("html_inject_core_css", ValidatedConfigValue::Bool(enabled)) => {
-            config.html_section.html_inject_core_css = Some(enabled);
-        }
-        ("html_body_style", ValidatedConfigValue::String(text)) => {
-            config.html_section.html_body_style = Some(text);
-        }
-        (unknown, _) => {
-            return Err(CompilerError::compiler_error(format!(
-                "html section applied unknown validated field '{unknown}'"
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "builder section '{section_name}' field '{name}' has an unstorable value shape"
+                ),
+            ));
         }
     }
     Ok(())
@@ -620,10 +575,10 @@ struct ConfigSchemaView<'schema, 'indexes> {
 /// WHAT: the value span plus the error lane with the string table.
 /// WHY: nested diagnostics keep underlining the declaration's authored value span without
 /// threading the span and error lane through every helper as bare parameters.
-struct ValueDiagnosticContext<'a> {
+struct ValueDiagnosticContext<'borrow, 'strings> {
     span: Option<SourceSpan>,
-    string_table: &'a mut StringTable,
-    errors: &'a mut Vec<CompilerDiagnostic>,
+    string_table: &'borrow mut DiagnosticStringBuilder<'strings>,
+    errors: &'borrow mut Vec<DiagnosticDraft>,
 }
 
 /// A config value that has been validated against its schema field.
@@ -674,7 +629,7 @@ enum ValueCheck {
 /// field instead of falling back to the declaration span. Schema defaults keep the plain
 /// helper because they own no authored span.
 fn push_spanned_shape_failure(
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
@@ -695,7 +650,7 @@ fn push_spanned_shape_failure(
 /// authored span.
 fn validate_value(
     view: &ConfigSchemaView<'_, '_>,
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
@@ -710,7 +665,7 @@ fn validate_value(
 /// defaults and nested collection elements pass `None` so no diagnostic gains fake provenance.
 fn validate_value_with_span(
     view: &ConfigSchemaView<'_, '_>,
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
@@ -770,7 +725,7 @@ fn validate_value_with_span(
 /// record-valued elements. A scalar is not promoted to a one-element collection.
 fn validate_collection(
     view: &ConfigSchemaView<'_, '_>,
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     element_shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
@@ -808,7 +763,7 @@ fn validate_collection(
 /// Validate one record value against one schema node, field by field.
 fn validate_record_fields(
     view: &ConfigSchemaView<'_, '_>,
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     node_id: ConfigSchemaNodeId,
     value: &PublicFoldedValue,
     field_spans: Option<&[Option<SourceSpan>]>,
@@ -964,7 +919,7 @@ fn validate_record_fields(
 ///      is validated against its field shape in one place.
 fn validate_field_default(
     view: &ConfigSchemaView<'_, '_>,
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     field: &ConfigSchemaField,
     default: &PublicFoldedValue,
 ) -> Option<ValidatedRecordField> {
@@ -994,7 +949,7 @@ fn validate_field_default(
 }
 
 fn push_shape_failure(
-    diagnostics: &mut ValueDiagnosticContext<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_, '_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
@@ -1020,7 +975,7 @@ fn string_in_closed_domain(text: &str, allowed_strings: Option<&'static [&'stati
 fn shape_failure_reason(
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
-    string_table: &mut StringTable,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> InvalidConfigReason {
     let expected = match (shape, field.allowed_strings) {
         (ConfigFieldShape::String, Some(allowed)) => format_closed_string_set_expected(allowed),
@@ -1028,7 +983,7 @@ fn shape_failure_reason(
     };
 
     InvalidConfigReason::InvalidConfigValueShape {
-        expected: string_table.intern(&expected),
+        expected: diagnostic_strings.intern(&expected),
     }
 }
 
@@ -1039,8 +994,8 @@ fn shape_failure_reason(
 /// transducer.
 fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedValue> {
     match value {
-        // Folded numeric metadata now carries its exact scalar width and precision, so every
-        // fixed scalar projects through unchanged instead of being reinterpreted at one width.
+        // Folded numeric metadata carries its exact scalar width and precision, so every
+        // fixed scalar projects through unchanged.
         PublicFoldedValue::FixedScalar(value) => Some(PublicFoldedValue::FixedScalar(*value)),
         PublicFoldedValue::Bool(value) => Some(PublicFoldedValue::Bool(*value)),
         PublicFoldedValue::Char(value) => Some(PublicFoldedValue::Char(*value)),
@@ -1139,8 +1094,8 @@ fn extract_bool_value(value: &PublicFoldedValue) -> Option<bool> {
 fn validate_template_const_loop_iteration_limit(
     value: FixedScalarValue,
     span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> Result<usize, Vec<CompilerDiagnostic>> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<usize, Vec<DiagnosticDraft>> {
     // The project schema guarantees an exact I32 before applying the resource bound.
     debug_assert_eq!(value.scalar(), FixedScalar::I32);
     let value = value
@@ -1148,10 +1103,10 @@ fn validate_template_const_loop_iteration_limit(
         .expect("the validated loop limit is an I32 scalar");
     if value <= 0 {
         return Err(vec![config_diagnostic(
-            Some(string_table.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
+            Some(diagnostic_strings.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
             InvalidConfigReason::InvalidProjectSettingValue {
-                value: string_table.intern(&value.to_string()),
-                expected: string_table.intern("a positive integer"),
+                value: diagnostic_strings.intern(&value.to_string()),
+                expected: diagnostic_strings.intern("a positive integer"),
             },
             span,
         )]);
@@ -1161,10 +1116,10 @@ fn validate_template_const_loop_iteration_limit(
     let limit = usize::try_from(value).unwrap_or(usize::MAX);
     if limit > MAX_TEMPLATE_CONST_LOOP_ITERATIONS {
         return Err(vec![config_diagnostic(
-            Some(string_table.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
+            Some(diagnostic_strings.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
             InvalidConfigReason::InvalidProjectSettingValue {
-                value: string_table.intern(&value.to_string()),
-                expected: string_table.intern("an integer no greater than 1000000"),
+                value: diagnostic_strings.intern(&value.to_string()),
+                expected: diagnostic_strings.intern("an integer no greater than 1000000"),
             },
             span,
         )]);
@@ -1177,8 +1132,8 @@ fn config_diagnostic(
     key: Option<StringId>,
     reason: InvalidConfigReason,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(key, reason, span)
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(key, reason, span)
 }
 
 // -------------------------
@@ -1195,14 +1150,14 @@ fn config_diagnostic(
 /// working directory.
 pub(crate) fn validate_directory_output_settings(
     config: &Config,
-    string_table: &mut StringTable,
-) -> Result<ValidatedDirectoryOutputSettings, Vec<CompilerDiagnostic>> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<ValidatedDirectoryOutputSettings, Vec<DiagnosticDraft>> {
     let mut errors = Vec::new();
 
     let project_root = &config.entry_dir;
-    // The transitional empty or "." entry root form means the entry root covers the whole
-    // project, so output containment is validated against the project root only. When
-    // entry_root is a strict subdirectory, enforce that the output is outside it.
+    // An empty or "." entry root resolves to the project root, so output containment is validated
+    // against that root only. When entry_root is a strict subdirectory, enforce that the output is
+    // outside it.
     let resolved_entry_root =
         if config.entry_root.as_os_str().is_empty() || config.entry_root == Path::new(".") {
             None
@@ -1218,7 +1173,7 @@ pub(crate) fn validate_directory_output_settings(
         project_root,
         resolved_entry_root.as_deref(),
         config,
-        string_table,
+        diagnostic_strings,
         &mut errors,
     );
     let release = validate_one_output_folder(
@@ -1227,7 +1182,7 @@ pub(crate) fn validate_directory_output_settings(
         project_root,
         resolved_entry_root.as_deref(),
         config,
-        string_table,
+        diagnostic_strings,
         &mut errors,
     );
 
@@ -1239,7 +1194,7 @@ pub(crate) fn validate_directory_output_settings(
             &dev_setting,
             &release_setting,
             config,
-            string_table,
+            diagnostic_strings,
             &mut errors,
         );
     }
@@ -1299,8 +1254,8 @@ fn validate_one_output_folder(
     project_root: &Path,
     resolved_entry_root: Option<&Path>,
     config: &Config,
-    string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) -> Option<ValidatedOutputFolder> {
     let span = config.setting_span(key);
 
@@ -1309,13 +1264,13 @@ fn validate_one_output_folder(
             if let Err(reason) =
                 validate_output_folder_containment(&valid, project_root, resolved_entry_root)
             {
-                let folder_id = Some(string_table.intern(&folder.to_string_lossy()));
+                let folder_id = Some(diagnostic_strings.intern(&folder.to_string_lossy()));
                 errors.push(output_folder_diagnostic(
                     key,
                     folder_id,
                     reason,
                     span,
-                    string_table,
+                    diagnostic_strings,
                 ));
             }
 
@@ -1324,13 +1279,13 @@ fn validate_one_output_folder(
         }
         Err(reason) => {
             let folder_id = (!matches!(reason, InvalidOutputFolderReason::Empty))
-                .then(|| string_table.intern(&folder.to_string_lossy()));
+                .then(|| diagnostic_strings.intern(&folder.to_string_lossy()));
             errors.push(output_folder_diagnostic(
                 key,
                 folder_id,
                 reason,
                 span,
-                string_table,
+                diagnostic_strings,
             ));
             None
         }
@@ -1344,8 +1299,8 @@ fn validate_output_folders_distinct(
     dev_setting: &EffectiveOutputSetting,
     release_setting: &EffectiveOutputSetting,
     config: &Config,
-    string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) {
     // Both folders passed classification, so their relative paths are guaranteed valid.
     let dev_identity = output_path_identity(&dev.relative_path)
@@ -1359,18 +1314,17 @@ fn validate_output_folders_distinct(
         .is_some_and(|(dev_root, release_root)| dev_root == release_root);
 
     if dev_identity == release_identity || canonical_roots_match {
-        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
-            Some(string_table.intern(dev_setting.key)),
+        let mut diagnostic = project_config::invalid_config_reason(
+            Some(diagnostic_strings.intern(dev_setting.key)),
             InvalidConfigReason::OutputFoldersNotDistinct {
-                dev_folder: string_table.intern(&dev_setting.folder.to_string_lossy()),
-                release_folder: string_table.intern(&release_setting.folder.to_string_lossy()),
+                dev_folder: diagnostic_strings.intern(&dev_setting.folder.to_string_lossy()),
+                release_folder: diagnostic_strings
+                    .intern(&release_setting.folder.to_string_lossy()),
             },
             config.setting_span(dev_setting.key),
         );
         if let Some(release_span) = config.setting_span(release_setting.key) {
-            diagnostic
-                .labels
-                .push(DiagnosticLabel::secondary(Some(release_span), None));
+            diagnostic = diagnostic.with_label(Some(release_span), None);
         }
         errors.push(diagnostic);
     }
@@ -1380,14 +1334,14 @@ fn assign_entry_root(
     config: &mut Config,
     value: String,
     span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> Result<(), Vec<CompilerDiagnostic>> {
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<(), Vec<DiagnosticDraft>> {
     if entry_root_escapes_project(&value, &config.entry_dir) {
         return Err(vec![config_diagnostic(
-            Some(string_table.intern("entry_root")),
+            Some(diagnostic_strings.intern("entry_root")),
             InvalidConfigReason::InvalidProjectSettingValue {
-                value: string_table.intern(&value),
-                expected: string_table.intern(
+                value: diagnostic_strings.intern(&value),
+                expected: diagnostic_strings.intern(
                     "a relative directory strictly below the project root, with no parent-directory segments",
                 ),
             },
@@ -1440,10 +1394,10 @@ fn output_folder_diagnostic(
     folder: Option<StringId>,
     reason: InvalidOutputFolderReason,
     span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(
-        Some(string_table.intern(key)),
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(
+        Some(diagnostic_strings.intern(key)),
         InvalidConfigReason::InvalidOutputFolder { folder, reason },
         span,
     )

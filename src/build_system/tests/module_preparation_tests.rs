@@ -13,7 +13,11 @@ use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::names_declarations::IdentifierNamingConventionView,
+    test_support::compact_bag_for_test,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -491,7 +495,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let headers = prepare_header_syntax(
         &mut [output_a, output_b],
         &mut frontend.string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut |source, diagnostic| {
+            crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+                diagnostic, source,
+            )
+        },
         &mut frontend.path_fork,
     )
     .expect("header syntax preparation should succeed");
@@ -646,10 +654,9 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
             project_root.clone(),
             canonical_entry.clone(),
         )]),
-    )
-    .expect("project path resolver should build");
+    );
 
-    // Phase 1: preparation is provider-independent. The preparation context carries no external
+    // Preparation is provider-independent. The preparation context carries no external
     // package registry, dependency resolution table or builder runtime packages — only style
     // directives and the project path resolver — so it can run before any provider interface
     // exists.
@@ -689,7 +696,8 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         source_files_view.fork_path_interner(),
         source_byte_count,
     );
-    let prepared = prepared_result.expect("module preparation should succeed");
+    let (prepared, preparation_warnings) =
+        prepared_result.expect("module preparation should succeed");
 
     let return_name_span = prepared
         .semantic
@@ -738,6 +746,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let semantic_result = compile_module(
         &compile_context,
         prepared.semantic,
+        preparation_warnings,
         generated_store.known_generated(),
         None,
     );
@@ -745,14 +754,21 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let semantic_result = compile_module(
         &compile_context,
         prepared.semantic,
+        preparation_warnings,
         generated_store.known_generated(),
     );
     let draft = semantic_result.expect("semantic compilation should succeed");
-    // Semantic compilation is the source's last producer. With no span producer outstanding,
-    // the owner freezes the original builder tables before the escaped-source assertions below.
+    // Semantic compilation adds no spans; install the returned preparation table before the
+    // terminal owner checks its lifecycle state.
+    source_files
+        .finish_source(source_id)
+        .expect("the module source should finalize after preparation");
+    source_files
+        .assemble_finalized_tables()
+        .expect("the frozen module source table should assemble");
     let finalized_source_files = source_files
         .finish()
-        .expect("source builder should finalize after the last producer returned");
+        .expect("source builder should validate after the last producer returned");
     let range = return_name_span.byte_range(&finalized_source_files);
     let snapshot = finalized_source_files
         .retained_text(source_id)
@@ -771,7 +787,15 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     );
 
     let draft = match draft {
-        ModuleCompilationOutcome::Success(draft) => draft,
+        ModuleCompilationOutcome::Success {
+            compiled: draft,
+            warnings,
+            sidecar_warnings,
+        } => {
+            assert!(warnings.is_empty());
+            assert!(sidecar_warnings.is_empty());
+            draft
+        }
         ModuleCompilationOutcome::Diagnosed(diagnostics) => panic!(
             "a generic free-function declaration should compile, not diagnose: {diagnostics:?}"
         ),
@@ -784,10 +808,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     assert_eq!(
         draft.module.metadata.entry_point, canonical_entry,
         "semantic compilation should preserve the module entry point"
-    );
-    assert!(
-        draft.module.metadata.warnings.is_empty(),
-        "semantic compilation should not introduce warnings for a clean generic free-function declaration"
     );
     let materialisation_context = draft
         .module
@@ -869,8 +889,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
             project_root,
             canonical_entry.clone(),
         )]),
-    )
-    .expect("project path resolver should build");
+    );
     let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
         StablePackageIdentity::project_local("test-project"),
         std::path::Path::new("api"),
@@ -903,7 +922,8 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         source_files_view.fork_path_interner(),
         source_byte_count,
     );
-    let prepared = prepared_result.expect("API-only module preparation should succeed");
+    let (prepared, preparation_warnings) =
+        prepared_result.expect("API-only module preparation should succeed");
 
     let external_packages = Arc::new(ExternalPackageRegistry::new());
     let resolution_table = ExternalImportResolutionTable::default();
@@ -930,6 +950,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let semantic_result = compile_module(
         &compile_context,
         prepared.semantic,
+        preparation_warnings,
         generated_store.known_generated(),
         None,
     );
@@ -937,16 +958,32 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let semantic_result = compile_module(
         &compile_context,
         prepared.semantic,
+        preparation_warnings,
         generated_store.known_generated(),
     );
     let outcome =
         semantic_result.expect("API-only semantic compilation should not fail internally");
-    // Finalization also verifies that semantic compilation released every private source reader.
+    // Semantic compilation adds no spans; finalize the retained preparation builder before the
+    // terminal owner validation.
+    source_files
+        .finish_source(source_id)
+        .expect("the API-only module source should finalize after preparation");
+    source_files
+        .assemble_finalized_tables()
+        .expect("the frozen API-only table should assemble");
     let _source_files = source_files
         .finish()
-        .expect("API-only fixture should finalize after its last producer returned");
+        .expect("API-only fixture should validate after its last producer returned");
     let draft = match outcome {
-        ModuleCompilationOutcome::Success(draft) => draft,
+        ModuleCompilationOutcome::Success {
+            compiled: draft,
+            warnings,
+            sidecar_warnings,
+        } => {
+            assert!(warnings.is_empty());
+            assert!(sidecar_warnings.is_empty());
+            draft
+        }
         ModuleCompilationOutcome::Diagnosed(diagnostics) => {
             panic!("API-only declarations should compile without diagnostics: {diagnostics:?}")
         }
@@ -1095,9 +1132,9 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             .retain_text(source_id, source.to_owned())
             .expect("test source snapshot should be retained");
     }
-    // R6 gives every builder its own exclusive database: rebuild the same deterministic
-    // registration for the span owner below instead of sharing the frontend handle. Identical
-    // inputs keep source identities aligned across both tables.
+    // Each builder owns an exclusive database: rebuild the same deterministic registration for
+    // the span owner below instead of sharing the frontend handle. Identical inputs keep source
+    // identities aligned across both tables.
     let mut span_owner_sources = SourceDatabase::build(
         &[&canonical_a, &canonical_b, &canonical_c],
         &canonical_a,
@@ -1305,13 +1342,13 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         2,
         "expected two naming-convention warnings from Beta and Gamma"
     );
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
     assert!(
-        warnings.iter().all(|w| matches!(
-            w.kind,
-            crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
-                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-            )
-        )),
+        compact.views().all(|warning| {
+            warning
+                .family_view::<IdentifierNamingConventionView>()
+                .is_some()
+        }),
         "all warnings should be naming convention warnings"
     );
 
@@ -1365,9 +1402,9 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             .retain_text(source_id, source.clone())
             .expect("test source snapshot should be retained");
     }
-    // R6 gives every builder its own exclusive database: rebuild the same deterministic
-    // registration for the span owner below instead of sharing the frontend handle. Identical
-    // inputs keep source identities aligned across both tables.
+    // Each builder owns an exclusive database: rebuild the same deterministic registration for
+    // the span owner below instead of sharing the frontend handle. Identical inputs keep source
+    // identities aligned across both tables.
     let mut span_owner_sources = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
@@ -1721,6 +1758,72 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
 }
 
 #[test]
+fn indexed_file_preparation_returns_warnings_for_publication() {
+    let mut fixture = frontend_preparation_fixture(&[("main.moth", "Value #= 1\n")]);
+    let input = fixture
+        .input_files
+        .pop()
+        .expect("fixture should contain one source");
+    let source_id = input.source_id();
+    let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
+        StablePackageIdentity::project_local("preparation-warning-owner"),
+        Path::new(""),
+        ModuleRootRole::Normal,
+    )
+    .expect("test module origin should construct");
+    let source_module_origins = Arc::new(super::SourceModuleOriginTable::from_synthetic_origin(
+        &fixture.frontend.source_files,
+        &stable_origin,
+    ));
+    let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
+        style_directives: &fixture.frontend.style_directives,
+    };
+    let mut selected_source_texts = super::super::source_loading::SelectedSourceTextMap::default();
+    let mut syntax = preparation_context
+        .begin_syntax_discovery(
+            stable_origin,
+            super::RegisteredModuleSources {
+                candidate_source_ids: vec![source_id],
+                source_module_origins,
+            },
+            &fixture.entry_file_path,
+            None,
+            std::mem::take(&mut fixture.frontend.string_table),
+            std::mem::replace(&mut fixture.frontend.path_fork, PathInternerFork::empty()),
+            &mut selected_source_texts,
+            #[cfg(feature = "timers")]
+            None,
+        )
+        .expect("syntax discovery should start for the fixture source");
+    let (_, mut source_spans) = fixture.span_builders.split();
+    let output = syntax
+        .prepare_source(input, &mut source_spans)
+        .expect("the fixture source should prepare successfully");
+
+    syntax
+        .retain_prepared_output(0, output)
+        .expect("the prepared output should occupy its candidate slot");
+    let (_prepared, warnings) = syntax
+        .finish()
+        .expect("successful header preparation should finish");
+    assert_eq!(
+        warnings.len(),
+        1,
+        "indexed file preparation should keep the PascalCase value warning exactly once"
+    );
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    assert_eq!(compact.len(), 1);
+    assert!(
+        compact
+            .first()
+            .and_then(|warning| warning.family_view::<IdentifierNamingConventionView>())
+            .is_some(),
+        "the retained warning should be the identifier naming convention diagnostic"
+    );
+}
+
+#[test]
 fn chunked_file_preparation_preserves_warning_source_order() {
     let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
         .map(|index| {
@@ -1751,13 +1854,12 @@ fn chunked_file_preparation_preserves_warning_source_order() {
         )
         .expect("chunked preparation should succeed with warnings");
 
-    let warning_names: Vec<_> = warnings
-        .iter()
-        .filter_map(|warning| match &warning.payload {
-            DiagnosticPayload::IdentifierNamingConvention { name, .. } => {
-                Some(fixture.frontend.string_table.resolve(*name).to_owned())
-            }
-            _ => None,
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let warning_names: Vec<_> = compact
+        .views()
+        .filter_map(|warning| {
+            let facts = warning.family_view::<IdentifierNamingConventionView>()?;
+            Some(fixture.frontend.string_table.resolve(facts.name).to_owned())
         })
         .collect();
     let expected_names: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
@@ -1856,13 +1958,13 @@ fn dummy_preparation_chunk(
     }
 }
 /// Merge malformed chunks through the real merge path and assert the boundary returns an
-/// infrastructure `CompilerError` whose message contains `expected_fragment`.
+/// infrastructure `InfrastructureFailure` whose message contains `expected_fragment`.
 fn assert_malformed_chunks_rejected(
     chunks: Vec<super::FilePreparationChunk>,
     module_file_count: usize,
     expected_fragment: &str,
 ) {
-    use crate::compiler_frontend::compiler_messages::PremergeFailure;
+    use crate::compiler_frontend::compiler_messages::PreparedFailure;
 
     let mut string_table = StringTable::new();
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
@@ -1872,9 +1974,8 @@ fn assert_malformed_chunks_rejected(
         module_file_count,
         0,
     ) {
-        Err(PremergeFailure::Infrastructure(error)) => error,
-        Err(PremergeFailure::Mixed { error, .. }) => error,
-        Err(PremergeFailure::Diagnosed(_)) => {
+        Err(PreparedFailure::Infrastructure(error)) => error,
+        Err(PreparedFailure::Diagnosed(_)) => {
             panic!("malformed chunk payload should be an infrastructure failure, not diagnostics")
         }
         Ok(_) => panic!("malformed chunk payload should be rejected, but merge succeeded"),
@@ -1882,9 +1983,9 @@ fn assert_malformed_chunks_rejected(
     let error = &error.primary;
 
     assert!(
-        error.msg.contains(expected_fragment),
+        error.message.contains(expected_fragment),
         "error message `{}` should contain `{expected_fragment}`",
-        error.msg,
+        error.message,
     );
 }
 
@@ -1968,7 +2069,7 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
         .expect("fixture chunks should prepare against the fixture path fork")
     };
 
-    use crate::compiler_frontend::compiler_messages::PremergeFailure;
+    use crate::compiler_frontend::compiler_messages::PreparedFailure;
 
     let mut string_table = fixture
         .frontend
@@ -1987,11 +2088,8 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
         input_file_count,
         fork_source.base_len(),
     ) {
-        Err(PremergeFailure::Infrastructure(_)) => {}
-        Err(PremergeFailure::Mixed { .. }) => {
-            panic!("a foreign merge base must be an infrastructure failure, not diagnostics")
-        }
-        Err(PremergeFailure::Diagnosed(_)) => {
+        Err(PreparedFailure::Infrastructure(_)) => {}
+        Err(PreparedFailure::Diagnosed(_)) => {
             panic!("a foreign merge base must be an infrastructure failure, not diagnostics")
         }
         Ok(_) => panic!("a foreign merge base must be rejected, but merge succeeded"),
@@ -2216,7 +2314,6 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
         &source_module_origins,
         &expected_origin,
         &canonical_entry,
-        &string_table,
     );
 
     let error = match result {
@@ -2225,10 +2322,10 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     };
     assert!(
         error
-            .msg
+            .message
             .contains("does not match the expected active origin"),
         "error message `{}` should state the origin mismatch",
-        error.msg,
+        error.message,
     );
 }
 
@@ -2363,7 +2460,11 @@ fn assert_counter_value(
 #[test]
 fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     use crate::compiler_frontend::compiler_messages::{
-        PremergeFailure, SourceSpanCapacityResource,
+        DiagnosticSeverity, PreparedFailure, SourceSpanCapacityResource,
+        diagnostics::{
+            boundary_accumulator::BoundaryAccumulator,
+            families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
+        },
     };
     use crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard;
 
@@ -2376,6 +2477,7 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     );
 
     let mut string_table = StringTable::new();
+    let ownership_marker = string_table.get_or_intern("chunk merge ownership marker".to_owned());
     let _gate = ForcedExhaustionGuard::new();
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
@@ -2388,29 +2490,29 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
         Ok(_) => panic!("authored path exhaustion must fail the chunk merge"),
     };
 
-    let PremergeFailure::Diagnosed(batch) = error else {
+    let PreparedFailure::Diagnosed(batch) = error else {
         panic!("authored chunk-merge exhaustion must produce the diagnosed capacity lane");
     };
-    let (diagnostic_bag, taken_string_table, ..) = batch.into_parts();
-    let diagnostics = diagnostic_bag.diagnostics();
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let reports = accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("capacity diagnostic should freeze");
+    assert_eq!(reports.counts().errors, 1);
+    let (report, diagnostic) = reports
+        .iter()
+        .next()
+        .expect("exhaustion must retain one frozen diagnostic");
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+    let facts = diagnostic
+        .family_view::<SourceSpanCapacityView>()
+        .expect("exhaustion must retain the typed capacity facts");
+    assert_eq!(facts.start, 0);
+    assert_eq!(facts.length, u32::MAX as usize);
+    assert_eq!(facts.resource, SourceSpanCapacityResource::LogicalPath);
     assert_eq!(
-        diagnostics.len(),
-        1,
-        "exhaustion must diagnose exactly once"
+        report.context().strings().resolve(ownership_marker),
+        "chunk merge ownership marker",
+        "the diagnosed batch must retain its original string-table identity"
     );
-    let diagnostic = &diagnostics[0];
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::SourceSpanCapacity {
-            start: 0,
-            length: u32::MAX,
-            resource: SourceSpanCapacityResource::LogicalPath,
-        }
-    );
-    assert_eq!(
-        diagnostic.severity,
-        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-    );
-    // The merged table must move into the diagnosed batch as the owner of the interned ids.
-    let _owned_string_table = taken_string_table;
 }

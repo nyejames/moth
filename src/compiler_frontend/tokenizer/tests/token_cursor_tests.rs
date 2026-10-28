@@ -1,4 +1,6 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::numeric_text::store::NumericLiteralStore;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -47,8 +49,8 @@ fn mutable_source_tokens() -> Arc<SourceTokens> {
 #[test]
 fn cursor_observes_half_open_boundaries_and_stable_eof() {
     let tokens = static_tokens();
-    let start = TokenIndex::try_from_raw(0).unwrap();
-    let end = TokenIndex::try_from_raw(3).unwrap();
+    let start = TokenIndex::from_raw(0);
+    let end = TokenIndex::from_raw(3);
     let mut cursor = TokenCursor::from_bounds(&tokens, start, end).expect("range should fit");
 
     assert_eq!(cursor.position(), start);
@@ -99,7 +101,7 @@ fn contiguous_parser_reads_respect_a_nonzero_active_range() {
 
     let mut at_end = cursor;
     at_end
-        .set_position(TokenIndex::try_from_raw(2).unwrap())
+        .set_position(TokenIndex::from_raw(2))
         .expect("position inside range should be accepted");
     assert!(at_end.parser_peek_next().is_none());
     assert_eq!(at_end.parser_previous().unwrap().index().raw(), 1);
@@ -436,8 +438,8 @@ fn sequence_store_rejects_invalid_ranges_and_handles_without_panicking() {
 
     let reversed = TokenRange {
         source,
-        start: TokenIndex::try_from_raw(2).unwrap(),
-        end: TokenIndex::try_from_raw(1).unwrap(),
+        start: TokenIndex::from_raw(2),
+        end: TokenIndex::from_raw(1),
     };
     assert!(matches!(
         store.try_push(&[reversed]),
@@ -527,8 +529,8 @@ fn nested_ranges_and_malformed_handles_are_checked() {
     let cursor = tokens.cursor(full).expect("full range should fit");
     let nested = TokenRange::new(
         SourceId::COMPILATION_ROOT,
-        TokenIndex::try_from_raw(1).unwrap(),
-        TokenIndex::try_from_raw(3).unwrap(),
+        TokenIndex::from_raw(1),
+        TokenIndex::from_raw(3),
     )
     .unwrap();
     let nested_cursor = cursor.nested(nested).expect("nested range should fit");
@@ -537,8 +539,8 @@ fn nested_ranges_and_malformed_handles_are_checked() {
     let other_source = SourceId::from_index(1);
     let wrong_source = TokenRange::new(
         other_source,
-        TokenIndex::try_from_raw(0).unwrap(),
-        TokenIndex::try_from_raw(1).unwrap(),
+        TokenIndex::from_raw(0),
+        TokenIndex::from_raw(1),
     )
     .unwrap();
     assert!(matches!(
@@ -548,23 +550,15 @@ fn nested_ranges_and_malformed_handles_are_checked() {
     assert!(
         TokenRange::new(
             SourceId::COMPILATION_ROOT,
-            TokenIndex::try_from_raw(2).unwrap(),
-            TokenIndex::try_from_raw(1).unwrap(),
+            TokenIndex::from_raw(2),
+            TokenIndex::from_raw(1),
         )
         .is_none()
     );
+    assert!(tokens.token(TokenIndex::from_raw(u32::MAX)).is_err());
     assert!(
-        tokens
-            .token(TokenIndex::try_from_raw(u32::MAX).unwrap())
+        TokenCursor::from_bounds(&tokens, TokenIndex::from_raw(0), TokenIndex::from_raw(4))
             .is_err()
-    );
-    assert!(
-        TokenCursor::from_bounds(
-            &tokens,
-            TokenIndex::try_from_raw(0).unwrap(),
-            TokenIndex::try_from_raw(4).unwrap(),
-        )
-        .is_err()
     );
 }
 
@@ -591,7 +585,7 @@ fn token_ref_exposes_shape_span_and_borrowed_cold_rows() {
         .finish()
         .expect("cold-store fixture should satisfy source-token invariants");
 
-    let numeric_ref = tokens.token(TokenIndex::try_from_raw(0).unwrap()).unwrap();
+    let numeric_ref = tokens.token(TokenIndex::from_raw(0)).unwrap();
     assert_eq!(numeric_ref.shape().numeric_literal_id().unwrap().raw(), 1);
     assert_eq!(numeric_ref.tag(), TokenTag::NUMERIC_LITERAL);
     assert_eq!(numeric_ref.span(), LocalSpan::source_start());
@@ -599,7 +593,7 @@ fn token_ref_exposes_shape_span_and_borrowed_cold_rows() {
         numeric_ref.numeric_literal().unwrap().unwrap().source_text,
         numeric_source_text
     );
-    let path_ref = tokens.token(TokenIndex::try_from_raw(1).unwrap()).unwrap();
+    let path_ref = tokens.token(TokenIndex::from_raw(1)).unwrap();
     assert_eq!(path_ref.tag(), TokenTag::PATH);
     assert_eq!(path_ref.path_syntax().unwrap().unwrap().root, path_id);
 }
@@ -615,13 +609,9 @@ fn canonical_publication_attaches_the_shared_path_table_to_source_tokens() {
     builder
         .push_payload(TokenTag::PATH, 0, path_row.raw(), LocalSpan::source_start())
         .expect("path token shape should build");
-    let mut tokens = Arc::new(
-        builder
-            .finish(NumericLiteralStore::with_source(source))
-            .expect("canonical path owner should build"),
-    );
+    let mut tokens = Arc::new(builder.finish(NumericLiteralStore::with_source(source)));
 
-    let path_index = TokenIndex::try_from_raw(0).unwrap();
+    let path_index = TokenIndex::from_raw(0);
     assert!(matches!(
         tokens.token(path_index).unwrap().path_syntax(),
         Err(TokenViewError::MissingPathTable)
@@ -687,7 +677,7 @@ fn canonical_numeric_publication_retains_its_checked_cold_row() {
     let owner = builder
         .finish()
         .expect("canonical numeric fixture should publish");
-    let token = owner.token(TokenIndex::try_from_raw(0).unwrap()).unwrap();
+    let token = owner.token(TokenIndex::from_raw(0)).unwrap();
     let handle = token
         .shape()
         .numeric_literal_id()
@@ -719,10 +709,17 @@ fn canonical_construction_rejects_unowned_cold_stores() {
             span,
         )
         .expect("numeric shape fixture should pack");
-    let unbound_result = canonical_builder.finish(unbound_numeric);
-    assert!(
-        unbound_result.is_err(),
-        "non-empty numeric stores must carry their source identity"
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        canonical_builder.finish(unbound_numeric)
+    }))
+    .expect_err("a non-empty unowned numeric store must panic as a compiler bug");
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .expect("compiler bug panic should carry a structured report");
+    assert_eq!(report.stage, CompilerStage::Tokenization);
+    assert_eq!(
+        report.message.as_ref(),
+        "source token numeric store has records but no source identity"
     );
 
     let foreign_path_builder = TestSourceTokensBuilder::with_path_syntax(

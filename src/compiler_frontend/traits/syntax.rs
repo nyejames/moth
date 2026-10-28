@@ -7,7 +7,7 @@
 //! These shells intentionally stay parse-only; semantic trait identity belongs to AST environment
 //! construction after dependency bindings, visibility and type metadata are available.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
@@ -98,7 +98,7 @@ impl TraitDeclarationSyntax {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for requirement in &self.requirements {
             requirement.validate_required_source_prefixes(provisional_source_file, path_fork)?;
         }
@@ -118,7 +118,7 @@ impl TraitRequirementSyntax {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.signature
             .validate_required_source_prefixes(provisional_source_file, path_fork)
     }

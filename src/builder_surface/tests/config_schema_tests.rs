@@ -177,9 +177,9 @@ fn frozen_schema_rejects_further_registration() {
         .add_node("nested", UnknownFieldPolicy::Reject)
         .expect_err("frozen schemas must not grow");
     assert!(
-        error.msg.contains("frozen config schema"),
+        error.message.contains("frozen config schema"),
         "mutation after freeze is a compiler error, got {}",
-        error.msg
+        error.message
     );
     assert!(schema.is_frozen());
 }
@@ -235,9 +235,9 @@ fn validate_and_freeze_rejects_incompatible_default() {
         .validate_and_freeze()
         .expect_err("an exact integer default cannot freeze on a String field");
     assert!(
-        error.msg.contains("default does not match"),
+        error.message.contains("default does not match"),
         "got {}",
-        error.msg
+        error.message
     );
     assert!(!schema.is_frozen());
 }
@@ -257,9 +257,9 @@ fn validate_and_freeze_rejects_duplicate_field_names() {
         .validate_and_freeze()
         .expect_err("duplicate field names must not freeze");
     assert!(
-        error.msg.contains("duplicate field name 'title'"),
+        error.message.contains("duplicate field name 'title'"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 
@@ -278,9 +278,9 @@ fn validate_and_freeze_rejects_required_field_with_default() {
         .validate_and_freeze()
         .expect_err("required plus default is contradictory");
     assert!(
-        error.msg.contains("both required and have a default"),
+        error.message.contains("both required and have a default"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 
@@ -299,10 +299,10 @@ fn validate_and_freeze_rejects_closed_domain_on_int_field() {
         .expect_err("closed strings belong on String fields");
     assert!(
         error
-            .msg
+            .message
             .contains("closed string domain on a non-string shape"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 
@@ -324,9 +324,9 @@ fn validate_and_freeze_rejects_unknown_record_node() {
         .validate_and_freeze()
         .expect_err("unknown record nodes must not freeze");
     assert!(
-        error.msg.contains("unknown record node"),
+        error.message.contains("unknown record node"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 
@@ -364,10 +364,10 @@ fn config_schemas_reject_duplicate_project_section_names() {
         .expect_err("duplicate project section names are compiler errors");
     assert!(
         error
-            .msg
+            .message
             .contains("project config section name 'html' is registered more than once"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 
@@ -430,10 +430,10 @@ fn config_schemas_reject_reserved_project_section_name() {
         .expect_err("project is reserved in both registries");
     assert!(
         error
-            .msg
+            .message
             .contains("entry config section name 'project' is reserved"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 
@@ -475,9 +475,9 @@ fn validate_and_freeze_rejects_invalid_nested_record_defaults() {
         .validate_and_freeze()
         .expect_err("nested record defaults must match the referenced node");
     assert!(
-        error.msg.contains("default does not match"),
+        error.message.contains("default does not match"),
         "got {}",
-        error.msg
+        error.message
     );
 }
 

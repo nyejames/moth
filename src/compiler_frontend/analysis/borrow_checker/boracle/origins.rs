@@ -12,7 +12,8 @@ use super::super::problem::{
 use super::relations::{
     CopyGraphId, OriginRegistration, OriginRelation, OriginRelations, PrecisionLossReason,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::{BTreeMap, BTreeSet};
 
 type OriginSet = BTreeSet<ValueOriginId>;
@@ -167,7 +168,7 @@ impl OriginSolution {
 pub(crate) struct OriginSolver;
 
 impl OriginSolver {
-    pub(crate) fn solve(problem: &BorrowProblem) -> Result<OriginSolution, CompilerError> {
+    pub(crate) fn solve(problem: &BorrowProblem) -> Result<OriginSolution, InfrastructureFailure> {
         problem.validate()?;
 
         let block_count = problem.control_flow().blocks.len();
@@ -295,7 +296,7 @@ fn origin_relations(
     traces: &[OriginTrace],
     state_after_event: &BTreeMap<(EventId, PlaceId), Box<[ValueOriginId]>>,
     missing_call_result_origins: &BTreeSet<ValueOriginId>,
-) -> Result<OriginRelations, CompilerError> {
+) -> Result<OriginRelations, InfrastructureFailure> {
     let top_reasons = top_like_reasons(problem, traces, missing_call_result_origins);
     let mut registrations = Vec::new();
     let mut rows = Vec::new();
@@ -920,7 +921,7 @@ fn apply_block(
     mut state: FlowState,
     mut capture: ApplyCapture<'_>,
     missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
-) -> Result<AppliedBlock, CompilerError> {
+) -> Result<AppliedBlock, InfrastructureFailure> {
     let block = &problem.control_flow().blocks[block_index];
     let mut local_facts = Vec::new();
     let mut local_traces = Vec::new();
@@ -929,10 +930,10 @@ fn apply_block(
     let mut pending_write: Option<(PlaceId, UseId)> = None;
     for (event_index, event_id) in block.events.iter().enumerate() {
         let event = problem.events().get(event_id.index()).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Boracle origin solver cannot locate event {:?}",
-                event_id
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!("Boracle origin solver cannot locate event {:?}", event_id),
+            )
         })?;
         if let EventKind::CallEffect(effect) = &event.kind {
             // Resolve each slot against the same incoming state before writing any destination.
@@ -1097,7 +1098,7 @@ fn apply_event(
     problem: &BorrowProblem,
     event: &Event,
     state: &mut FlowState,
-) -> Result<(OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>), CompilerError> {
+) -> Result<(OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>), InfrastructureFailure> {
     match &event.kind {
         EventKind::Fresh {
             destination,
@@ -1171,13 +1172,16 @@ fn apply_event(
                 .into_iter()
                 .collect::<Vec<_>>();
             if source_origins.is_empty() {
-                return Err(CompilerError::compiler_error(format!(
-                    "Boracle origin solver cannot apply copy event {:?}: origin state is \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!(
+                        "Boracle origin solver cannot apply copy event {:?}: origin state is \
                      missing for source place {:?} and destination place {:?}",
-                    event.id,
-                    source,
-                    destination.place()
-                )));
+                        event.id,
+                        source,
+                        destination.place()
+                    ),
+                ));
             }
             Ok(apply_binding_write(
                 problem,
@@ -1197,13 +1201,16 @@ fn apply_event(
             let input = projection_child_origins(problem, &state.origins, *source, *origin)
                 .unwrap_or_else(|| origins_for_place(problem, &state.origins, *source));
             if input.is_empty() {
-                return Err(CompilerError::compiler_error(format!(
-                    "Boracle origin solver cannot apply projection event {:?}: origin state is \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!(
+                        "Boracle origin solver cannot apply projection event {:?}: origin state is \
                      missing for source place {:?} and destination place {:?}",
-                    event.id,
-                    source,
-                    destination.place()
-                )));
+                        event.id,
+                        source,
+                        destination.place()
+                    ),
+                ));
             }
             let output = input.clone();
             Ok(apply_binding_write(
@@ -1246,13 +1253,16 @@ fn apply_event(
             for field in fields {
                 let field_origins = origins_for_place(problem, &state.origins, field.source);
                 if field_origins.is_empty() {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Boracle origin solver cannot apply aggregate event {:?}: origin state \
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!(
+                            "Boracle origin solver cannot apply aggregate event {:?}: origin state \
                          is missing for field source place {:?} and destination place {:?}",
-                        event.id,
-                        field.source,
-                        destination.place()
-                    )));
+                            event.id,
+                            field.source,
+                            destination.place()
+                        ),
+                    ));
                 }
                 input.extend(field_origins.iter().copied());
                 field_states.push((field.projection, field_origins));
@@ -1325,15 +1335,18 @@ fn resolve_call_result(
     result: &super::super::problem::CallResult,
     incoming: &OriginState,
     missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
-) -> Result<(OriginSet, OriginSet), CompilerError> {
+) -> Result<(OriginSet, OriginSet), InfrastructureFailure> {
     let origin = problem
         .origins()
         .get(result.origin.index())
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Boracle origin solver cannot locate call-result origin {:?}",
-                result.origin
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle origin solver cannot locate call-result origin {:?}",
+                    result.origin
+                ),
+            )
         })?;
     Ok(match &origin.kind {
         OriginKind::CallResult { provenance, .. } => call_result_origins(
@@ -1352,7 +1365,7 @@ fn apply_jump_arguments(
     problem: &BorrowProblem,
     event: &Event,
     state: &mut FlowState,
-) -> Result<Vec<(PlaceId, Vec<ValueOriginId>)>, CompilerError> {
+) -> Result<Vec<(PlaceId, Vec<ValueOriginId>)>, InfrastructureFailure> {
     let EventKind::Terminator {
         kind: super::super::problem::TerminatorEventKind::Jump { arguments, .. },
     } = &event.kind
@@ -1369,7 +1382,7 @@ fn apply_jump_arguments(
                 .into_iter()
                 .collect::<Vec<_>>();
             if origins.is_empty() {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(CompilerStage::BorrowChecking, format!(
                     "Boracle origin solver cannot apply jump {:?}: origin state is missing for source place {:?}",
                     event.id, argument.source
                 )));
@@ -1521,7 +1534,7 @@ fn rebuild_origins(state: &mut FlowState) {
     state.origins = origins;
 }
 
-// LEAVE-LOCAL: counterpart is boracle/oracle/execute.rs:369 is_place_available_without_materialising.
+// Its counterpart is boracle/oracle/execute.rs:369 is_place_available_without_materialising.
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 fn place_is_in_generation(
     problem: &BorrowProblem,
@@ -1569,7 +1582,7 @@ fn replace_mode_generation(
     rebuild_origins(state);
 }
 
-// LEAVE-LOCAL: counterpart is boracle/oracle/calls.rs:109 execute_call_effect (Fresh/AliasParams/Alias/Unknown dispatch).
+// Its counterpart is boracle/oracle/calls.rs:109 execute_call_effect (Fresh/AliasParams/Alias/Unknown dispatch).
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 fn call_result_origins(
     problem: &BorrowProblem,

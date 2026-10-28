@@ -2,12 +2,11 @@
 //!
 //! WHAT: projects AST const facts into a smaller HIR-safe summary that carries
 //!       declaration path, scope, source, and exact source span.
-//! WHY: borrow checking and backend lowering may use these facts for optimization
-//!      in the future, but they are strictly advisory and must not affect semantic
-//!      lowering decisions today.
+//! WHY: borrow checking and backend lowering may use these facts for optimization, but
+//!      they are strictly advisory and must not affect semantic lowering decisions.
 //!
 //! HIR facts carry metadata only. The resolved constant stays owned by the const value
-//! store, and these facts feed future optimization passes. They are not semantic inputs
+//! store, and optimization passes may read these facts. They are not semantic inputs
 //! to HIR lowering or borrow validation.
 
 use crate::compiler_frontend::ast::const_values::facts::{

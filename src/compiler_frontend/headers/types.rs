@@ -6,10 +6,10 @@
 //! and avoids making `parse_file_headers.rs` the dumping ground for every header concern.
 
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, PremergeDiagnosticBatch,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::{DependencyClauseKind, DiagnosticBag};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
@@ -81,22 +81,25 @@ impl SourceTokenOwner {
         self.tokens.token_stats()
     }
 
-    pub(crate) fn full_range(&self) -> Result<TokenRange, CompilerError> {
+    pub(crate) fn full_range(&self) -> Result<TokenRange, InfrastructureFailure> {
         self.tokens.full_range().map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "canonical source token range could not be constructed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("canonical source token range could not be constructed: {error:?}"),
+            )
         })
     }
 
     pub(crate) fn cursor(
         &self,
         range: TokenRange,
-    ) -> Result<crate::compiler_frontend::tokenizer::tokens::TokenCursor<'_>, CompilerError> {
+    ) -> Result<crate::compiler_frontend::tokenizer::tokens::TokenCursor<'_>, InfrastructureFailure>
+    {
         self.tokens.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "canonical source token cursor could not be constructed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("canonical source token cursor could not be constructed: {error:?}"),
+            )
         })
     }
 
@@ -120,11 +123,12 @@ impl SourceTokenOwner {
     pub(crate) fn register_token_sequence(
         &mut self,
         ranges: &[TokenRange],
-    ) -> Result<TokenSequenceId, CompilerError> {
+    ) -> Result<TokenSequenceId, InfrastructureFailure> {
         self.try_register_token_sequence(ranges).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "source token sequence registration failed: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("source token sequence registration failed: {error:?}"),
+            )
         })
     }
 
@@ -480,11 +484,12 @@ impl LocalDeclarationOrderingHint {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.origin == LocalDeclarationOrderingHintOrigin::SourceOwned
             && !path_fork.starts_with(self.path, provisional_source_file)
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "source-owned retained path is missing its provisional source prefix",
             ));
         }
@@ -497,7 +502,7 @@ impl LocalDeclarationOrderingHint {
         provisional_source_file: PathId,
         logical_path: PathId,
         path_fork: &mut PathInternerFork,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let path = match self.origin {
             LocalDeclarationOrderingHintOrigin::SourceOwned => {
                 rebind_required_path(self.path, provisional_source_file, logical_path, path_fork)?
@@ -522,9 +527,10 @@ fn rebind_required_path(
     old_prefix: PathId,
     new_prefix: PathId,
     path_fork: &mut PathInternerFork,
-) -> Result<PathId, CompilerError> {
+) -> Result<PathId, InfrastructureFailure> {
     if !path_fork.starts_with(path, old_prefix) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "source-owned retained path is missing its provisional source prefix",
         ));
     }
@@ -536,7 +542,8 @@ fn rebind_required_path(
         rebound = path_fork
             .try_intern_child(rebound, *component)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "path table exhausted while rebinding source-owned path",
                 )
             })?;
@@ -638,9 +645,10 @@ impl TopLevelConstFragment {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if !path_fork.starts_with(self.header_path, provisional_source_file) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "source-owned retained path is missing its provisional source prefix",
             ));
         }
@@ -653,7 +661,7 @@ impl TopLevelConstFragment {
         provisional_source_file: PathId,
         logical_path: PathId,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.header_path = rebind_required_path(
             self.header_path,
             provisional_source_file,
@@ -809,7 +817,7 @@ impl HeaderKind {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match self {
             HeaderKind::Function { signature, .. } => {
                 signature.validate_required_source_prefixes(provisional_source_file, path_fork)
@@ -845,7 +853,7 @@ impl HeaderKind {
         logical_path: PathId,
         provisional_source_file: PathId,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match self {
             HeaderKind::Function {
                 generic_parameters,
@@ -862,7 +870,7 @@ impl HeaderKind {
             }
 
             HeaderKind::Constant { declaration, .. } => {
-                rebind_declaration_source_identity(declaration, file_id)?;
+                rebind_declaration_source_identity(declaration, file_id);
             }
 
             HeaderKind::Struct {
@@ -1009,7 +1017,7 @@ fn rebind_signature_member_source_identity(
     provisional_source_file: PathId,
     logical_path: PathId,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     member.id = rebind_required_path(member.id, provisional_source_file, logical_path, path_fork)?;
     rebind_source_span(&mut member.span, file_id);
     member.default_range = member
@@ -1025,7 +1033,7 @@ fn rebind_function_signature_source_identity(
     provisional_source_file: PathId,
     logical_path: PathId,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for parameter in &mut signature.parameters {
         rebind_signature_member_source_identity(
             parameter,
@@ -1047,7 +1055,7 @@ fn rebind_trait_declaration_source_identity(
     provisional_source_file: PathId,
     logical_path: PathId,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     declaration.name_span = SourceSpan::new(file_id, declaration.name_span.local());
     declaration.span = SourceSpan::new(file_id, declaration.span.local());
     for requirement in &mut declaration.requirements {
@@ -1070,7 +1078,7 @@ fn rebind_choice_variant_source_identity(
     provisional_source_file: PathId,
     logical_path: PathId,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     rebind_source_span(&mut variant.span, file_id);
     if let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
         fields,
@@ -1089,10 +1097,7 @@ fn rebind_choice_variant_source_identity(
     Ok(())
 }
 
-fn rebind_declaration_source_identity(
-    declaration: &mut DeclarationSyntax,
-    file_id: SourceId,
-) -> Result<(), CompilerError> {
+fn rebind_declaration_source_identity(declaration: &mut DeclarationSyntax, file_id: SourceId) {
     rebind_source_span(&mut declaration.span, file_id);
     declaration.initializer_range = declaration
         .initializer_range
@@ -1107,7 +1112,6 @@ fn rebind_declaration_source_identity(
     for reference in &mut declaration.initializer_references {
         rebind_source_span(&mut reference.span, file_id);
     }
-    Ok(())
 }
 
 impl Header {
@@ -1149,9 +1153,10 @@ impl Header {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if !path_fork.starts_with(self.declaration_path, provisional_source_file) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "source-owned retained path is missing its provisional source prefix",
             ));
         }
@@ -1168,7 +1173,7 @@ impl Header {
         provisional_source_file: PathId,
         logical_path: PathId,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.validate_required_source_prefixes(provisional_source_file, path_fork)?;
         self.kind.rebind_source_identity(
             file_id,
@@ -1235,18 +1240,27 @@ impl DependencySelectionRange {
     pub fn get(
         self,
         selections: &[DependencySelection],
-    ) -> Result<&[DependencySelection], CompilerError> {
+    ) -> Result<&[DependencySelection], InfrastructureFailure> {
         let start = usize::try_from(self.start).map_err(|_| {
-            CompilerError::compiler_error("dependency selection range start does not fit usize")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "dependency selection range start does not fit usize",
+            )
         })?;
         let end = usize::try_from(self.end).map_err(|_| {
-            CompilerError::compiler_error("dependency selection range end does not fit usize")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "dependency selection range end does not fit usize",
+            )
         })?;
         if start > end || end > selections.len() {
-            return Err(CompilerError::compiler_error(format!(
-                "dependency selection range {start}..{end} is outside a table of length {}",
-                selections.len()
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "dependency selection range {start}..{end} is outside a table of length {}",
+                    selections.len()
+                ),
+            ));
         }
         Ok(&selections[start..end])
     }
@@ -1373,12 +1387,13 @@ impl RetainedDependencyClause {
     pub fn selections<'a>(
         &self,
         selection_table: &'a [DependencySelection],
-    ) -> Result<&'a [DependencySelection], CompilerError> {
+    ) -> Result<&'a [DependencySelection], InfrastructureFailure> {
         let Some(range) = self.binding.selection_range() else {
             return Ok(&[]);
         };
         if range.is_empty() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "direct-selection binding has an empty selection range",
             ));
         }
@@ -1390,17 +1405,20 @@ impl RetainedDependencyClause {
         &self,
         selection_table: &[DependencySelection],
         selected_index: usize,
-    ) -> Result<DependencySelectionId, CompilerError> {
+    ) -> Result<DependencySelectionId, InfrastructureFailure> {
         let selection_count = self
             .binding
             .selection_range()
             .map_or(0, |range| range.len());
         let selections = self.selections(selection_table)?;
         if selected_index >= selection_count || selected_index >= selections.len() {
-            return Err(CompilerError::compiler_error(format!(
-                "dependency selection index {selected_index} is outside clause range of length {}",
-                selection_count
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "dependency selection index {selected_index} is outside clause range of length {}",
+                    selection_count
+                ),
+            ));
         }
         Ok(DependencySelectionId::new(
             self.dependency.dependency_shell_id,
@@ -1505,9 +1523,7 @@ pub struct FileFrontendPrepareOutput {
     pub(crate) source_token_stream: Option<Arc<SourceTokens>>,
     /// WHY: const-template synthetic names must remain unique across the module while per-file
     /// parsing reports its contribution separately from module aggregation.
-    // Phase 6 parallel preparation keeps this contribution explicit for validation and future
-    // fragment instrumentation, even though Alpha currently permits const templates only in the
-    // single active module root.
+    // Const templates are permitted only in the single active module root.
     pub const_template_count: usize,
     /// Number of runtime fragments contributed by this file.
     pub runtime_fragment_count: usize,
@@ -1517,7 +1533,7 @@ pub struct FileFrontendPrepareOutput {
     ///
     /// WHY: per-file preparation must be self-contained; warnings are merged into the caller's
     /// warning vector in deterministic file iteration order before module-wide aggregation.
-    pub warnings: Vec<CompilerDiagnostic>,
+    pub warnings: DiagnosticBag,
 }
 
 /// Lifecycle owner for one prepared source file's path syntax.
@@ -1543,15 +1559,16 @@ impl PreparedFilePathSyntax {
         }
     }
 
-    fn table_mut(&mut self) -> Result<&mut PathSyntaxTable, CompilerError> {
+    fn table_mut(&mut self) -> Result<&mut PathSyntaxTable, InfrastructureFailure> {
         let Self::Preparing(table) = self else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "prepared-file path table was mutated after its immutable freeze boundary",
             ));
         };
 
         Arc::get_mut(table).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                 "prepared-file path table was mutated while retained header metadata already shared it",
             )
         })
@@ -1561,7 +1578,10 @@ impl PreparedFilePathSyntax {
     /// leave a partially frozen output or make a mutable table observable through copy-on-write.
     fn freeze_preflighted(&mut self) -> Arc<PathSyntaxTable> {
         let Self::Preparing(table) = self else {
-            unreachable!("prepared-file path table was preflighted as preparing before freeze")
+            crate::compiler_bug!(
+                CompilerStage::HeaderParsing,
+                "prepared-file path table was preflighted as preparing before freeze"
+            )
         };
 
         Arc::get_mut(table)
@@ -1588,8 +1608,8 @@ pub(crate) struct SourcePreparationDelta {
 /// Its source's live span builder belongs to the enclosing preparation owner.
 #[derive(Debug)]
 pub struct FileFrontendPrepareError {
-    pub warnings: Vec<CompilerDiagnostic>,
-    pub diagnostic: CompilerDiagnostic,
+    pub warnings: DiagnosticBag,
+    pub diagnostic: DiagnosticDraft,
 }
 impl FileFrontendPrepareError {
     /// Remap every complete-path identity owned by this failed per-file output.
@@ -1602,9 +1622,7 @@ impl FileFrontendPrepareError {
             return;
         }
 
-        for warning in &mut self.warnings {
-            warning.remap_path_ids(remap);
-        }
+        self.warnings.remap_path_ids(remap);
         self.diagnostic.remap_path_ids(remap);
     }
 }
@@ -1619,14 +1637,14 @@ impl FileFrontendPrepareError {
 #[derive(Debug)]
 pub enum FileFrontendPrepareFailure {
     Diagnosed(FileFrontendPrepareError),
-    Infrastructure(CompilerError),
+    Infrastructure(InfrastructureFailure),
 }
 
 impl FileFrontendPrepareFailure {
     pub(crate) fn from_tokenization(failure: TokenizeFailure) -> Self {
         match failure {
             TokenizeFailure::Diagnosed(diagnostic) => Self::Diagnosed(FileFrontendPrepareError {
-                warnings: Vec::new(),
+                warnings: DiagnosticBag::new(),
                 diagnostic,
             }),
             TokenizeFailure::Infrastructure(error) => Self::Infrastructure(error),
@@ -1643,18 +1661,18 @@ impl FileFrontendPrepareFailure {
 ///      boundary.
 #[derive(Debug)]
 pub(crate) enum HeaderParseFailure {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(CompilerError),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
 }
 
-impl From<CompilerDiagnostic> for HeaderParseFailure {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for HeaderParseFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
 
-impl From<CompilerError> for HeaderParseFailure {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for HeaderParseFailure {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
@@ -1665,8 +1683,8 @@ impl From<FileFrontendPrepareError> for FileFrontendPrepareFailure {
     }
 }
 
-impl From<CompilerError> for FileFrontendPrepareFailure {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for FileFrontendPrepareFailure {
+    fn from(error: InfrastructureFailure) -> Self {
         Self::Infrastructure(error)
     }
 }
@@ -1681,7 +1699,7 @@ impl FileFrontendPrepareOutput {
     ///      remap separately through `remap_path_ids` after the string delta merges.
     ///      stages resolve names through the global table.
     // Called when merging per-file frontend outputs into the module-wide compilation.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) -> Result<(), CompilerError> {
+    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) -> Result<(), InfrastructureFailure> {
         // Per-file merges frequently append strings without changing numeric IDs; avoid walking
         // the full token/header/template payload when those IDs already target the merged table.
         if remap.is_identity() {
@@ -1691,17 +1709,17 @@ impl FileFrontendPrepareOutput {
         if let Some(source) = self.source_token_stream.as_mut() {
             Arc::get_mut(source)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "prepared source token stream was shared before string remapping",
                     )
                 })?
                 .remap_string_ids(remap);
         }
+
         for clause in &mut self.file_dependency_clauses {
             clause.remap_string_ids(remap);
         }
-
-        self.structural_file_references.remap_string_ids(remap);
 
         for selection in &mut self.dependency_selections {
             selection.source_name = remap.get(selection.source_name);
@@ -1718,9 +1736,7 @@ impl FileFrontendPrepareOutput {
             fragment.remap_string_ids(remap);
         }
 
-        for warning in &mut self.warnings {
-            warning.remap_string_ids(remap);
-        }
+        self.warnings.remap_string_ids(remap);
 
         Ok(())
     }
@@ -1733,7 +1749,7 @@ impl FileFrontendPrepareOutput {
     ///      path nodes re-intern into the module fork. Callers must invoke `remap_string_ids`
     ///      first (when non-identity) and then this method with the corresponding path remap,
     ///      mirroring the chunk merge order.
-    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) -> Result<(), CompilerError> {
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) -> Result<(), InfrastructureFailure> {
         if remap.is_identity() {
             return Ok(());
         }
@@ -1765,7 +1781,7 @@ impl FileFrontendPrepareOutput {
         final_file_id: SourceId,
         final_logical_path: PathId,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let provisional_source_file = self.source_file;
         // Validate all required source-owned paths and the mutable lifecycle before any retained
         // output is changed. A failed rebinding must never leave a partially finalised file.
@@ -1776,7 +1792,8 @@ impl FileFrontendPrepareOutput {
         if let Some(source) = self.source_token_stream.as_mut() {
             Arc::get_mut(source)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "prepared source token stream was shared before source rebinding",
                     )
                 })?
@@ -1807,11 +1824,8 @@ impl FileFrontendPrepareOutput {
                 path_fork,
             )?;
         }
-        for warning in &mut self.warnings {
-            rebind_source_span(&mut warning.primary_span, final_file_id);
-            for label in &mut warning.labels {
-                rebind_source_span(&mut label.span, final_file_id);
-            }
+        for warning in self.warnings.iter_mut() {
+            warning.rebind_source_ids(&mut |_| Ok(final_file_id))?;
         }
 
         // The table remains private to this output until every retained header has had
@@ -1831,7 +1845,7 @@ impl FileFrontendPrepareOutput {
         &mut self,
         string_table: &StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.validate_file_invariants(string_table, &*path_fork)?;
         if matches!(self.path_syntax, PreparedFilePathSyntax::Frozen(_)) {
             return Ok(());
@@ -1859,12 +1873,13 @@ impl FileFrontendPrepareOutput {
     /// Already-global synthetic outputs are validated when their final source identity is
     /// rebound. Aggregation uses this constant-time state check so it cannot traverse retained
     /// tokens, headers, clauses or path rows a second time.
-    pub(crate) fn require_frozen_path_syntax(&self) -> Result<(), CompilerError> {
+    pub(crate) fn require_frozen_path_syntax(&self) -> Result<(), InfrastructureFailure> {
         if matches!(self.path_syntax, PreparedFilePathSyntax::Frozen(_)) {
             return Ok(());
         }
 
-        Err(CompilerError::compiler_error(
+        Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "already-global prepared-file output reached aggregation before its path table froze",
         ))
     }
@@ -1873,7 +1888,7 @@ impl FileFrontendPrepareOutput {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for header in &self.headers {
             header.validate_required_source_prefixes(provisional_source_file, path_fork)?;
         }
@@ -1894,7 +1909,7 @@ impl FileFrontendPrepareOutput {
         &self,
         string_table: &StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         add_frontend_counter(FrontendCounter::PreparedFileInvariantValidationCount, 1);
         let path_syntax = self.path_syntax.table();
         path_syntax.validate_file_owned_locations(self.file_id)?;
@@ -1920,7 +1935,8 @@ impl FileFrontendPrepareOutput {
 
         for fragment in &self.top_level_const_fragments {
             if !path_fork.starts_with(fragment.header_path, self.source_file) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "top-level const fragment retained a path outside its prepared source file",
                 ));
             }
@@ -1939,18 +1955,19 @@ fn validate_dependency_clauses(
     file_id: SourceId,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let mut next_selection_start = 0usize;
 
     for (clause_index, clause) in clauses.iter().enumerate() {
         let expected_ordinal = u32::try_from(clause_index).map_err(|_| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                 "prepared file contains more dependency clauses than its dense shell identity can represent",
             )
         })?;
         validate_dependency_path(&clause.dependency, file_id, string_table, path_fork)?;
         if clause.dependency.dependency_shell_id.ordinal != expected_ordinal {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained dependency clause shell ordinal does not match its dense file-local clause position",
             ));
         }
@@ -1958,7 +1975,8 @@ fn validate_dependency_clauses(
         match &clause.binding {
             DependencyBindingSyntax::Namespace { alias } => {
                 if clause.export_mode.is_public() {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "public dependency clause retained a namespace binding instead of direct selections",
                     ));
                 }
@@ -1968,18 +1986,21 @@ fn validate_dependency_clauses(
             }
             DependencyBindingSyntax::DirectSelections { range } => {
                 let start = usize::try_from(range.start).map_err(|_| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "dependency selection range start does not fit usize",
                     )
                 })?;
                 if start != next_selection_start {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "dependency selection ranges do not partition the file-owned table in clause order",
                     ));
                 }
                 let selected = range.get(selections)?;
                 if selected.is_empty() {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "direct dependency selection clause retained an empty selection range",
                     ));
                 }
@@ -1987,7 +2008,8 @@ fn validate_dependency_clauses(
                     validate_dependency_selection(selection, file_id)?;
                 }
                 next_selection_start = usize::try_from(range.end).map_err(|_| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "dependency selection range end does not fit usize",
                     )
                 })?;
@@ -1996,7 +2018,8 @@ fn validate_dependency_clauses(
     }
 
     if next_selection_start != selections.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "file-owned dependency selection table contains unclaimed rows",
         ));
     }
@@ -2008,16 +2031,18 @@ fn validate_dependency_path(
     file_id: SourceId,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if dependency.path == PathId::ROOT {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained dependency clause has an empty path",
         ));
     }
     match (&dependency.target, dependency.provider_target.as_ref()) {
         (DependencyTargetKind::Source, None) => {}
         (DependencyTargetKind::Source, Some(_)) => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "source dependency retained an external provider fact",
             ));
         }
@@ -2030,7 +2055,8 @@ fn validate_dependency_path(
             )?;
         }
         (DependencyTargetKind::ExternalProvider { .. }, None) => {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "external provider dependency is missing its checked target fact",
             ));
         }
@@ -2039,7 +2065,8 @@ fn validate_dependency_path(
     if dependency.dependency_shell_id.source == file_id {
         Ok(())
     } else {
-        Err(CompilerError::compiler_error(
+        Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "dependency shell identity does not match the prepared file identity",
         ))
     }
@@ -2048,7 +2075,7 @@ fn validate_dependency_path(
 fn validate_dependency_selection(
     selection: &DependencySelection,
     file_id: SourceId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_source_span(Some(selection.source_span), file_id, "dependency selection")?;
     if let Some(alias) = &selection.local_alias {
         validate_source_span(Some(alias.span), file_id, "dependency selection alias")?;
@@ -2061,14 +2088,16 @@ fn validate_header(
     source_file: PathId,
     path_fork: &PathInternerFork,
     source_tokens: Option<&SourceTokens>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if header.tokens.source() != file_id {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained header token range does not match the prepared file identity",
         ));
     }
     if !path_fork.starts_with(header.declaration_path, source_file) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained header path does not use the prepared file's final source prefix",
         ));
     }
@@ -2078,28 +2107,32 @@ fn validate_header(
                 header.synthetic_content_payload,
                 Some(SyntheticContentPayload::RenderedHtml(_))
             ) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "RenderedHtml synthetic content retained a canonical token stream",
                 ));
             }
 
             if source.source() != file_id {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "canonical source token owner does not match its prepared file identity",
                 ));
             }
             source
                 .range(header.tokens.start(), header.tokens.end())
                 .map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "retained header token range is invalid: {error:?}"
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        format!("retained header token range is invalid: {error:?}"),
+                    )
                 })?;
             if let Some(sequence) = header.token_sequence {
                 source.token_sequence(sequence).map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "retained header token sequence is invalid: {error:?}"
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        format!("retained header token sequence is invalid: {error:?}"),
+                    )
                 })?;
             }
         }
@@ -2112,19 +2145,22 @@ fn validate_header(
                 || !header.tokens.is_empty()
                 || header.token_sequence.is_some()
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "tokenized header has no canonical source token owner",
                 ));
             }
             let HeaderKind::Constant { declaration } = &header.kind else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "payload-only synthetic content header is not a constant",
                 ));
             };
             if declaration.initializer_range.is_some()
                 || !declaration.initializer_references.is_empty()
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "payload-only synthetic content retained parser initializer syntax",
                 ));
             }
@@ -2133,12 +2169,14 @@ fn validate_header(
 
     if let Some(SyntheticContentPayload::MothTemplate { .. }) = header.synthetic_content_payload {
         let HeaderKind::Constant { declaration } = &header.kind else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "MothTemplate synthetic payload is not attached to a constant",
             ));
         };
         if declaration.initializer_range.is_some() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "MothTemplate synthetic content retained parser initializer syntax",
             ));
         }
@@ -2148,7 +2186,8 @@ fn validate_header(
         if hint.origin() == LocalDeclarationOrderingHintOrigin::SourceOwned
             && !path_fork.starts_with(hint.path(), source_file)
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "source-owned declaration ordering hint retained a provisional source prefix",
             ));
         }
@@ -2164,7 +2203,7 @@ fn validate_header_kind(
     source_file: PathId,
     path_fork: &PathInternerFork,
     source_tokens: Option<&SourceTokens>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match kind {
         HeaderKind::Function {
             generic_parameters,
@@ -2233,7 +2272,7 @@ fn validate_header_kind(
 fn validate_generic_parameters(
     parameters: &GenericParameterList,
     file_id: SourceId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for parameter in &parameters.parameters {
         validate_source_span(parameter.span, file_id, "generic parameter")?;
         for bound in &parameter.trait_bounds {
@@ -2249,7 +2288,7 @@ fn validate_function_signature(
     source_file: PathId,
     path_fork: &PathInternerFork,
     source_tokens: Option<&SourceTokens>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for parameter in &signature.parameters {
         validate_signature_member(parameter, file_id, source_file, path_fork, source_tokens)?;
     }
@@ -2265,9 +2304,10 @@ fn validate_signature_member(
     source_file: PathId,
     path_fork: &PathInternerFork,
     source_tokens: Option<&SourceTokens>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if !path_fork.starts_with(member.id, source_file) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained declaration member path does not use the prepared file's final source prefix",
         ));
     }
@@ -2287,7 +2327,7 @@ fn validate_choice_variant(
     source_file: PathId,
     path_fork: &PathInternerFork,
     source_tokens: Option<&SourceTokens>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_source_span(variant.span, file_id, "choice variant")?;
     match &variant.payload {
         crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Unit => {}
@@ -2306,7 +2346,7 @@ fn validate_declaration_syntax(
     declaration: &DeclarationSyntax,
     file_id: SourceId,
     source_tokens: Option<&SourceTokens>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_source_span(declaration.span, file_id, "declaration shell")?;
     validate_parsed_type_ref(&declaration.type_annotation, file_id)?;
     if let Some(qualifier) = &declaration.config_qualifier {
@@ -2328,7 +2368,7 @@ fn validate_declaration_syntax(
 fn validate_parsed_type_ref(
     type_ref: &ParsedTypeRef,
     file_id: SourceId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match type_ref {
         ParsedTypeRef::Inferred => {}
         ParsedTypeRef::Named { span, .. }
@@ -2388,20 +2428,27 @@ fn validate_source_range(
     source_tokens: Option<&SourceTokens>,
     file_id: SourceId,
     role: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(range) = range else {
         return Ok(());
     };
     if range.source() != file_id {
-        return Err(CompilerError::compiler_error(format!(
-            "{role} range does not use the prepared file's source identity"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("{role} range does not use the prepared file's source identity"),
+        ));
     }
     let source = source_tokens.ok_or_else(|| {
-        CompilerError::compiler_error(format!("{role} range has no canonical source token owner"))
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("{role} range has no canonical source token owner"),
+        )
     })?;
     source.range(range.start(), range.end()).map_err(|error| {
-        CompilerError::compiler_error(format!("{role} range is invalid: {error:?}"))
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("{role} range is invalid: {error:?}"),
+        )
     })?;
     Ok(())
 }
@@ -2410,13 +2457,14 @@ fn validate_source_span(
     span: Option<SourceSpan>,
     expected_source: SourceId,
     role: &str,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if let Some(span) = span
         && span.source() != expected_source
     {
-        return Err(CompilerError::compiler_error(format!(
-            "{role} span does not use the prepared file's source identity"
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("{role} span does not use the prepared file's source identity"),
+        ));
     }
     Ok(())
 }
@@ -2437,20 +2485,9 @@ impl FileFrontendPrepareError {
             return;
         }
 
-        for warning in &mut self.warnings {
-            warning.remap_string_ids(remap);
-        }
+        self.warnings.remap_string_ids(remap);
 
         self.diagnostic.remap_string_ids(remap);
-    }
-
-    pub(crate) fn into_premerge_batch(self, string_table: StringTable) -> PremergeDiagnosticBatch {
-        let Self {
-            mut warnings,
-            diagnostic,
-        } = self;
-        warnings.push(diagnostic);
-        PremergeDiagnosticBatch::from_diagnostics(warnings, string_table)
     }
 }
 
@@ -2461,7 +2498,7 @@ pub(super) struct HeaderParseContext<'a> {
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
     pub span_builder: &'a mut ExtendedSpanBuilder,
-    /// The source-owned path rows used by dependency parsing and legacy diagnostics.
+    /// The source-owned path rows used by dependency parsing and its syntax-rejection diagnostics.
     ///
     /// WHAT: remains separate from the canonical token owner until output freeze.
     /// WHY: path rows are mutable preparation state and must not be recovered from token storage.
@@ -2480,7 +2517,7 @@ pub(super) struct HeaderParseContext<'a> {
 
 // Shared per-header builder inputs that stay stable while one declaration is classified.
 pub(super) struct HeaderBuildContext<'a> {
-    pub warnings: &'a mut Vec<CompilerDiagnostic>,
+    pub warnings: &'a mut DiagnosticBag,
     pub source_file: PathId,
     pub file_dependency_clauses: &'a [RetainedDependencyClause],
     pub dependency_selections: &'a [DependencySelection],

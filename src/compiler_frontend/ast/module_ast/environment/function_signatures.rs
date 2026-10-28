@@ -8,6 +8,8 @@
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::generic_functions::{
@@ -27,9 +29,10 @@ use crate::compiler_frontend::ast::type_resolution::{
     intern_resolved_function_signature, resolve_function_signature,
     validate_generic_parameters_used,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
+    InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -62,11 +65,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for &declaration_id in &declaration_lanes.functions {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             let HeaderKind::Function {
                 generic_parameters,
                 signature,
@@ -75,7 +76,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
 
             let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
                 generic_parameters,
@@ -98,7 +99,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     generic_parameters,
                     &resolved_bounds_by_local,
                     trait_environment,
-                    string_table,
                 )?;
             }
 
@@ -136,11 +136,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
             let unresolved_signature = {
                 let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "function header has no prepared source token owner",
-                        ),
-                        string_table,
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "function header has no prepared source token owner",
                     )
                 })?;
                 // Live parser state stays on the canonical source owner. The transient
@@ -148,21 +146,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // inside its bounds for this signature parse only. `from_source_tokens`
                 // retains the canonical owner for later bounded expression handoffs.
                 let full = owner_tokens.full_range().map_err(|error| {
-                    self.error_messages(
-                        CompilerError::compiler_error(format!(
-                            "function header source range could not be constructed: {error:?}"
-                        )),
-                        string_table,
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!("function header source range could not be constructed: {error:?}"),
                     )
                 })?;
                 let source_owner =
                     AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
-                        self.error_messages(
-                            CompilerError::compiler_error(format!(
-                                "function header source range is outside its source owner: {error:?}"
-                            )),
-                            string_table,
-                        )
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
+                            "function header source range is outside its source owner: {error:?}"
+                        ))
                     })?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
@@ -177,10 +170,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
                     self.path_fork,
-                )
-                .map_err(|error| self.expression_error_messages(error, string_table))?;
-                self.warnings
-                    .extend(signature_context.take_emitted_warnings());
+                )?;
+                for warning in signature_context.take_emitted_warnings() {
+                    self.warnings.push(warning);
+                }
                 signature
             };
             // -------------------------------
@@ -206,8 +199,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 unsafe { &*path_fork },
                 string_table,
                 Some(&signature_context),
-            )
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            )?;
             // Release the scope's declaration-table `Rc` before the builder mutates it below.
             drop(signature_context);
             // Receiver methods are never exported, so the export gate above never reaches them.
@@ -224,7 +216,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         generic_parameters,
                         &resolved_bounds_by_local,
                         trait_environment,
-                        string_table,
                     )?;
                 }
             }
@@ -243,8 +234,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &used_generic_parameters,
                 &header.declaration_path,
                 header.name_span,
-            )
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            )?;
 
             // ---------------------------------
             //  Update declaration table
@@ -254,7 +244,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &resolved_signature.signature,
                 &mut self.type_environment,
             );
-            let update_result = match self.declaration_table_mut() {
+            let update_result = match Self::unique_declaration_table_mut(
+                &mut self.declaration_table,
+            ) {
                 Ok(declaration_table) => {
                     if let Some(function_declaration) =
                         declaration_table.get_mut_by_id(declaration_id)
@@ -267,7 +259,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         function_declaration.type_id = function_type_id;
                         Ok(())
                     } else {
-                        Err(CompilerError::compiler_error(
+                        Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Function declaration was not registered before AST signature resolution.",
                         ))
                     }
@@ -275,25 +268,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 Err(error) => Err(error),
             };
 
-            update_result.map_err(|error| self.error_messages(error, string_table))?;
+            update_result?;
 
             if !generic_parameters.is_empty() {
                 let Some(registered_generic_parameters) = registered_generic_parameters.as_ref()
                 else {
-                    return Err(self.error_messages(
-                        CompilerError::compiler_error(
+                    return Err(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "Generic function parameters were not registered before template construction.",
-                        ),
-                        string_table,
-                    ));
+                        )
+                        .into(),
+                    );
                 };
                 let canonical_owner =
                     self.token_owner(header.tokens.source()).ok_or_else(|| {
-                        self.error_messages(
-                            CompilerError::compiler_error(
-                                "generic function header has no prepared source token owner",
-                            ),
-                            string_table,
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "generic function header has no prepared source token owner",
                         )
                     })?;
                 let body = GenericFunctionBody::source(
@@ -301,8 +292,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     header.tokens,
                     header.token_sequence,
                     header.declaration_path,
-                )
-                .map_err(|error| self.error_messages(error, string_table))?;
+                )?;
                 let template = build_generic_function_template(
                     header,
                     generic_parameters,
@@ -331,7 +321,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
-    ) -> Result<Rc<ReceiverMethodCatalog>, CompilerMessages> {
+    ) -> Result<Rc<ReceiverMethodCatalog>, ExpressionParseError> {
         add_ast_counter(
             AstCounter::ReceiverCatalogHeadersScanned,
             sorted_headers.len(),
@@ -349,11 +339,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         })
         .map_err(|error| match error {
             ReceiverMethodCatalogError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(diagnostic, string_table)
+                ExpressionParseError::from(diagnostic)
             }
-            ReceiverMethodCatalogError::Infrastructure(error) => {
-                self.error_messages(*error, string_table)
-            }
+            ReceiverMethodCatalogError::Infrastructure(error) => ExpressionParseError::from(*error),
         })?;
 
         for function_path in self
@@ -362,23 +350,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         {
             let Some(resolved) = self.resolved_function_signatures_by_path.get(function_path)
             else {
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(format!(
-                        "Imported callable path {function_path:?} has no resolved signature"
-                    )),
-                    string_table,
-                ));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("Imported callable path {function_path:?} has no resolved signature"),
+                )
+                .into());
             };
             let Some(receiver) = resolved.receiver.as_ref() else {
                 continue;
             };
             let Some(method_name) = self.path_fork.component(*function_path) else {
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(
-                        "Imported receiver method path has no final method-name component",
-                    ),
-                    string_table,
-                ));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Imported receiver method path has no final method-name component",
+                )
+                .into());
             };
             let entry = ReceiverMethodEntry {
                 function_path: *function_path,
@@ -411,12 +397,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .insert(*function_path, entry)
                 .is_some()
             {
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(format!(
+                return Err(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "Imported receiver method path {function_path:?} collides with an existing receiver method"
-                    )),
-                    string_table,
-                ));
+                    ))
+                    .into(),
+                );
             }
         }
 
@@ -447,8 +433,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn validate_receiver_method_visibility_invariants(
         &self,
         receiver_methods: &ReceiverMethodCatalog,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for file_visibility in self.binding_environment.file_visibility_by_source.values() {
             for visible_methods in file_visibility.visible_receiver_methods.values() {
                 for visible_method in visible_methods {
@@ -469,13 +454,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 .get(other.target.local_path())
                                 .is_some_and(|entry| entry.receiver == method_entry.receiver)
                     }) {
-                        return Err(self.diagnostic_messages(
-                            CompilerDiagnostic::invalid_receiver_declaration(
-                                InvalidReceiverDeclarationReason::DuplicateVisibleMethod,
-                                visible_method.span,
-                            ),
-                            string_table,
-                        ));
+                        let diagnostic = generics_traits_api::invalid_receiver_declaration(
+                            InvalidReceiverDeclarationReason::DuplicateVisibleMethod,
+                            visible_method.span,
+                        );
+                        return Err(diagnostic.into());
                     }
                 }
             }

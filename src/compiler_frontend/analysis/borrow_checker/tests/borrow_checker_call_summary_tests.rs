@@ -23,23 +23,26 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    MultipleMutableBorrowsView, SharedMutableConflictView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, BorrowDiagnosticKind, DiagnosticPayload, InvalidMutableAccessReason,
+    BorrowAccessKind, DiagnosticBag, InvalidMutableAccessReason,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::test_support::{
     TestExternalAccessKind as ExternalAccessKind, TestExternalReturnAlias as ExternalReturnAlias,
-    TestExternalReturnType as ExternalReturnType,
+    TestExternalReturnType as ExternalReturnType, set_test_external_function_return_alias,
 };
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
     ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::hir_builder::lower_ast;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
 use crate::compiler_frontend::hir::statements::{
@@ -55,15 +58,16 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, node, param_with_type_id, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_kind, assert_infrastructure_error_contains,
-    assert_invalid_mutable_access_reason, run_borrow_checker,
+    assert_infrastructure_error_contains, assert_invalid_mutable_access_reason, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
 };
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
-use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast,
+};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -328,7 +332,7 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
         .expect_err("partial parameter metadata should fail summary construction");
     assert_infrastructure_error_contains(
         &error,
-        ErrorType::Compiler,
+        InfrastructureFailureKind::Internal,
         &["could not resolve mutability for parameter local"],
     );
 }
@@ -2256,7 +2260,7 @@ fn host_mutable_parameter_requires_mutable_access() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutable host parameter should enforce mutable access");
-    assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
 }
 
 #[test]
@@ -2558,7 +2562,17 @@ fn two_mutable_args_to_same_root_are_rejected() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("two mutable args to the same root should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::MultipleMutableBorrows);
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("borrow failure should retain its typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compact
+        .first()
+        .expect("multiple-mutable-borrows diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-BORROW-0002");
+    diagnostic
+        .family_view::<MultipleMutableBorrowsView>()
+        .expect("multiple-mutable-borrows diagnostic should retain typed facts");
 }
 
 #[test]
@@ -2678,17 +2692,19 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("shared then mutable access to same root in a call must fail");
-    let payload = assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
-    let DiagnosticPayload::SharedMutableConflict {
-        existing_access,
-        requested_access,
-        ..
-    } = payload
-    else {
-        panic!("expected shared/mutable conflict payload, found {payload:?}");
-    };
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("borrow failure should retain its typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compact
+        .first()
+        .expect("shared/mutable conflict diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-BORROW-0003");
+    let conflict = diagnostic
+        .family_view::<SharedMutableConflictView>()
+        .expect("shared/mutable conflict should retain typed access facts");
     assert_eq!(
-        (*existing_access, *requested_access),
+        (conflict.existing_access, conflict.requested_access),
         (BorrowAccessKind::Shared, BorrowAccessKind::Mutable)
     );
 }
@@ -3106,7 +3122,11 @@ fn unresolved_or_mismatched_host_signature_errors() {
         } else {
             "argument count mismatch"
         };
-        assert_infrastructure_error_contains(&error, ErrorType::Compiler, &[expected_message]);
+        assert_infrastructure_error_contains(
+            &error,
+            InfrastructureFailureKind::Internal,
+            &[expected_message],
+        );
         let call = hir
             .blocks
             .iter_mut()
@@ -3226,7 +3246,104 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("immutable argument passed to mutable user param and reused must fail");
-    assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+}
+
+#[test]
+fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let bad_alias_host = register_external_function(
+        &mut external_package_registry,
+        "bad_alias_host",
+        vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::AliasArgs(vec![0]),
+        ExternalReturnType::Fixed(FixedScalar::I32),
+    );
+    // Admit a valid descriptor first, then corrupt only the stored metadata to reach
+    // the borrow checker's independent caller guard.
+    set_test_external_function_return_alias(
+        Arc::make_mut(&mut external_package_registry),
+        bad_alias_host,
+        ExternalReturnAlias::AliasArgs(vec![1]),
+    );
+    let x = symbol("x", &mut path_fork, &mut string_table);
+
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
+                )),
+                test_source_location(10),
+            ),
+            node(
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = immutable_reference_expr(
+                                &mut expression_builder,
+                                x,
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(11),
+                            );
+                            expression_builder.own(value)
+                        },
+                        CallAccessMode::Shared,
+                        test_source_location(11),
+                    )];
+                    host_function_call_node(
+                        &mut expression_builder,
+                        bad_alias_host,
+                        arguments,
+                        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                        test_source_location(11),
+                    )
+                },
+                test_source_location(11),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
+
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("out-of-range return alias metadata should fail at call site");
+    assert_infrastructure_error_contains(
+        &error,
+        InfrastructureFailureKind::Internal,
+        &["out-of-range return-alias index"],
+    );
 }
 
 #[test]
@@ -3499,8 +3616,7 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
             .expect("a direct private catch must lower");
     let mut initial = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("the pre-installation HIR must be legal");
-    infer_builtin_failure_summaries(&hir, &mut initial)
-        .expect("the private producer must infer its escaping failure");
+    infer_builtin_failure_summaries(&hir, &mut initial);
     install_private_failure_lanes(&mut hir, &initial, &mut type_environment, &registry)
         .expect("the inferred call must install a real handler edge");
     assert!(hir.catch_protected_calls.is_empty());

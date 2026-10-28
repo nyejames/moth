@@ -1,6 +1,6 @@
 entry = "."
 
-# Authored for Phase 5B.2 and unobserved until the parent harness run. Expected success depends on OptionalBindingStorageFix. Parent-observed pre-fix failures: alias_scalar I32? = alias_origin fails with SYNTAX0002 at 3:28 (optional-alias-storage-probe), and the wide origin literal 4294967334 fails with SYNTAX0008 at 10:10 (optional-wide-storage-probe). OptionalBindingStorageFix covers the alias and wide-alias shapes only; the directed, annotated, absent, and raw_wide shapes are unverified by that change. No html_wasm block is declared, so no Wasm outcome is asserted.
+# No html_wasm block is declared, so no Wasm outcome is asserted.
 
 [backends.html]
 mode = "success"

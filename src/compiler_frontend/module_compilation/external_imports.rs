@@ -8,7 +8,8 @@ use crate::builder_surface::external_import_providers::provider::{
     BuilderRuntimePackageMetadata, RequiredRuntimeImport, RuntimeAssetIdentity,
 };
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::{ExternalPackageId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::reachability::{HirModuleLinkFacts, ReachableExternalCall};
 use crate::compiler_frontend::module_compilation::artefact::ModuleExternalImport;
@@ -22,9 +23,9 @@ pub(crate) fn collect_external_import_candidates(
     registry: &ExternalPackageRegistry,
     resolution_table: &ExternalImportResolutionTable,
     builder_runtime_packages: &[BuilderRuntimePackageMetadata],
-) -> Result<Vec<ModuleExternalImport>, CompilerError> {
+) -> Result<Vec<ModuleExternalImport>, InfrastructureFailure> {
     let mut package_ids =
-        collect_external_import_package_ids(function_facts.direct_external_calls(), registry)?;
+        collect_external_import_package_ids(function_facts.direct_external_calls(), registry);
     package_ids.extend(
         resolution_table
             .resolved_imports_for_source_files(source_logical_paths)
@@ -47,39 +48,35 @@ pub(crate) fn collect_external_import_candidates(
 pub(crate) fn collect_external_import_package_ids<'a>(
     calls: impl Iterator<Item = &'a ReachableExternalCall>,
     registry: &ExternalPackageRegistry,
-) -> Result<FxHashSet<ExternalPackageId>, CompilerError> {
+) -> FxHashSet<ExternalPackageId> {
     let mut package_ids = FxHashSet::default();
     for call in calls {
         if registry.get_function_by_id(call.function_id).is_none() {
-            return Err(CompilerError::new(
-                format!(
-                    "Runtime-import inventory: finalized external function {:?} is not registered",
-                    call.function_id
-                ),
-                call.span,
-                ErrorType::Compiler,
-            ));
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Runtime-import inventory: finalized external function {:?} is not registered",
+                call.function_id
+            );
         }
-        let package_id = registry.resolve_function_package_id(call.function_id).ok_or_else(|| {
-            CompilerError::new(
-                format!("Runtime-import inventory: finalized external function {:?} has no owning package", call.function_id),
-                call.span,
-                ErrorType::Compiler,
-            )
-        })?;
-        if registry.get_package_by_id(package_id).is_none() {
-            return Err(CompilerError::new(
-                format!(
-                    "Runtime-import inventory: finalized external function {:?} refers to unknown package {package_id:?}",
+        let package_id = registry
+            .resolve_function_package_id(call.function_id)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Runtime-import inventory: finalized external function {:?} has no owning package",
                     call.function_id
-                ),
-                call.span,
-                ErrorType::Compiler,
-            ));
+                )
+            });
+        if registry.get_package_by_id(package_id).is_none() {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Runtime-import inventory: finalized external function {:?} refers to unknown package {package_id:?}",
+                call.function_id
+            );
         }
         package_ids.insert(package_id);
     }
-    Ok(package_ids)
+    package_ids
 }
 
 /// Project one canonical runtime record per requested, registry-owned package.
@@ -92,15 +89,18 @@ pub(crate) fn collect_external_import_candidates_for_packages(
     resolution_table: &ExternalImportResolutionTable,
     builder_runtime_packages: &[BuilderRuntimePackageMetadata],
     registry: &ExternalPackageRegistry,
-) -> Result<Vec<ModuleExternalImport>, CompilerError> {
+) -> Result<Vec<ModuleExternalImport>, InfrastructureFailure> {
     let mut package_ids = package_ids.iter().copied().collect::<Vec<_>>();
     package_ids.sort_by_key(|package_id| package_id.0);
     let mut candidates = Vec::with_capacity(package_ids.len());
     for package_id in package_ids {
         let package = registry.get_package_by_id(package_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Runtime-import inventory: candidate package {package_id:?} is not registered"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Runtime-import inventory: candidate package {package_id:?} is not registered"
+                ),
+            )
         })?;
         let provider = resolution_table.get_by_package_id(package_id);
         let mut canonical = provider.map(|resolved| {
@@ -146,7 +146,7 @@ fn check_runtime_metadata_compatibility(
     package_id: ExternalPackageId,
     retained: (Option<&RuntimeAssetIdentity>, &[RequiredRuntimeImport]),
     incoming: (Option<&RuntimeAssetIdentity>, &[RequiredRuntimeImport]),
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let conflicting_fact = match (retained.0, incoming.0) {
         (Some(_), None) | (None, Some(_)) => Some("runtime asset presence"),
         (Some(left), Some(right)) if left.origin != right.origin => Some("runtime asset origin"),
@@ -163,16 +163,12 @@ fn check_runtime_metadata_compatibility(
             .then_some("required runtime module/import contract")
     });
     if let Some(fact) = conflicting_fact {
-        return Err(CompilerError::new(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
             format!(
                 "Runtime-import inventory: incompatible {fact} for package '{package_path}' ({package_id:?}). Canonical asset/provenance: {:?}; conflicting asset/provenance: {:?}. Canonical runtime imports: {:?}; conflicting runtime imports: {:?}",
                 retained.0, incoming.0, retained.1, incoming.1,
             ),
-            retained
-                .0
-                .and_then(|asset| asset.source_span)
-                .or_else(|| incoming.0.and_then(|asset| asset.source_span)),
-            ErrorType::Compiler,
         ));
     }
     Ok(())

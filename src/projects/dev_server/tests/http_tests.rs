@@ -33,6 +33,17 @@ fn configure_failed_build_state(
     build_state.last_error_html = Some(last_error_html.to_owned());
     build_state.last_build_version = 9;
     build_state.entry_page_rel = entry_page_rel;
+    build_state.served_artifacts = if output_dir.exists() {
+        crate::projects::dev_server::build_loop::capture_served_artifacts(output_dir)
+            .expect("capture previous successful artifacts")
+    } else {
+        Arc::default()
+    };
+    build_state.served_html_entries =
+        crate::projects::dev_server::static_files::validated_html_entries(
+            output_dir,
+            &build_state.served_artifacts,
+        );
     build_state
 }
 
@@ -52,7 +63,7 @@ fn nested_html_request_uses_stored_error_page_during_failed_build() {
     let build_state =
         configure_failed_build_state(&output_dir, error_html, Some(PathBuf::from("index.html")));
 
-    match prepare_static_response("/docs/basics/", None, &build_state).expect("prepare page") {
+    match prepare_static_response("/docs/basics/", None, &build_state) {
         PreparedResponse::Text {
             status_line,
             content_type,
@@ -92,28 +103,28 @@ fn failed_build_keeps_css_js_and_image_assets_reachable() {
         Some(PathBuf::from("index.html")),
     );
 
-    match prepare_static_response("/styles/site.css", None, &build_state).expect("prepare css") {
+    match prepare_static_response("/styles/site.css", None, &build_state) {
         PreparedResponse::Bytes { body, content_type } => {
             assert_eq!(content_type, "text/css; charset=utf-8");
-            assert_eq!(body, b"body { color: red; }");
+            assert_eq!(body.as_slice(), b"body { color: red; }");
         }
         PreparedResponse::Text { .. } => panic!("css request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("css request should not redirect"),
     }
 
-    match prepare_static_response("/scripts/app.js", None, &build_state).expect("prepare js") {
+    match prepare_static_response("/scripts/app.js", None, &build_state) {
         PreparedResponse::Bytes { body, content_type } => {
             assert_eq!(content_type, "application/javascript; charset=utf-8");
-            assert_eq!(body, b"console.log('hello');");
+            assert_eq!(body.as_slice(), b"console.log('hello');");
         }
         PreparedResponse::Text { .. } => panic!("js request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("js request should not redirect"),
     }
 
-    match prepare_static_response("/images/icon.png", None, &build_state).expect("prepare png") {
+    match prepare_static_response("/images/icon.png", None, &build_state) {
         PreparedResponse::Bytes { body, content_type } => {
             assert_eq!(content_type, "image/png");
-            assert_eq!(body, vec![0x89, b'P', b'N', b'G']);
+            assert_eq!(body.as_slice(), &[0x89, b'P', b'N', b'G']);
         }
         PreparedResponse::Text { .. } => panic!("image request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("image request should not redirect"),
@@ -132,9 +143,7 @@ fn failed_build_traversal_request_still_returns_not_found() {
         Some(PathBuf::from("index.html")),
     );
 
-    match prepare_static_response("/../secret.txt", None, &build_state)
-        .expect("prepare invalid path")
-    {
+    match prepare_static_response("/../secret.txt", None, &build_state) {
         PreparedResponse::Text {
             status_line,
             content_type,
@@ -158,7 +167,7 @@ fn root_request_uses_failed_build_error_page_without_entry_page() {
     let build_state =
         configure_failed_build_state(&output_dir, "<html><body>root error</body></html>", None);
 
-    match prepare_static_response("/", None, &build_state).expect("prepare root") {
+    match prepare_static_response("/", None, &build_state) {
         PreparedResponse::Text {
             status_line,
             content_type,
@@ -192,7 +201,7 @@ fn redirects_are_returned_even_during_failed_build() {
         Some(PathBuf::from("index.html")),
     );
 
-    match prepare_static_response("/about", Some("x=1"), &build_state).expect("prepare redirect") {
+    match prepare_static_response("/about", Some("x=1"), &build_state) {
         PreparedResponse::Redirect {
             status_line,
             location,

@@ -11,7 +11,8 @@ use super::super::problem::BorrowProblemParts;
 use super::oracle::{OracleBounds, OracleOutcome, execute_bounded};
 use super::report::{BoracleReport, BoracleSolver};
 use super::service::{BoracleExperiment, BoracleRuleSelection, format_experiment_names};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// The classified result of comparing one static rule selection with the bounded oracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +22,7 @@ pub(crate) enum OracleComparisonClass {
     StaticRejectedBoundedSafe,
     OracleInconclusive,
     #[allow(dead_code)]
-    // Boracle conflict-directed relational refinement plan: malformed-input classification.
+    // Used by test-only malformed comparison sets.
     MalformedProblem,
     ExperimentOnlyAcceptedDifference,
 }
@@ -45,7 +46,7 @@ pub(crate) enum OracleComparisonSeverity {
     SoundnessFailure,
     PrecisionCandidate,
     #[allow(dead_code)]
-    // Boracle conflict-directed relational refinement plan: malformed-input severity.
+    // Used when classifying test-only malformed comparison sets.
     MalformedInput,
     Informational,
 }
@@ -144,7 +145,7 @@ impl OracleComparisonSet {
 pub(crate) fn compare_problem_parts(
     parts: BorrowProblemParts,
     bounds: OracleBounds,
-) -> Result<OracleComparisonSet, CompilerError> {
+) -> Result<OracleComparisonSet, InfrastructureFailure> {
     let (reference, experiments) = reference_and_experiment_selections();
     match BorrowProblem::new(parts) {
         Ok(problem) => compare_valid_problem(problem, reference, experiments, bounds),
@@ -156,7 +157,7 @@ pub(crate) fn compare_problem_parts(
 pub(crate) fn compare_reference_and_experiments(
     problem: BorrowProblem,
     bounds: OracleBounds,
-) -> Result<OracleComparisonSet, CompilerError> {
+) -> Result<OracleComparisonSet, InfrastructureFailure> {
     let (reference, experiments) = reference_and_experiment_selections();
     compare_valid_problem(problem, reference, experiments, bounds)
 }
@@ -166,7 +167,7 @@ fn compare_valid_problem(
     reference_selection: BoracleRuleSelection,
     experiment_selections: Vec<BoracleRuleSelection>,
     bounds: OracleBounds,
-) -> Result<OracleComparisonSet, CompilerError> {
+) -> Result<OracleComparisonSet, InfrastructureFailure> {
     validate_selection(&reference_selection)?;
     validate_selections(&experiment_selections)?;
 
@@ -212,11 +213,13 @@ fn compare_valid_problem(
     })
 }
 
-fn validate_selection(selection: &BoracleRuleSelection) -> Result<(), CompilerError> {
-    selection.validate().map_err(CompilerError::compiler_error)
+fn validate_selection(selection: &BoracleRuleSelection) -> Result<(), InfrastructureFailure> {
+    selection
+        .validate()
+        .map_err(|message| InfrastructureFailure::internal(CompilerStage::BorrowChecking, message))
 }
 
-fn validate_selections(selections: &[BoracleRuleSelection]) -> Result<(), CompilerError> {
+fn validate_selections(selections: &[BoracleRuleSelection]) -> Result<(), InfrastructureFailure> {
     for selection in selections {
         validate_selection(selection)?;
     }
@@ -228,7 +231,7 @@ fn malformed_comparison_set(
     reference_selection: BoracleRuleSelection,
     experiment_selections: Vec<BoracleRuleSelection>,
     bounds: OracleBounds,
-) -> Result<OracleComparisonSet, CompilerError> {
+) -> Result<OracleComparisonSet, InfrastructureFailure> {
     validate_selection(&reference_selection)?;
     validate_selections(&experiment_selections)?;
     let malformed = |rule_selection| OracleComparison {

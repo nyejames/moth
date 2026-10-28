@@ -264,7 +264,7 @@ impl Drop for WatchSession {
             && join_handle.join().is_err()
         {
             // A polling worker that panicked stopped watching for changes. Discarding the join
-            // result would leave the dev server reporting a live watch it no longer has.
+            // result would leave the dev server reporting a live watch it does not have.
             say!(Yellow "Dev server watch warning: the polling worker panicked and stopped watching.");
         }
     }

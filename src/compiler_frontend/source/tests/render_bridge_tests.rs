@@ -2,9 +2,13 @@ use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan};
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 
 use crate::builder_surface::SourceFileKindRegistry;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -36,8 +40,7 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
         PreparedSourcePackageRoots::default(),
         &source_file_kinds,
         ModuleRootTable::empty(),
-    )
-    .expect("project path resolver should build");
+    );
     let mut string_table = StringTable::new();
     let mut database = SourceDatabase::build(
         [root_config.as_path(), entry_config.as_path()],
@@ -84,11 +87,19 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
     let local_span =
         LocalSpan::exact(0, 6, &mut span_builder).expect("primary span should fit inline");
     let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(SourceSpan::new(entry_id, local_span)));
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(database));
-
-    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+        names_declarations::unknown_value_name(name, Some(SourceSpan::new(entry_id, local_span)));
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, Some((Arc::new(database), None)));
+    let failure: CompilationResult<()> = accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed);
+    let rendered = render_compilation_result_html(&failure, temporary_directory.path());
     assert!(
         !rendered.contains("root config snapshot"),
         "the exact source span must not render the colliding root source: {rendered}"

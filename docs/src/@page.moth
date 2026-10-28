@@ -6,24 +6,43 @@ page_head #= theme_head
 
 #[navbar]
 #[section, $md:
+
     # What is Moth?
 
     Moth is a new programming language and toolchain.
 
+    It focuses on predictable, safe and reliable code with modern language ergonomics.
+
+    There is also an ambitious and unique memory management plan and
+    a Wasm focused but modular backend design for future proofing (with incomplete implementation).
+
     [highlight, $md: *This website was created using Moth!*]
 
-    Everything you see on this page, including the layout, styles, and even the text content 
-    was written in Moth files and generated using the compiler's built-in HTML project builder.
-
     The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
+
 
     ## Documentation
     
     The @./docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
 
-    This compiler is in early alpha and is undergoing rapid development, so not everything is exactly up to date with the current compiler.
+    This project is in early alpha, so not everything is exactly up to date with the current compiler.
     [highlight, $md: *You can already use Moth for web projects, but be aware of the early alpha status*]
 
+
+    ## AI
+
+    This project started off all handwritten, and is still human designed.
+
+    But most of the coding workflow is now heavily AI driven.
+    You can @https://github.com/nyejames/moth/blob/main/HUMANS.md (read this document) for more detail on the project's AI policy.
+
+    Moths design turned out to be great for LLM coding workflows due to its Rust inspiration.
+
+    It's now actively being designed for a future where most code is written by AI,
+    with humans driving the core design and review loops.
+
+    This is because the design principles follow this rule:
+    *Keep the programmer-facing model small and predictable. Make a strict compiler that proves more and gives snappy, comprehensive feedback.*
 
     ## A small language with a powerful compiler
 
@@ -36,18 +55,6 @@ page_head #= theme_head
     
     Moth considers the lifecycle of a project the responsibility of the language and its integrated build system. 
     And it should look the same no matter the scale.
-
-
-    ### How to achieve this through careful design
-
-    When you build something powerful directly into the semantics of a language rather than bolting it on, you can go so much further without excessive complexity, nasty trade-offs or weird DSLs within the same language.
-    
-    The source stays small, statically typed and opinionated, while the compiler and build system take on more of the work. 
-    Borrow validation, compile-time templates, accepted Wiring contracts and project builders all feed through one toolchain.
-
-    Each piece of this is still modular, the language semantics stay agnostic to the platform its running on.
-
-    The HTML builder proves that model, while a backend-neutral frontend and experimental WebAssembly path push the same ideas way beyond it.
 
     
     ### Its time to re-imagine strings
@@ -63,20 +70,12 @@ page_head #= theme_head
     Static content leaves no general template engine behind, and builders consume compiler graphs and link plans instead of inventing a second understanding of the program. 
     
     [highlight, $md:*This docs site already runs through this toolchain.*]
-
-    Memory follows the same principles of simplicity for the programmer:
-    *Keep the programmer-facing model small and make the compiler prove more.* 
     
-    Moth treats restraint as a feature. 
-
     General closures, operator overloading, reflection, trait objects and broad metaprogramming are excluded from the language design on purpose. 
     Those mechanisms can hide control flow, add runtime machinery or turn local code into a type-solving exercise. 
     Moth provides simpler tools that scale better. 
 
     Moth still has plenty of rough edges but aspires to grow into a language that feels joyful at every scale without different sized projects feeling like a completely different tech stack. 
-    
-    If you want to explore something a bit more unique against other C-like languages,
-    with plenty of fresh ideas and remixes of what stands the test of time, have a go at Moth.
 
 ]
 

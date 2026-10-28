@@ -29,7 +29,8 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReferenc
 use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::source::SourceSpan;
 
 use std::collections::HashSet;
@@ -53,7 +54,7 @@ impl TirWrapperContext {
 // -------------------------
 
 impl<'a> TirView<'a> {
-    pub(crate) fn root_node(&self) -> Result<&'a TemplateIrNode, CompilerError> {
+    pub(crate) fn root_node(&self) -> Result<&'a TemplateIrNode, InfrastructureFailure> {
         let root_node_id = self.root_template()?.root;
         self.effective_node(root_node_id)
     }
@@ -62,7 +63,7 @@ impl<'a> TirView<'a> {
         &self,
         expressions: &'expressions AstExpressionBuilder,
         node_ref: TemplateIrNodeId,
-    ) -> Result<Option<ExpressionView<'expressions>>, CompilerError> {
+    ) -> Result<Option<ExpressionView<'expressions>>, InfrastructureFailure> {
         let site_id = {
             let node = self.effective_node(node_ref)?;
             match &node.kind {
@@ -77,7 +78,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn source_span_for_slot_occurrence(
         &self,
         occurrence_id: SlotOccurrenceId,
-    ) -> Result<Option<SourceSpan>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, InfrastructureFailure> {
         let root_node_ref = self.root_template()?.root;
         find_span_in_subtree(self, root_node_ref, &|kind, span| match kind {
             TemplateIrNodeKind::Slot { placeholder }
@@ -92,7 +93,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn source_span_for_child_template_occurrence(
         &self,
         occurrence_id: ChildTemplateOccurrenceId,
-    ) -> Result<Option<SourceSpan>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, InfrastructureFailure> {
         let root_node_ref = self.root_template()?.root;
         find_span_in_subtree(self, root_node_ref, &|kind, span| match kind {
             TemplateIrNodeKind::ChildTemplate {
@@ -106,7 +107,7 @@ impl<'a> TirView<'a> {
     pub(crate) fn source_span_for_expression_site(
         &self,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<SourceSpan>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, InfrastructureFailure> {
         let root_node_ref = self.root_template()?.root;
         find_span_in_subtree(self, root_node_ref, &|kind, span| match kind {
             TemplateIrNodeKind::DynamicExpression {
@@ -133,7 +134,7 @@ fn find_span_in_subtree(
     view: &TirView<'_>,
     node_ref: TemplateIrNodeId,
     matches: &impl Fn(&TemplateIrNodeKind, Option<SourceSpan>) -> Option<SourceSpan>,
-) -> Result<Option<SourceSpan>, CompilerError> {
+) -> Result<Option<SourceSpan>, InfrastructureFailure> {
     let (found, children) = {
         let node = view.effective_node(node_ref)?;
         let found = matches(&node.kind, node.span);
@@ -278,7 +279,7 @@ pub(crate) trait TirExpressionPayloadMutator {
         &mut self,
         expressions: &mut AstExpressionBuilder,
         expression: &mut ExprId,
-    ) -> Result<(), CompilerError>;
+    ) -> Result<(), InfrastructureFailure>;
 }
 
 pub(crate) fn mutate_finalized_tir_body_root_expression_payloads<M>(
@@ -286,7 +287,7 @@ pub(crate) fn mutate_finalized_tir_body_root_expression_payloads<M>(
     expressions: &mut AstExpressionBuilder,
     root: TemplateIrNodeId,
     mutator: &mut M,
-) -> Result<(), CompilerError>
+) -> Result<(), InfrastructureFailure>
 where
     M: TirExpressionPayloadMutator,
 {
@@ -336,20 +337,22 @@ where
         }
     }
 
-    fn walk_template(&mut self, template_id: TemplateIrId) -> Result<(), CompilerError> {
+    fn walk_template(&mut self, template_id: TemplateIrId) -> Result<(), InfrastructureFailure> {
         if self.completed_templates.contains(&template_id) {
             return Ok(());
         }
 
         if !self.active_templates.insert(template_id) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation found a recursive child-template reference.",
             ));
         }
 
         let (root, runtime_slot_plan) = {
             let template = self.store.get_template(template_id).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "TIR expression mutation referenced a missing child template.",
                 )
             })?;
@@ -373,13 +376,14 @@ where
         &mut self,
         wrapper_root: TemplateIrNodeId,
         slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if self.completed_slot_plans.contains(&slot_plan_id) {
             return self.walk_node(wrapper_root);
         }
 
         if !self.active_slot_plans.insert(slot_plan_id) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation found a recursive runtime slot plan.",
             ));
         }
@@ -409,9 +413,10 @@ where
     fn runtime_slot_plan(
         &self,
         slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<&TemplateSlotPlan, CompilerError> {
+    ) -> Result<&TemplateSlotPlan, InfrastructureFailure> {
         self.store.get_slot_plan(slot_plan_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation referenced a missing runtime slot plan.",
             )
         })
@@ -421,7 +426,7 @@ where
     fn runtime_slot_plan_root_count(
         &self,
         slot_plan_id: TemplateSlotPlanId,
-    ) -> Result<usize, CompilerError> {
+    ) -> Result<usize, InfrastructureFailure> {
         let slot_plan = self.runtime_slot_plan(slot_plan_id)?;
         Ok(slot_plan.contribution_sources.len() + slot_plan.slot_sites.len())
     }
@@ -435,7 +440,7 @@ where
         &self,
         slot_plan_id: TemplateSlotPlanId,
         index: usize,
-    ) -> Result<TemplateIrNodeId, CompilerError> {
+    ) -> Result<TemplateIrNodeId, InfrastructureFailure> {
         let slot_plan = self.runtime_slot_plan(slot_plan_id)?;
 
         if let Some(source) = slot_plan.contribution_sources.get(index) {
@@ -445,21 +450,25 @@ where
         // Contribution sources come first, so a remaining index must address a slot site.
         let site_index = index - slot_plan.contribution_sources.len();
         let Some(site) = slot_plan.slot_sites.get(site_index) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR expression mutation read slot-plan root {index} outside plan {slot_plan_id}."
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR expression mutation read slot-plan root {index} outside plan {slot_plan_id}."
+                ),
+            ));
         };
 
         Ok(site.render_root)
     }
 
-    fn walk_node(&mut self, node_id: TemplateIrNodeId) -> Result<(), CompilerError> {
+    fn walk_node(&mut self, node_id: TemplateIrNodeId) -> Result<(), InfrastructureFailure> {
         if self.completed_nodes.contains(&node_id) {
             return Ok(());
         }
 
         if !self.active_nodes.insert(node_id) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation found a recursive node reference.",
             ));
         }
@@ -481,21 +490,24 @@ where
         &self,
         plan: TemplateSlotPlanId,
         site: RuntimeSlotSiteId,
-    ) -> Result<Vec<TirExpressionWalkChild>, CompilerError> {
+    ) -> Result<Vec<TirExpressionWalkChild>, InfrastructureFailure> {
         let Some(slot_plan) = self.store.get_slot_plan(plan) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation referenced a missing runtime slot plan.",
             ));
         };
 
         let Some(indexed_site) = slot_plan.slot_sites.get(site.0) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation referenced a missing runtime slot site.",
             ));
         };
 
         if indexed_site.site != site {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "TIR expression mutation found a runtime slot site index mismatch.",
             ));
         }
@@ -506,12 +518,15 @@ where
     fn mutate_node_and_collect_children(
         &mut self,
         node_id: TemplateIrNodeId,
-    ) -> Result<Vec<TirExpressionWalkChild>, CompilerError> {
+    ) -> Result<Vec<TirExpressionWalkChild>, InfrastructureFailure> {
         if let TemplateIrNodeKind::RuntimeSlotSite { plan, site } = &self
             .store
             .get_node(node_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error("TIR expression mutation referenced a missing node.")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "TIR expression mutation referenced a missing node.",
+                )
             })?
             .kind
         {
@@ -577,7 +592,7 @@ where
     fn walk_children(
         &mut self,
         children: Vec<TirExpressionWalkChild>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for child in children {
             match child {
                 TirExpressionWalkChild::Node(node_id) => self.walk_node(node_id)?,
@@ -593,7 +608,7 @@ fn mutate_selector_expression<M>(
     selector: &mut TemplateBranchSelector,
     expressions: &mut AstExpressionBuilder,
     mutator: &mut M,
-) -> Result<(), CompilerError>
+) -> Result<(), InfrastructureFailure>
 where
     M: TirExpressionPayloadMutator,
 {
@@ -611,7 +626,7 @@ fn mutate_loop_header_expressions<M>(
     header: &mut TemplateLoopHeader,
     expressions: &mut AstExpressionBuilder,
     mutator: &mut M,
-) -> Result<(), CompilerError>
+) -> Result<(), InfrastructureFailure>
 where
     M: TirExpressionPayloadMutator,
 {

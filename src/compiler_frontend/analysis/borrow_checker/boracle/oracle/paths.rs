@@ -14,7 +14,7 @@ use super::state::{OracleState, PlaceIndex};
 use super::traces::{ExecutionTrace, TraceBuilder};
 use super::{OracleBounds, OracleLimitReason, OracleOutcome};
 use crate::compiler_frontend::analysis::borrow_checker::problem::{BlockId, BorrowProblem};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 
 struct PathFrame {
     cursor: EventCursor,
@@ -38,7 +38,7 @@ impl PathFrame {
 pub(crate) fn execute_bounded(
     problem: &BorrowProblem,
     bounds: OracleBounds,
-) -> Result<OracleOutcome, CompilerError> {
+) -> Result<OracleOutcome, InfrastructureFailure> {
     problem.validate()?;
 
     validate_branch_targets(problem)?;

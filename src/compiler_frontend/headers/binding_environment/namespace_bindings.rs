@@ -15,7 +15,10 @@ use super::{
     NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember, ResolvedNamespaceTarget,
     SourceDeclarationTarget, SourceDependencyAccess, VisibleNameBinding, VisibleNameRegistry,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ImportPublicSurfaceType};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::external_packages::{ExternalSymbolId, ExternalSymbolPath};
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::module_symbols::{
@@ -97,7 +100,7 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         let child_surface_path = self
             .path_fork
             .try_intern_child(*surface_path, name_id)
-            .expect("path interner fork exhausted while building namespace diagnostic path");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
         let is_leaf = index == components.len() - 1;
 
         if is_leaf {
@@ -107,7 +110,7 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
                 || record.value_members.contains_key(&name_id)
                 || record.type_members.contains_key(&name_id)
             {
-                return Err(CompilerDiagnostic::duplicate_import_surface_member(
+                return Err(imports::duplicate_import_surface_member(
                     child_surface_path,
                     name_id,
                     self.span,
@@ -146,7 +149,7 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         // a value or type member at the same level.
         if record.value_members.contains_key(&name_id) || record.type_members.contains_key(&name_id)
         {
-            return Err(CompilerDiagnostic::duplicate_import_surface_member(
+            return Err(imports::duplicate_import_surface_member(
                 child_surface_path,
                 name_id,
                 self.span,
@@ -361,17 +364,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &mut self,
         clause: &RetainedDependencyClause,
         source_file: &PathId,
-    ) -> Option<ResolvedNamespaceTarget> {
+    ) -> NamespaceBindingResult<Option<ResolvedNamespaceTarget>> {
         let mut components = Vec::new();
         let components = self
             .path_fork
             .resolve_components(clause.dependency.path, &mut components);
         if components.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         if let Some(target) = self.resolve_source_package_public_export(components, source_file) {
-            return Some(target);
+            return Ok(Some(target));
         }
 
         self.resolve_module_root_public_export(&clause.dependency.path, source_file)
@@ -415,14 +418,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &mut self,
         dependency_path: &PathId,
         source_file: &PathId,
-    ) -> Option<ResolvedNamespaceTarget> {
+    ) -> NamespaceBindingResult<Option<ResolvedNamespaceTarget>> {
         let effective_path = effective_module_boundary_path(
             source_file,
             dependency_path,
             &self.module_symbols.file_module_membership,
             &self.module_symbols.module_root_boundaries,
             &mut *self.path_fork,
-        );
+        )?;
 
         for boundary in &self.module_symbols.module_root_boundaries {
             if effective_path != boundary.dependency_prefix {
@@ -431,7 +434,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
             let consumer_root = self.module_symbols.file_module_membership.get(source_file);
             if consumer_root == Some(&boundary.module_root) {
-                return None;
+                return Ok(None);
             }
 
             if self
@@ -439,11 +442,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .module_file_paths
                 .contains(&boundary.root_file)
             {
-                return Some(ResolvedNamespaceTarget::SourceFile(boundary.root_file));
+                return Ok(Some(ResolvedNamespaceTarget::SourceFile(
+                    boundary.root_file,
+                )));
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Enforce public export privacy for concrete source-file namespace bindings.
@@ -539,7 +544,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let Some(local_name) =
             clause.effective_namespace_local_name(self.string_table, &*self.path_fork)
         else {
-            return Err(CompilerDiagnostic::invalid_namespace_default_name(
+            return Err(imports::invalid_namespace_default_name(
                 clause.dependency.path,
                 namespace_span,
             )
@@ -547,7 +552,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         if !is_identifier(self.string_table.resolve(local_name)) {
-            return Err(CompilerDiagnostic::invalid_namespace_default_name(
+            return Err(imports::invalid_namespace_default_name(
                 clause.dependency.path,
                 namespace_span,
             )
@@ -749,7 +754,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .source_provider_dependencies
             .resolve_reexport(selection.shell)
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                     format!(
                         "public provider selection {:?} has no resolved provider for namespace path {:?}",
                         selection, diagnostic_path
@@ -768,7 +773,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             && view.binding_export(provider_name).is_none()
         {
             return Err(
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                     format!(
                         "public provider selection {:?} has no exported provider member '{}' for diagnostic path {:?}",
                         selection, provider_name, diagnostic_path
@@ -780,7 +785,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         if let Some(origin) = view.exported_origin(provider_name).cloned() {
             let declaration = view.declaration(&origin).ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(format!(
+                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                     "provider interface {:?} has no declaration record for exported origin {:?}",
                     provider_id, origin
                 ))
@@ -788,7 +793,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let local_path = self
                 .path_fork
                 .try_intern_child(*root_file, export_name)
-                .expect("path interner fork exhausted while binding provider namespace member");
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             let target = SourceDeclarationTarget::Imported {
                 origin: origin.clone(),
                 local_path,
@@ -858,7 +863,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
                 .ok_or_else(|| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                         format!(
                             "public provider selection {:?} has an unresolvable binding target for '{}'",
                             selection, provider_name
@@ -878,13 +883,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return Ok(());
         }
 
-        Err(crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-            format!(
-                "public provider selection {:?} has no exported provider member '{}' for diagnostic path {:?}",
-                selection, provider_name, diagnostic_path
-            ),
+        crate::compiler_bug!(
+            CompilerStage::HeaderParsing,
+            "public provider selection {:?} has no exported provider member '{}' for diagnostic path {:?}",
+            selection,
+            provider_name,
+            diagnostic_path
         )
-        .into())
     }
 
     /// Build a namespace record from an external package's symbols.
@@ -915,7 +920,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let surface_path = self
             .path_fork
             .try_intern_child(PathId::ROOT, package_path)
-            .expect("path interner fork exhausted while building package namespace path");
+            .ok_or_else(token_lexical::logical_path_capacity)?;
         let mut inserter = ExternalNamespaceRecordInserter {
             string_table: self.string_table,
             path_fork: self.path_fork,
@@ -991,12 +996,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     ) -> NamespaceBindingResult<()> {
         for name in value_members.keys() {
             if type_members.contains_key(name) {
-                return Err(CompilerDiagnostic::duplicate_import_surface_member(
-                    *surface_path,
-                    *name,
-                    span,
-                )
-                .into());
+                return Err(
+                    imports::duplicate_import_surface_member(*surface_path, *name, span).into(),
+                );
             }
         }
         Ok(())

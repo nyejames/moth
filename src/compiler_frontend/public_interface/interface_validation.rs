@@ -4,7 +4,7 @@
 //! [`PublicSemanticInterface`] and validates the declaration, binding, receiver, evidence and
 //! concrete-call-summary joins before the build system publishes the interface to another wave.
 //! WHY: a successful provider slot is compiler-owned trusted input. Missing or contradictory
-//! facts must fail at publication as [`CompilerError`] rather than becoming consumer source
+//! facts must fail at publication as [`InfrastructureFailure`] rather than becoming consumer source
 //! diagnostics or silently disappearing during dependency projection.
 
 use super::model::{
@@ -22,7 +22,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::public_call_summary::{
     PublicCallParameterAccess, validate_public_call_summary,
@@ -38,7 +39,7 @@ impl PublicSemanticInterface {
     /// Cross-provider bindings are intentionally validated only after closure supplies them.
     /// Evidence is judged here only where its join is local. Rows that need a provider-owned
     /// declaration wait for the closed pass, because closure has not supplied it yet.
-    pub(super) fn validate_closure_input(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_closure_input(&self) -> Result<(), InfrastructureFailure> {
         self.validate_no_private_type_identities()?;
 
         let mut declarations_by_origin = FxHashMap::default();
@@ -59,7 +60,7 @@ impl PublicSemanticInterface {
     }
 
     /// Validate the total closed semantic surface owned by one successful provider interface.
-    pub(crate) fn validate_for_publication(&self) -> Result<(), CompilerError> {
+    pub(crate) fn validate_for_publication(&self) -> Result<(), InfrastructureFailure> {
         self.validate_no_private_type_identities()?;
 
         let declarations_by_origin = self.validate_declarations_and_bindings()?;
@@ -75,7 +76,7 @@ impl PublicSemanticInterface {
     pub(crate) fn validate_binding_targets(
         &self,
         external_registry: &ExternalPackageRegistry,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         for binding in &self.binding_exports {
             if external_registry
                 .resolve_canonical_symbol(&binding.target)
@@ -145,7 +146,7 @@ impl PublicSemanticInterface {
     /// projection drops private targets, and `validate_reusable_evidence` requires that shape
     /// before closure and at publication. A pre-closure walk therefore could never find a
     /// private identity in evidence.
-    fn validate_no_private_type_identities(&self) -> Result<(), CompilerError> {
+    fn validate_no_private_type_identities(&self) -> Result<(), InfrastructureFailure> {
         let mut invalid_identity = None;
         let mut inspect = |identity: &CanonicalTypeIdentity| {
             if invalid_identity.is_none()
@@ -175,7 +176,8 @@ impl PublicSemanticInterface {
 
     fn validate_declarations_and_bindings(
         &self,
-    ) -> Result<FxHashMap<&OriginDeclarationId, &PublicDeclarationSemantics>, CompilerError> {
+    ) -> Result<FxHashMap<&OriginDeclarationId, &PublicDeclarationSemantics>, InfrastructureFailure>
+    {
         let mut declarations_by_origin = FxHashMap::default();
         for declaration in &self.declarations {
             if declarations_by_origin
@@ -244,7 +246,7 @@ impl PublicSemanticInterface {
     fn validate_concrete_call_summaries(
         &self,
         declarations_by_origin: &FxHashMap<&OriginDeclarationId, &PublicDeclarationSemantics>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut expected = FxHashMap::default();
         for (origin, semantics) in declarations_by_origin {
             collect_expected_callable_summaries(origin, semantics, &mut expected)?;
@@ -267,7 +269,7 @@ impl PublicSemanticInterface {
             validate_public_call_summary(&parameter_access, &record.summary).map_err(|error| {
                 publication_error(format!(
                     "invalid concrete call summary for {:?}: {}",
-                    record.origin, error.msg
+                    record.origin, error.message
                 ))
             })?;
         }
@@ -289,7 +291,7 @@ impl PublicSemanticInterface {
         &self,
         declarations_by_origin: &FxHashMap<&OriginDeclarationId, &PublicDeclarationSemantics>,
         scope: EvidenceJoinScope,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut identities = FxHashSet::default();
 
         for evidence in &self.reusable_evidence {
@@ -385,7 +387,7 @@ impl PublicSemanticInterface {
 enum EvidenceJoinScope {
     /// Judge only rows that join nothing a provider must supply.
     LocalOnly,
-    /// Judge every row, now that closure has supplied each declaration a row joins.
+    /// Judge every row after closure supplies each declaration it joins.
     Closed,
 }
 
@@ -415,7 +417,7 @@ fn validate_evidence_requirement_mappings(
     requirements: &[PublicTraitRequirementSurface],
     target_origin: &OriginTypeId,
     target_methods: &[PublicReceiverMethodSemantics],
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if evidence.requirement_mappings.len() != requirements.len() {
         return Err(publication_error(format!(
             "reusable evidence {:?} maps {} requirement(s), but its trait declares {}",
@@ -476,7 +478,7 @@ fn validate_evidence_requirement_mappings(
 
 fn core_trait_requirement(
     identity: CanonicalCoreTraitIdentity,
-) -> Result<PublicTraitRequirementSurface, CompilerError> {
+) -> Result<PublicTraitRequirementSurface, InfrastructureFailure> {
     let (requirement_name, success_type, error_type) = match identity {
         CanonicalCoreTraitIdentity::Displayable => (
             DISPLAYABLE_REQUIREMENT_NAME,
@@ -545,7 +547,7 @@ fn validate_evidence_method_shape(
     evidence_identity: &CanonicalEvidenceIdentity,
     requirement: &PublicTraitRequirementSurface,
     method: &PublicReceiverMethodSemantics,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(receiver) = method.parameters.first() else {
         return Err(publication_error(format!(
             "reusable evidence {:?} maps requirement '{}' to method {:?} without a receiver parameter",
@@ -689,7 +691,7 @@ fn evidence_shape_error(
     evidence_identity: &CanonicalEvidenceIdentity,
     requirement: &PublicTraitRequirementSurface,
     method: &PublicReceiverMethodSemantics,
-) -> CompilerError {
+) -> InfrastructureFailure {
     publication_error(format!(
         "reusable evidence {:?} maps requirement '{}' to incompatible receiver method {:?}",
         evidence_identity, requirement.name, method.method_origin
@@ -699,7 +701,7 @@ fn evidence_shape_error(
 fn validate_declaration_category(
     origin: &OriginDeclarationId,
     semantics: &PublicDeclarationSemantics,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let matches = matches!(
         (origin, semantics),
         (
@@ -754,11 +756,14 @@ fn collect_expected_callable_summaries(
     origin: &OriginDeclarationId,
     semantics: &PublicDeclarationSemantics,
     expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     match semantics {
         PublicDeclarationSemantics::Function(function) => {
             let OriginDeclarationId::Function(origin) = origin else {
-                unreachable!("declaration category was validated before callable collection");
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "declaration category was validated before callable collection"
+                );
             };
             if !matches!(origin.kind(), FunctionOriginKind::Free) {
                 return Err(publication_error(format!(
@@ -772,7 +777,10 @@ fn collect_expected_callable_summaries(
         }
         PublicDeclarationSemantics::Struct(structure) => {
             let OriginDeclarationId::Type(receiver_origin) = origin else {
-                unreachable!("declaration category was validated before callable collection");
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "declaration category was validated before callable collection"
+                );
             };
             collect_expected_receiver_summaries(
                 receiver_origin,
@@ -782,7 +790,10 @@ fn collect_expected_callable_summaries(
         }
         PublicDeclarationSemantics::Choice(choice) => {
             let OriginDeclarationId::Type(receiver_origin) = origin else {
-                unreachable!("declaration category was validated before callable collection");
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "declaration category was validated before callable collection"
+                );
             };
             collect_expected_receiver_summaries(
                 receiver_origin,
@@ -801,7 +812,7 @@ fn collect_expected_receiver_summaries(
     receiver_origin: &OriginTypeId,
     methods: &[super::model::PublicReceiverMethodSemantics],
     expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for method in methods {
         if method.method_origin.receiver() != Some(receiver_origin) {
             return Err(publication_error(format!(
@@ -820,7 +831,7 @@ fn insert_expected_summary(
     origin: &OriginFunctionId,
     parameters: &[super::model::PublicParameterTypeSlot],
     expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let parameter_access = parameters
         .iter()
         .map(|parameter| parameter.access)
@@ -925,8 +936,9 @@ fn visit_callable_type_identities(
     }
 }
 
-fn publication_error(message: String) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "public semantic interface publication invariant failed: {message}"
-    ))
+fn publication_error(message: String) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::AstConstruction,
+        format!("public semantic interface publication invariant failed: {message}"),
+    )
 }

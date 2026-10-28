@@ -259,16 +259,15 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
         panic!("expected the malformed generic bound to remain a source diagnostic");
     };
 
-    assert!(matches!(
-        error.diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::InvalidTraitName,
-            ..
-        }
-    ));
-    let span = error
-        .diagnostic
-        .primary_span
+    let diagnostic_bag = diagnostic_view_for_test(error.diagnostic);
+    let diagnostic = diagnostic_bag
+        .first()
+        .expect("generic-bound diagnostic should compact");
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("invalid_declaration.invalid_trait_name")
+    );
+    let span = diagnostic_primary_span(diagnostic)
         .expect("generic-bound diagnostics should retain their token span");
     assert_eq!(span.source(), source_id);
     let range = span.resolve_with(span_builder.resolver_for(source_id));
@@ -291,8 +290,12 @@ fn top_level_const_template_outside_entry_file_errors() {
     );
 
     assert!(
-        result.is_err(),
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "const templates outside the entry file should error"
+    );
+    let _errors = expect_header_error(
+        result,
+        "const templates outside the entry file should error",
     );
 }
 
@@ -376,7 +379,7 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
         let prepared = prepare_header_syntax(
             &mut outputs,
             string_table,
-            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            &mut |source, diagnostic| crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(diagnostic, source),
             &mut path_fork,
         )
         .expect("header syntax should aggregate");
@@ -463,7 +466,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     cursor.advance();
     let malformed_clause =
         super::malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let mut context = HeaderBuildContext {
         warnings: &mut warnings,
         source_file: scope,
@@ -480,7 +483,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     match failure {
         HeaderParseFailure::Infrastructure(error) => {
             assert!(
-                error.msg.contains("outside a table"),
+                error.message.contains("outside a table"),
                 "unexpected error: {error:?}"
             );
         }
@@ -958,31 +961,38 @@ fn retained_header_substreams_do_not_count_copied_path_rows() {
 fn function_signature_rejects_void_return_syntax() {
     let source = format!("f|| {}{}:\n;\n", "-> ", "Void");
     let result = parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
-    assert!(result.is_err(), "void return syntax must be rejected");
-    let errors = result.err().expect("expected parse errors");
+    assert!(
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
+        "void return syntax must be rejected"
+    );
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::VoidNotAllowed
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<generics_traits_api::InvalidFunctionSignatureView>()
+            .is_some_and(|_| {
+                diagnostic.reason_key() == Some("invalid_function_signature.void_not_allowed")
+            })
+    }));
 }
 
 #[test]
 fn function_signature_rejects_none_return_syntax() {
     let source = format!("f|| {}{}:\n;\n", "-> ", "None");
     let result = parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
-    assert!(result.is_err(), "none return syntax must be rejected");
-    let errors = result.err().expect("expected parse errors");
+    assert!(
+        matches!(&result, HeaderTestOutcome::Diagnostics(_)),
+        "none return syntax must be rejected"
+    );
+    let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTypeAnnotation {
-            reason: InvalidTypeAnnotationReason::NoneNotAllowed,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::InvalidTypeAnnotationView>()
+            .is_some_and(|_| {
+                diagnostic.reason_key() == Some("invalid_type_annotation.none_not_allowed")
+            })
+    }));
 }
 
 #[test]

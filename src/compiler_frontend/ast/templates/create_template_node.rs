@@ -43,16 +43,16 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
     compose_tir_head_chain_from_root, prepare_tir_view_with_source_scope,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
@@ -89,8 +89,7 @@ type PreparedTemplateConstructionResult = Result<PreparedTemplateConstruction, T
 /// Explicit parser facts for a Moth content constant.
 ///
 /// The body cursor remains borrowed from the canonical source owner; this entry supplies only the
-/// virtual `$md` head effects and the donor-exhaustion close policy that the copied wrapper used to
-/// provide.
+/// virtual `$md` head effects and the donor-exhaustion close policy.
 pub(crate) struct MothContentTemplateEntry {
     style: Style,
     outer_span: Option<SourceSpan>,
@@ -380,7 +379,7 @@ impl Template {
         let construction_span = entry
             .as_ref()
             .and_then(|entry| entry.outer_span)
-            .or_else(|| construction_span_for(token_stream));
+            .or_else(|| Some(token_stream.current_span()));
         let mut construction_context =
             TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span);
 
@@ -520,7 +519,8 @@ impl Template {
                     .get_template(template_id)
                     .map(|t| t.root)
                     .ok_or_else(|| {
-                        TemplateError::from(CompilerError::compiler_error(
+                        TemplateError::from(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Template head-chain composition started from a missing TIR root.",
                         ))
                     })?
@@ -613,7 +613,7 @@ impl Template {
             TemplateType::Comment(CommentDirectiveKind::Doc)
         ) && !template_preparation.facts.is_const_evaluable_shape
         {
-            return Err(CompilerDiagnostic::invalid_template_structure(
+            return Err(templates::invalid_template_structure(
                 InvalidTemplateStructureReason::NonFoldableDocComment,
                 construction_span,
             )
@@ -658,13 +658,6 @@ impl Template {
             preparation: template_preparation,
         })
     }
-}
-/// Read-only construction span on the canonical cursor view.
-///
-/// WHAT: reports the current token span for template construction diagnostics and TIR.
-/// WHY: the construction span is a pure token-local read on the canonical cursor.
-fn construction_span_for(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
 }
 
 fn default_nested_style_for_source_path(

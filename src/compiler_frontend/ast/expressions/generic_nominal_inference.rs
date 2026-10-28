@@ -22,10 +22,14 @@ use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericInferenceSubject, InvalidCallShapeReason,
-    InvalidGenericInstantiationReason, ValueReceiverContext,
+    GenericInferenceSubject, InvalidCallShapeReason, InvalidGenericInstantiationReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -208,13 +212,16 @@ pub(crate) fn infer_generic_nominal_constructor(
         .environment()
         .canonical_parameters_for_nominal(input.context.nominal_path)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generic nominal '{}' has no canonical parameter list after registration",
-                input
-                    .context
-                    .diagnostic_name
-                    .rendered_callee_name(string_table)
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Generic nominal '{}' has no canonical parameter list after registration",
+                    input
+                        .context
+                        .diagnostic_name
+                        .rendered_callee_name(string_table)
+                ),
+            )
         })?;
 
     let mut concrete_arguments = Vec::with_capacity(canonical_parameters.len());
@@ -228,11 +235,13 @@ pub(crate) fn infer_generic_nominal_constructor(
     }
 
     if !missing_parameters.is_empty() {
-        let diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
-            input
-                .context
-                .diagnostic_name
-                .diagnostic_callee_name(string_table),
+        let diagnostic = generics_traits_api::invalid_generic_instantiation(
+            Some(
+                input
+                    .context
+                    .diagnostic_name
+                    .diagnostic_callee_name(string_table),
+            ),
             InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters },
             input.context.span,
         );
@@ -246,13 +255,16 @@ pub(crate) fn infer_generic_nominal_constructor(
             .environment()
             .nominal_id_for_path(input.context.nominal_path);
         let nominal_id = nominal_id.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generic nominal '{}' has no canonical nominal identity after registration",
-                input
-                    .context
-                    .diagnostic_name
-                    .rendered_callee_name(string_table)
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Generic nominal '{}' has no canonical nominal identity after registration",
+                    input
+                        .context
+                        .diagnostic_name
+                        .rendered_callee_name(string_table)
+                ),
+            )
         })?;
 
         type_interner.intern_generic_instance(nominal_id, concrete_arguments.into_boxed_slice())
@@ -265,14 +277,16 @@ pub(crate) fn infer_generic_nominal_constructor(
     };
     if let Err(mut diagnostic) = validate_nominal_generic_bound_evidence(
         instance_type_id,
-        input
-            .context
-            .diagnostic_name
-            .diagnostic_callee_name(string_table),
+        Some(
+            input
+                .context
+                .diagnostic_name
+                .diagnostic_callee_name(string_table),
+        ),
         input.context.span,
         &evidence_context,
     ) {
-        diagnostic.primary_span = input.context.span;
+        diagnostic.set_primary_span(input.context.span);
         return Err(CallValidationError::Diagnostic(diagnostic));
     }
     Ok(GenericNominalInference {
@@ -366,7 +380,7 @@ fn collect_expected_type_bindings(
                 let canonical_parameters = type_environment
                     .canonical_parameters_for_nominal(constructor_context.nominal_path)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "Generic nominal '{}' has no canonical parameter list after registration",
                             constructor_context
                                 .diagnostic_name
@@ -514,12 +528,15 @@ fn collect_nominal_binding_evidence(
         .type_environment
         .canonical_parameters_for_nominal(context.nominal_path)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generic nominal '{}' has no canonical parameter list after registration",
-                context
-                    .diagnostic_name
-                    .rendered_callee_name(context.string_table)
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Generic nominal '{}' has no canonical parameter list after registration",
+                    context
+                        .diagnostic_name
+                        .rendered_callee_name(context.string_table)
+                ),
+            )
         })?;
 
     match context
@@ -576,12 +593,15 @@ fn collect_route_input_binding_evidence(
         .type_environment
         .canonical_parameters_for_nominal(context.nominal_path)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generic nominal '{}' has no canonical parameter list after registration",
-                context
-                    .diagnostic_name
-                    .rendered_callee_name(context.string_table)
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "Generic nominal '{}' has no canonical parameter list after registration",
+                    context
+                        .diagnostic_name
+                        .rendered_callee_name(context.string_table)
+                ),
+            )
         })?;
 
     match context
@@ -599,7 +619,7 @@ fn collect_route_input_binding_evidence(
             );
             Ok(())
         }
-        Ok(false) | Err(_) => Err(CompilerDiagnostic::invalid_call_shape(
+        Ok(false) | Err(_) => Err(calls_data::invalid_call_shape(
             InvalidCallShapeReason::RouteInputFieldMismatch,
             None,
             span,
@@ -682,7 +702,7 @@ fn nominal_binding_conflict_diagnostic(
     string_table: &mut StringTable,
     current_evidence_span: Option<SourceSpan>,
     previous_evidence_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     // Pairwise nominal inference only records conflicts for the canonical parameters in this list.
     let parameter_name = canonical_parameters
         .iter()
@@ -690,8 +710,8 @@ fn nominal_binding_conflict_diagnostic(
         .map(|parameter| parameter.name)
         .expect("generic binding conflicts must identify a canonical parameter");
 
-    CompilerDiagnostic::conflicting_generic_inference(
-        diagnostic_name.diagnostic_callee_name(string_table),
+    generics_traits_api::conflicting_generic_inference(
+        Some(diagnostic_name.diagnostic_callee_name(string_table)),
         GenericInferenceSubject::NominalType,
         conflict,
         parameter_name,

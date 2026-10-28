@@ -11,7 +11,7 @@ use super::sidecar_build::{GeneratedSidecarRequest, emit_materialised_sidecar};
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionSignature,
-    StableFunctionTarget, StableParameterContract, const_store_error_into_compiler_error,
+    StableFunctionTarget, StableParameterContract, const_store_error_into_prepared_failure,
     generated_file_value_resolution_services, import_canonical_folded_value,
 };
 use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
@@ -36,9 +36,12 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, GenericDeclarationOrigin,
 };
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CapacityResource;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -157,18 +160,15 @@ impl ModuleMaterialisationContext {
         &self,
         template_index: usize,
         input: ModuleMaterialisationInput<'a>,
-    ) -> Result<MaterialisedGenericAst, CompilerMessages> {
+    ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let artefact = self.artefacts.get(template_index).ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Published materialisation context has no template row {template_index}"
-                )),
-                &input.requester_context.string_table,
-            )
+            PreparedFailure::from(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!("Published materialisation context has no template row {template_index}"),
+            ))
         })?;
-        check_materialisation_row_identity(artefact, input.identity).map_err(|error| {
-            CompilerMessages::from_error_ref(error, &input.requester_context.string_table)
-        })?;
+        check_materialisation_row_identity(artefact, input.identity)
+            .map_err(PreparedFailure::from)?;
         artefact.materialise_ast(self, input)
     }
 
@@ -185,23 +185,27 @@ impl ModuleMaterialisationContext {
     /// Return the retained issuing identity pair, when this context owns one.
     pub(crate) fn retained_identity_tables(
         &self,
-    ) -> Result<Option<(&PathTable, &FrozenStringTable)>, CompilerError> {
+    ) -> Result<Option<(&PathTable, &FrozenStringTable)>, InfrastructureFailure> {
         match (
             self.path_table.as_deref(),
             self.source_string_table.as_deref(),
         ) {
             (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
             (None, None) => Ok(None),
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "published materialisation context has an incomplete identity table pair",
             )),
         }
     }
-    pub(crate) fn retained_identity_arcs(&self) -> Result<RetainedIdentityArcs<'_>, CompilerError> {
+    pub(crate) fn retained_identity_arcs(
+        &self,
+    ) -> Result<RetainedIdentityArcs<'_>, InfrastructureFailure> {
         match (&self.path_table, &self.source_string_table) {
             (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
             (None, None) => Ok(None),
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "published materialisation context has an incomplete identity table pair",
             )),
         }
@@ -235,9 +239,10 @@ impl ModuleMaterialisationContext {
         &self,
         path_fork: &mut PathInternerFork,
         destination_strings: &mut StringTable,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let Some((path_table, source_strings)) = self.retained_identity_tables()? else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "published materialisation context cannot rebase without an issuing identity table pair",
             ));
         };
@@ -255,11 +260,12 @@ impl ModuleMaterialisationContext {
         source_strings: &impl StringTableResolver,
         path_fork: &mut PathInternerFork,
         destination_strings: &mut StringTable,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let path_remap = path_fork
             .remap_table_from_strings(path_table, source_strings, destination_strings)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "published materialisation context path table could not be re-interned",
                 )
             })?;
@@ -280,13 +286,16 @@ impl ModuleMaterialisationContext {
 pub(super) fn check_materialisation_row_identity(
     artefact: &GenericTemplateArtefact,
     identity: &GeneratedFunctionIdentity,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if artefact.declaration_identity != *identity.declaration() {
-        return Err(CompilerError::compiler_error(format!(
-            "Published materialisation row holds declaration identity {:?} but request {:?} selected it",
-            artefact.declaration_identity,
-            identity.declaration()
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            format!(
+                "Published materialisation row holds declaration identity {:?} but request {:?} selected it",
+                artefact.declaration_identity,
+                identity.declaration()
+            ),
+        ));
     }
     Ok(())
 }
@@ -295,16 +304,21 @@ pub(super) fn check_materialisation_row_identity(
 ///
 /// WHY: a rejected generated constant node is an invariant break in the materialised body, not a
 /// user-facing diagnostic. This mirrors the constant-store conversion in `stable_types`.
-fn expression_construction_failure_into_compiler_error(
+fn expression_construction_failure_into_prepared_failure(
     failure: ExpressionConstructionFailure,
-) -> Box<InfrastructureErrors> {
+    string_table: &StringTable,
+    type_environment: &TypeEnvironment,
+) -> PreparedFailure {
     match failure {
         ExpressionConstructionFailure::Diagnostic(diagnostic) => {
-            CompilerError::compiler_error(format!(
-                "Generated constant expression violated an expression store invariant: {diagnostic:?}"
-            )).into()
+            PreparedFailure::capture_diagnosed(
+                DiagnosticBag::from(diagnostic),
+                string_table.clone(),
+                Some(type_environment),
+                None,
+            )
         }
-        ExpressionConstructionFailure::Invariant(error) => error,
+        ExpressionConstructionFailure::Invariant(error) => PreparedFailure::Infrastructure(error),
     }
 }
 
@@ -313,7 +327,7 @@ impl GenericTemplateArtefact {
         &self,
         context: &ModuleMaterialisationContext,
         input: ModuleMaterialisationInput<'a>,
-    ) -> Result<MaterialisedGenericAst, CompilerMessages> {
+    ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let ModuleMaterialisationInput {
             identity,
             requester_context,
@@ -329,17 +343,17 @@ impl GenericTemplateArtefact {
         } = input;
         requester_context
             .validate_requester_string_prefix(string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
         let identity_tables = context
             .retained_identity_arcs()
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
         let materialised_body = self
             .body
             .materialise(source_file, path_fork, string_table, identity_tables)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            .map_err(PreparedFailure::from)?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
             Rc::clone(&module_resources),
@@ -379,7 +393,7 @@ impl GenericTemplateArtefact {
                 path_fork_ref,
                 string_table_ref,
             )
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+            .map_err(PreparedFailure::from)?;
         let builtin_manifest =
             crate::compiler_frontend::builtins::error_type::register_builtin_error_types(
                 path_fork_ref,
@@ -423,12 +437,7 @@ impl GenericTemplateArtefact {
             string_table_ref,
             path_fork_ref,
             Some(materialised_body),
-        )
-        .map_err(|errors| {
-            let mut messages = CompilerMessages::empty(string_table_ref.clone());
-            messages.append_infrastructure_errors(errors);
-            messages
-        })?;
+        )?;
 
         let (build_result, instance_path) = emit_materialised_sidecar(
             phase_context,
@@ -457,7 +466,7 @@ impl GenericTemplateArtefact {
         external_package_registry: &ExternalPackageRegistry,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         string_table: &mut StringTable,
-    ) -> Result<HeaderBindingEnvironment, CompilerError> {
+    ) -> Result<HeaderBindingEnvironment, InfrastructureFailure> {
         let mut environment = HeaderBindingEnvironment::default();
         environment.file_visibility_by_source.insert(
             *source_file,
@@ -517,7 +526,7 @@ impl GenericTemplateArtefact {
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         mut materialised_self_body: Option<MaterialisedBody>,
-    ) -> Result<(), Box<InfrastructureErrors>> {
+    ) -> Result<(), PreparedFailure> {
         let external_package_registry = services.external_registry;
         let template_ir_store = services.template_ir_store;
         let module_resources = Rc::clone(&services.module_resources);
@@ -530,7 +539,14 @@ impl GenericTemplateArtefact {
                 self,
                 string_table,
                 path_fork,
-            )?;
+            )
+            .map_err(|error| {
+                const_store_error_into_prepared_failure(
+                    error,
+                    string_table,
+                    Some(&environment.type_environment),
+                )
+            })?;
             let local_path = nominal.local_path;
             environment
                 .type_environment
@@ -540,7 +556,8 @@ impl GenericTemplateArtefact {
                 .nominal_path(type_id)
                 .cloned()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialised nominal binding has no generated environment path",
                     )
                 })?;
@@ -553,7 +570,8 @@ impl GenericTemplateArtefact {
                     Some(TypeDefinition::Struct(_)) => GenericDeclarationKind::Struct,
                     Some(TypeDefinition::Choice(_)) => GenericDeclarationKind::Choice,
                     _ => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Materialised generic nominal has no struct or choice definition",
                         )
                         .into());
@@ -562,7 +580,8 @@ impl GenericTemplateArtefact {
             } else {
                 None
             };
-            let lookups = Rc::make_mut(&mut environment.lookups);
+            let lookups = Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation");
             Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path, type_id);
             Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path);
             if let Some(kind) = generic_kind {
@@ -648,7 +667,14 @@ impl GenericTemplateArtefact {
                     self,
                     string_table,
                     path_fork,
-                )?;
+                )
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        string_table,
+                        Some(&environment.type_environment),
+                    )
+                })?;
                 let mut materialiser = GeneratedFoldedValueMaterialiser {
                     type_environment: &mut environment.type_environment,
                     external_registry: external_package_registry,
@@ -665,15 +691,33 @@ impl GenericTemplateArtefact {
                     string_table,
                     span,
                 )
-                .map_err(const_store_error_into_compiler_error)?;
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        string_table,
+                        Some(&environment.type_environment),
+                    )
+                })?;
                 services
                     .const_values
                     .bind_module_constant(local_path, value_id)
-                    .map_err(const_store_error_into_compiler_error)?;
+                    .map_err(|error| {
+                        const_store_error_into_prepared_failure(
+                            error,
+                            string_table,
+                            Some(&environment.type_environment),
+                        )
+                    })?;
                 let value = services
                     .expression_builder
                     .constant(value_id, type_id, span, ValueMode::ImmutableReference)
-                    .map_err(expression_construction_failure_into_compiler_error)?;
+                    .map_err(|failure| {
+                        expression_construction_failure_into_prepared_failure(
+                            failure,
+                            string_table,
+                            &environment.type_environment,
+                        )
+                    })?;
                 let declaration = Declaration {
                     id: local_path,
                     type_id,
@@ -683,7 +727,8 @@ impl GenericTemplateArtefact {
                     binding_span: span,
                     config_qualifier: None,
                 };
-                let lookups = Rc::make_mut(&mut environment.lookups);
+                let lookups = Rc::get_mut(&mut environment.lookups)
+                    .expect("AST environment lookups are uniquely owned before materialisation");
                 let declaration_id = match lookups
                     .declaration_table
                     .declaration_id_by_path(&local_path)
@@ -728,7 +773,8 @@ impl GenericTemplateArtefact {
                 if matches!(method.target, StableFunctionTarget::Imported(_)) {
                     continue;
                 }
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     "Generic receiver method has no retained materialisation artefact",
                 )
                 .into());
@@ -753,7 +799,9 @@ impl GenericTemplateArtefact {
             )?;
             let receiver = materialised_receiver_key(&signature, &environment.type_environment)
                 .or_else(|_| {
-                    Ok::<ReceiverKey, CompilerError>(method.receiver.materialise(string_table))
+                    Ok::<ReceiverKey, InfrastructureFailure>(
+                        method.receiver.materialise(string_table),
+                    )
                 })?;
             let declaration = Declaration {
                 id: method_path,
@@ -766,7 +814,8 @@ impl GenericTemplateArtefact {
                 binding_span: None,
                 config_qualifier: None,
             };
-            let lookups = Rc::make_mut(&mut environment.lookups);
+            let lookups = Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation");
             if lookups
                 .declaration_table
                 .get_by_path(&method_path)
@@ -807,7 +856,8 @@ impl GenericTemplateArtefact {
                 AstImportedFunctionContract {
                     target: method.target.materialise(method_path),
                     summary: method.summary.clone().ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Concrete receiver method has no retained call summary",
                         )
                     })?,
@@ -836,12 +886,13 @@ impl GenericTemplateArtefact {
                             .trait_environment
                             .id_for_canonical_identity(identity)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::GenericMaterialisation,
                                     "Materialised generic bound is absent from its trait closure",
                                 )
                             })
                     })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                    .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
                 resolved_bounds_by_local.insert(TypeParameterId(slot as u32), bounds);
             }
             // Public receiver methods and public free functions share the parameter identities
@@ -860,20 +911,29 @@ impl GenericTemplateArtefact {
                     self,
                     string_table,
                     path_fork,
-                )?;
+                )
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        string_table,
+                        Some(&environment.type_environment),
+                    )
+                })?;
                 let nominal_parameter_list_id =
                     match environment.type_environment.get(nominal_type_id) {
                         Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
                         Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
                         _ => {
-                            return Err(CompilerError::compiler_error(
+                            return Err(InfrastructureFailure::internal(
+                                CompilerStage::GenericMaterialisation,
                                 "Generic receiver template owner is not a nominal type",
                             )
                             .into());
                         }
                     }
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Generic receiver template owner has no generic parameter list",
                         )
                     })?;
@@ -897,7 +957,8 @@ impl GenericTemplateArtefact {
                         .type_environment
                         .generic_parameters(owner_list_id)
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::GenericMaterialisation,
                                 "Shared generic parameter owner has a missing parameter list",
                             )
                         })?
@@ -908,14 +969,16 @@ impl GenericTemplateArtefact {
                             .type_environment
                             .type_id_for_generic_parameter(parameter.id)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::GenericMaterialisation,
                                     "Shared generic parameter owner parameter has no type handle",
                                 )
                             })
                         })
-                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
                     if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
                             "Generic template parameter count disagrees with its shared owner",
                         )
                         .into());
@@ -948,7 +1011,8 @@ impl GenericTemplateArtefact {
                             &resolved_bounds_by_local,
                         )
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::GenericMaterialisation,
                                 "Materialised generic contract disagrees with its parameter owner",
                             )
                         })?;
@@ -977,7 +1041,8 @@ impl GenericTemplateArtefact {
                                 .get(&TypeParameterId(slot as u32))
                                 .copied()
                                 .ok_or_else(|| {
-                                    CompilerError::compiler_error(
+                                    InfrastructureFailure::internal(
+                                        CompilerStage::GenericMaterialisation,
                                         "Materialised generic template omitted a parameter slot",
                                     )
                                 })?;
@@ -985,12 +1050,13 @@ impl GenericTemplateArtefact {
                             .type_environment
                             .type_id_for_generic_parameter(parameter_id)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::GenericMaterialisation,
                                     "Materialised generic template parameter has no type handle",
                                 )
                             })
                         })
-                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
                     for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
                         let local_id = TypeParameterId(slot as u32);
                         let parameter_id = registration
@@ -998,7 +1064,8 @@ impl GenericTemplateArtefact {
                             .get(&local_id)
                             .copied()
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::GenericMaterialisation,
                                     "Materialised generic template omitted a stable parameter slot",
                                 )
                             })?;
@@ -1006,7 +1073,8 @@ impl GenericTemplateArtefact {
                             .type_environment
                             .type_id_for_generic_parameter(parameter_id)
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
+                                InfrastructureFailure::internal(
+                                    CompilerStage::GenericMaterialisation,
                                     "Materialised generic template parameter has no type identity",
                                 )
                             })?;
@@ -1049,7 +1117,7 @@ impl GenericTemplateArtefact {
                 materialised_self_body
                     .take()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "generated materialisation consumed its root generic body more than once",
                         )
                     })?
@@ -1070,7 +1138,8 @@ impl GenericTemplateArtefact {
                 body_tokens: Some(body),
                 declaration_span: nested.declaration_span,
             };
-            let lookups = Rc::make_mut(&mut environment.lookups);
+            let lookups = Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation");
             lookups
                 .generic_function_templates_by_path
                 .insert(nested_path, template);
@@ -1122,7 +1191,8 @@ impl GenericTemplateArtefact {
                 .register_materialised_function(nested_path);
         }
         if materialised_self_body.is_some() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "generated materialisation did not install its root generic body",
             )
             .into());
@@ -1150,7 +1220,7 @@ impl GenericTemplateArtefact {
         services: &mut GeneratedValueMaterialisationServices<'_>,
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<(), Box<InfrastructureErrors>> {
+    ) -> Result<(), PreparedFailure> {
         for identity in self
             .nominals
             .iter()
@@ -1177,7 +1247,8 @@ impl GenericTemplateArtefact {
                 .nominal_path(type_id)
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "Materialised callable nominal has no generated nominal path",
                     )
                 })?;
@@ -1191,7 +1262,8 @@ impl GenericTemplateArtefact {
                     .iter()
                     .any(|definition| definition.nominal_path == nominal_path)
                 {
-                    Rc::make_mut(&mut environment.lookups)
+                    Rc::get_mut(&mut environment.lookups)
+                        .expect("AST environment lookups are uniquely owned before materialisation")
                         .imported_choice_definitions
                         .push(crate::compiler_frontend::ast::AstChoiceDefinition { nominal_path });
                 }
@@ -1227,11 +1299,14 @@ impl GenericTemplateArtefact {
                 )?
             {
                 Rc::make_mut(
-                    &mut Rc::make_mut(&mut environment.lookups).resolved_struct_fields_by_path,
+                    &mut Rc::get_mut(&mut environment.lookups)
+                        .expect("AST environment lookups are uniquely owned before materialisation")
+                        .resolved_struct_fields_by_path,
                 )
                 .insert(nominal_path, fields);
             }
-            Rc::make_mut(&mut environment.lookups)
+            Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation")
                 .imported_struct_definitions
                 .push(AstImportedStructDefinition { nominal_path });
         }
@@ -1242,18 +1317,22 @@ impl GenericTemplateArtefact {
 pub(super) fn materialised_receiver_key(
     signature: &FunctionSignature,
     type_environment: &TypeEnvironment,
-) -> Result<ReceiverKey, CompilerError> {
+) -> Result<ReceiverKey, InfrastructureFailure> {
     let receiver_type_id = signature
         .parameters
         .first()
         .map(|parameter| parameter.type_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error("Receiver method has no receiver parameter")
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Receiver method has no receiver parameter",
+            )
         })?;
     type_environment
         .receiver_key_for_type_id(receiver_type_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "Receiver method parameter does not resolve to a nominal receiver",
             )
         })
@@ -1274,9 +1353,10 @@ fn register_materialised_receiver_method(
     signature: FunctionSignature,
     path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     value_carried: bool,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let method_name = path_fork.component(function_path).ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Materialised receiver method path has no final method-name component",
         )
     })?;
@@ -1307,7 +1387,8 @@ fn register_materialised_receiver_method(
         .insert(function_path, entry)
         .is_some()
     {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
             "Materialised receiver method path was registered more than once",
         ));
     }
@@ -1318,14 +1399,24 @@ pub(super) fn append_materialised_declaration(
     lookups: &mut AstModuleLookups,
     declaration: Declaration,
     path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-) -> Result<crate::compiler_frontend::ast::module_ast::environment::DeclarationId, CompilerError> {
+) -> Result<
+    crate::compiler_frontend::ast::module_ast::environment::DeclarationId,
+    InfrastructureFailure,
+> {
     let path = declaration.id;
-    Rc::make_mut(&mut lookups.declaration_table)
+    Rc::get_mut(&mut lookups.declaration_table)
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "AST declaration table was shared during generated materialisation",
+            )
+        })?
         .append_for_construction(declaration, path_fork)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Materialised declaration path {path:?} was registered more than once",
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                format!("Materialised declaration path {path:?} was registered more than once",),
+            )
         })
 }
 
@@ -1347,7 +1438,7 @@ impl StableFunctionSignature {
         &self,
         function_path: &PathId,
         context: &mut StableFunctionMaterialisationContext<'_, N>,
-    ) -> Result<MaterialisedFunctionSignature, Box<InfrastructureErrors>> {
+    ) -> Result<MaterialisedFunctionSignature, PreparedFailure> {
         let mut parameters = Vec::with_capacity(self.parameters.len());
         for parameter in &self.parameters {
             let type_id = intern_materialisation_type_blueprint(
@@ -1358,7 +1449,14 @@ impl StableFunctionSignature {
                 context.external_package_registry,
                 context.string_table,
                 context.path_fork,
-            )?;
+            )
+            .map_err(|error| {
+                const_store_error_into_prepared_failure(
+                    error,
+                    context.string_table,
+                    Some(context.type_environment),
+                )
+            })?;
             let contract = match &parameter.contract {
                 StableParameterContract::Value => ParameterContract::Value,
                 StableParameterContract::Wire => ParameterContract::Wire,
@@ -1375,6 +1473,13 @@ impl StableFunctionSignature {
                                 context.string_table,
                                 context.path_fork,
                             )
+                            .map_err(|error| {
+                                const_store_error_into_prepared_failure(
+                                    error,
+                                    context.string_table,
+                                    Some(context.type_environment),
+                                )
+                            })
                         })
                         .transpose()?,
                 },
@@ -1384,8 +1489,14 @@ impl StableFunctionSignature {
                 .path_fork
                 .try_intern_child(*function_path, name)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "path table exhausted while materialising a function parameter",
+                    PreparedFailure::capture_diagnosed(
+                        DiagnosticBag::from(token_lexical::compiler_capacity_exceeded(
+                            CapacityResource::PathNodes,
+                            parameter.span,
+                        )),
+                        (*context.string_table).clone(),
+                        Some(context.type_environment),
+                        None,
                     )
                 })?;
             let parameter_span = parameter.span;
@@ -1405,7 +1516,13 @@ impl StableFunctionSignature {
                     context.string_table,
                     parameter_span,
                 )
-                .map_err(const_store_error_into_compiler_error)?;
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        context.string_table,
+                        Some(context.type_environment),
+                    )
+                })?;
                 Some(value_id)
             } else {
                 None
@@ -1431,7 +1548,14 @@ impl StableFunctionSignature {
                 context.external_package_registry,
                 context.string_table,
                 context.path_fork,
-            )?;
+            )
+            .map_err(|error| {
+                const_store_error_into_prepared_failure(
+                    error,
+                    context.string_table,
+                    Some(context.type_environment),
+                )
+            })?;
             returns.push(ReturnSlot {
                 type_id: Some(type_id),
                 channel: ReturnChannel::Success,
@@ -1447,7 +1571,14 @@ impl StableFunctionSignature {
                 context.external_package_registry,
                 context.string_table,
                 context.path_fork,
-            )?;
+            )
+            .map_err(|error| {
+                const_store_error_into_prepared_failure(
+                    error,
+                    context.string_table,
+                    Some(context.type_environment),
+                )
+            })?;
             returns.push(ReturnSlot {
                 type_id: Some(type_id),
                 channel: ReturnChannel::Error,
@@ -1481,7 +1612,7 @@ impl super::stable_types::StableCallableBinding {
         nominal_source: &N,
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<AstImportedFunctionContract, Box<InfrastructureErrors>> {
+    ) -> Result<AstImportedFunctionContract, PreparedFailure> {
         let MaterialisedFunctionSignature {
             signature,
             function_type_id,
@@ -1500,7 +1631,8 @@ impl super::stable_types::StableCallableBinding {
                 string_table,
             },
         )?;
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         if lookups.declaration_table.get_by_path(&local_path).is_none() {
             append_materialised_declaration(
                 lookups,
@@ -1541,7 +1673,7 @@ impl super::stable_types::StableCallableBinding {
         nominal_source: &N,
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<(), Box<InfrastructureErrors>> {
+    ) -> Result<(), PreparedFailure> {
         let contract = self.materialise_requester_contract(
             self.local_path,
             environment,
@@ -1550,7 +1682,8 @@ impl super::stable_types::StableCallableBinding {
             string_table,
             path_fork,
         )?;
-        Rc::make_mut(&mut environment.lookups)
+        Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation")
             .imported_functions_by_local_path
             .insert(self.local_path, contract);
         Ok(())

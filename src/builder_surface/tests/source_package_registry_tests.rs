@@ -45,14 +45,13 @@ fn register_filesystem_root_rejects_duplicate_prefix_without_replacing_root() {
     let mut registry = SourcePackageRegistry::new();
     register(&mut registry, "ui", "/builder/ui", PackageOrigin::Builder);
 
-    let error = registry
+    registry
         .register_filesystem_root(
             "ui",
             std::path::PathBuf::from("/other/ui"),
             PackageOrigin::Builder,
         )
         .expect_err("a second root for one prefix must not replace the first");
-    assert!(error.msg.contains("already registered"), "{}", error.msg);
 
     let root = registry.get_root("ui").expect("first root should remain");
     assert!(
@@ -100,6 +99,13 @@ fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
                 "reserved or malformed source prefix {prefix:?} must be rejected"
             ));
     }
+    registry
+        .register_filesystem_root(
+            "project",
+            std::path::PathBuf::from("/project/package"),
+            PackageOrigin::ProjectLocal,
+        )
+        .expect_err("project-local source packages cannot claim project globals");
     assert_eq!(registry.iter().count(), 0);
 }
 

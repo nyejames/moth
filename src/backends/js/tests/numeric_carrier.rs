@@ -132,13 +132,13 @@ fn uint_carriers_follow_the_exact_width_without_new_helpers() {
         JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U32))
             .expect("U32 has a carrier")
             .helper_family(),
-        Some("int")
+        "int"
     );
     assert_eq!(
         JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U64))
             .expect("U64 has a carrier")
             .helper_family(),
-        Some("bigint")
+        "bigint"
     );
     assert_eq!(
         JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U32))

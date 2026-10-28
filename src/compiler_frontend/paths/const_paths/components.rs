@@ -4,7 +4,8 @@
 //! WHY: one path token owns one component grammar; keeping component logic in one module avoids
 //!      duplication and makes validation rules easy to audit.
 
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
+use crate::compiler_frontend::compiler_messages::PathKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span};
 use crate::compiler_frontend::tokenizer::tokens::TokenStream;
@@ -52,7 +53,7 @@ fn parse_quoted_component(
 
     loop {
         let Some(next) = stream.peek().copied() else {
-            return Err(CompilerDiagnostic::invalid_path(
+            return Err(token_lexical::invalid_path(
                 PathKind::MissingClosingQuote,
                 Some(current_source_span(stream)?),
             )
@@ -71,7 +72,7 @@ fn parse_quoted_component(
             stream.next();
 
             let Some(escaped) = stream.peek().copied() else {
-                return Err(CompilerDiagnostic::invalid_path(
+                return Err(token_lexical::invalid_path(
                     PathKind::MissingClosingQuote,
                     Some(current_source_span(stream)?),
                 )
@@ -84,7 +85,7 @@ fn parse_quoted_component(
                     stream.next();
                 }
                 _ => {
-                    return Err(CompilerDiagnostic::invalid_path(
+                    return Err(token_lexical::invalid_path(
                         PathKind::InvalidEscape,
                         Some(current_source_span(stream)?),
                     )
@@ -119,7 +120,7 @@ pub(super) fn parse_bare_component(
     }
 
     if value.is_empty() {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::EmptyComponent,
             Some(current_source_span(stream)?),
         )
@@ -197,7 +198,7 @@ fn validate_path_component(
     _string_table: &StringTable,
 ) -> ComponentResult<()> {
     if component.is_empty() {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::EmptyComponent,
             Some(current_source_span(stream)?),
         )
@@ -209,7 +210,7 @@ fn validate_path_component(
     //      `@` starting any component (such as `@@pages` or `@helper/@home`) is not a valid
     //      module name. Normal module-root filenames are cosmetic filesystem markers.
     if !was_quoted && component.starts_with('@') {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::LeadingAtInPathComponent,
             Some(current_source_span(stream)?),
         )
@@ -221,7 +222,7 @@ fn validate_path_component(
             return Ok(());
         }
 
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::InvalidComponent,
             Some(current_source_span(stream)?),
         )
@@ -229,7 +230,7 @@ fn validate_path_component(
     }
 
     if component.ends_with('.') {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::InvalidComponent,
             Some(current_source_span(stream)?),
         )
@@ -240,7 +241,7 @@ fn validate_path_component(
         .chars()
         .any(|character| !is_valid_component_char(character, was_quoted))
     {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::InvalidComponent,
             Some(current_source_span(stream)?),
         )
@@ -248,7 +249,7 @@ fn validate_path_component(
     }
 
     if is_reserved_windows_name(component) {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::InvalidComponent,
             Some(current_source_span(stream)?),
         )

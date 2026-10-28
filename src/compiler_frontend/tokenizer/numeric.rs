@@ -5,7 +5,7 @@
 //! WHY: keeping the grammar in one place makes separator, exponent, and sign rules
 //!      consistent between source literals and future string casts.
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{
@@ -48,7 +48,7 @@ pub(super) fn tokenize_numeric_literal(
             // Report the authored source text so diagnostics preserve underscores and sign.
             let authored = authored_numeric_text(sign, &literal_text);
             let authored_id = string_table.intern(&authored);
-            return Err(CompilerDiagnostic::invalid_number_literal(
+            return Err(token_lexical::invalid_number_literal(
                 authored_id,
                 NumberLiteralErrorReason::MultipleDecimalPoints,
                 Some(current_source_span(stream)?),
@@ -107,7 +107,7 @@ pub(super) fn tokenize_numeric_literal(
         Err(reason) => {
             // Report the authored source text so diagnostics preserve underscores and sign.
             let authored_id = string_table.intern(&authored);
-            Err(CompilerDiagnostic::invalid_number_literal(
+            Err(token_lexical::invalid_number_literal(
                 authored_id,
                 reason,
                 Some(current_source_span(stream)?),

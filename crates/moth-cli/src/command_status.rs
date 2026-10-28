@@ -10,6 +10,7 @@ use std::process::ExitCode;
 pub(crate) enum CommandStatus {
     Success,
     Failure,
+    CompilerBug,
 }
 
 impl From<CommandStatus> for ExitCode {
@@ -17,6 +18,7 @@ impl From<CommandStatus> for ExitCode {
         match status {
             CommandStatus::Success => ExitCode::from(0),
             CommandStatus::Failure => ExitCode::from(1),
+            CommandStatus::CompilerBug => ExitCode::from(2),
         }
     }
 }

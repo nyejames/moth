@@ -10,9 +10,8 @@ use super::{
     BindingEnvironmentBuilder, BindingEnvironmentError, FileVisibility, SourceDeclarationTarget,
     SourceDependencyAccess, VisibleNameBinding, VisibleNameRegistry,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
 use crate::compiler_frontend::source::SourceSpan;
@@ -22,7 +21,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Result for source dependency registration.
 ///
-/// Diagnosed failures remain plain `CompilerDiagnostic` values and
+/// Diagnosed failures remain `DiagnosticDraft` values and
 /// infrastructure failures remain typed in `BindingEnvironmentError`.
 type SourceDependencyResult<T> = Result<T, BindingEnvironmentError>;
 
@@ -169,7 +168,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if is_receiver_method {
             // Source-authored receiver methods are not independently bindable or aliasable.
             // They travel with their receiver type's visibility.
-            return Err(CompilerDiagnostic::invalid_receiver_declaration(
+            return Err(generics_traits_api::invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
                 source_span,
             )
@@ -177,7 +176,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         // Check export requirement after the source receiver-method guard so explicit method
-        // dependencies report the Phase 5 receiver policy instead of an incidental export failure.
+        // dependencies report the receiver policy instead of an incidental export failure.
         if matches!(&access, SourceDependencyAccess::DirectSourceExport) {
             let is_dependency_bindable = self
                 .module_symbols

@@ -1,0 +1,2 @@
+enabled #Config of Bool
+[:enabled [enabled]]

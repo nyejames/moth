@@ -5,6 +5,25 @@
 //! expression/type/rule diagnostic rendering.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    DirectSymbolPathImportView, DuplicateImportSurfaceMemberView,
+    DuplicateMothTemplateInputPathView, ExplicitMothExtensionView, ExplicitSourceExtensionView,
+    InvalidExternalModuleView, InvalidImportPathView, InvalidNamespaceDefaultNameView,
+    InvalidSourceFileEntryView, MissingImportTargetView,
+    MothTemplateInputsShareNoCommonAncestorView, UnsupportedExternalExtensionView,
+    UnsupportedSourceFileKindView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ConstRecordUsedAsValueView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidCompileTimePathView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    DependencyNamespaceUsedAsValueView, HtmlSingleFileRouteNameEmptyView, InvalidConfigView,
+    NamespaceTypeValueMisuseView, NestedDependencyTraversalView, ProjectEntryExtensionRequiredView,
+    decode_invalid_config,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
 pub(crate) fn invalid_config_message(
     key: Option<StringId>,
@@ -219,6 +238,15 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*artefact_kind),
             string_table.resolve(*output_path),
         ),
+        InvalidConfigReason::InvalidArtefactOutputPath {
+            output_path,
+            artefact_kind,
+            reason,
+        } => invalid_artefact_output_path_message(
+            string_table.resolve(*artefact_kind),
+            string_table.resolve(*output_path),
+            *reason,
+        ),
         InvalidConfigReason::ConfiguredEntryRootMissing { entry_root } => format!(
             "Configured entry root '{}' does not exist.",
             string_table.resolve(*entry_root),
@@ -323,6 +351,49 @@ pub(crate) fn invalid_config_message(
     }
 }
 
+/// WHAT: renders invalid configuration from its compact reason code and ordered string facts.
+/// WHY: only `invalid_config_message` needs the reconstructed `InvalidConfigReason`.
+pub(crate) fn render_invalid_config(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidConfigView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let (key, reason) = decode_invalid_config(view, diagnostic.string_ids())
+        .expect("invalid config row stores every string required by its reason code");
+    RenderedPayload {
+        message: invalid_config_message(key, &reason, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn render_html_single_file_route_name_empty(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &HtmlSingleFileRouteNameEmptyView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!(
+            "HTML single-file entry '{}' has a stem that becomes empty after stripping the cosmetic '@' prefix; Moth routes require a non-empty route name.",
+            context.string_table.resolve(facts.entry_path)
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn render_project_entry_extension_required(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ProjectEntryExtensionRequiredView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!(
+            "Project entry file '{}' has no extension. Moth files use .moth.",
+            context.string_table.resolve(facts.entry_path)
+        ),
+        guidance: Vec::new(),
+    }
+}
+
 fn invalid_output_folder_message(
     key_label: &str,
     folder: Option<StringId>,
@@ -379,6 +450,42 @@ fn invalid_output_folder_message(
     }
 }
 
+fn invalid_artefact_output_path_message(
+    artefact_kind: &str,
+    output_path: &str,
+    reason: InvalidOutputFolderReason,
+) -> String {
+    match reason {
+        InvalidOutputFolderReason::Empty => format!(
+            "{artefact_kind} output path is empty. Use a relative path under the output root."
+        ),
+        InvalidOutputFolderReason::NonUtf8 => format!(
+            "{artefact_kind} output path '{output_path}' must use valid UTF-8 path components."
+        ),
+        InvalidOutputFolderReason::AbsolutePath => format!(
+            "{artefact_kind} output path '{output_path}' must be relative to the output root, not absolute."
+        ),
+        InvalidOutputFolderReason::RootOrPrefix => format!(
+            "{artefact_kind} output path '{output_path}' must not be a root or platform-prefix path."
+        ),
+        InvalidOutputFolderReason::ParentDirectorySegment => format!(
+            "{artefact_kind} output path '{output_path}' must not contain parent-directory segments ('..')."
+        ),
+        InvalidOutputFolderReason::CurrentDirectory => {
+            format!("{artefact_kind} output path '{output_path}' must not be '.'.")
+        }
+        InvalidOutputFolderReason::InvalidPathComponent => format!(
+            "{artefact_kind} output path '{output_path}' contains a Windows-incompatible or otherwise invalid path component."
+        ),
+        InvalidOutputFolderReason::InsideOrEqualToEntryRoot => format!(
+            "{artefact_kind} output path '{output_path}' must be outside the source entry root."
+        ),
+        InvalidOutputFolderReason::ResolvesOutsideProjectRoot => format!(
+            "{artefact_kind} output path '{output_path}' must resolve strictly inside the project root and may not escape through a symlink."
+        ),
+    }
+}
+
 pub(crate) fn invalid_import_path_message(
     path: PathId,
     reason: InvalidImportPathReason,
@@ -410,6 +517,22 @@ pub(crate) fn invalid_import_path_message(
             context.string_table.resolve(provided),
             context.string_table.resolve(expected),
         ),
+    }
+}
+
+/// Renders an invalid dependency path from compact reason and path facts.
+pub(crate) fn render_invalid_import_path(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidImportPathView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = view
+        .reason
+        .to_reason(view.provided, view.expected)
+        .expect("case-mismatch import paths retain both spellings");
+    RenderedPayload {
+        message: invalid_import_path_message(view.path, reason, context),
+        guidance: Vec::new(),
     }
 }
 
@@ -452,6 +575,22 @@ pub(crate) fn invalid_compile_time_path_message(
         ),
     }
 }
+/// WHAT: renders a compile-time path error from the compact path, reason code and optional case facts.
+/// WHY: only `invalid_compile_time_path_message` needs the reconstructed data-carrying reason.
+pub(crate) fn render_invalid_compile_time_path(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidCompileTimePathView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .reason
+        .to_reason(facts.provided, facts.expected)
+        .expect("compile-time path reason stores all required case-mismatch facts");
+    RenderedPayload {
+        message: invalid_compile_time_path_message(facts.path, reason, context),
+        guidance: Vec::new(),
+    }
+}
 
 pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
     match path_kind {
@@ -491,6 +630,19 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
     }
 }
 
+/// WHAT: renders the parser's invalid-path reason from its compact unit code.
+/// WHY: the path-kind helper owns the established wording for this family.
+pub(crate) fn render_invalid_path(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidPathView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_path_message(facts.path_kind).to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn direct_symbol_path_import_message(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
@@ -501,6 +653,18 @@ pub(crate) fn direct_symbol_path_import_message(
          Select the symbol from its containing surface, such as `@path/to/file symbol`, \
          or bind the containing namespace and access `namespace.symbol`.",
     )
+}
+
+/// Renders a direct-symbol dependency path from its compact path fact.
+pub(crate) fn render_direct_symbol_path_import(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DirectSymbolPathImportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: direct_symbol_path_import_message(view.path, context),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_namespace_default_name_message(
@@ -517,6 +681,18 @@ pub(crate) fn invalid_namespace_default_name_message(
     )
 }
 
+/// Renders an invalid default dependency namespace name from its compact path fact.
+pub(crate) fn render_invalid_namespace_default_name(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidNamespaceDefaultNameView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_namespace_default_name_message(view.path, context),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn duplicate_import_surface_member_message(
     surface_path: PathId,
     member_name: StringId,
@@ -531,6 +707,22 @@ pub(crate) fn duplicate_import_surface_member_message(
     )
 }
 
+/// Renders a duplicate dependency surface member from its compact facts.
+pub(crate) fn render_duplicate_import_surface_member(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DuplicateImportSurfaceMemberView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_import_surface_member_message(
+            view.surface_path,
+            view.member_name,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn explicit_moth_extension_message(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
@@ -541,6 +733,18 @@ pub(crate) fn explicit_moth_extension_message(
         "Dependency paths must not include the `.moth` extension: `@{path_text}`.\n\
          Use `@{extensionless_path}` instead.",
     )
+}
+
+/// Renders an explicit `.moth` dependency extension from its compact path fact.
+pub(crate) fn render_explicit_moth_extension(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &ExplicitMothExtensionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: explicit_moth_extension_message(view.path, context),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn explicit_source_extension_message(
@@ -558,6 +762,18 @@ pub(crate) fn explicit_source_extension_message(
     )
 }
 
+/// Renders an explicit source-file dependency extension from its compact facts.
+pub(crate) fn render_explicit_source_extension(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &ExplicitSourceExtensionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: explicit_source_extension_message(view.path, view.extension, context),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn unsupported_source_file_kind_message(
     path: PathId,
     extension: StringId,
@@ -569,6 +785,18 @@ pub(crate) fn unsupported_source_file_kind_message(
         "Dependency `{path_text}` resolves to a recognized source file kind `.{extension}`, but this builder does not support it.\n\
          Use a builder that supports `.{extension}` files or depend on a Moth source file instead.",
     )
+}
+
+/// Renders an unsupported source-file kind from its compact facts.
+pub(crate) fn render_unsupported_source_file_kind(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &UnsupportedSourceFileKindView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_source_file_kind_message(view.path, view.extension, context),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_source_file_entry_message(
@@ -584,6 +812,18 @@ pub(crate) fn invalid_source_file_entry_message(
     )
 }
 
+/// Renders an invalid source entry from its compact facts.
+pub(crate) fn render_invalid_source_file_entry(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidSourceFileEntryView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_source_file_entry_message(view.path, view.extension, context),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn duplicate_moth_template_input_path_message(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
@@ -592,6 +832,18 @@ pub(crate) fn duplicate_moth_template_input_path_message(
     format!(
         "Moth template input path `{path_text}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
     )
+}
+
+/// Renders a duplicate Moth template input path from its compact path fact.
+pub(crate) fn render_duplicate_moth_template_input_path(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DuplicateMothTemplateInputPathView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_moth_template_input_path_message(view.path, context),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
@@ -609,6 +861,22 @@ pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
     )
 }
 
+/// Renders Moth template inputs without a common ancestor from their compact path facts.
+pub(crate) fn render_moth_template_inputs_share_no_common_ancestor(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MothTemplateInputsShareNoCommonAncestorView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: moth_template_inputs_share_no_common_ancestor_message(
+            view.first_path,
+            view.second_path,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn unsupported_external_extension_message(
     path: PathId,
     extension: StringId,
@@ -620,6 +888,18 @@ pub(crate) fn unsupported_external_extension_message(
         "External file import `{path_text}` uses extension `.{extension}`, which is not supported by this builder.\n\
          Register an external import provider for `.{extension}` or depend on a Moth source file instead.",
     )
+}
+
+/// Renders an unsupported external-file extension from its compact facts.
+pub(crate) fn render_unsupported_external_extension(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &UnsupportedExternalExtensionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_external_extension_message(view.path, view.extension, context),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_external_module_message(
@@ -640,8 +920,30 @@ pub(crate) fn invalid_external_module_message(
         InvalidExternalModuleReason::PathContainsPackageSeparator => {
             "Its path contains `#`, which Moth package paths reserve. Rename the file.".to_owned()
         }
+        InvalidExternalModuleReason::NonUtf8Source { utf8_detail } => format!(
+            "Source is not valid UTF-8 ({}).",
+            string_table.resolve(*utf8_detail)
+        ),
     };
     format!("External JS module `{path_text}` is invalid.\n{detail}")
+}
+
+/// Renders an invalid external module from its compact reason code and optional string fact.
+pub(crate) fn render_invalid_external_module(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidExternalModuleView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let Some(reason) = view.reason_code.to_reason(view.reason_detail) else {
+        crate::compiler_bug!(
+            CompilerStage::DiagnosticReporting,
+            "invalid external-module reason code and optional detail agree"
+        );
+    };
+    RenderedPayload {
+        message: invalid_external_module_message(view.path, &reason, context),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn dependency_namespace_used_as_value_message(
@@ -656,6 +958,21 @@ pub(crate) fn dependency_namespace_used_as_value_message(
          Alternative: `@path content as {name}`",
     )
 }
+/// WHAT: renders a dependency namespace used as a value from its compact name fact.
+/// WHY: `dependency_namespace_used_as_value_message` interpolates the name throughout its text.
+pub(crate) fn render_dependency_namespace_used_as_value(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &DependencyNamespaceUsedAsValueView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: dependency_namespace_used_as_value_message(
+            facts.record_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
 pub(crate) fn const_record_used_as_value_message(
     record_name: StringId,
@@ -667,6 +984,17 @@ pub(crate) fn const_record_used_as_value_message(
          They are used to group named fields, module dependencies, and compile-time members.\n\
          Access a field instead, for example `{name}.member`.",
     )
+}
+
+pub(crate) fn render_const_record_used_as_value(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ConstRecordUsedAsValueView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: const_record_used_as_value_message(facts.record_name, context.string_table),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn namespace_type_value_misuse_message(
@@ -710,15 +1038,43 @@ pub(crate) fn namespace_type_value_misuse_message(
         _ => format!("`{name}` cannot be used in this context."),
     }
 }
+/// WHAT: renders namespace type/value misuse from its name and usage-kind facts.
+/// WHY: `namespace_type_value_misuse_message` owns all six expected/found combinations.
+pub(crate) fn render_namespace_type_value_misuse(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &NamespaceTypeValueMisuseView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: namespace_type_value_misuse_message(
+            facts.name,
+            facts.expected,
+            facts.found,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
-pub(crate) fn nested_dependency_traversal_message(
-    _record_name: StringId,
-    _string_table: &dyn StringTableResolver,
-) -> String {
+pub(crate) fn nested_dependency_traversal_message() -> String {
     String::from(
         "Dependency namespace records do not expose nested filesystem paths as fields.\n\
          Bind the child path directly as a separate clause, for example `@child/path as child`.",
     )
+}
+
+/// WHAT: renders the fixed nested dependency traversal message.
+/// WHY: its fixed message ignores the record-name fact that the typed row retains.
+pub(crate) fn render_nested_dependency_traversal(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &NestedDependencyTraversalView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _ = facts.record_name;
+    RenderedPayload {
+        message: nested_dependency_traversal_message(),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_dependency_clause_message(
@@ -777,5 +1133,40 @@ pub(crate) fn invalid_dependency_clause_message(
         InvalidDependencyClauseReason::ContinuationEnteredStatement => {
             "The comma continued the dependency clause, so this name was consumed as the next selected dependency name. Remove the comma to end the clause and start the following statement."
         }
+    }
+}
+/// WHAT: renders an invalid dependency clause from its compact reason code.
+/// WHY: the row retains the clause kind; the message depends only on the reason.
+pub(crate) fn render_invalid_dependency_clause(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidDependencyClauseView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _ = facts.clause_kind;
+    RenderedPayload {
+        message: invalid_dependency_clause_message(facts.reason).to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders the message for an import target that cannot be resolved.
+/// WHY: the path is the record's only content, so the message needs no other facts.
+pub(crate) fn missing_import_target_message(
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!("Cannot resolve dependency '{}'.", context.render_path(path))
+}
+
+/// WHAT: renders a missing import target from its compact facts.
+/// WHY: the record stores the path, which is everything the message needs.
+pub(crate) fn render_missing_import_target(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &MissingImportTargetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_import_target_message(facts.path, context),
+        guidance: Vec::new(),
     }
 }

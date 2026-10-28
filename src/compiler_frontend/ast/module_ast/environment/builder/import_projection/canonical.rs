@@ -1,12 +1,14 @@
 //! Durable inverse canonical type interning.
 
 use super::*;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(super) fn intern_imported_canonical_type(
         &mut self,
         identity: &CanonicalTypeIdentity,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, InfrastructureFailure> {
         if let Some(type_id) = self
             .type_environment
             .type_id_for_canonical_identity(identity)
@@ -26,7 +28,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .type_environment
                     .type_id_for_canonical_identity(identity)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "Imported canonical Error type has no consumer-local builtin declaration",
                         )
                     })?,
@@ -53,17 +55,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .get(origin)
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "Imported canonical source type {origin:?} has no projected consumer-local nominal declaration"
                     ))
                 })?,
             CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "Public interface exposed module-private nominal identity {identity:?}"
                 )));
             }
             CanonicalTypeIdentity::ModulePrivateGenericInstance { .. } => {
-                return Err(CompilerError::compiler_error(format!(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "Public interface exposed module-private generic instance {identity:?}"
                 )));
             }
@@ -76,7 +78,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         external.symbol_path(),
                     )
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "Imported canonical external type {external:?} is absent from the consumer's binding package registry"
                         ))
                     })?;
@@ -88,7 +90,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .get(base)
                     .copied()
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "Imported canonical generic instance base {:?} has no projected consumer-local nominal declaration",
                             base
                         ))
@@ -97,7 +99,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     Some(crate::compiler_frontend::datatypes::definitions::TypeDefinition::Struct(definition)) => definition.id,
                     Some(crate::compiler_frontend::datatypes::definitions::TypeDefinition::Choice(definition)) => definition.id,
                     _ => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "Imported canonical generic instance base did not resolve to a nominal type",
                         ));
                     }
@@ -114,7 +116,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .get(parameter)
                 .copied()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "Imported canonical generic parameter {:?} has no consumer-local TypeId",
                         parameter
                     ))

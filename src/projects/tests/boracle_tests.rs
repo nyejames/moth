@@ -1,12 +1,20 @@
 use super::{compile_boracle_input, run_boracle, solve_boracle};
+use crate::build_system::create_project_modules::compile_single_file_boracle;
+use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::analysis::borrow_checker::{
     AccessKind, BindingDestination, BoracleDump, BoracleExperiment, BoracleModuleReport,
     BoracleRuleSelection, CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind,
     OriginOverlapDecision, RebindValue, TerminatorEventKind, UseKind,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::module_compilation::BoracleModuleInput;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
 use std::collections::BTreeSet;
 use std::fs;
 #[test]
@@ -15,24 +23,61 @@ fn boracle_service_source_smoke_uses_real_moth_input() {
     let entry = temporary.path().join("main.moth");
     fs::write(&entry, "value = 1\n").expect("source should be writable");
 
-    let first = run_boracle(
+    let first = successful_value(run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         BoracleDump::Origins,
         dead_exclusive_selection(),
-    )
-    .expect("real source should reach Boracle");
-    let second = run_boracle(
+    ));
+    let second = successful_value(run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         BoracleDump::Origins,
         dead_exclusive_selection(),
-    )
-    .expect("real source should reach Boracle");
+    ));
 
     assert_eq!(first, second);
     assert!(first.contains("rule-set = boracle-reference-v1"));
     assert!(first.contains("experiments = dead-exclusive-loan"));
     assert!(!first.contains("experiment = "));
     assert!(first.contains("OriginSolution"));
+}
+
+fn compile_boracle_file(path: &std::path::Path) -> CompilationResult<BoracleModuleInput> {
+    let config = Config::new(path.to_path_buf());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut builder_surface = BuilderSurface::with_mandatory_core();
+    let mut string_table = StringTable::new();
+    compile_single_file_boracle(
+        &config,
+        &style_directives,
+        &mut builder_surface,
+        &mut string_table,
+    )
+}
+
+#[test]
+fn boracle_frontend_does_not_recover_string_table_after_diagnosed_outcome() {
+    let temporary = tempfile::tempdir().expect("temporary source directory should exist");
+    let entry = temporary.path().join("invalid.moth");
+    fs::write(&entry, "value =\n").expect("invalid source should be writable");
+
+    assert!(
+        matches!(
+            compile_boracle_file(&entry),
+            Ok(CompilationOutcome::Diagnosed(_))
+        ),
+        "invalid source should produce a diagnosed Boracle outcome without panicking"
+    );
+}
+
+#[test]
+fn boracle_frontend_does_not_recover_string_table_after_infrastructure_outcome() {
+    let temporary = tempfile::tempdir().expect("temporary source directory should exist");
+    let missing = temporary.path().join("missing.moth");
+
+    assert!(
+        compile_boracle_file(&missing).is_err(),
+        "missing source should remain an infrastructure outcome without panicking"
+    );
 }
 
 #[test]
@@ -45,8 +90,9 @@ fn boracle_source_service_accepts_stage0_resource_structural_strings() {
         .expect("source should be writable");
     fs::write(assets.join("logo.svg"), "<svg></svg>\n").expect("resource should be writable");
 
-    let (input, _) = compile_boracle_input(entry.to_str().expect("temporary path should be UTF-8"))
-        .expect("resource-bearing source should produce validated HIR");
+    let (input, _) = successful_value(compile_boracle_input(
+        entry.to_str().expect("temporary path should be UTF-8"),
+    ));
     let resource_piece = input
         .hir
         .blocks
@@ -79,8 +125,9 @@ fn boracle_source_service_accepts_stage0_resource_structural_strings() {
         "validated HIR should preserve the resolved Resource structural piece"
     );
 
-    let report = solve_boracle(entry.to_str().expect("temporary path should be UTF-8"))
-        .expect("resource-bearing source should reach Boracle");
+    let report = successful_value(solve_boracle(
+        entry.to_str().expect("temporary path should be UTF-8"),
+    ));
     let problem = &report
         .functions()
         .first()
@@ -820,13 +867,19 @@ fn boracle_source_differential_rejects_selected_experiment() {
     let entry = temporary.path().join("main.moth");
     fs::write(&entry, "value = 1\n").expect("source should be writable");
 
-    let messages = run_boracle(
+    let error = match run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         BoracleDump::Differential,
         dead_exclusive_selection(),
-    )
-    .expect_err("differential dump should reject an explicitly selected experiment");
-    let error = format!("{messages:?}");
+    ) {
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            terse::format_terse_diagnostic_reports(&reports).join("\n")
+        }
+        Err(errors) => format!("{errors:?}"),
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("differential dump should reject an explicitly selected experiment")
+        }
+    };
     assert!(
         error.contains(
             "Boracle differential dump compares every legality-changing experiment and cannot"
@@ -2795,8 +2848,9 @@ fn solve_source(source: &str) -> BoracleModuleReport {
     let temporary = tempfile::tempdir().expect("temporary source directory should exist");
     let entry = temporary.path().join("main.moth");
     fs::write(&entry, source).expect("source should be writable");
-    solve_boracle(entry.to_str().expect("temporary path should be UTF-8"))
-        .unwrap_or_else(|messages| panic!("source should reach Boracle: {messages:?}"))
+    successful_value(solve_boracle(
+        entry.to_str().expect("temporary path should be UTF-8"),
+    ))
 }
 
 fn assert_mutable_parameter_is_write_through(source: &str) {
@@ -2875,12 +2929,11 @@ fn run_source_dump(source: &str, dump: BoracleDump) -> String {
     let temporary = tempfile::tempdir().expect("temporary source directory should exist");
     let entry = temporary.path().join("main.moth");
     fs::write(&entry, source).expect("source should be writable");
-    run_boracle(
+    successful_value(run_boracle(
         entry.to_str().expect("temporary path should be UTF-8"),
         dump,
         BoracleRuleSelection::default(),
-    )
-    .unwrap_or_else(|messages| panic!("source should reach Boracle: {messages:?}"))
+    ))
 }
 
 fn dead_exclusive_selection() -> BoracleRuleSelection {
@@ -2888,5 +2941,15 @@ fn dead_exclusive_selection() -> BoracleRuleSelection {
         reference_rule_set:
             crate::compiler_frontend::analysis::borrow_checker::BoracleReferenceRuleSet::V1,
         experiments: BTreeSet::from([BoracleExperiment::DeadExclusiveLoan]),
+    }
+}
+
+fn successful_value<T>(result: CompilationResult<T>) -> T {
+    match result {
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("source should compile without user diagnostics: {reports:?}")
+        }
+        Err(errors) => panic!("source should compile without infrastructure failures: {errors:?}"),
     }
 }

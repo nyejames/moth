@@ -11,10 +11,32 @@
 use crate::builder_surface::package_metadata::{
     PackageMetadata, PackageOrigin, validate_package_path,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
+
+/// An invalid source package root registration.
+///
+/// `BuilderDefinition` translates this into its `InvalidDefinition` error lane.
+#[derive(Debug)]
+pub struct SourcePackageRegistryError {
+    pub(crate) msg: String,
+}
+
+impl SourcePackageRegistryError {
+    fn new(msg: impl Into<String>) -> Self {
+        Self { msg: msg.into() }
+    }
+}
+
+impl fmt::Display for SourcePackageRegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.msg)
+    }
+}
+
+impl std::error::Error for SourcePackageRegistryError {}
 
 /// Registry of source-backed package roots indexed by their package prefix.
 ///
@@ -41,15 +63,15 @@ impl SourcePackageRegistry {
         package_prefix: impl Into<String>,
         root: PathBuf,
         origin: PackageOrigin,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), SourcePackageRegistryError> {
         let prefix = package_prefix.into();
         if let Err(reason) = validate_package_path(&prefix, origin) {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(SourcePackageRegistryError::new(format!(
                 "Source package '@{prefix}' {reason}."
             )));
         }
         if prefix.contains('/') {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(SourcePackageRegistryError::new(format!(
                 "Source package '@{prefix}' must have exactly one component."
             )));
         }
@@ -58,7 +80,7 @@ impl SourcePackageRegistry {
             .keys()
             .any(|existing| existing.eq_ignore_ascii_case(&prefix))
         {
-            return Err(CompilerError::compiler_error(format!(
+            return Err(SourcePackageRegistryError::new(format!(
                 "Source package '@{prefix}' is already registered."
             )));
         }

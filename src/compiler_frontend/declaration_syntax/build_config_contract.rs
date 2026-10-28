@@ -10,9 +10,13 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, BuildInputType, ContractValueError, DeferredNumericLiteral,
     PrimitiveBuildInputType, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidConfigReason,
+    CommonSyntaxMistakeReason, DiagnosticToken, InvalidConfigReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
@@ -130,14 +134,14 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
 ) -> Result<SourceBuildConfigContract, HeaderParseFailure> {
     let name_text = string_table.resolve(name).to_owned();
     let input_name = BuildInputName::new(&name_text).map_err(|_| {
-        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
+        HeaderParseFailure::Diagnostic(project_config::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigContractNameInvalid,
             Some(name_span),
         ))
     })?;
     let value_type = build_input_type_from_parsed(&qualifier.type_annotation).ok_or_else(|| {
-        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
+        HeaderParseFailure::Diagnostic(project_config::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
             parsed_type_span(&qualifier.type_annotation),
@@ -168,14 +172,15 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                         .string_spelling(string_table)
                         .map_err(|error| {
                             HeaderParseFailure::Infrastructure(
-                                CompilerDiagnostic::token_view_invariant_error(
-                                    error,
+                                InfrastructureFailure::malformed_token_projection(
                                     "source config string payload",
+                                    error,
                                 ),
                             )
                         })?
                         .ok_or_else(|| {
-                            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                                CompilerStage::HeaderParsing,
                                 "source config string token is missing its payload",
                             ))
                         })?;
@@ -190,7 +195,8 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                 }
                 TokenTag::BOOL_LITERAL => {
                     let value = token.bool_value().ok_or_else(|| {
-                        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
                             "source config bool token has a malformed payload",
                         ))
                     })?;
@@ -205,7 +211,8 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                 }
                 TokenTag::CHAR_LITERAL => {
                     let value = token.char_value().ok_or_else(|| {
-                        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
                             "source config char token has a malformed payload",
                         ))
                     })?;
@@ -223,14 +230,15 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                         .numeric_literal()
                         .map_err(|error| {
                             HeaderParseFailure::Infrastructure(
-                                CompilerDiagnostic::token_view_invariant_error(
-                                    error,
+                                InfrastructureFailure::malformed_token_projection(
                                     "source config numeric payload",
+                                    error,
                                 ),
                             )
                         })?
                         .ok_or_else(|| {
-                            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                                CompilerStage::HeaderParsing,
                                 "source config numeric token is missing its payload",
                             ))
                         })?;
@@ -289,14 +297,14 @@ pub(crate) fn normalize_source_build_config_contract_non_primitive(
 ) -> Result<SourceBuildConfigContract, HeaderParseFailure> {
     let name_text = string_table.resolve(name).to_owned();
     BuildInputName::new(&name_text).map_err(|_| {
-        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
+        HeaderParseFailure::Diagnostic(project_config::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigContractNameInvalid,
             Some(name_span),
         ))
     })?;
     let value_type = build_input_type_from_parsed(&qualifier.type_annotation).ok_or_else(|| {
-        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_config_reason(
+        HeaderParseFailure::Diagnostic(project_config::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
             parsed_type_span(&qualifier.type_annotation),
@@ -314,7 +322,7 @@ fn accept_source_default(
     value: Result<PrimitiveBuildValue, ContractValueError>,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<(bool, Option<PrimitiveBuildValue>), CompilerDiagnostic> {
+) -> Result<(bool, Option<PrimitiveBuildValue>), DiagnosticDraft> {
     value
         .map(|value| (false, Some(value)))
         .map_err(|error| source_default_failure(name, value_type, error, span, string_table))
@@ -327,13 +335,13 @@ fn source_default_failure(
     error: ContractValueError,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     match error {
         ContractValueError::TypeMismatch { provided } => {
             source_default_type_mismatch(name, value_type, provided.name(), span, string_table)
         }
         ContractValueError::LiteralOutOfRange { text, reason } => {
-            CompilerDiagnostic::invalid_number_literal(string_table.intern(&text), reason, span)
+            token_lexical::invalid_number_literal(string_table.intern(&text), reason, span)
         }
     }
 }
@@ -344,8 +352,8 @@ fn source_default_type_mismatch(
     provided: &str,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(
         Some(name),
         InvalidConfigReason::ConfigInputTypeMismatch {
             provided: string_table.intern(provided),
@@ -432,7 +440,7 @@ pub(crate) fn find_invalid_config_qualifier_spacing_in_cursor(
 /// Canonical source-view entry for header-owned `#Config` dispatch.
 ///
 /// The declaration parser reads canonical source tags and source-owned symbol payloads directly;
-/// qualifier scanning stays bounded to the active source view without a compatibility cursor.
+/// qualifier scanning stays bounded to the active source view without a second cursor.
 pub(crate) fn starts_build_config_qualifier_at_source(
     source_tokens: &SourceTokens,
     index: TokenIndex,
@@ -447,9 +455,7 @@ pub(crate) fn starts_build_config_qualifier_at_source(
     let Some(next_raw) = index.raw().checked_add(1) else {
         return false;
     };
-    let Some(next_index) = TokenIndex::try_from_raw(next_raw) else {
-        return false;
-    };
+    let next_index = TokenIndex::from_raw(next_raw);
     source_tokens.token(next_index).ok().is_some_and(|token| {
         token.tag() == TokenTag::SYMBOL
             && token
@@ -462,7 +468,7 @@ pub(crate) fn starts_build_config_qualifier_at_source(
 pub(crate) fn starts_build_config_qualifier_at_cursor(
     cursor: &DeclarationCursor<'_>,
     string_table: &mut StringTable,
-) -> Result<bool, crate::compiler_frontend::compiler_errors::CompilerError> {
+) -> Result<bool, crate::compiler_frontend::compiler_errors::InfrastructureFailure> {
     if cursor.current_tag() != TokenTag::HASH {
         return Ok(false);
     }
@@ -501,14 +507,16 @@ pub(crate) fn parse_build_config_qualifier(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "config qualifier diagnostic projection",
-                ))
+                HeaderParseFailure::Infrastructure(
+                    InfrastructureFailure::malformed_token_projection(
+                        "config qualifier diagnostic projection",
+                        error,
+                    ),
+                )
             })?
             .or_else(|| Some(DiagnosticToken::from_static_tag(TokenTag::EOF)));
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::expected_token_from_projections(
+            token_lexical::expected_token_from_projections(
                 expected,
                 found,
                 token_stream.current_span(),
@@ -520,14 +528,22 @@ pub(crate) fn parse_build_config_qualifier(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "config qualifier diagnostic projection",
-                ))
+                HeaderParseFailure::Infrastructure(
+                    InfrastructureFailure::malformed_token_projection(
+                        "config qualifier diagnostic projection",
+                        error,
+                    ),
+                )
             })?
             .or_else(|| Some(DiagnosticToken::from_static_tag(TokenTag::EOF)));
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::expected_token_from_tags(TokenTag::OF, found, span),
+            token_lexical::expected_token_from_projections(
+                crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
+                    TokenTag::OF,
+                ),
+                found,
+                span,
+            ),
         ));
     }
     token_stream.advance();
@@ -562,7 +578,7 @@ fn require_config_marker_adjacent(
     let next_range = next_token.span().resolve_with(resolver);
     if current_range.end() != next_range.start() {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::common_syntax_mistake(
+            token_lexical::common_syntax_mistake(
                 CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
                 Some(current_token.source_span()),
             ),

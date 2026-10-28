@@ -16,7 +16,7 @@ fn canonical_scale_names_accept_only_boundaries() {
         assert_eq!(NumberScale::from_name(invalid), None);
     }
 
-    // The retired `Number` family spellings are ordinary named types now.
+    // `Number` family spellings are ordinary named types, so they never parse as a scale.
     for retired in [
         "Number",
         "Number0",

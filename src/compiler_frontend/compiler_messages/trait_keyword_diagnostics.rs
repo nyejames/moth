@@ -9,15 +9,15 @@
 //! This module is retained only for the diagnostic helpers used by parser paths that must reject
 //! trait-only keywords outside valid trait syntax.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTraitKeywordUsageReason;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, ErrorType,
+    InfrastructureDetail, InfrastructureFailure,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTraitKeywordUsageReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_trait_keyword_usage;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReservedTraitKeyword {
@@ -56,47 +56,34 @@ pub(crate) fn reserved_trait_keyword_for_tag(tag: TokenTag) -> Option<ReservedTr
 ///      the same message.
 pub(crate) fn reserved_trait_keyword_or_dispatch_mismatch_for_tag(
     tag: TokenTag,
-    span: Option<SourceSpan>,
-    compilation_stage: &'static str,
+    stage: CompilerStage,
     parser_context: &'static str,
-) -> Result<ReservedTraitKeyword, CompilerError> {
-    reserved_trait_keyword_for_tag(tag).ok_or_else(|| {
-        reserved_trait_dispatch_mismatch_error_for_tag(tag, span, compilation_stage, parser_context)
-    })
+) -> Result<ReservedTraitKeyword, InfrastructureFailure> {
+    reserved_trait_keyword_for_tag(tag)
+        .ok_or_else(|| reserved_trait_dispatch_mismatch_error_for_tag(tag, stage, parser_context))
 }
 
-/// Tag-based dispatch-mismatch error with the legacy message shape.
+/// Builds the compiler-bug error for a token that reached reserved trait dispatch without a keyword.
 pub(crate) fn reserved_trait_dispatch_mismatch_error_for_tag(
     tag: TokenTag,
-    span: Option<SourceSpan>,
-    compilation_stage: &'static str,
+    stage: CompilerStage,
     parser_context: &'static str,
-) -> CompilerError {
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        CompilerErrorMetadataKey::CompilationStage,
-        compilation_stage.to_owned(),
-    );
-    metadata.insert(
-        CompilerErrorMetadataKey::PrimarySuggestion,
-        String::from("This indicates parser dispatch drift. Please report this compiler bug."),
-    );
-
-    let mut error = CompilerError::new(
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        stage,
         format!(
             "Reserved trait token dispatch mismatch in {parser_context}: {}",
             tag.descriptor().text()
         ),
-        span,
-        ErrorType::Compiler,
-    );
-    error.metadata = metadata;
-    error
+    )
+    .with_detail(InfrastructureDetail::PrimarySuggestion(
+        "This indicates parser dispatch drift. Please report this compiler bug.".into(),
+    ))
 }
 
 pub(crate) fn reserved_trait_keyword_error(
     keyword: ReservedTraitKeyword,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_trait_keyword_usage(keyword.invalid_usage_reason(), span)
+) -> DiagnosticDraft {
+    invalid_trait_keyword_usage(keyword.invalid_usage_reason(), span)
 }

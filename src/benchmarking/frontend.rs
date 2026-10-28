@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildBootstrap, BuilderSelection, bootstrap_project_build};
+use crate::build_system::build::{
+    BuildBootstrap, BuilderSelection, bootstrap_project_build, finish_successful_project_warnings,
+};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::build_system::create_project_modules::compiled_boundary::FrozenRenderRetentionMetrics;
 use crate::build_system::create_project_modules::{
@@ -22,10 +24,12 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigInputValue,
     BuildConfigValueLocation, BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
-use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::render::infrastructure::INFRASTRUCTURE_FAILURE_CODE;
+use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
@@ -105,6 +109,110 @@ pub struct FrontendBenchmarkRetention {
     pub path_table_node_rows: usize,
     /// Backing vector capacity bytes for those deduplicated path tables.
     pub path_table_storage_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub source_line_start_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub source_text_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub source_line_start_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub source_line_start_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub extended_span_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub extended_span_duplicate_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub source_identity_slot_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub source_provenance_field_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub compilation_root_slots: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub authored_physical_slots: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub canonical_os_path_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub loaded_source_records: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub loaded_source_record_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_record_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_extra_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_extra_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_label_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_label_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_label_data_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_label_data_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_string_list_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_string_list_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_substitution_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_substitution_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_foreign_site_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_foreign_site_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub type_display_record_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub type_display_record_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub type_display_auxiliary_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub type_display_auxiliary_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_report_count: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_report_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_run_count: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_run_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_foreign_context_slots: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub diagnostic_foreign_context_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub frozen_context_shell_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub frozen_string_tables: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub frozen_string_storage_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_samples: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_slot_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_local_payload_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_reverse_capacity_entries: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_inherited_prefix_rows: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_inherited_prefix_slot_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_inherited_reverse_capacity_entries: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_string_table_peak_slot_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_path_builder_samples: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_path_table_storage_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_path_builder_lookup_layers: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_path_builder_lookup_capacity_entries: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub mutable_path_builder_local_lookup_capacity_entries: usize,
     pub source_tokens_owners: usize,
     pub source_tokens_shape_bytes: usize,
     pub source_tokens_shape_capacity_bytes: usize,
@@ -121,7 +229,6 @@ pub struct FrontendBenchmarkRetention {
     /// Largest individual builder buffer sample; a high-water observation, not an aggregate live
     /// allocation claim.
     pub transient_construction_peak_bytes: usize,
-    pub cutover_adapter_bytes: usize,
     pub donor_identity_string_tables: usize,
     pub donor_identity_string_storage_bytes: usize,
     pub donor_identity_path_tables: usize,
@@ -135,6 +242,10 @@ pub struct FrontendBenchmarkRetention {
     pub requester_remap_count: usize,
     pub requester_remap_used_bytes: usize,
     pub requester_remap_capacity_bytes: usize,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub string_merge_remap_ns: u64,
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub path_merge_remap_ns: u64,
     /// True when bounded probe bookkeeping could not observe every distinct owner.
     pub memory_ledger_incomplete: bool,
 }
@@ -151,6 +262,68 @@ impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
             path_table_count: metrics.path_table_count,
             path_table_node_rows: metrics.path_table_node_rows,
             path_table_storage_bytes: metrics.path_table_storage_bytes,
+            source_line_start_rows: metrics.source_line_start_rows,
+            source_text_capacity_bytes: metrics.source_text_capacity_bytes,
+            source_line_start_bytes: metrics.source_line_start_bytes,
+            extended_span_bytes: metrics.extended_span_bytes,
+            extended_span_duplicate_rows: metrics.extended_span_duplicate_rows,
+            source_line_start_capacity_bytes: metrics.source_line_start_capacity_bytes,
+            source_identity_slot_capacity_bytes: metrics.source_identity_slot_capacity_bytes,
+            source_provenance_field_bytes: metrics.source_provenance_field_bytes,
+            compilation_root_slots: metrics.compilation_root_slots,
+            authored_physical_slots: metrics.authored_physical_slots,
+            canonical_os_path_bytes: metrics.canonical_os_path_bytes,
+            loaded_source_records: metrics.loaded_source_records,
+            loaded_source_record_capacity_bytes: metrics.loaded_source_record_capacity_bytes,
+            diagnostic_record_capacity_bytes: metrics.diagnostic_record_capacity_bytes,
+            diagnostic_extra_rows: metrics.diagnostic_extra_rows,
+            diagnostic_extra_capacity_bytes: metrics.diagnostic_extra_capacity_bytes,
+            diagnostic_label_rows: metrics.diagnostic_label_rows,
+            diagnostic_label_capacity_bytes: metrics.diagnostic_label_capacity_bytes,
+            diagnostic_label_data_rows: metrics.diagnostic_label_data_rows,
+            diagnostic_label_data_capacity_bytes: metrics.diagnostic_label_data_capacity_bytes,
+            diagnostic_string_list_rows: metrics.diagnostic_string_list_rows,
+            diagnostic_string_list_capacity_bytes: metrics.diagnostic_string_list_capacity_bytes,
+            diagnostic_substitution_rows: metrics.diagnostic_substitution_rows,
+            diagnostic_substitution_capacity_bytes: metrics.diagnostic_substitution_capacity_bytes,
+            diagnostic_foreign_site_rows: metrics.diagnostic_foreign_site_rows,
+            diagnostic_foreign_site_capacity_bytes: metrics.diagnostic_foreign_site_capacity_bytes,
+            type_display_record_rows: metrics.type_display_record_rows,
+            type_display_record_capacity_bytes: metrics.type_display_record_capacity_bytes,
+            type_display_auxiliary_rows: metrics.type_display_auxiliary_rows,
+            type_display_auxiliary_capacity_bytes: metrics.type_display_auxiliary_capacity_bytes,
+            diagnostic_report_count: metrics.diagnostic_report_count,
+            diagnostic_report_capacity_bytes: metrics.diagnostic_report_capacity_bytes,
+            diagnostic_run_count: metrics.diagnostic_run_count,
+            diagnostic_run_capacity_bytes: metrics.diagnostic_run_capacity_bytes,
+            diagnostic_foreign_context_slots: metrics.diagnostic_foreign_context_slots,
+            diagnostic_foreign_context_capacity_bytes: metrics
+                .diagnostic_foreign_context_capacity_bytes,
+            frozen_context_shell_bytes: metrics.frozen_context_shell_bytes,
+            frozen_string_tables: metrics.frozen_string_tables,
+            frozen_string_storage_bytes: metrics.frozen_string_storage_bytes,
+            mutable_string_table_samples: metrics.mutable_string_table_samples,
+            mutable_string_table_slot_capacity_bytes: metrics
+                .mutable_string_table_slot_capacity_bytes,
+            mutable_string_table_local_payload_bytes: metrics
+                .mutable_string_table_local_payload_bytes,
+            mutable_string_table_reverse_capacity_entries: metrics
+                .mutable_string_table_reverse_capacity_entries,
+            mutable_string_table_inherited_prefix_rows: metrics
+                .mutable_string_table_inherited_prefix_rows,
+            mutable_string_table_inherited_prefix_slot_bytes: metrics
+                .mutable_string_table_inherited_prefix_slot_bytes,
+            mutable_string_table_inherited_reverse_capacity_entries: metrics
+                .mutable_string_table_inherited_reverse_capacity_entries,
+            mutable_string_table_peak_slot_capacity_bytes: metrics
+                .mutable_string_table_peak_slot_capacity_bytes,
+            mutable_path_builder_samples: metrics.mutable_path_builder_samples,
+            mutable_path_table_storage_bytes: metrics.mutable_path_table_storage_bytes,
+            mutable_path_builder_lookup_layers: metrics.mutable_path_builder_lookup_layers,
+            mutable_path_builder_lookup_capacity_entries: metrics
+                .mutable_path_builder_lookup_capacity_entries,
+            mutable_path_builder_local_lookup_capacity_entries: metrics
+                .mutable_path_builder_local_lookup_capacity_entries,
             source_tokens_owners: metrics.source_tokens_owners,
             source_tokens_shape_bytes: metrics.source_tokens_shape_bytes,
             source_tokens_shape_capacity_bytes: metrics.source_tokens_shape_capacity_bytes,
@@ -167,7 +340,6 @@ impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
                 .source_tokens_sequence_store_capacity_bytes,
             transient_construction_buffer_bytes: metrics.transient_construction_buffer_bytes,
             transient_construction_peak_bytes: metrics.transient_construction_peak_bytes,
-            cutover_adapter_bytes: metrics.cutover_adapter_bytes,
             donor_identity_string_tables: metrics.donor_identity_string_tables,
             donor_identity_string_storage_bytes: metrics.donor_identity_string_storage_bytes,
             donor_identity_path_tables: metrics.donor_identity_path_tables,
@@ -179,6 +351,8 @@ impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
             requester_remap_count: metrics.requester_remap_count,
             requester_remap_used_bytes: metrics.requester_remap_used_bytes,
             requester_remap_capacity_bytes: metrics.requester_remap_capacity_bytes,
+            string_merge_remap_ns: metrics.string_merge_remap_ns,
+            path_merge_remap_ns: metrics.path_merge_remap_ns,
             memory_ledger_incomplete: metrics.observation_incomplete,
         }
     }
@@ -265,6 +439,15 @@ impl std::fmt::Display for FrontendBenchmarkError {
 fn snapshot_ledger_retention() -> FrontendBenchmarkRetention {
     FrontendBenchmarkRetention::from(FrozenRenderRetentionMetrics::from_ledger(
         crate::compiler_frontend::instrumentation::snapshot_memory_ledger(),
+    ))
+}
+#[cfg(feature = "data_layout_memory_probe")]
+fn snapshot_ledger_retention_with_reports(
+    reports: &DiagnosticReportSet,
+) -> FrontendBenchmarkRetention {
+    FrontendBenchmarkRetention::from(FrozenRenderRetentionMetrics::from_ledger_with_reports(
+        crate::compiler_frontend::instrumentation::snapshot_memory_ledger(),
+        reports,
     ))
 }
 
@@ -385,7 +568,7 @@ pub fn prepare_frontend_memory_ledger() {
 #[derive(Debug)]
 pub struct FrontendBenchmarkReportWithOwner {
     pub report: FrontendBenchmarkReport,
-    owner: CompilerMessages,
+    owner: CompilationResult<()>,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
@@ -409,7 +592,25 @@ pub fn run_frontend_benchmark_with_report_owner(
 
 fn run_frontend_benchmark_with_owner_internal(
     options: FrontendBenchmarkOptions,
-) -> Result<(FrontendBenchmarkReport, CompilerMessages), FrontendBenchmarkError> {
+) -> Result<(FrontendBenchmarkReport, CompilationResult<()>), FrontendBenchmarkError> {
+    run_frontend_benchmark_with_configured_warning_owner(options, |_| {})
+}
+
+#[cfg(all(test, feature = "data_layout_memory_probe"))]
+pub(crate) fn run_frontend_benchmark_with_record_limit(
+    options: FrontendBenchmarkOptions,
+    records: usize,
+) -> Result<FrontendBenchmarkReport, FrontendBenchmarkError> {
+    run_frontend_benchmark_with_configured_warning_owner(options, |warning_owner| {
+        warning_owner.set_record_limit_for_test(records);
+    })
+    .map(|(report, _)| report)
+}
+
+fn run_frontend_benchmark_with_configured_warning_owner(
+    options: FrontendBenchmarkOptions,
+    configure_warning_owner: impl FnOnce(&mut BoundaryAccumulator),
+) -> Result<(FrontendBenchmarkReport, CompilationResult<()>), FrontendBenchmarkError> {
     let start = Instant::now();
 
     // Acquire the raw session before resetting the command ledger. If another benchmark owns the
@@ -443,15 +644,13 @@ fn run_frontend_benchmark_with_owner_internal(
     let valid_path = match check_if_valid_path(normalized) {
         Ok(path) => path,
         Err(error) => {
-            let messages = CompilerMessages::from_error(error, StringTable::new());
+            let messages: CompilationResult<()> = Err(error.into());
             let mut diagnostic_codes = collect_diagnostic_codes(&messages);
-            if messages.has_infrastructure_error() {
-                diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
-            }
+            diagnostic_codes.push(INFRASTRUCTURE_FAILURE_CODE.to_owned());
             return Err(frontend_benchmark_error(
                 FrontendBenchmarkFailureKind::PathValidation,
                 diagnostic_codes,
-                format_compiler_messages(&messages),
+                format_compilation_result(&messages),
             ));
         }
     };
@@ -459,10 +658,10 @@ fn run_frontend_benchmark_with_owner_internal(
     let BuildBootstrap {
         mut config,
         style_directives,
-        mut string_table,
+        string_table,
         mut frontend_surface,
         validated_directory_output_settings,
-        mut project_source_files,
+        mut project_source_builder,
         build_config_inputs,
     } = match bootstrap_project_build(
         builder_selection.backend.as_ref(),
@@ -470,16 +669,21 @@ fn run_frontend_benchmark_with_owner_internal(
         &requested_inputs,
     ) {
         Ok(bootstrap) => bootstrap,
-        Err(messages) => {
+        Err(failure) => {
+            let messages = failure
+                .into_diagnostic_reports()
+                .map(CompilationOutcome::Diagnosed);
             let diagnostic_codes = collect_diagnostic_codes(&messages);
             return Err(frontend_benchmark_error(
                 FrontendBenchmarkFailureKind::Bootstrap,
                 diagnostic_codes,
-                format_compiler_messages(&messages),
+                format_compilation_result(&messages),
             ));
         }
     };
-
+    let mut project_source_files = None;
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    configure_warning_owner(&mut warning_owner);
     let build_profile = match options.build_profile {
         FrontendBenchmarkBuildProfile::Release => BuildProfile::Release,
         FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
@@ -491,32 +695,47 @@ fn run_frontend_benchmark_with_owner_internal(
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
+        &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
-        Ok(frontend) => {
+        Ok(CompilationOutcome::Success { mut value, .. }) => {
+            let project_source_database = value.project_source_database.take();
+            drop(value);
+            drop(project_source_files.take());
+            let messages =
+                finish_successful_project_warnings(&mut warning_owner, project_source_database, ());
             #[cfg(feature = "data_layout_memory_probe")]
-            let (messages, retention) = frontend
-                .into_render_messages_with_frozen_identity_and_metrics(
-                    &mut string_table,
-                    project_source_files.take(),
-                    None,
-                );
+            let retention = match &messages {
+                Ok(CompilationOutcome::Success {
+                    warnings: Some(reports),
+                    ..
+                })
+                | Ok(CompilationOutcome::Diagnosed(reports)) => {
+                    snapshot_ledger_retention_with_reports(reports)
+                }
+                _ => snapshot_ledger_retention(),
+            };
             #[cfg(not(feature = "data_layout_memory_probe"))]
-            let messages = frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                project_source_files.take(),
-                None,
-            );
-            #[cfg(feature = "data_layout_memory_probe")]
-            let retention = FrontendBenchmarkRetention::from(retention);
-            #[cfg(not(feature = "data_layout_memory_probe"))]
-            let retention = FrontendBenchmarkRetention::default();
-            (messages, retention, false)
+            let retention = snapshot_ledger_retention();
+            let compilation_failed = !matches!(&messages, Ok(CompilationOutcome::Success { .. }));
+            (messages, retention, compilation_failed)
         }
-        Err(messages) => (messages, snapshot_ledger_retention(), true),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            drop(project_source_files.take());
+            #[cfg(feature = "data_layout_memory_probe")]
+            let retention = snapshot_ledger_retention_with_reports(&reports);
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            let retention = snapshot_ledger_retention();
+            (Ok(CompilationOutcome::Diagnosed(reports)), retention, true)
+        }
+        Err(errors) => {
+            drop(project_source_files.take());
+            let retention = snapshot_ledger_retention();
+            (Err(errors), retention, true)
+        }
     };
 
     #[cfg(feature = "timers")]
@@ -529,11 +748,11 @@ fn run_frontend_benchmark_with_owner_internal(
     let counters: Vec<FrontendBenchmarkCounter> = Vec::new();
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let error_count = messages.error_count();
+    let error_count = error_count(&messages);
     let mut diagnostic_codes = collect_diagnostic_codes(&messages);
-    let has_infrastructure_error = messages.has_infrastructure_error();
+    let has_infrastructure_error = messages.is_err();
     if has_infrastructure_error {
-        diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
+        diagnostic_codes.push(INFRASTRUCTURE_FAILURE_CODE.to_owned());
     }
 
     // User diagnostics are an expected benchmark outcome, but an infrastructure
@@ -543,7 +762,7 @@ fn run_frontend_benchmark_with_owner_internal(
         return Err(frontend_benchmark_error_with_retention(
             FrontendBenchmarkFailureKind::Compilation,
             diagnostic_codes,
-            format_compiler_messages(&messages),
+            format_compilation_result(&messages),
             retention,
         ));
     }
@@ -569,10 +788,14 @@ fn run_frontend_benchmark_with_owner_internal(
         })
         .collect();
 
-    let warning_count = messages.warning_count();
-    let warning_codes = messages
-        .warnings()
-        .map(|warning| warning.kind.code().to_owned())
+    let warning_reports = warning_reports(&messages);
+    let warning_count = warning_reports
+        .map(|reports| reports.iter_severity(DiagnosticSeverity::Warning).count())
+        .unwrap_or(0);
+    let warning_codes = warning_reports
+        .into_iter()
+        .flat_map(|reports| reports.iter_severity(DiagnosticSeverity::Warning))
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect();
     let outcome = if error_count == 0 {
         FrontendBenchmarkOutcome::Success
@@ -607,20 +830,38 @@ fn run_frontend_benchmark_with_owner_internal(
     ))
 }
 
-fn format_compiler_messages(messages: &CompilerMessages) -> String {
-    let mut lines = format_terse_compiler_messages(messages);
+fn format_compilation_result(messages: &CompilationResult<()>) -> String {
+    let mut lines = terse::format_terse_compilation_result(messages);
     if lines.is_empty() {
-        lines.push(format!("{} error(s) found", messages.error_count()));
+        lines.push(format!("{} error(s) found", error_count(messages)));
     }
     lines.join("\n")
 }
 
+fn error_count(messages: &CompilationResult<()>) -> usize {
+    match messages {
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            reports.iter_severity(DiagnosticSeverity::Error).count()
+        }
+        Ok(CompilationOutcome::Success { .. }) | Err(_) => 0,
+    }
+}
+
+fn warning_reports(messages: &CompilationResult<()>) -> Option<&DiagnosticReportSet> {
+    match messages {
+        Ok(CompilationOutcome::Success { warnings, .. }) => warnings.as_ref(),
+        Ok(CompilationOutcome::Diagnosed(_)) | Err(_) => None,
+    }
+}
+
 /// Collects the stable diagnostic codes from the error diagnostics, preserving
 /// order and multiplicity.
-fn collect_diagnostic_codes(messages: &CompilerMessages) -> Vec<String> {
-    messages
-        .diagnostics()
-        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|diagnostic| diagnostic.kind.code().to_owned())
-        .collect()
+fn collect_diagnostic_codes(messages: &CompilationResult<()>) -> Vec<String> {
+    match messages {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .map(|(_, view)| view.descriptor().code.to_owned())
+            .collect(),
+        Ok(CompilationOutcome::Success { .. }) | Err(_) => Vec::new(),
+    }
 }

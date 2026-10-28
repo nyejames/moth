@@ -1,6 +1,6 @@
 entry = "."
 
-# HTML success is the runtime output. The Wasm failure block at 7:1 is bg909-observed (constructor-second-wasm-gates.json) and unverified until the parent harness run.
+# HTML success is the runtime output. The Wasm failure block at 7:1 pins the current Wasm rejection.
 
 [backends.html]
 mode = "success"

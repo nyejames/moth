@@ -1,0 +1,9 @@
+Label = |
+    text String,
+|
+
+read_text |label Label| -> String:
+    return label.text
+;
+
+[:read [read_text(Label("ok"))]]

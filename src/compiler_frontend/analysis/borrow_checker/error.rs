@@ -1,24 +1,24 @@
 //! Borrow-checker boundary error.
 //!
-//! WHAT: separates user-facing borrow diagnostics from internal borrow-checker infrastructure
-//! failures.
-//! WHY: borrow-rule failures should remain typed `CompilerDiagnostic` values, while invalid HIR
-//! metadata or missing compiler side-table facts should stay on the internal `CompilerError` path.
+//! WHAT: separates user-facing borrow diagnostic drafts from internal borrow-checker
+//! infrastructure failures.
+//! WHY: borrow-rule failures stay on the typed diagnostic lane, while invalid HIR metadata or
+//! missing compiler side-table facts stay on the internal `InfrastructureFailure` path.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum BorrowCheckError {
-    Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(Box<InfrastructureFailure>),
 }
 
 impl BorrowCheckError {
     #[cfg(test)]
-    pub(crate) fn into_diagnostic_or_infrastructure(
+    pub(crate) fn into_draft_or_infrastructure(
         self,
-    ) -> Result<CompilerDiagnostic, CompilerError> {
+    ) -> Result<DiagnosticDraft, InfrastructureFailure> {
         match self {
             BorrowCheckError::Diagnostic(diagnostic) => Ok(diagnostic),
             BorrowCheckError::Infrastructure(error) => Err(*error),
@@ -26,15 +26,7 @@ impl BorrowCheckError {
     }
 
     #[cfg(test)]
-    pub(crate) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
-        match self {
-            BorrowCheckError::Diagnostic(diagnostic) => Some(diagnostic),
-            BorrowCheckError::Infrastructure(_) => None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn infrastructure(&self) -> Option<&CompilerError> {
+    pub(crate) fn infrastructure(&self) -> Option<&InfrastructureFailure> {
         match self {
             BorrowCheckError::Diagnostic(_) => None,
             BorrowCheckError::Infrastructure(error) => Some(error.as_ref()),
@@ -42,14 +34,14 @@ impl BorrowCheckError {
     }
 }
 
-impl From<CompilerError> for BorrowCheckError {
-    fn from(error: CompilerError) -> Self {
+impl From<InfrastructureFailure> for BorrowCheckError {
+    fn from(error: InfrastructureFailure) -> Self {
         BorrowCheckError::Infrastructure(Box::new(error))
     }
 }
 
-impl From<CompilerDiagnostic> for BorrowCheckError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for BorrowCheckError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         BorrowCheckError::Diagnostic(diagnostic)
     }
 }

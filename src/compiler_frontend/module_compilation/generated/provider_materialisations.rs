@@ -11,7 +11,8 @@
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationContext, ModuleMaterialisationPreparation,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 
 use rustc_hash::FxHashMap;
@@ -50,17 +51,20 @@ impl ProviderMaterialisationRegistry {
         identity: &GeneratedDeclarationIdentity,
         context: &Arc<ModuleMaterialisationContext>,
         template_index: usize,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         if let Some(existing) = self.published.get(identity) {
             if Arc::ptr_eq(&existing.context, context) && existing.template_index == template_index
             {
                 return Ok(());
             }
 
-            return Err(CompilerError::compiler_error(format!(
-                "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
-                identity
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
+                    identity
+                ),
+            ));
         }
         Ok(())
     }
@@ -81,7 +85,7 @@ impl ProviderMaterialisationRegistry {
         context: Arc<ModuleMaterialisationContext>,
         template_index: usize,
         rebase_required: bool,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.preflight_publish(&identity, &context, template_index)?;
         self.published
             .entry(identity)
@@ -97,7 +101,7 @@ impl ProviderMaterialisationRegistry {
     pub(crate) fn publish_context(
         &mut self,
         context: &Arc<ModuleMaterialisationContext>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.publish_context_with_rebase_required(context, false)
     }
 
@@ -110,17 +114,20 @@ impl ProviderMaterialisationRegistry {
         &mut self,
         context: &Arc<ModuleMaterialisationContext>,
         rebase_required: bool,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let rows: Vec<_> = context.declaration_rows().collect();
         let mut pending = FxHashMap::default();
         for (identity, template_index) in &rows {
             self.preflight_publish(identity, context, *template_index)?;
             if let Some(&existing_index) = pending.get(identity) {
                 if existing_index != *template_index {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
-                        identity
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
+                            identity
+                        ),
+                    ));
                 }
             } else {
                 pending.insert(*identity, *template_index);

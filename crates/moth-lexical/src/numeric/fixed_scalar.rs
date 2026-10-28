@@ -220,7 +220,7 @@ impl FixedScalarValue {
 
 /// Scalar-qualified exact rendering for compiler dumps, such as `U64(18446744073709551615)` or
 /// `F16(-0.0)`, so equal numbers of different scalars never render identically. Source-facing
-/// formatting is a later phase and does not use this.
+/// formatting does not use this.
 impl std::fmt::Display for FixedScalarValue {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = self.scalar.name();

@@ -1,6 +1,6 @@
 //! Moth path syntax parsing for path literals.
 //!
-//! This parser sits directly on tokenizer tokens and returns typed `CompilerDiagnostic` values for
+//! This parser sits directly on tokenizer tokens and returns typed diagnostic drafts for
 //! user-authored path mistakes. The lexical entry point also propagates token span infrastructure
 //! failures through the shared tokenizer result; component grammar helpers own only diagnostics.
 //!
@@ -8,8 +8,8 @@
 //! identifier and punctuation tokens parsed by the header-owned dependency-clause parser,
 //! never part of a path row.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{CapacityResource, PathKind};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{
@@ -43,9 +43,8 @@ pub fn parse_file_path(
     // @docs/"my file.md"
 
     // WHAT: Tokenize exact `@/` as the empty canonical path.
-    // WHY: in dependency position `@/` stays a rejected spelling whose owner reports its own
-    //      diagnostic, while expression position now accepts bare `@/` as the structural
-    //      site-root value.
+    // WHY: dependency position rejects `@/` with its own diagnostic, while expression position
+    // accepts it as the structural site-root value.
     if stream.peek() == Some(&'/') {
         stream.next();
 
@@ -56,7 +55,7 @@ pub fn parse_file_path(
                     return mint_path_token(stream, PathId::ROOT);
                 }
 
-                return Err(CompilerDiagnostic::invalid_path(
+                return Err(token_lexical::invalid_path(
                     PathKind::OnlyRootSlashSupported,
                     Some(current_source_span(stream)?),
                 )
@@ -68,7 +67,7 @@ pub fn parse_file_path(
     let parsed_prefix = parse_path_prefix(stream, string_table)?;
 
     if parsed_prefix.components.is_empty() {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::Empty,
             Some(current_source_span(stream)?),
         )
@@ -76,19 +75,17 @@ pub fn parse_file_path(
     }
 
     if parsed_prefix.ended_with_separator {
-        return Err(CompilerDiagnostic::invalid_path(
+        return Err(token_lexical::invalid_path(
             PathKind::TrailingSeparator,
             Some(current_source_span(stream)?),
         )
         .into());
     }
-
+    let path_span = current_source_span(stream)?;
     let root = path_fork
         .try_intern_components(&parsed_prefix.components)
         .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "path table exhausted while interning an authored path row",
-            )
+            token_lexical::compiler_capacity_exceeded(CapacityResource::PathNodes, Some(path_span))
         })?;
     mint_path_token(stream, root)
 }
@@ -128,7 +125,7 @@ fn parse_path_prefix(
                 } else {
                     PathKind::TrailingSeparator
                 };
-                return Err(CompilerDiagnostic::invalid_path(
+                return Err(token_lexical::invalid_path(
                     path_kind,
                     Some(current_source_span(stream)?),
                 )
@@ -136,7 +133,7 @@ fn parse_path_prefix(
             }
 
             if matches!(next, '/' | '\\') {
-                return Err(CompilerDiagnostic::invalid_path(
+                return Err(token_lexical::invalid_path(
                     PathKind::EmptyComponent,
                     Some(current_source_span(stream)?),
                 )

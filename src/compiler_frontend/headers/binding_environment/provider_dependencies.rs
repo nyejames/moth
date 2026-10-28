@@ -10,8 +10,10 @@ use super::{
     BindingEnvironmentBuilder, BindingEnvironmentError, FileVisibility, VisibleNameRegistry,
 };
 use crate::builder_surface::external_import_providers::provider::ResolvedExternalImport;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencySelection;
@@ -49,7 +51,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // A retained provider root must match the provider prefix exactly. Any remaining path
         // component is a malformed provider identity, not a selected source name.
         if !remaining.is_empty() {
-            return Err(CompilerDiagnostic::direct_symbol_path_import(
+            return Err(imports::direct_symbol_path_import(
                 dependency.dependency.path,
                 Some(dependency.dependency.span),
             )
@@ -68,14 +70,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         for selection in selections {
+            let selected_path = self
+                .path_fork
+                .try_intern_child(dependency.dependency.path, selection.source_name)
+                .ok_or_else(token_lexical::logical_path_capacity)?;
             let symbol_id = self
                 .lookup_external_symbol_id_by_name(&package.path, selection.source_name)
                 .ok_or_else(|| {
                     super::diagnostics::missing_dependency_target(
-                        &self
-                            .path_fork
-                            .try_intern_child(dependency.dependency.path, selection.source_name)
-                            .expect("path interner fork exhausted while building provider diagnostic path"),
+                        &selected_path,
                         Some(selection.source_span),
                     )
                 })?;
@@ -119,7 +122,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // If there are remaining components after the provider-backed prefix, this is a
         // direct symbol-path dependency, which is invalid for bare dependencies.
         if !remaining.is_empty() {
-            return Err(CompilerDiagnostic::direct_symbol_path_import(
+            return Err(imports::direct_symbol_path_import(
                 dependency.dependency.path,
                 Some(dependency.dependency.span),
             )
@@ -182,7 +185,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     ..
                 }
             ) {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                     "external provider dependency is missing its checked target fact",
                 )
                 .into());

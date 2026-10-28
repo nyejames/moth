@@ -19,7 +19,7 @@ fn missing_constant_position_produces_infrastructure_error() {
     let error = missing_constant_position_error(&constant_path, &path_fork, &string_table);
 
     assert!(
-        error.msg.contains("Missing constant position metadata"),
+        error.message.contains("Missing constant position metadata"),
         "missing constant position must be an infrastructure error, not a user-facing diagnostic: {error:?}"
     );
 }

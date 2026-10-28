@@ -9,7 +9,9 @@ use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -36,7 +38,7 @@ pub fn lower_hir_to_js(
     config: JsLoweringConfig,
     type_environment: &TypeEnvironment,
     path_table: &PathTable,
-) -> Result<JsModule, CompilerError> {
+) -> Result<JsModule, InfrastructureFailure> {
     let emitter = JsEmitter::new(
         hir,
         numeric_proofs,
@@ -117,7 +119,7 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn lower_module(mut self) -> Result<JsModule, CompilerError> {
+    fn lower_module(mut self) -> Result<JsModule, InfrastructureFailure> {
         if let JsFunctionEmissionPolicy::Selected(selection) = &self.config.function_emission_policy
         {
             selection.validate_for_hir(self.hir)?;
@@ -164,10 +166,13 @@ impl<'hir> JsEmitter<'hir> {
                 .hir
                 .require_start_function("JavaScript automatic start invocation")?;
             let Some(start_name) = self.function_name_by_id.get(&start_function).cloned() else {
-                return Err(CompilerError::compiler_error(format!(
-                    "JavaScript backend: start function {:?} has no generated JS name",
-                    start_function
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
+                    format!(
+                        "JavaScript backend: start function {:?} has no generated JS name",
+                        start_function
+                    ),
+                ));
             };
 
             if !self.out.is_empty() {
@@ -236,7 +241,7 @@ impl<'hir> JsEmitter<'hir> {
     fn emitted_functions_use_numeric_helpers(
         &self,
         functions: &[&'hir HirFunction],
-    ) -> Result<NumericRuntimeHelperUsage, CompilerError> {
+    ) -> Result<NumericRuntimeHelperUsage, InfrastructureFailure> {
         let mut usage = NumericRuntimeHelperUsage::default();
 
         for function in functions {
@@ -246,13 +251,13 @@ impl<'hir> JsEmitter<'hir> {
                 for statement in &block.statements {
                     match &statement.kind {
                         HirStatementKind::NumericOp { op, .. } => {
-                            self.collect_numeric_operation_helpers(*op, statement.id, &mut usage)?;
+                            self.collect_numeric_operation_helpers(*op, statement.id, &mut usage);
                         }
                         HirStatementKind::FormatFloat { source, .. } => {
                             // The formatted source's own exact precision selects the formatter the
                             // prelude must carry, exactly like statement lowering.
                             let (_scalar, precision) =
-                                self.float_source_scalar(*source, "FormatFloat")?;
+                                self.float_source_scalar(*source, "FormatFloat");
                             usage.require_float_formatter(precision);
                         }
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
@@ -265,11 +270,10 @@ impl<'hir> JsEmitter<'hir> {
                 if let HirTerminator::Invoke { id, operation, .. } = &block.terminator {
                     match operation {
                         HirFallibleOperation::NumericOp { op, .. } => {
-                            self.collect_numeric_operation_helpers(*op, *id, &mut usage)?;
+                            self.collect_numeric_operation_helpers(*op, *id, &mut usage);
                         }
                         HirFallibleOperation::FormatFloat { source } => {
-                            let (_, precision) =
-                                self.float_source_scalar(*source, "FormatFloat")?;
+                            let (_, precision) = self.float_source_scalar(*source, "FormatFloat");
                             usage.require_float_formatter(precision);
                         }
                         HirFallibleOperation::ValidateFloat { .. } => usage.validate_float = true,
@@ -292,13 +296,14 @@ impl<'hir> JsEmitter<'hir> {
         op: HirNumericOp,
         id: HirNodeId,
         usage: &mut NumericRuntimeHelperUsage,
-    ) -> Result<(), CompilerError> {
-        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+    ) {
+        let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "JS backend has no numeric carrier for {:?}",
                 op.domain
-            ))
-        })?;
+            )
+        });
         let helper_family = carrier.helper_family();
         // Proof elision uses the operation's stable identity for statements and Invoke alike.
         // The failure continuation remains intact even when no checked helper is demanded.
@@ -316,29 +321,24 @@ impl<'hir> JsEmitter<'hir> {
         ) && self.numeric_proofs.integer_operation_is_safe(id);
         if !proven_safe {
             match helper_family {
-                Some("int") => usage.number_integer_ops = true,
-                Some("number") => usage.number_decimal_ops = true,
-                Some("bigint") => usage.big_integer_ops = true,
-                Some("float16") => usage.binary16_ops = true,
-                Some("float32") => usage.binary32_ops = true,
-                Some("float") => usage.binary64_ops = true,
-                _ => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "JS backend received an unreachable numeric operation domain {:?}",
-                        op.domain
-                    )));
-                }
+                "int" => usage.number_integer_ops = true,
+                "number" => usage.number_decimal_ops = true,
+                "bigint" => usage.big_integer_ops = true,
+                "float16" => usage.binary16_ops = true,
+                "float32" => usage.binary32_ops = true,
+                "float" => usage.binary64_ops = true,
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS backend received an unreachable numeric operation domain {:?}",
+                    op.domain
+                ),
             }
         }
         if op.operator == NumericOperator::Power
-            && matches!(
-                helper_family,
-                Some("float16") | Some("float32") | Some("float")
-            )
+            && matches!(helper_family, "float16" | "float32" | "float")
         {
             usage.binary_float_power = true;
         }
-        Ok(())
     }
 
     /// Returns true when any emitted reachable JS body can construct, store, copy, display, or
@@ -350,7 +350,7 @@ impl<'hir> JsEmitter<'hir> {
     fn emitted_functions_use_maps(
         &self,
         functions: &[&'hir HirFunction],
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, InfrastructureFailure> {
         for function in functions {
             if function
                 .returns
@@ -449,7 +449,7 @@ impl<'hir> JsEmitter<'hir> {
     fn collect_used_cast_policies(
         &mut self,
         functions: &[&'hir HirFunction],
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.used_cast_policies.clear();
 
         for function in functions {

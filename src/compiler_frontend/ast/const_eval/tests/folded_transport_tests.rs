@@ -14,7 +14,7 @@ use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::ast_nodes::{MultiBindTargetKind, NodeKind};
 use crate::compiler_frontend::ast::const_eval::external_calls::materialise_success_slots;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
+    ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
@@ -30,7 +30,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
     intern_canonical_builtin,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::{
@@ -43,7 +44,6 @@ use crate::compiler_frontend::folded_value::{
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX,
 };
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
@@ -60,6 +60,9 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     fresh_success_returns, function_node, node, symbol,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::multi_bind_target;
+use crate::compiler_frontend::tests::type_id_fixture_support::{
+    build_ast_with_registered_types, lower_ast,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -278,8 +281,9 @@ impl NominalOriginResolver for NoNominalOrigins {
     fn resolve_nominal_origin(
         &self,
         _nominal_id: NominalTypeId,
-    ) -> Result<OriginTypeId, CompilerError> {
-        Err(CompilerError::compiler_error(
+    ) -> Result<OriginTypeId, InfrastructureFailure> {
+        Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "transport fixture has no nominal origins",
         ))
     }
@@ -296,8 +300,9 @@ impl FoldedValueMaterialiser for ConsumerFixtureMaterialiser {
         &mut self,
         _origin: &StableResourceOriginId,
         _span: Option<SourceSpan>,
-    ) -> Result<ResourceId, CompilerError> {
-        Err(CompilerError::compiler_error(
+    ) -> Result<ResourceId, InfrastructureFailure> {
+        Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
             "transport fixture has no resource origins",
         ))
     }
@@ -306,16 +311,22 @@ impl FoldedValueMaterialiser for ConsumerFixtureMaterialiser {
         &mut self,
         identity: &CanonicalTypeIdentity,
         _string_table: &mut StringTable,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, ConstValueStoreError> {
         match identity {
             CanonicalTypeIdentity::Builtin(builtin) => {
                 intern_canonical_builtin(*builtin, &mut self.type_environment).ok_or_else(|| {
-                    CompilerError::compiler_error("builtin should intern in the consumer")
+                    InfrastructureFailure::internal(
+                        CompilerStage::ConstantEvaluation,
+                        "builtin should intern in the consumer",
+                    )
+                    .into()
                 })
             }
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
                 "transport fixture imports builtin types only",
-            )),
+            )
+            .into()),
         }
     }
 

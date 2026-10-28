@@ -8,7 +8,7 @@ pub(crate) enum ProjectionElem {
     Field(u32),
     FixedIndex(u32),
     DynamicIndex,
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (aggregate-copy provenance).
+    // Normalized aggregate inputs may carry this child projection; HIR extraction emits no CollectionElement projection.
     #[allow(dead_code)]
     CollectionElement,
     MapEntry,
@@ -57,7 +57,7 @@ impl Place {
     }
 }
 
-// LEAVE-LOCAL: this shared structural trichotomy remains an input fact; decision lanes are boracle/relations.rs:237 OriginOverlapDecision and boracle/oracle/conflicts.rs:23 DynamicOverlap.
+// This shared structural trichotomy remains an input fact; the decision lanes are boracle/relations.rs:237 OriginOverlapDecision and boracle/oracle/conflicts.rs:23 DynamicOverlap.
 // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 /// The initial place-overlap relation used by Boracle fixtures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -81,14 +81,6 @@ pub(crate) use enabled::start_command_session_with_configuration;
 pub(crate) use enabled::record_counter;
 
 // ---------------------------------------------------------------------------
-//  Legacy detailed-timer macros (no-op)
-// ---------------------------------------------------------------------------
-//
-// These macros are retained as no-ops so legacy call sites compile without
-// modification. Typed metrics and counters are the durable evidence owners;
-// verbose human detail should be derived from the drained typed snapshot.
-
-// ---------------------------------------------------------------------------
 //  Counter output mode (feature = "benchmark_counters")
 // ---------------------------------------------------------------------------
 //
@@ -106,12 +98,9 @@ pub(crate) use enabled::record_counter;
 ///   Explicit raw benchmark sessions may still collect counters programmatically.
 /// - `Summary`: emit stable `MOTH_BENCH counter` lines and print a concise
 ///   grouped counter summary after compilation.
-/// - `Full`: emit stable `MOTH_BENCH counter` lines and print a concise
-///   grouped counter summary after compilation.
 ///
-/// Both `Summary` and `Full` emit the same stable lines and concise summary
-/// from the drained snapshot. The legacy per-counter human dump has been
-/// removed; typed metrics and counters are the sole evidence owners.
+/// The grouped summary is rendered from the drained snapshot; typed metrics and
+/// counters are the sole evidence owners.
 #[cfg(feature = "benchmark_counters")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CounterOutputMode {
@@ -119,8 +108,6 @@ pub(crate) enum CounterOutputMode {
     Off,
     /// Stable counter lines plus a concise grouped summary.
     Summary,
-    /// Stable counter lines plus the legacy per-counter human dump.
-    Full,
 }
 
 #[cfg(feature = "benchmark_counters")]
@@ -132,7 +119,6 @@ impl CounterOutputMode {
     pub(crate) fn parse(value: Option<&str>) -> Self {
         match value {
             Some("summary") => Self::Summary,
-            Some("full") => Self::Full,
             _ => Self::Off,
         }
     }
@@ -145,15 +131,14 @@ impl CounterOutputMode {
 
     /// Whether stable `MOTH_BENCH counter` lines should be printed.
     pub(crate) fn emits_bench_counter_lines(self) -> bool {
-        matches!(self, Self::Summary | Self::Full)
+        self == Self::Summary
     }
 
     /// Whether the concise grouped counter summary should be printed after
-    /// compilation. Both `Summary` and `Full` modes render the concise grouped
-    /// summary from the drained snapshot.
+    /// compilation. The summary is rendered from the drained snapshot.
     #[cfg(feature = "timers")]
     pub(crate) fn emits_counter_summary(self) -> bool {
-        matches!(self, Self::Summary | Self::Full)
+        self == Self::Summary
     }
 }
 
@@ -177,8 +162,8 @@ pub(crate) fn current_counter_output_mode() -> CounterOutputMode {
 ///      benchmark observation parser can grep without depending on human output.
 /// WHY:  like the timing line, separating the stable counter metric from
 ///       human output lets counter logging change its display without breaking
-///       benchmark attribution. The line is only emitted for `MOTH_COUNTERS`
-///       modes that request stdout (`summary` or `full`).
+///      benchmark attribution. The line is only emitted for `MOTH_COUNTERS`
+///      modes that request stdout (`summary`).
 #[cfg(all(feature = "benchmark_counters", not(feature = "timers")))]
 pub(crate) fn emit_bench_counter_line(name: &'static str, value: f64, output_suppressed: bool) {
     if name.trim().is_empty() {

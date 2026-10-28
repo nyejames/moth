@@ -1,8 +1,8 @@
 //! Bounded expression parsing regression tests.
 //!
-//! WHAT: validates `create_expression_until` edge cases after the token-window refactor.
-//! WHY: the bounded window replaces token-copying with a temporary `length` cap; these tests
-//!      prove the cap behaves correctly for delimiters, nesting, and EOF boundaries.
+//! WHAT: validates `create_expression_until` edge cases for the bounded token window.
+//! WHY: the bounded window limits parsing with a `length` cap instead of copying tokens;
+//!      these tests prove the cap behaves correctly for delimiters, nesting, and EOF boundaries.
 
 use super::*;
 use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
@@ -16,9 +16,12 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, DiagnosticToken, SyntaxDiagnosticKind,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    UnexpectedTokenShape, UnexpectedTokenView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticToken};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -152,14 +155,15 @@ fn bounded_expression_empty_at_delimiter_errors() {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}");
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0002");
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("the diagnostic is an unexpected token");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { found }
+        facts.shape,
+        UnexpectedTokenShape::Token(found)
             if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
     ));
 }
@@ -370,15 +374,15 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}");
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0002");
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("the diagnostic is an unexpected token");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from_static_tag(TokenTag::EOF)
+        facts.shape,
+        UnexpectedTokenShape::Token(found) if found == DiagnosticToken::from_static_tag(TokenTag::EOF)
     ));
 }
 
@@ -427,10 +431,15 @@ fn mutable_receiver_unexpected_operand_reports_full_operand_span() {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}");
     };
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
-    assert_eq!(
-        diagnostic.primary_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operand_span)),
-        "the diagnostic should underline the whole `false` operand, not `~`",
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0002");
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span)
+                if span == SourceSpan::new(SourceId::COMPILATION_ROOT, operand_span)
+        ),
+        "the diagnostic should underline the whole `false` operand, not `~`"
     );
 }

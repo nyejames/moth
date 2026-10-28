@@ -2,7 +2,7 @@
 
 use super::hir_validation_tests::builtin_error_type_id;
 use super::minimal_lowered_hir_module;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -32,7 +32,7 @@ struct InvokeFixture {
 }
 
 impl InvokeFixture {
-    fn validate(&self) -> Result<(), CompilerError> {
+    fn validate(&self) -> Result<(), InfrastructureFailure> {
         validate_module_for_tests(
             &self.module,
             &self.strings,
@@ -155,10 +155,10 @@ fn validator_rejects_duplicate_invoke_success_destinations() {
     let error = fixture
         .validate()
         .expect_err("success destinations must be unique");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Invoke success destinations must be unique")
     );
 }
@@ -177,10 +177,10 @@ fn validator_rejects_overlapping_invoke_success_and_error_destinations() {
     let error = fixture
         .validate()
         .expect_err("success and error definitions must be disjoint");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Invoke success/error destinations must be disjoint")
     );
 }
@@ -197,10 +197,10 @@ fn validator_rejects_invoke_success_arity_mismatch() {
     let error = fixture
         .validate()
         .expect_err("float formatting requires one success slot");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Invoke operation success slot arity is invalid")
     );
 }
@@ -216,8 +216,8 @@ fn validator_rejects_success_result_use_on_failure_edge() {
     let error = fixture
         .validate()
         .expect_err("failure does not define success locals");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("not definitely defined"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("not definitely defined"));
 }
 
 #[test]
@@ -228,8 +228,8 @@ fn validator_rejects_error_result_use_on_success_edge() {
     let error = fixture
         .validate()
         .expect_err("success does not define the error local");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains("not definitely defined"));
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains("not definitely defined"));
 }
 
 fn module_with_ordered_returns() -> (
@@ -292,10 +292,10 @@ fn validator_rejects_multiple_success_return_arity_mismatch() {
     let error =
         validate_module_for_tests(&module, &strings, &types, &ExternalPackageRegistry::new())
             .expect_err("each declared success slot requires one value");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Return success slot arity does not match function signature")
     );
 }
@@ -312,10 +312,10 @@ fn validator_rejects_reordered_multiple_success_return_types() {
     let error =
         validate_module_for_tests(&module, &strings, &types, &ExternalPackageRegistry::new())
             .expect_err("return types match corresponding slots, not an unordered type set");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Return success slot type does not match function signature")
     );
 }
@@ -452,8 +452,8 @@ fn validator_rejects_native_map_get_success_arity_and_type_mismatches() {
     let error = fixture
         .validate()
         .expect_err("Get requires one success slot");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains(
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains(
         "Builtin operation argument/result slot arity does not match semantic signature"
     ));
 
@@ -462,10 +462,10 @@ fn validator_rejects_native_map_get_success_arity_and_type_mismatches() {
     let error = fixture
         .validate()
         .expect_err("Get returns the map value type");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Builtin operation result type does not match semantic signature")
     );
 }
@@ -482,8 +482,8 @@ fn validator_rejects_native_map_set_success_slot_and_wrong_error_type() {
         success_results.push(success_local);
     }
     let error = fixture.validate().expect_err("Set has no success values");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains(
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(error.message.contains(
         "Builtin operation argument/result slot arity does not match semantic signature"
     ));
 
@@ -492,10 +492,10 @@ fn validator_rejects_native_map_set_success_slot_and_wrong_error_type() {
     let error = fixture
         .validate()
         .expect_err("map failure returns builtin Error");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
-            .msg
+            .message
             .contains("Invoke builtin error destination has the wrong error type")
     );
 }
@@ -515,10 +515,10 @@ fn validator_rejects_native_map_key_and_set_value_type_mismatches() {
         let error = fixture
             .validate()
             .expect_err("map operands match exact key/value types");
-        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
         assert!(
             error
-                .msg
+                .message
                 .contains("Builtin operation argument type does not match semantic signature")
         );
     }

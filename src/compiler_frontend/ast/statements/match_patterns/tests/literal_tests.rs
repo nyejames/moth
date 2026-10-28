@@ -15,7 +15,12 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     literal::{parse_literal_pattern, parse_non_choice_pattern},
     option::parse_option_pattern,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, TypeMismatchContext};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidNumberLiteralView, NumberLiteralCode,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -411,7 +416,9 @@ fn assert_invalid_number_literal_reason(
     expected_reason: NumberLiteralErrorReason,
 ) {
     let diagnostic = match error {
-        ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
+        ExpressionParseError::Diagnostic(diagnostic)
+        | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
+        | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("literal pattern infrastructure failure is not a source diagnostic: {error:?}")
         }
@@ -419,16 +426,25 @@ fn assert_invalid_number_literal_reason(
             panic!("literal pattern numeric deferral is not a source diagnostic: {deferral:?}")
         }
     };
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidNumberLiteral { reason, .. } if reason == expected_reason
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidNumberLiteralView>()
+        .expect("number-literal draft should retain typed facts");
+    let (expected_code, expected_scalar, expected_scale) =
+        NumberLiteralCode::split(&expected_reason);
+    assert_eq!(facts.code, expected_code);
+    assert_eq!(facts.scalar, expected_scalar);
+    assert_eq!(facts.scale, expected_scale);
 }
 
 fn assert_match_pattern_type_mismatch(error: ExpressionParseError) {
     let diagnostic = match error {
-        ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
+        ExpressionParseError::Diagnostic(diagnostic)
+        | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
+        | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("literal pattern mismatch must be a source diagnostic: {error:?}")
         }
@@ -436,14 +452,14 @@ fn assert_match_pattern_type_mismatch(error: ExpressionParseError) {
             panic!("literal pattern mismatch must be a source diagnostic: {deferral:?}")
         }
     };
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::MatchPattern,
-            ..
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("literal pattern draft should retain typed mismatch facts");
+    assert_eq!(facts.context, TypeMismatchContext::MatchPattern);
 }
 
 fn assert_fixed_scalar_pattern(

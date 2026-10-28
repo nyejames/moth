@@ -7,6 +7,10 @@
 //! WHY: choice construction has distinct rules from function calls and struct constructors;
 //!      unit variants use value syntax while payload variants use constructor-call syntax.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use std::borrow::Cow;
 
 use crate::compiler_frontend::ast::ScopeContext;
@@ -53,12 +57,12 @@ use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCall, DeferredCallArgument, DeferredExpressionCompletion, DeferredExpressionServices,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken, InvalidCallShapeReason,
+    CompileTimeEvaluationErrorReason, DiagnosticToken, InvalidCallShapeReason,
     InvalidChoiceVariantReason,
 };
 use crate::compiler_frontend::datatypes::definitions::{
@@ -102,7 +106,8 @@ pub(super) fn parse_choice_construct(
     // The declaration must carry a nominal path so we can look up variant definitions
     // and produce diagnostic type information.
     let Some(nominal_path) = type_interner.environment().nominal_path(type_id) else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Choice construct parser was called with a declaration that has no nominal path.",
         )
         .into());
@@ -127,16 +132,25 @@ pub(super) fn parse_choice_construct(
 
     token_stream.advance();
     if token_stream.current_tag() != TokenTag::DOUBLE_COLON {
-        let choice_name = choice_diagnostic_name.rendered_callee_name(string_table);
-        return Err(CompilerError::compiler_error(format!(
-            "Choice construct parser expected '::' after choice name '{}'.",
-            choice_name
-        ))
+        let found_token = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                InfrastructureFailure::malformed_token_projection(
+                    "choice separator diagnostic",
+                    error,
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
+        return Err(token_lexical::expected_token_from_projections(
+            DiagnosticToken::from_static_tag(TokenTag::DOUBLE_COLON),
+            Some(found_token),
+            Some(token_stream.current_span()),
+        )
         .into());
     }
 
     if let Some(gap) = token_stream.current_choice_variant_separator_gap() {
-        return Err(CompilerDiagnostic::invalid_choice_variant_spacing(
+        return Err(token_lexical::invalid_choice_variant_spacing(
             gap,
             Some(token_stream.current_span()),
         )
@@ -150,14 +164,16 @@ pub(super) fn parse_choice_construct(
         TokenTag::SYMBOL => token_stream
             .current_string_id_in(string_table)?
             .ok_or_else(|| {
-                CompilerError::compiler_error("choice variant symbol had no string payload")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "choice variant symbol had no string payload",
+                )
             })?,
 
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                 token_stream.current_tag(),
-                Some(token_stream.current_span()),
-                "Expression Parsing",
+                CompilerStage::AstConstruction,
                 "choice variant expression parsing",
             )?;
 
@@ -170,13 +186,13 @@ pub(super) fn parse_choice_construct(
             let found_token = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
+                    InfrastructureFailure::malformed_token_projection(
                         "choice variant diagnostic",
+                        error,
                     )
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            return Err(token_lexical::unexpected_token_from_tag(
                 found_token,
                 Some(token_stream.current_span()),
             )
@@ -197,7 +213,7 @@ pub(super) fn parse_choice_construct(
             .map(|variant| variant.name)
             .collect();
 
-        return Err(CompilerDiagnostic::invalid_choice_variant(
+        return Err(choices_control_flow::invalid_choice_variant(
             InvalidChoiceVariantReason::UnknownVariant,
             path_fork.component(choice_declaration.id),
             Some(variant_name),
@@ -488,7 +504,7 @@ pub(super) fn parse_choice_construct(
                 token_stream.advance(); // past '('
 
                 if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
-                    return Err(CompilerDiagnostic::invalid_choice_variant(
+                    return Err(choices_control_flow::invalid_choice_variant(
                         InvalidChoiceVariantReason::UnitVariantWithParentheses,
                         path_fork.component(choice_declaration.id),
                         Some(variant_name),
@@ -498,7 +514,7 @@ pub(super) fn parse_choice_construct(
                     .into());
                 }
 
-                return Err(CompilerDiagnostic::invalid_choice_variant(
+                return Err(choices_control_flow::invalid_choice_variant(
                     InvalidChoiceVariantReason::UnitVariantAsConstructor,
                     path_fork.component(choice_declaration.id),
                     Some(variant_name),
@@ -521,7 +537,7 @@ pub(super) fn parse_choice_construct(
         ChoiceVariantPayloadDefinition::Record { fields } => {
             if !has_parens {
                 token_stream.advance();
-                return Err(CompilerDiagnostic::invalid_choice_variant(
+                return Err(choices_control_flow::invalid_choice_variant(
                     InvalidChoiceVariantReason::PayloadVariantMissingArguments,
                     path_fork.component(choice_declaration.id),
                     Some(variant_name),
@@ -534,13 +550,15 @@ pub(super) fn parse_choice_construct(
             // This should always be Some because record variants with parentheses
             // are pre-parsed above. A missing value indicates an internal invariant.
             let Some(raw_args) = parsed_payload_arguments.take() else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Payload choice constructor reached validation without parsed arguments.",
                 )
                 .into());
             };
             let Some(expectations) = parsed_payload_expectations.take() else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Payload choice constructor reached validation without parsed expectations.",
                 )
                 .into());
@@ -599,7 +617,7 @@ fn parse_route_choice_construct(
     // Generic templates are provisional while this constructor seeds their instance; the
     // substituted call signature owns the final exact contract check.
     if !route_context.matches_output_type(choice_declaration.type_id, type_interner.environment()) {
-        return Err(CompilerDiagnostic::invalid_call_shape(
+        return Err(calls_data::invalid_call_shape(
             InvalidCallShapeReason::RouteArgumentNotDirect,
             None,
             variant_span,
@@ -622,7 +640,7 @@ fn parse_route_choice_construct(
                 } else {
                     InvalidChoiceVariantReason::UnitVariantAsConstructor
                 };
-                return Err(CompilerDiagnostic::invalid_choice_variant(
+                return Err(choices_control_flow::invalid_choice_variant(
                     reason,
                     path_fork.component(choice_declaration.id),
                     Some(variant_name),
@@ -632,7 +650,7 @@ fn parse_route_choice_construct(
                 .into());
             }
             if route_context.input_type.is_some() {
-                return Err(CompilerDiagnostic::invalid_call_shape(
+                return Err(calls_data::invalid_call_shape(
                     InvalidCallShapeReason::RouteInputFieldMismatch,
                     None,
                     variant_span,
@@ -686,7 +704,7 @@ fn parse_route_choice_construct(
             let future_input = route_context.input_type.is_some();
             let capture_count = if route_context.input_type.is_some() {
                 let Some(trailing_field) = fields.last() else {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::RouteInputFieldMismatch,
                         None,
                         variant_span,
@@ -706,7 +724,7 @@ fn parse_route_choice_construct(
                 if !route_context
                     .matches_input_type(Some(trailing_field_type), type_interner.environment())
                 {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
+                    return Err(calls_data::invalid_call_shape(
                         InvalidCallShapeReason::RouteInputFieldMismatch,
                         None,
                         variant_span,
@@ -719,7 +737,7 @@ fn parse_route_choice_construct(
             };
 
             if future_input && capture_count == 0 && has_parens {
-                return Err(CompilerDiagnostic::invalid_call_shape(
+                return Err(calls_data::invalid_call_shape(
                     InvalidCallShapeReason::RouteArgumentNotDirect,
                     None,
                     variant_span,
@@ -766,7 +784,7 @@ fn parse_route_choice_construct(
                     };
                     return Ok(ParsedConstructorExpression::Value(expression));
                 }
-                return Err(CompilerDiagnostic::invalid_choice_variant(
+                return Err(choices_control_flow::invalid_choice_variant(
                     InvalidChoiceVariantReason::PayloadVariantMissingArguments,
                     path_fork.component(choice_declaration.id),
                     Some(variant_name),
@@ -1054,7 +1072,7 @@ fn finish_choice_payload_construct(
                 let field_name = path_fork
                     .component(field.name)
                     .unwrap_or_else(|| string_table.intern("<field>"));
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                return Err(choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                     Some(field_name),
                     field_span,
@@ -1081,8 +1099,12 @@ fn finish_choice_payload_construct(
 
         choice_fields.push(CompletedConstructorField {
             name: field.name,
-            slot: u32::try_from(slot)
-                .map_err(|_| CompilerError::compiler_error("constructor field slot exceeds u32"))?,
+            slot: u32::try_from(slot).map_err(|_| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "constructor field slot exceeds u32",
+                )
+            })?,
             value,
         });
     }
@@ -1188,14 +1210,16 @@ pub(crate) fn complete_deferred_choice_call<
     let variant_definitions =
         resolve_choice_variant_definitions(&nominal_path, choice_type_id, context, type_interner);
     let Some(selected_variant) = variant_definitions.get(variant_index).cloned() else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained choice constructor's variant was missing from its resolved variant list",
         )
         .into());
     };
     drop(variant_definitions);
     let ChoiceVariantPayloadDefinition::Record { fields } = &selected_variant.payload else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained choice constructor's selected variant was not a payload variant",
         )
         .into());
@@ -1203,7 +1227,8 @@ pub(crate) fn complete_deferred_choice_call<
     let capture_field_count = expectations.len();
     let payload_field_count = capture_field_count + usize::from(future_input);
     if fields.len() != payload_field_count {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "a retained choice constructor's payload field count changed before completion",
         )
         .into());

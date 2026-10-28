@@ -34,7 +34,7 @@ impl<'a> HirBuilder<'a> {
         let vec_ty = self.type_environment.intern_collection(string_ty, None);
         let vec_local = self.allocate_temp_local(vec_ty, None)?;
 
-        let region = self.current_region_or_error(span)?;
+        let region = self.current_region_or_error()?;
         let empty_collection = self.make_expression(
             span,
             HirExpressionKind::Collection(HirValueRange::empty()),
@@ -42,11 +42,7 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             region,
         )?;
-        self.emit_write_statement(
-            HirWriteTarget::DefineLocal(vec_local),
-            empty_collection,
-            span,
-        )?;
+        self.emit_write_statement(HirWriteTarget::DefineLocal(vec_local), empty_collection)?;
         self.entry_fragment_vec_local = Some(vec_local);
 
         Ok(())
@@ -72,8 +68,8 @@ impl<'a> HirBuilder<'a> {
             return Ok(false);
         };
 
-        let vec_type = self.local_type_id_or_error(vec_local, span)?;
-        let region = self.current_region_or_error(span)?;
+        let vec_type = self.local_type_id_or_error(vec_local)?;
+        let region = self.current_region_or_error()?;
         let load_expr = self.make_local_load_expression(vec_local, vec_type, span, region)?;
         let values = self.module.expressions.append_values(&[load_expr], *span)?;
         self.emit_terminator(current_block, HirTerminator::Return(values), span)?;

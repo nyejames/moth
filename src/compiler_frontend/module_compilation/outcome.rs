@@ -6,7 +6,8 @@
 //!       Classifying them once here means graph and render consumers never re-classify a mixed
 //!       message bag.
 
-use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDelta;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -15,27 +16,30 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Typed result of one retained module's semantic compilation.
 ///
-/// `Success` carries the complete unmerged semantic result plus its local string-table and
-/// path-interner deltas. `Diagnosed` carries the user-facing diagnostics the renderer surfaces.
-/// An infrastructure failure is a boxed cause aggregate at the call boundary instead.
+/// `Success` carries the complete unmerged semantic result plus transient base and sidecar
+/// warning bags. `Diagnosed` carries the user-facing diagnostics the renderer surfaces. An
+/// infrastructure failure is a boxed cause aggregate at the call boundary instead.
 pub(crate) enum ModuleCompilationOutcome {
     // `ModuleSemanticResult` carries the full unmerged module (HIR, type environment and borrow
-    // facts) and is far larger than `ModuleDiagnostics`, so the success payload is boxed to keep
-    // the boundary outcome small. The box is transient: the caller moves the payload before merging.
-    Success(Box<ModuleSemanticResult>),
-    Diagnosed(ModuleDiagnostics),
+    // facts) and is far larger than `PreparedDiagnosticBatch`, so the success payload is boxed to
+    // keep the boundary outcome small. The box is transient: the caller moves the payload before merging.
+    Success {
+        compiled: Box<ModuleSemanticResult>,
+        warnings: DiagnosticBag,
+        sidecar_warnings: Vec<DiagnosticBag>,
+    },
+    Diagnosed(PreparedDiagnosticBatch),
 }
 
 /// Everything one successful module compilation produced, before boundary publication.
 ///
 /// WHAT: the validated base module lanes, the generated delta completed in the same transaction,
-///       the closed public interface, and the module-local string/path deltas carrying every
-///       diagnostic render identity.
-/// WHY: publication is atomic. Keeping the artefact, its generated delta and both identity deltas
-///      in one value means the build boundary merges strings first, then paths, and commits the
-///      whole transaction or none of it. The stable module origin travels through
-///      `public_interface`; no dense `ModuleId` crosses this boundary, because standalone
-///      compilation has no graph-assigned identity.
+///       the closed public interface, and module-local string/path deltas.
+/// WHY: publication is atomic. Keeping every semantic result and both identity deltas in one value
+///      means the build boundary merges strings first, then paths, and commits the whole
+///      transaction or none of it. The stable module origin travels through `public_interface`;
+///      no dense `ModuleId` crosses this boundary, because standalone compilation has no
+///      graph-assigned identity.
 pub(crate) struct ModuleSemanticResult {
     /// Validated base HIR, paired type environment, borrow facts, link facts and metadata.
     pub(crate) module: Module,

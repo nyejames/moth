@@ -57,26 +57,15 @@ fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
     let source = "@core/math sin\nsin #= 1\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selected name must conflict with a declaration");
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::DuplicateDeclaration { .. }
-            )
-        })
-        .expect("expected duplicate declaration diagnostic");
+    let diagnostic =
+        find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
+            .expect("expected duplicate declaration diagnostic");
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the selected name's previous span");
     assert_eq!(previous_span, source_span_for(source, "sin", 0));
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "sin", 1))
     );
 }
@@ -86,26 +75,15 @@ fn selected_alias_duplicate_declaration_uses_the_alias_span() {
     let source = "@core/math sin as local\nlocal #= 1\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selected alias must conflict with a declaration");
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::DuplicateDeclaration { .. }
-            )
-        })
-        .expect("expected duplicate declaration diagnostic");
+    let diagnostic =
+        find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
+            .expect("expected duplicate declaration diagnostic");
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the selected alias's previous span");
     assert_eq!(previous_span, source_span_for(source, "local", 0));
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "local", 1))
     );
 }
@@ -115,31 +93,15 @@ fn declaration_followed_by_selection_preserves_declaration_and_selection_spans()
     let source = "line #= 1\n@core/io line\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selection must conflict with a declaration");
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::ImportNameCollision { .. }
-            )
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "expected dependency-name collision diagnostic: {:?}",
-                errors.diagnostics
-            )
-        });
+    let diagnostic =
+        find_diagnostic_family::<imports::ImportNameCollisionView>(&errors.diagnostics)
+            .unwrap_or_else(|| panic!("expected dependency-name collision diagnostic"));
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the declaration's previous span");
     assert_eq!(previous_span, source_span_for(source, "line", 0));
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "line", 1))
     );
 }
@@ -149,31 +111,15 @@ fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
     let source = "@core/io line as value\n@core/io debug as value\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "duplicate selected aliases must conflict");
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::ImportNameCollision { .. }
-            )
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "expected dependency-name collision diagnostic: {:?}",
-                errors.diagnostics
-            )
-        });
+    let diagnostic =
+        find_diagnostic_family::<imports::ImportNameCollisionView>(&errors.diagnostics)
+            .unwrap_or_else(|| panic!("expected dependency-name collision diagnostic"));
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the first selected alias's previous span");
     assert_eq!(previous_span, source_span_for(source, "value", 0));
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "value", 1))
     );
 }
@@ -184,7 +130,7 @@ fn direct_selection_empty_range_is_rejected_in_the_internal_error_lane() {
     let error = clause
         .selections(&[])
         .expect_err("empty direct-selection ranges must not become namespace bindings");
-    assert!(error.msg.contains("empty selection range"));
+    assert!(error.message.contains("empty selection range"));
 }
 
 #[test]
@@ -193,7 +139,7 @@ fn direct_selection_reversed_range_is_rejected_in_the_internal_error_lane() {
     let error = clause
         .selections(&[])
         .expect_err("reversed direct-selection ranges must fail closed");
-    assert!(error.msg.contains("outside a table"));
+    assert!(error.message.contains("outside a table"));
 }
 
 #[test]
@@ -202,7 +148,7 @@ fn direct_selection_out_of_bounds_range_is_rejected_in_the_internal_error_lane()
     let error = clause
         .selections(&[])
         .expect_err("out-of-bounds direct-selection ranges must fail closed");
-    assert!(error.msg.contains("outside a table"));
+    assert!(error.message.contains("outside a table"));
 }
 
 #[test]
@@ -210,26 +156,15 @@ fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
     let source = "@core/io as io\nio #= 1\n";
     let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a namespace alias must conflict with a declaration");
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::DuplicateDeclaration { .. }
-            )
-        })
-        .expect("expected duplicate declaration diagnostic");
+    let diagnostic =
+        find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
+            .expect("expected duplicate declaration diagnostic");
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the namespace alias's previous span");
     assert_eq!(previous_span, source_span_for(source, "io", 1));
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "io", 2))
     );
 }
@@ -242,26 +177,15 @@ fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
         result,
         "an inferred namespace name must conflict with a declaration",
     );
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::DuplicateDeclaration { .. }
-            )
-        })
-        .expect("expected duplicate declaration diagnostic");
+    let diagnostic =
+        find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
+            .expect("expected duplicate declaration diagnostic");
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the provider path's previous span");
     assert_eq!(previous_span, source_span_for(source, "@core/io", 0));
     assert_eq!(
-        diagnostic.primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "io", 1))
     );
 }
@@ -274,22 +198,11 @@ fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
         result,
         "trailing whitespace must not enter the inferred namespace path span",
     );
-    let diagnostic = errors
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::DuplicateDeclaration { .. }
-            )
-        })
-        .expect("expected duplicate declaration diagnostic");
+    let diagnostic =
+        find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
+            .expect("expected duplicate declaration diagnostic");
 
-    let previous_span = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .and_then(|label| label.span)
+    let previous_span = diagnostic_previous_declaration_span(diagnostic)
         .expect("expected the inferred namespace path's previous span");
     assert_eq!(previous_span, source_span_for(source, "@core/io", 0));
 }

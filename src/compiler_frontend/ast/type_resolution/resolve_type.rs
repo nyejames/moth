@@ -8,8 +8,8 @@
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionResult,
-    collections::fold_collection_capacity,
-    context::{ResolvedTypeAnnotation, TypeResolutionContext},
+    collections::fold_collection_capacity_with_failure_kind,
+    context::{ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionFailureKind},
     generics::instantiate_generic_nominal,
     lookup::{
         resolve_generic_base_type, resolve_named_type_from_context,
@@ -17,9 +17,11 @@ use crate::compiler_frontend::ast::type_resolution::{
     },
     maps::{map_nesting_depth, validate_map_key_type},
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, generics_traits_api, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericApplicationErrorReason, InvalidCollectionTypeReason,
-    InvalidMapTypeReason, InvalidTypeAnnotationReason,
+    GenericApplicationErrorReason, InvalidMapTypeReason, InvalidTypeAnnotationReason,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
@@ -40,7 +42,33 @@ pub(crate) fn resolve_parsed_type_annotation(
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
-    let type_id = resolve_parsed_type_ref(source_ref, span, context, string_table, scope_context)?;
+    let mut failure_kind = TypeResolutionFailureKind::Other;
+    resolve_parsed_type_annotation_with_failure_kind(
+        source_ref,
+        span,
+        context,
+        string_table,
+        scope_context,
+        &mut failure_kind,
+    )
+}
+
+pub(crate) fn resolve_parsed_type_annotation_with_failure_kind(
+    source_ref: &ParsedTypeRef,
+    span: Option<SourceSpan>,
+    context: &mut TypeResolutionContext<'_>,
+    string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
+    failure_kind: &mut TypeResolutionFailureKind,
+) -> TypeResolutionResult<ResolvedTypeAnnotation> {
+    let type_id = resolve_parsed_type_ref(
+        source_ref,
+        span,
+        context,
+        string_table,
+        scope_context,
+        failure_kind,
+    )?;
     Ok(ResolvedTypeAnnotation { type_id })
 }
 
@@ -126,6 +154,7 @@ fn resolve_parsed_type_ref(
     context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
+    failure_kind: &mut TypeResolutionFailureKind,
 ) -> TypeResolutionResult<Option<TypeId>> {
     increment_ast_counter(AstCounter::TypeResolutionCalls);
     let span = parsed_type_ref_span(source_ref).or(span);
@@ -141,46 +170,50 @@ fn resolve_parsed_type_ref(
             Ok(Some(context.type_environment.intern_number(*scale)))
         }
         ParsedTypeRef::Named { name, .. } => {
-            resolve_named_type_from_context(*name, span, context, string_table)
+            resolve_named_type_from_context(*name, span, context, string_table, failure_kind)
         }
         ParsedTypeRef::Qualified { path, .. } => {
-            resolve_namespaced_type_from_context(path, span, context)
+            resolve_namespaced_type_from_context(path, span, context, failure_kind)
         }
         ParsedTypeRef::Applied {
             base, arguments, ..
-        } => resolve_applied_type(base, arguments, span, context, string_table, scope_context),
+        } => resolve_applied_type(
+            base,
+            arguments,
+            span,
+            context,
+            string_table,
+            scope_context,
+            failure_kind,
+        ),
         ParsedTypeRef::Collection {
             element,
             fixed_capacity,
             ..
         } => {
             // Resolve the element before folding capacity, matching the source diagnostic order.
-            let element_type_id =
-                resolve_parsed_type_ref(element, span, context, string_table, scope_context)?;
+            let element_type_id = resolve_parsed_type_ref(
+                element,
+                span,
+                context,
+                string_table,
+                scope_context,
+                failure_kind,
+            )?;
             let fixed_capacity = match fixed_capacity {
-                Some(capacity) => match fold_collection_capacity(
+                Some(ParsedCollectionCapacity::BareConstant { .. }) if scope_context.is_none() => {
+                    // Header-only generic bounds can be resolved before a value scope exists.
+                    // Preserve their old unsized-collection fallback and retained syntax.
+                    *failure_kind = TypeResolutionFailureKind::CapacityNotConstant;
+                    None
+                }
+                Some(capacity) => Some(fold_collection_capacity_with_failure_kind(
                     capacity,
                     scope_context,
                     context.type_environment,
                     context.const_values,
-                ) {
-                    Ok(value) => Some(value),
-                    Err(diagnostic)
-                        if scope_context.is_none()
-                            && matches!(
-                                &diagnostic.as_diagnostic().payload,
-                                crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCollectionType {
-                                    reason: InvalidCollectionTypeReason::CapacityNotConstant,
-                                    ..
-                                }
-                            ) =>
-                    {
-                        // Header-only generic bounds can be resolved before a value scope exists.
-                        // Preserve their old unsized-collection fallback and retained syntax.
-                        None
-                    }
-                    Err(diagnostic) => return Err(diagnostic.into_diagnostic()),
-                },
+                    failure_kind,
+                )?),
                 None => None,
             };
 
@@ -197,7 +230,7 @@ fn resolve_parsed_type_ref(
             // Validate inline nesting before resolving either member.
             let nesting_depth = map_nesting_depth(source_ref);
             if nesting_depth > 2 {
-                return Err(CompilerDiagnostic::invalid_map_type(
+                return Err(calls_data::invalid_map_type(
                     InvalidMapTypeReason::ExcessiveInlineNesting {
                         depth: nesting_depth,
                     },
@@ -205,10 +238,22 @@ fn resolve_parsed_type_ref(
                 ));
             }
 
-            let key_type_id =
-                resolve_parsed_type_ref(key, span, context, string_table, scope_context)?;
-            let value_type_id =
-                resolve_parsed_type_ref(value, span, context, string_table, scope_context)?;
+            let key_type_id = resolve_parsed_type_ref(
+                key,
+                span,
+                context,
+                string_table,
+                scope_context,
+                failure_kind,
+            )?;
+            let value_type_id = resolve_parsed_type_ref(
+                value,
+                span,
+                context,
+                string_table,
+                scope_context,
+                failure_kind,
+            )?;
             let (Some(key_type_id), Some(value_type_id)) = (key_type_id, value_type_id) else {
                 return Ok(None);
             };
@@ -221,8 +266,14 @@ fn resolve_parsed_type_ref(
             ))
         }
         ParsedTypeRef::Optional { inner, .. } => {
-            let Some(inner_type_id) =
-                resolve_parsed_type_ref(inner, span, context, string_table, scope_context)?
+            let Some(inner_type_id) = resolve_parsed_type_ref(
+                inner,
+                span,
+                context,
+                string_table,
+                scope_context,
+                failure_kind,
+            )?
             else {
                 return Ok(None);
             };
@@ -232,7 +283,7 @@ fn resolve_parsed_type_ref(
                 .option_inner_type(inner_type_id)
                 .is_some()
             {
-                return Err(CompilerDiagnostic::invalid_type_annotation(
+                return Err(names_declarations::invalid_type_annotation(
                     TypeAnnotationContext::DeclarationTarget,
                     InvalidTypeAnnotationReason::NestedOptional,
                     span,
@@ -251,20 +302,34 @@ fn resolve_applied_type(
     context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
+    failure_kind: &mut TypeResolutionFailureKind,
 ) -> TypeResolutionResult<Option<TypeId>> {
     let ParsedTypeRef::Named { name, .. } = base else {
-        return Err(CompilerDiagnostic::invalid_generic_application(
+        return Err(generics_traits_api::invalid_generic_application(
             GenericApplicationErrorReason::OnNonNamedType,
             span,
         ));
     };
 
-    let base_path = resolve_generic_base_type(*name, arguments.len(), span, context, string_table)?;
+    let base_path = resolve_generic_base_type(
+        *name,
+        arguments.len(),
+        span,
+        context,
+        string_table,
+        failure_kind,
+    )?;
 
     let mut argument_type_ids = Vec::with_capacity(arguments.len());
     for argument in arguments {
-        let Some(type_id) =
-            resolve_parsed_type_ref(argument, span, context, string_table, scope_context)?
+        let Some(type_id) = resolve_parsed_type_ref(
+            argument,
+            span,
+            context,
+            string_table,
+            scope_context,
+            failure_kind,
+        )?
         else {
             return Ok(None);
         };

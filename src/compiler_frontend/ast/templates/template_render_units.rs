@@ -21,15 +21,16 @@ use crate::compiler_frontend::ast::templates::tir::{
     compose_tir_head_chain_from_root, format_tir_body_root, head_prefix_tir_nodes,
     prepare_loop_aggregate_wrapper, run_tir_formatter_with_warnings, sequence_children,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Installs formatter output as the current module-local TIR reference.
 ///
 /// WHAT: runs the TIR formatter adapter over the template's current referenced
 ///       root and stores the append-only formatted root as a new TIR template.
-/// WHY: linear templates now carry their formatted root directly in TIR.
-///      TIR formatting is the production authority for linear bodies.
+/// WHY: linear templates carry their formatted root directly in TIR, making TIR formatting
+///      the production authority for linear bodies.
 pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_reference_for_linear_template(
     tir_reference: &mut TemplateTirReference,
     has_control_flow: bool,
@@ -50,7 +51,7 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     }
 
     let mut store = context.template_ir_store.borrow_mut();
-    let formatter_result = run_tir_formatter_with_warnings(
+    let formatted_root = run_tir_formatter_with_warnings(
         &mut store,
         expression_builder,
         const_values,
@@ -63,7 +64,7 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     )?;
     let formatted_template_id = store.push_structurally_derived_template(
         reference.root,
-        formatter_result.root,
+        formatted_root,
         DerivedTemplateMetadata::preserve_source(),
     )?;
 
@@ -242,7 +243,8 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
     request: ControlFlowRenderUnitRequest<'_>,
 ) -> Result<(), TemplateError> {
     let control_flow_node_id = construction_context.control_flow_node_id().ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "prepare_control_flow_render_units called on template without a TIR control-flow node",
         )
     })?;
@@ -251,7 +253,8 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
     let target = {
         let store = request.context.template_ir_store.borrow();
         let node = store.get_node(control_flow_node_id).ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Control-flow node disappeared from the TIR store during render-unit preparation.",
             )
         })?;
@@ -278,7 +281,8 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                         (ControlFlowBodyKind::ConditionalBody, body)
                     }
                     RetainedNumericIntakeRole::HeadExpression { .. } => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "head-expression intake was reported as a control-flow position.",
                         )
                         .into());
@@ -290,7 +294,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                 }
             }
             _ => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "Control-flow node was neither a Conditional, Loop, nor retained control-flow position during render-unit preparation.",
                 )
                 .into());

@@ -2,7 +2,7 @@
 //!
 //! WHAT: maps the AST stage into three explicit owners:
 //! `AstModuleEnvironmentBuilder`, `AstEmitter`, and `AstFinalizer`.
-//! WHY: the old pass accumulator made field validity depend on implicit ordering. Keeping
+//! WHY: a single pass accumulator would make field validity depend on implicit ordering. Keeping
 //! environment, emission, and finalization state separate makes stage ownership reviewable.
 //!
 //! ## Phase ownership

@@ -91,16 +91,26 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::sync::Arc;
 
-use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
+use crate::projects::settings::Config;
+#[cfg(feature = "boracle")]
+use crate::projects::settings::LANGUAGE_SOURCE_EXTENSION;
 use crate::timed_stage;
 
 use crate::build_system::BuildProfile;
@@ -129,39 +139,42 @@ pub(crate) use compiled_boundary::ProjectFrontendCompilation;
 /// Production build/check/dev callers use [`compile_project_frontend_with_inputs`] so the typed
 /// input set remains attached to its owning command boundary. This entry point remains useful for
 /// compiler-internal callers that deliberately compile a config-free fixture.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn compile_project_frontend(
     config: &mut Config,
     build_profile: BuildProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
-    string_table: &mut StringTable,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    warning_owner: &mut BoundaryAccumulator,
+) -> CompilationResult<ProjectFrontendCompilation> {
     let mut project_source_files = None;
+    let mut project_source_builder = None;
     let result = compile_project_frontend_with_inputs(
         config,
         build_profile,
         validated_output_settings,
         style_directives,
         builder_surface,
-        string_table,
+        warning_owner,
         &mut project_source_files,
+        &mut project_source_builder,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
     );
-    result.map(|mut frontend| {
-        // Retain the finalized owner so the config-free seam can pass it to the canonical frozen
-        // render tail without cloning source snapshots.
-        frontend.project_source_database = project_source_files;
-        frontend
-    })
+    match result {
+        Err(error) => Err(error),
+        Ok(CompilationOutcome::Diagnosed(reports)) => Ok(CompilationOutcome::Diagnosed(reports)),
+        Ok(CompilationOutcome::Success { value, warnings }) => {
+            Ok(CompilationOutcome::Success { value, warnings })
+        }
+    }
 }
 
 /// Compile all project modules with one command-owned typed input set and frontend mode.
 #[allow(
     clippy::too_many_arguments,
-    reason = "frontend dispatch keeps mutable configuration, build profile, optional output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
+    reason = "frontend dispatch keeps mutable configuration, build profile, optional output settings, directives, mutable builder/report/source owners, build-config inputs and mode separate"
 )]
 pub(crate) fn compile_project_frontend_with_inputs(
     config: &mut Config,
@@ -169,11 +182,12 @@ pub(crate) fn compile_project_frontend_with_inputs(
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
-    string_table: &mut StringTable,
+    warning_owner: &mut BoundaryAccumulator,
     project_source_files: &mut Option<Arc<SourceDatabase>>,
+    project_source_builder: &mut Option<SourceDatabaseBuilder>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+) -> CompilationResult<ProjectFrontendCompilation> {
     // Frontend counters are command-scoped and gated by `benchmark_counters`.
     // The counter storage is atomic so directory module compilation can update
     // it safely from Rayon workers.
@@ -196,8 +210,9 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 validated_output_settings,
                 style_directives,
                 builder_surface,
-                string_table,
+                warning_owner,
                 project_source_files,
+                project_source_builder,
                 build_config_inputs,
                 mode,
             )
@@ -208,21 +223,28 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 style_directives,
                 builder_surface,
                 extension,
-                string_table,
+                warning_owner,
                 project_source_files,
                 build_config_inputs,
                 mode,
             )
         } else {
-            use crate::compiler_frontend::compiler_errors::CompilerError;
-
-            let err = CompilerError::file_error(
-                &config.entry_dir,
-                format!(
-                    "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
-                ),
+            let mut string_table = StringTable::new();
+            let entry_path = portable_path_text(&config.entry_dir);
+            let entry_path_id = string_table.intern(&entry_path);
+            let diagnostic = project_config::project_entry_extension_required(entry_path_id, None);
+            let prepared = PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                string_table,
+                None,
+                None,
             );
-            Err(CompilerMessages::from_error_ref(err, string_table))
+            warning_owner.discard_successful_warnings();
+            warning_owner.append_prepared(prepared, None);
+            let accumulator = std::mem::replace(warning_owner, BoundaryAccumulator::new());
+            Ok(CompilationOutcome::Diagnosed(
+                accumulator.finish(InstallMode::Unfrozen)?,
+            ))
         }
     });
 
@@ -243,13 +265,14 @@ pub(crate) fn compile_single_file_boracle(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
-) -> Result<BoracleModuleInput, CompilerMessages> {
+) -> CompilationResult<BoracleModuleInput> {
     let Some(extension) = config.entry_dir.extension() else {
-        let error = crate::compiler_frontend::compiler_errors::CompilerError::file_error(
+        let error = crate::compiler_frontend::compiler_errors::InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
             &config.entry_dir,
             format!("Boracle source mode requires a .{LANGUAGE_SOURCE_EXTENSION} file entry"),
         );
-        return Err(CompilerMessages::from_error_ref(error, string_table));
+        return Err(error.into());
     };
 
     compilation::compile_single_file_boracle_frontend(

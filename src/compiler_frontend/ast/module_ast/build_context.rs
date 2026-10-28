@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -242,7 +242,7 @@ impl<'a> AstPhaseContext<'a> {
     pub(in crate::compiler_frontend) fn from_build_context(
         context: AstBuildContext<'a>,
         source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
-    ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), CompilerMessages> {
+    ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), InfrastructureFailure> {
         let AstBuildContext {
             build_profile,
             external_package_registry,
@@ -265,8 +265,7 @@ impl<'a> AstPhaseContext<'a> {
         let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::with_capacity_estimate(
             capacity_estimate,
         )));
-        let expression_builder = AstExpressionBuilder::with_capacity_estimate(capacity_estimate)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let expression_builder = AstExpressionBuilder::with_capacity_estimate(capacity_estimate)?;
         Ok((
             Self {
                 external_package_registry,

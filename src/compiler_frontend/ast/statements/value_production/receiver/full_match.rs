@@ -25,8 +25,9 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -71,7 +72,7 @@ pub(super) fn parse_value_match_at_receiver(
     } = input;
 
     let scrutinee_context =
-        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
+        context.new_child_control_flow(ContextKind::Condition, string_table, path_fork)?;
     let scrutinee = parse_scrutinee_until_is(
         token_stream,
         &scrutinee_context,
@@ -83,7 +84,7 @@ pub(super) fn parse_value_match_at_receiver(
     )?;
 
     if token_stream.current_tag() != TokenTag::IS {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
             Some(token_stream.current_span()),
         )
@@ -94,7 +95,7 @@ pub(super) fn parse_value_match_at_receiver(
     let receiver_kind = target.receiver_kind;
     let expected_result_type_ids = target.result_type_ids.clone();
     let needs_slot_inference = target.needs_slot_inference();
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let parsed_match = parse_match_block(
         scrutinee,
         token_stream,

@@ -32,15 +32,20 @@ use super::module_identity::ModuleIdentityRecord;
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::source_tree_index::SourceTreeIndex;
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Outcome of inserting one deterministic provider-before-consumer dependency edge.
@@ -48,7 +53,7 @@ use std::path::{Path, PathBuf};
 /// WHAT: tells the caller whether a new edge was added or whether the edge was already present.
 /// WHY: a duplicate edge does not change the dependency graph, so insertion is idempotent rather
 ///      than an error. Self-edges and out-of-range module IDs remain internal graph failures
-///      reported through [`CompilerError`].
+///      reported through [`InfrastructureFailure`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DependencyEdgeOutcome {
     Inserted,
@@ -160,11 +165,6 @@ pub(crate) struct ProjectModuleGraph {
     entry_modules: Vec<ModuleId>,
     facade: Option<ModuleId>,
     dependencies: ProjectModuleDependencies,
-    // Retained authored source span for each inserted provider-before-consumer edge,
-    // keyed by the (provider, consumer) `ModuleId` pair. Only the first observation in
-    // deterministic merge order is retained; duplicate observations are idempotent for the edge
-    // and never overwrite retained provenance. Provenance is never used for edge identity.
-    edge_source_spans: BTreeMap<(ModuleId, ModuleId), Option<SourceSpan>>,
 }
 
 impl ProjectModuleGraph {
@@ -204,7 +204,6 @@ impl ProjectModuleGraph {
                 dependency_providers: vec![Vec::new(); node_count],
                 provider_consumers: vec![Vec::new(); node_count],
             },
-            edge_source_spans: BTreeMap::new(),
         }
     }
 
@@ -262,7 +261,6 @@ impl ProjectModuleGraph {
                 dependency_providers,
                 provider_consumers,
             },
-            edge_source_spans: BTreeMap::new(),
         }
     }
 
@@ -307,7 +305,6 @@ impl ProjectModuleGraph {
                 dependency_providers: vec![Vec::new(); node_count],
                 provider_consumers: vec![Vec::new(); node_count],
             },
-            edge_source_spans: BTreeMap::new(),
         }
     }
 
@@ -346,12 +343,15 @@ impl ProjectModuleGraph {
     pub(crate) fn dependency_providers(
         &self,
         module_id: ModuleId,
-    ) -> Result<&[ModuleId], CompilerError> {
+    ) -> Result<&[ModuleId], InfrastructureFailure> {
         if !self.is_valid_module_id(module_id) {
-            return Err(CompilerError::compiler_error(format!(
-                "Project module graph received out-of-range ModuleId {} for provider lookup",
-                module_id.index()
-            )));
+            return Err(InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Project module graph received out-of-range ModuleId {} for provider lookup",
+                    module_id.index()
+                ),
+            ));
         }
 
         let ProjectModuleDependencies::Frozen {
@@ -401,11 +401,12 @@ impl ProjectModuleGraph {
     ///
     /// A canonical path owned by two modules, or an owned source whose logical identity module
     /// origin does not match its graph node origin, is a proven invariant violation surfaced
-    /// through CompilerError rather than silently overwriting one origin.
+    /// through InfrastructureFailure rather than silently overwriting one origin.
     pub(crate) fn build_source_origin_lookup(
         &self,
         source_tree_index: &SourceTreeIndex,
-    ) -> Result<FxHashMap<std::path::PathBuf, StableModuleOriginIdentity>, CompilerError> {
+    ) -> Result<FxHashMap<std::path::PathBuf, StableModuleOriginIdentity>, InfrastructureFailure>
+    {
         let mut origins: FxHashMap<std::path::PathBuf, StableModuleOriginIdentity> =
             FxHashMap::default();
 
@@ -414,14 +415,14 @@ impl ProjectModuleGraph {
             for source_id in source_tree_index.owned_source_indices(node.module_id()) {
                 let record = source_tree_index.source(*source_id);
                 let Some(entry_origin) = record.logical_identity().module_origin() else {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "Project module graph owned source ID {} resolves to an unrooted record; \
                          an owned source record must carry an owned logical identity",
                         source_id.index(),
                     )));
                 };
                 if entry_origin != node_origin {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not match its containing graph node origin ({:?})",
                         record.canonical_path().display(),
                         entry_origin,
@@ -430,7 +431,7 @@ impl ProjectModuleGraph {
                 }
                 let canonical_path = record.canonical_path().to_path_buf();
                 if origins.contains_key(&canonical_path) {
-                    return Err(CompilerError::compiler_error(format!(
+                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "Source tree index owned source ID sets assign canonical path {} to multiple modules; each source file must have exactly one owning module",
                         canonical_path.display()
                     )));
@@ -445,14 +446,14 @@ impl ProjectModuleGraph {
     /// Insert one deterministic provider-before-consumer dependency edge.
     ///
     /// The provider must compile before the consumer. Module IDs are validated and self-edges
-    /// are rejected through an internal [`CompilerError`] without panicking. A duplicate edge
+    /// are rejected through an internal [`InfrastructureFailure`] without panicking. A duplicate edge
     /// is idempotent and reports [`DependencyEdgeOutcome::AlreadyPresent`] because it does not
     /// change the dependency graph.
     pub(crate) fn add_dependency_edge(
         &mut self,
         provider: ModuleId,
         consumer: ModuleId,
-    ) -> Result<DependencyEdgeOutcome, CompilerError> {
+    ) -> Result<DependencyEdgeOutcome, InfrastructureFailure> {
         if !self.is_valid_module_id(provider) || !self.is_valid_module_id(consumer) {
             return Err(self.invalid_module_id_edge_error(provider, consumer));
         }
@@ -483,13 +484,12 @@ impl ProjectModuleGraph {
     ///
     /// WHAT: the one-time construction-to-completion transition. Construction `BTreeSet` storage
     ///       is converted to sorted `Vec<ModuleId>` storage for both provider and consumer
-    ///       adjacency in lockstep, and the dependency state becomes `Frozen`. The retained
-    ///       authored edge spans are unaffected.
+    ///       adjacency in lockstep, and the dependency state becomes `Frozen`.
     /// WHY: compile-wave scheduling reads only the frozen adjacency so the graph keeps one
     ///      complete adjacency representation. Completing an already-completed graph is a
-    ///      mutation after completion and reports an internal [`CompilerError`] rather than
+    ///      mutation after completion and reports an internal [`InfrastructureFailure`] rather than
     ///      silently no-op-ing, so the lifecycle transition stays a single explicit step.
-    pub(crate) fn complete(&mut self) -> Result<(), CompilerError> {
+    pub(crate) fn complete(&mut self) -> Result<(), InfrastructureFailure> {
         let (dependency_providers, provider_consumers) = match &mut self.dependencies {
             ProjectModuleDependencies::UnderConstruction {
                 dependency_providers,
@@ -519,43 +519,18 @@ impl ProjectModuleGraph {
         Ok(())
     }
 
-    /// Insert one resolved structural dependency edge and retain its authored source span.
+    /// Insert one resolved structural dependency edge.
     ///
-    /// WHAT: the production edge-insertion path maps already-resolved `ModuleId`
-    ///       identities to the low-level [`add_dependency_edge`] inserter and, for a newly
-    ///       inserted edge, retains the exact authored `SourceSpan` carried by the dependency
-    ///       reference. Duplicate observations are idempotent for the edge and never overwrite
-    ///       retained provenance; provenance is never used for edge identity.
-    /// WHY: the namespace resolves dependencies to `ModuleId` directly and then calls this method so
-    ///      the graph stays the single owner of both edge adjacency and retained provenance.
+    /// WHAT: the production edge-insertion path maps already-resolved `ModuleId` identities to
+    ///       the low-level [`add_dependency_edge`] inserter.
+    /// WHY: the namespace resolves dependencies to `ModuleId` directly and then calls this method
+    ///      so the graph stays the single owner of provider/consumer adjacency.
     pub(crate) fn add_resolved_dependency_edge(
         &mut self,
         provider: ModuleId,
         consumer: ModuleId,
-        authored_span: Option<SourceSpan>,
-    ) -> Result<DependencyEdgeOutcome, CompilerError> {
-        let outcome = self.add_dependency_edge(provider, consumer)?;
-        if outcome == DependencyEdgeOutcome::Inserted {
-            self.edge_source_spans
-                .insert((provider, consumer), authored_span);
-        }
-        Ok(outcome)
-    }
-
-    /// The retained authored source span for one provider-before-consumer edge, if present.
-    ///
-    /// Focused graph-invariant checks use this to verify that exact authored source spans
-    /// survive direct edge insertion.
-    #[cfg(test)]
-    pub(crate) fn edge_source_span(
-        &self,
-        provider: ModuleId,
-        consumer: ModuleId,
-    ) -> Option<SourceSpan> {
-        self.edge_source_spans
-            .get(&(provider, consumer))
-            .copied()
-            .flatten()
+    ) -> Result<DependencyEdgeOutcome, InfrastructureFailure> {
+        self.add_dependency_edge(provider, consumer)
     }
 
     /// Whether a provider-before-consumer dependency edge is currently present.
@@ -588,15 +563,19 @@ impl ProjectModuleGraph {
     /// optional project package facade is ordered by its real edges, never by a hard-coded fake
     /// dependency.
     ///
-    /// A defensive cycle returns an internal [`CompilerError`] naming the modules left blocked by
-    /// cyclic dependencies in deterministic `ModuleId` order.
-    pub(crate) fn compile_waves(&self) -> Result<Vec<Vec<ModuleId>>, CompilerError> {
+    /// Dependency cycles are authored import cycles across modules or packages. They block the
+    /// affected providers and report one `project_config::circular_dependency` diagnostic that
+    /// names a module on the cycle.
+    pub(crate) fn compile_waves(&self) -> Result<Vec<Vec<ModuleId>>, PreparedFailure> {
         let ProjectModuleDependencies::Frozen {
             dependency_providers,
             provider_consumers,
         } = &self.dependencies
         else {
-            return Err(Self::scheduling_before_completion_error());
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                "Project module graph compile waves were requested before completion; the graph must complete and freeze its adjacency before compile-wave scheduling reads it"
+            );
         };
         let node_count = self.node_count();
         let mut remaining_providers: Vec<usize> = dependency_providers
@@ -637,7 +616,7 @@ impl ProjectModuleGraph {
         }
 
         if processed < node_count {
-            return Err(self.cycle_error(&remaining_providers));
+            return Err(self.cycle_failure(&remaining_providers, dependency_providers));
         }
 
         Ok(waves)
@@ -649,18 +628,20 @@ impl ProjectModuleGraph {
     }
 
     /// Build an internal graph failure for mutating a completed graph.
-    fn mutation_after_completion_error() -> CompilerError {
-        CompilerError::compiler_error(
+    fn mutation_after_completion_error() -> InfrastructureFailure {
+        InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             "Project module graph was mutated after completion; dependency edges must be inserted \
-             before the graph completes and freezes its adjacency for compile-wave scheduling",
+         before the graph completes and freezes its adjacency for compile-wave scheduling",
         )
     }
 
     /// Build an internal graph failure for scheduling before the graph completes.
-    fn scheduling_before_completion_error() -> CompilerError {
-        CompilerError::compiler_error(
+    fn scheduling_before_completion_error() -> InfrastructureFailure {
+        InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             "Project module graph compile waves were requested before completion; the graph must \
-             complete and freeze its adjacency before compile-wave scheduling reads it",
+         complete and freeze its adjacency before compile-wave scheduling reads it",
         )
     }
 
@@ -669,44 +650,66 @@ impl ProjectModuleGraph {
         &self,
         provider: ModuleId,
         consumer: ModuleId,
-    ) -> CompilerError {
-        CompilerError::compiler_error(format!(
-            "Project module graph received a dependency edge with an out-of-range module ID: \
+    ) -> InfrastructureFailure {
+        InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Project module graph received a dependency edge with an out-of-range module ID: \
              provider index {} consumer index {} but the graph has {} modules",
-            provider.index(),
-            consumer.index(),
-            self.node_count()
-        ))
+                provider.index(),
+                consumer.index(),
+                self.node_count()
+            ),
+        )
     }
 
     /// Build an internal graph failure for a self-edge supplied to edge insertion.
-    fn self_edge_error(&self, module_id: ModuleId) -> CompilerError {
+    fn self_edge_error(&self, module_id: ModuleId) -> InfrastructureFailure {
         let origin = self.describe_module(module_id);
-        CompilerError::compiler_error(format!(
-            "Project module graph received a self-dependency edge from module {origin}; a module \
+        InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Project module graph received a self-dependency edge from module {origin}; a module \
              cannot be its own provider"
-        ))
+            ),
+        )
     }
 
-    /// Build an internal graph failure for a dependency cycle, naming every module still blocked
-    /// by cyclic dependencies in deterministic `ModuleId` order.
-    fn cycle_error(&self, remaining_providers: &[usize]) -> CompilerError {
-        let blocked: Vec<String> = remaining_providers
-            .iter()
-            .enumerate()
-            .filter_map(|(index, remaining)| {
-                if *remaining > 0 {
-                    Some(self.describe_module(self.nodes[index].module_id()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        CompilerError::compiler_error(format!(
-            "Project module dependency cycle detected; {} module(s) remain blocked: {}",
-            blocked.len(),
-            blocked.join(", ")
+    /// Build the circular-dependency failure for modules the topological sweep left blocked.
+    ///
+    /// WHAT: names one module on the cycle in a `project_config::circular_dependency` diagnostic
+    ///       carried in its own string and path tables.
+    /// WHY: cycles come from authored cross-module and cross-package imports, so they are user
+    ///      diagnostics rather than compiler bugs. The local tables keep the path pairable with
+    ///      the diagnostic batch when it is appended to the build boundary.
+    fn cycle_failure(
+        &self,
+        remaining_providers: &[usize],
+        dependency_providers: &[Vec<ModuleId>],
+    ) -> PreparedFailure {
+        let cycle_index = module_on_dependency_cycle(remaining_providers, dependency_providers);
+        let logical_path = self.nodes[cycle_index]
+            .stable_origin()
+            .logical_module_path();
+        let mut strings = StringTable::new();
+        let mut fork = PathInternerFork::empty();
+        let Ok(path) = fork.try_intern_portable_path(logical_path, &mut strings) else {
+            let mut bag = DiagnosticBag::new();
+            bag.push(token_lexical::logical_path_capacity());
+            return PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                bag,
+                StringTable::new(),
+                None,
+                None,
+            ));
+        };
+        let mut bag = DiagnosticBag::new();
+        bag.push(project_config::circular_dependency(path, None));
+        PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+            bag,
+            strings,
+            None,
+            Some(std::sync::Arc::new(fork.snapshot_table())),
         ))
     }
 
@@ -720,6 +723,33 @@ impl ProjectModuleGraph {
             module_id.index()
         )
     }
+}
+
+/// Names one module on a dependency cycle left unscheduled by the topological sweep.
+///
+/// WHAT: walks from the first blocked module through blocked providers until one repeats.
+/// WHY: the first blocked module may only depend on a cycle, so its index is not a witness.
+///      Every blocked module keeps a blocked provider, so the walk cannot stop early, and the
+///      repeated module is on the cycle.
+fn module_on_dependency_cycle(
+    remaining_providers: &[usize],
+    dependency_providers: &[Vec<ModuleId>],
+) -> usize {
+    let blocked = |index: usize| remaining_providers[index] > 0;
+    let mut visited = vec![false; remaining_providers.len()];
+    let mut current = remaining_providers
+        .iter()
+        .position(|remaining| *remaining > 0)
+        .expect("a module cycle leaves at least one blocked module");
+    while !visited[current] {
+        visited[current] = true;
+        current = dependency_providers[current]
+            .iter()
+            .map(|provider| provider.index())
+            .find(|&provider| blocked(provider))
+            .expect("every blocked module has a blocked provider");
+    }
+    current
 }
 
 impl SupportVisibilityTopology for ProjectModuleGraph {
@@ -744,8 +774,8 @@ impl SupportVisibilityTopology for ModuleIdentityTable {
 
 /// Apply the project graph's scoped-support visibility rule to one package identity table.
 ///
-/// Package boundaries don't yet retain their own graph, so namespace construction consumes the
-/// same structural rule directly over the package's boundary-local identity table.
+/// Namespace construction has the package-boundary identity table, not its compiled graph, so it
+/// applies the same structural rule directly over those boundary-local identities.
 pub(super) fn is_support_visible_in_identity_table(
     identities: &ModuleIdentityTable,
     support_id: ModuleId,

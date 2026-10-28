@@ -3,8 +3,10 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::{CssTemplateWarning, MalformedTemplateReason};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn located_text_piece(text: &str, string_table: &mut StringTable) -> FormatterInputPiece {
     FormatterInputPiece::Text(FormatterTextPiece {
@@ -26,7 +28,8 @@ fn spanned_text_piece(
 
 fn validate_css_for_test(source: &str, mode: CssFormatterMode) -> Vec<SourceWarning> {
     let mut string_table = StringTable::new();
-    validate_css_source(source, mode, &mut string_table)
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+    validate_css_source(source, mode, &mut diagnostic_strings)
 }
 
 #[test]
@@ -91,13 +94,19 @@ fn css_formatter_preserves_structural_anchors_and_maps_warnings_to_authored_text
         ],
     };
 
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     let result = css_validation_formatter(CssFormatterMode::Block)
         .formatter
-        .format(input, &mut string_table)
+        .format(input, &mut diagnostic_strings)
         .expect("CSS formatter should preserve structural anchors");
 
+    let warnings =
+        crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test(
+            result.warnings,
+            None,
+        );
     assert_eq!(
-        result.warnings.len(),
+        warnings.views().count(),
         1,
         "the malformed declaration after the anchors should be diagnosed"
     );
@@ -187,7 +196,7 @@ fn empty_declaration_value_pins_first_colon_offset() {
     let warnings = validate_css_source(
         ".a { color: ; }",
         CssFormatterMode::Block,
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
     );
     assert_eq!(warnings.len(), 1);
     assert_eq!(
@@ -206,7 +215,11 @@ fn multiple_colons_split_at_first_colon() {
 #[test]
 fn combined_invalid_name_and_missing_value_keep_warning_order() {
     let mut string_table = StringTable::new();
-    let warnings = validate_css_source(".a { 123:; }", CssFormatterMode::Block, &mut string_table);
+    let warnings = validate_css_source(
+        ".a { 123:; }",
+        CssFormatterMode::Block,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    );
     assert_eq!(warnings.len(), 2);
     assert_eq!(
         warnings[0].reason,
@@ -222,7 +235,11 @@ fn combined_invalid_name_and_missing_value_keep_warning_order() {
     assert_eq!((warnings[1].start_offset, warnings[1].end_offset), (8, 9));
 
     // Empty property and empty value warn in the same order on the same span.
-    let warnings = validate_css_source(".a { :; }", CssFormatterMode::Block, &mut string_table);
+    let warnings = validate_css_source(
+        ".a { :; }",
+        CssFormatterMode::Block,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    );
     assert_eq!(warnings.len(), 2);
     assert_eq!(
         warnings[0].reason,
@@ -241,7 +258,11 @@ fn combined_invalid_name_and_missing_value_keep_warning_order() {
 #[test]
 fn declaration_offsets_count_unicode_scalars_not_bytes() {
     let mut string_table = StringTable::new();
-    let warnings = validate_css_source(".a { café:; }", CssFormatterMode::Block, &mut string_table);
+    let warnings = validate_css_source(
+        ".a { café:; }",
+        CssFormatterMode::Block,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    );
     assert_eq!(warnings.len(), 2);
     assert_eq!(
         warnings[0].reason,
@@ -276,9 +297,10 @@ fn css_formatter_passes_through_comments_and_maps_warning_to_source_piece() {
         ],
     };
 
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     let result = css_validation_formatter(CssFormatterMode::Block)
         .formatter
-        .format(input, &mut string_table)
+        .format(input, &mut diagnostic_strings)
         .expect("CSS formatter should pass comments through");
 
     // Comments are analysis-only: output text is identical to the input text.
@@ -294,6 +316,21 @@ fn css_formatter_passes_through_comments_and_maps_warning_to_source_piece() {
     ));
 
     // The `bad` declaration warns once, attributed to the piece that authored it.
-    assert_eq!(result.warnings.len(), 1);
-    assert_eq!(result.warnings[0].primary_span, Some(second_span));
+    let warnings =
+        crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test(
+            result.warnings,
+            None,
+        );
+    assert_eq!(warnings.views().count(), 1);
+    assert!(matches!(
+        warnings
+            .first()
+            .expect("the malformed declaration should yield one warning")
+            .primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } if span == second_span
+    ));
 }

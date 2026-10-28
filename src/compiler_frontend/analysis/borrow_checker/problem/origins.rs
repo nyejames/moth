@@ -13,10 +13,10 @@ pub(crate) enum OriginKind {
         index: u32,
     },
     Fresh,
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // The normalized solver supports this derivation, but HIR extraction emits other origin kinds.
     #[allow(dead_code)]
     Alias(Box<[ValueOriginId]>),
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    // The normalized solver supports this derivation, but HIR extraction emits other origin kinds.
     #[allow(dead_code)]
     ExclusiveAlias(Box<[ValueOriginId]>),
     Copy(Box<[ValueOriginId]>),
@@ -24,7 +24,7 @@ pub(crate) enum OriginKind {
         source: ValueOriginId,
         projection: ProjectionElem,
     },
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    // Reserved for joined-path provenance; HIR extraction does not synthesize join origins.
     #[allow(dead_code)]
     Join(Box<[ValueOriginId]>),
     CallResult {
@@ -51,7 +51,7 @@ pub(crate) enum CallResultUnknownReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CallResultProvenance {
     Fresh,
-    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (call summaries and deferred exclusive access).
+    // The solver accepts explicit alias origins; HIR call summaries currently encode aliases as AliasParams.
     #[allow(dead_code)]
     Alias(Box<[ValueOriginId]>),
     AliasParams(Box<[usize]>),

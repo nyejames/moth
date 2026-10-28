@@ -22,10 +22,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateDirectiveReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
@@ -75,7 +76,7 @@ pub(super) fn apply_handler_style_directive(
     if let Some(factory) = handler_spec.formatter_factory {
         let formatter = factory(parsed_argument.value.as_ref()).map_err(|message| {
             let message_id = string_table.get_or_intern(message);
-            let diagnostic = CompilerDiagnostic::invalid_template_directive(
+            let diagnostic = templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument_with_detail(message_id),
                 parsed_argument.error_span,
@@ -128,7 +129,7 @@ fn parse_optional_handler_style_argument(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> HandlerDirectiveResult<ParsedHandlerDirectiveArgument> {
-    let default_span = current_token_source_span(token_stream);
+    let default_span = Some(token_stream.current_span());
     let directive_name_id = string_table.intern(directive_name);
 
     let Some(expression) = parse_optional_parenthesized_expression(
@@ -150,7 +151,7 @@ fn parse_optional_handler_style_argument(
 
     let Some(argument_type) = argument_type else {
         return Err(with_argument_span(
-            CompilerDiagnostic::invalid_template_directive(
+            templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
                 default_span,
@@ -177,7 +178,7 @@ fn parse_optional_handler_style_argument(
 
     if !argument_is_compile_time_constant {
         return Err(with_argument_span(
-            CompilerDiagnostic::invalid_template_directive(
+            templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_span,
@@ -213,7 +214,8 @@ fn normalize_provided_style_argument_value(
     let payload = match expression.operation() {
         ExpressionOperationView::Constant(value) => {
             Some(const_values.payload(value).ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "template expression references an absent constant value",
                 )
             })?)
@@ -226,7 +228,7 @@ fn normalize_provided_style_argument_value(
                 StyleDirectiveArgumentValue::String(string_table.resolve(*text).to_owned()),
             ),
             _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
                     InvalidTemplateDirectiveReason::invalid_argument(),
                     argument_span,
@@ -241,7 +243,7 @@ fn normalize_provided_style_argument_value(
                 StyleDirectiveArgumentValue::Template(Box::new(template.clone())),
             ),
             _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
                     InvalidTemplateDirectiveReason::invalid_argument(),
                     argument_span,
@@ -259,7 +261,7 @@ fn normalize_provided_style_argument_value(
             match number {
                 Some(number) => Ok(StyleDirectiveArgumentValue::Number(number)),
                 None => Err(with_argument_span(
-                    CompilerDiagnostic::invalid_template_directive(
+                    templates::invalid_template_directive(
                         Some(string_table.intern(directive_name)),
                         InvalidTemplateDirectiveReason::invalid_argument(),
                         argument_span,
@@ -273,7 +275,7 @@ fn normalize_provided_style_argument_value(
         StyleDirectiveArgumentType::Bool => match payload {
             Some(ConstValuePayload::Bool(value)) => Ok(StyleDirectiveArgumentValue::Bool(*value)),
             _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
                     InvalidTemplateDirectiveReason::invalid_argument(),
                     argument_span,
@@ -287,8 +289,7 @@ fn normalize_provided_style_argument_value(
 
 /// Converts one exact numeric style-directive argument into its `f64` styling value.
 ///
-/// WHY: style directives historically accepted the convenience integer/float literals;
-///      they now accept the exact fixed integers and binary floats, while `Byte` and
+/// WHY: style directives accept the exact fixed integers and binary floats, while `Byte` and
 ///      `Dec` stay outside the numeric styling vocabulary.
 fn style_argument_number(value: FixedScalarValue) -> Option<f64> {
     match value.scalar().class() {
@@ -299,21 +300,12 @@ fn style_argument_number(value: FixedScalarValue) -> Option<f64> {
     }
 }
 
-/// Read-only current-token span on the canonical cursor view.
-///
-/// WHAT: reports the exact authored span of the handler directive token
-/// without advancing the stream.
-/// WHY: the no-argument default span is pure token-local lookahead.
-fn current_token_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
-    Some(token_stream.current_span())
-}
-
 fn with_argument_span(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     argument_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = argument_span;
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(argument_span);
     }
     diagnostic
 }

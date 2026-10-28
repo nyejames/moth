@@ -11,11 +11,11 @@
 //! requester tables.
 
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::headers::module_symbols::{
     DeclarationId, OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
 };
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -81,24 +81,6 @@ pub(crate) struct TopLevelDeclarationTable {
     constant_headers: Vec<bool>,
 }
 
-impl Clone for TopLevelDeclarationTable {
-    fn clone(&self) -> Self {
-        // Keep flat row copies visible to the benchmark counter. Stable generated restoration
-        // constructs its own table rather than cloning requester rows.
-        add_frontend_counter(
-            FrontendCounter::GeneratedDeclarationInheritedRowCopies,
-            self.declarations.len(),
-        );
-
-        Self {
-            declarations: self.declarations.clone(),
-            by_path: self.by_path.clone(),
-            by_name: self.by_name.clone(),
-            constant_headers: self.constant_headers.clone(),
-        }
-    }
-}
-
 impl TopLevelDeclarationTable {
     pub(crate) fn empty() -> Self {
         Self {
@@ -131,7 +113,7 @@ impl TopLevelDeclarationTable {
         ordered_declarations: Vec<OrderedSemanticDeclaration>,
         compiler_owned_declarations: Vec<Declaration>,
         path_fork: &PathInternerFork,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut by_path = FxHashMap::default();
         let mut by_name: FxHashMap<StringId, Vec<DeclarationId>> = FxHashMap::default();
         let mut constant_headers: Vec<bool> = Vec::new();
@@ -140,7 +122,8 @@ impl TopLevelDeclarationTable {
 
         for ordered in ordered_declarations {
             if ordered.declaration_id.index() != declaration_slots.len() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Stage 3 declaration IDs were not dense and ordered.",
                 ));
             }
@@ -156,7 +139,8 @@ impl TopLevelDeclarationTable {
                 by_name.entry(name).or_default().push(declaration_id);
             }
             if ordered.kind.owns_value_row() != ordered.declaration.is_some() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Stage 3 declaration storage did not match its semantic kind.",
                 ));
             }
@@ -165,12 +149,14 @@ impl TopLevelDeclarationTable {
                 .as_ref()
                 .is_some_and(|declaration| declaration.id != path)
             {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Stage 3 declaration row did not match its semantic path.",
                 ));
             }
             if by_path.insert(path, declaration_id).is_some() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Stage 3 produced duplicate semantic declaration paths.",
                 ));
             }
@@ -182,7 +168,8 @@ impl TopLevelDeclarationTable {
             let existing = by_path.insert(declaration.id, declaration_id);
 
             if existing.is_some() {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "Compiler-owned declaration path collided with a Stage 3 declaration.",
                 ));
             }

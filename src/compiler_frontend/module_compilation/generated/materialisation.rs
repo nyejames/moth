@@ -14,8 +14,10 @@ use crate::compiler_frontend::ast::generic_functions::{
     MaterialisedGenericAst, ModuleMaterialisationInput, ModuleMaterialisationPreparation,
     recursive_generic_function_instantiation,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
@@ -70,15 +72,10 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<(), PremergeFailure> {
+) -> Result<(), PreparedFailure> {
     for request_id in request_ids {
-        let identity = transaction
-            .identity(*request_id)
-            .map_err(PremergeFailure::from)?
-            .clone();
-        let (display_name, call_span) = transaction
-            .request_facts(*request_id)
-            .map_err(PremergeFailure::from)?;
+        let identity = transaction.identity(*request_id).clone();
+        let (display_name, call_span) = transaction.request_facts(*request_id);
         materialise_generated_request(
             context,
             *request_id,
@@ -98,8 +95,6 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     Ok(())
 }
 
-/// Attach the compiler's live path table to any diagnosed generated request before its local
-/// compiler owner is dropped.
 fn materialise_generated_request<'build>(
     context: &ModuleCompilationContext<'build>,
     request_id: GeneratedRequestId,
@@ -108,42 +103,8 @@ fn materialise_generated_request<'build>(
     requester_context: &ModuleMaterialisationPreparation,
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
-) -> Result<(), PremergeFailure> {
-    let result = materialise_generated_request_inner(
-        context,
-        request_id,
-        request,
-        transaction,
-        requester_context,
-        compiler,
-        entry_file_path,
-    );
-    match result {
-        Ok(()) => Ok(()),
-        Err(mut failure) => {
-            if let Err(error) =
-                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
-            {
-                return Err(PremergeFailure::from(error));
-            }
-            Err(failure)
-        }
-    }
-}
-
-fn materialise_generated_request_inner<'build>(
-    context: &ModuleCompilationContext<'build>,
-    request_id: GeneratedRequestId,
-    request: &MaterialisingRequest,
-    transaction: &mut GeneratedFunctionTransaction<'_>,
-    requester_context: &ModuleMaterialisationPreparation,
-    compiler: &mut CompilerFrontend<'_>,
-    entry_file_path: &Path,
-) -> Result<(), PremergeFailure> {
-    match transaction
-        .enter(request_id)
-        .map_err(PremergeFailure::from)?
-    {
+) -> Result<(), PreparedFailure> {
+    match transaction.enter(request_id) {
         GeneratedRequestEntry::Complete => return Ok(()),
         GeneratedRequestEntry::Recursive => {
             let display_name = compiler.string_table.intern(&request.display_name);
@@ -156,11 +117,14 @@ fn materialise_generated_request_inner<'build>(
             } else {
                 diagnostic
             };
-            return Err(PremergeDiagnosticBatch::from_diagnostic(
-                diagnostic,
-                std::mem::take(&mut compiler.string_table),
+            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from(diagnostic),
+                compiler.string_table.take_for_handoff(),
+                None,
+                || Some(Arc::new(compiler.path_fork.shared_table())),
             )
-            .into());
+            .map_err(PreparedFailure::from)?;
+            return Err(PreparedFailure::Diagnosed(batch));
         }
         GeneratedRequestEntry::Materialise => {}
     }
@@ -170,7 +134,7 @@ fn materialise_generated_request_inner<'build>(
         requester_context,
     )
     .ok_or_else(|| {
-        PremergeFailure::from(CompilerError::compiler_error(format!(
+        PreparedFailure::from(InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
             "Generated request for '{}' has no completed declaring-module materialisation context",
             request.identity.declaration().defining_name()
         )))
@@ -180,7 +144,8 @@ fn materialise_generated_request_inner<'build>(
             let (declaring_context, _) = context
                 .declaring_context_for_identity(request.identity.declaration())
                 .ok_or_else(|| {
-                    PremergeFailure::from(CompilerError::compiler_error(
+                    PreparedFailure::from(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
                         "Prepared generic request lost its selected declaring context",
                     ))
                 })?;
@@ -204,7 +169,7 @@ fn materialise_generated_request_inner<'build>(
             let declaring_source_identity_handle = declaring_context.frozen_identity_handle();
             let retained_identity_tables = declaring_context
                 .retained_identity_tables()
-                .map_err(PremergeFailure::from)?;
+                .map_err(PreparedFailure::from)?;
             // A same-boundary provider may have been published after this requester's preparation
             // fork was created. Its paths are then in the live boundary domain, but its retained
             // context deliberately has no growing table snapshot. Rebase from the boundary pair
@@ -235,7 +200,7 @@ fn materialise_generated_request_inner<'build>(
                     declaring_context
                         .rebased_for_requester(&mut compiler.path_fork, &mut compiler.string_table)
                 }
-                .map_err(PremergeFailure::from)?;
+                .map_err(PreparedFailure::from)?;
                 rebased_context.materialise_ast_at(
                     *template_index,
                     ModuleMaterialisationInput {
@@ -290,7 +255,8 @@ fn materialise_generated_request_inner<'build>(
         ..
     } = build_result;
     let module_resources = module_resources.ok_or_else(|| {
-        PremergeFailure::from(CompilerError::compiler_error(
+        PreparedFailure::from(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
             "generated AST finalization did not retain its sidecar resource table",
         ))
     })?;
@@ -309,14 +275,14 @@ fn materialise_generated_request_inner<'build>(
                 &compiler.path_fork,
                 &mut generated_ast,
             )
-            .map_err(PremergeFailure::from)?;
+            .map_err(PreparedFailure::from)?;
             let generated_context = builder
                 .finish_preparation(
                     &generated_ast.const_values,
                     &module_resources.borrow(),
                     &compiler.path_fork,
                 )
-                .map_err(PremergeFailure::from)?;
+                .map_err(PreparedFailure::from)?;
             let nested_request_ids =
                 transaction.register_requests(nested_requests.iter().map(|request| {
                     GeneratedRequestFacts {
@@ -332,7 +298,8 @@ fn materialise_generated_request_inner<'build>(
         }
         None if nested_requests.is_empty() && nested_validation_requests.is_empty() => None,
         None => {
-            return Err(PremergeFailure::from(CompilerError::compiler_error(
+            return Err(PreparedFailure::from(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "generated AST finalization dropped the requester context of its nested requests",
             )));
         }
@@ -342,7 +309,7 @@ fn materialise_generated_request_inner<'build>(
     // requester's tables. Snapshotting either table per request made generic instantiation
     // quadratic, and shared tables need no merge. Both tables return to the requester on
     // every exit so failures still attach the full tables.
-    let requester_string_table = std::mem::take(&mut compiler.string_table);
+    let requester_string_table = compiler.string_table.take_for_handoff();
     let requester_path_fork = std::mem::replace(&mut compiler.path_fork, PathInternerFork::empty());
     let mut generated_compiler = CompilerFrontend::new(
         context.options.clone(),
@@ -353,16 +320,11 @@ fn materialise_generated_request_inner<'build>(
         context.project_path_resolver,
         context.source_files,
     );
-    let lowered = (|| -> Result<Module, PremergeFailure> {
+    let lowered = (|| -> Result<(Module, DiagnosticBag), PreparedFailure> {
         if let Some((generated_context, nested_request_ids)) = nested {
             for nested_request_id in &nested_request_ids {
-                let nested_identity = transaction
-                    .identity(*nested_request_id)
-                    .map_err(PremergeFailure::from)?
-                    .clone();
-                let (nested_name, nested_span) = transaction
-                    .request_facts(*nested_request_id)
-                    .map_err(PremergeFailure::from)?;
+                let nested_identity = transaction.identity(*nested_request_id).clone();
+                let (nested_name, nested_span) = transaction.request_facts(*nested_request_id);
                 materialise_generated_request(
                     context,
                     *nested_request_id,
@@ -383,12 +345,13 @@ fn materialise_generated_request_inner<'build>(
             // before lowering takes sole ownership of the sidecar resources.
             drop(generated_context);
         }
-        let generated_warnings = generated_ast.warnings.clone();
+        let mut generated_warnings =
+            DiagnosticBag::from_diagnostics(std::mem::take(&mut generated_ast.warnings));
 
         let generated_lowering = lower_hir(
             &mut generated_compiler,
             generated_ast,
-            &generated_warnings,
+            &mut generated_warnings,
             HirFunctionOriginLookup::default(),
             Some(Rc::clone(&module_resources)),
             Some(&declaring_source_identity_handle),
@@ -402,7 +365,7 @@ fn materialise_generated_request_inner<'build>(
         let resource_table = Rc::try_unwrap(module_resources)
             .map(|cell| cell.into_inner())
             .map_err(|_| {
-                PremergeFailure::from(CompilerError::compiler_error("generated sidecar resource table still has a live shared handle after HIR lowering"))
+                PreparedFailure::from(InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, "generated sidecar resource table still has a live shared handle after HIR lowering"))
             })?;
         let function_id = hir_module
             .functions
@@ -412,7 +375,8 @@ fn materialise_generated_request_inner<'build>(
                     .then_some(function.id)
             })
             .ok_or_else(|| {
-                PremergeFailure::from(CompilerError::compiler_error(
+                PreparedFailure::from(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
                     "Generated HIR omitted its requested root function",
                 ))
             })?;
@@ -423,7 +387,8 @@ fn materialise_generated_request_inner<'build>(
             .function_failure_facts
             .get_mut(&function_id)
             .ok_or_else(|| {
-                PremergeFailure::from(CompilerError::compiler_error(
+                PreparedFailure::from(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
                     "Generated HIR omitted its requested root failure facts",
                 ))
             })?;
@@ -438,54 +403,57 @@ fn materialise_generated_request_inner<'build>(
         let borrow_analysis = check_borrows(
             &mut generated_compiler,
             &hir_module,
-            &generated_warnings,
+            &type_environment,
+            &mut generated_warnings,
             Some(&declaring_source_identity_handle),
         )?;
         let functions =
-            collect_module_function_link_facts(&hir_module).map_err(PremergeFailure::from)?;
+            collect_module_function_link_facts(&hir_module).map_err(PreparedFailure::from)?;
         let reachability =
             collect_reachability_from_function_link_facts(&functions, &[function_id])
-                .map_err(PremergeFailure::from)?;
+                .map_err(PreparedFailure::from)?;
         let reachable_package_ids = collect_external_import_package_ids(
             reachability.reachable_external_calls.iter(),
             &context.external_packages,
-        )
-        .map_err(PremergeFailure::from)?;
+        );
         let external_import_candidates = collect_external_import_candidates_for_packages(
             &reachable_package_ids,
             context.external_dependency_resolution_table,
             context.builder_runtime_packages,
             &context.external_packages,
         )
-        .map_err(PremergeFailure::from)?;
+        .map_err(PreparedFailure::from)?;
         // The publication owner in convergence computes the paired table from the final HIR.
         // Nothing reads this empty table before then, and an empty table retains every check.
-        Ok(Module {
-            executable: ModuleExecutable {
-                hir: hir_module,
-                resource_table,
-                type_environment,
-                borrow_analysis,
-                numeric_proofs: NumericProofs::default(),
-                path_table: Arc::new(
-                    crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
+        Ok((
+            Module {
+                executable: ModuleExecutable {
+                    hir: hir_module,
+                    resource_table,
+                    type_environment,
+                    borrow_analysis,
+                    numeric_proofs: NumericProofs::default(),
+                    path_table: Arc::new(
+                        crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new(
+                        )
                         .freeze(),
-                ),
+                    ),
+                },
+                link_facts: ModuleLinkFacts {
+                    external_package_registry: Arc::clone(&context.external_packages),
+                    external_import_candidates,
+                    functions,
+                },
+                metadata: ModuleCompilerMetadata {
+                    entry_point: entry_file_path.to_path_buf(),
+                    const_top_level_fragments: Vec::new(),
+                    root_activity: ModuleRootActivity::default(),
+                    doc_fragments: lowering_metadata.doc_fragments,
+                    materialisation_context: None,
+                },
             },
-            link_facts: ModuleLinkFacts {
-                external_package_registry: Arc::clone(&context.external_packages),
-                external_import_candidates,
-                functions,
-            },
-            metadata: ModuleCompilerMetadata {
-                entry_point: entry_file_path.to_path_buf(),
-                warnings: generated_warnings,
-                const_top_level_fragments: Vec::new(),
-                root_activity: ModuleRootActivity::default(),
-                doc_fragments: lowering_metadata.doc_fragments,
-                materialisation_context: None,
-            },
-        })
+            generated_warnings,
+        ))
     })();
     let CompilerFrontend {
         string_table: requester_string_table,
@@ -494,17 +462,16 @@ fn materialise_generated_request_inner<'build>(
     } = generated_compiler;
     compiler.string_table = requester_string_table;
     compiler.path_fork = requester_path_fork;
-    let generated_module = lowered?;
+    let (generated_module, generated_warnings) = lowered?;
 
     // The boundary install tail replaces each sidecar placeholder with the one final path table
     // after all publications, so successful materialisation does not snapshot the growing table.
-    let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)
-        .map_err(PremergeFailure::from)?;
-    transaction
-        .complete(
-            request_id,
-            summary,
-            GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
-        )
-        .map_err(PremergeFailure::from)
+    let summary = exact_generated_sidecar_summary(&request.identity, &generated_module);
+    transaction.complete(
+        request_id,
+        summary,
+        GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
+        generated_warnings,
+    );
+    Ok(())
 }

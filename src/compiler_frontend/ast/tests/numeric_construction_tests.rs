@@ -28,12 +28,23 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
     ContextKind, ScopeContext, TopLevelDeclarationTable, function_body_to_ast,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, compact_label_message_text,
+};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
+use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::test_support::TestSourceContext;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityContext, LocalSpan, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -61,6 +72,82 @@ fn body_context(scope: PathId, paths: &PathInternerFork) -> ScopeContext {
         parameter_contracts: Vec::new(),
     }));
     context
+}
+#[derive(Debug, PartialEq, Eq)]
+struct NumericMismatchSnapshot {
+    code: &'static str,
+    expected_identity: TypeDisplayShape<TypeDisplayId>,
+    expected_name: String,
+    found_identity: TypeDisplayShape<TypeDisplayId>,
+    found_name: String,
+    context: TypeMismatchContext,
+    primary_span: Option<SourceSpan>,
+    labels: Vec<NumericLabelSnapshot>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct NumericLabelSnapshot {
+    span: Option<SourceSpan>,
+    message: Option<String>,
+    owner: NumericLabelOwner,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum NumericLabelOwner {
+    Absent,
+    Local,
+    Foreign(Option<*const FrozenIdentityContext>),
+}
+
+fn numeric_mismatch_snapshot(
+    diagnostic: DiagnosticDraft,
+    environment: &TypeEnvironment,
+) -> NumericMismatchSnapshot {
+    let strings = StringTable::new();
+    let paths = PathInternerFork::empty();
+    let path_table = paths.snapshot_table();
+    let render_context = DiagnosticRenderContext::new(&strings).with_path_table(&path_table);
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), Some(environment));
+    let view = compact
+        .first()
+        .expect("numeric conflict emits one diagnostic");
+    let facts = view
+        .family_view::<TypeMismatchView>()
+        .expect("numeric conflict retains type mismatch facts");
+    NumericMismatchSnapshot {
+        code: view.descriptor().code,
+        expected_identity: view.types().shape(facts.expected),
+        expected_name: view.types().display(facts.expected, &strings, &path_table),
+        found_identity: view.types().shape(facts.found),
+        found_name: view.types().display(facts.found, &strings, &path_table),
+        context: facts.context,
+        primary_span: site_span(view.primary_site()),
+        labels: view
+            .durable_labels()
+            .map(|label| NumericLabelSnapshot {
+                span: site_span(label.site),
+                message: compact_label_message_text(label.message, view.types(), render_context),
+                owner: site_owner(label.site),
+            })
+            .collect(),
+    }
+}
+
+fn site_span(site: SiteRef<'_>) -> Option<SourceSpan> {
+    match site {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+
+fn site_owner(site: SiteRef<'_>) -> NumericLabelOwner {
+    match site {
+        SiteRef::Absent => NumericLabelOwner::Absent,
+        SiteRef::Local(_) => NumericLabelOwner::Local,
+        SiteRef::Foreign { context, .. } => NumericLabelOwner::Foreign(
+            context.map(|context| context as *const FrozenIdentityContext),
+        ),
+    }
 }
 
 fn empty_return(scope: PathId) -> NumericContinuation {
@@ -812,9 +899,10 @@ fn conflicting_receivers_on_aliases_keep_authored_spans_and_copy_equality() {
             Err(ExpressionParseError::Diagnostic(diagnostic)) => diagnostic,
             other => panic!("aliases share the exact receiver conflict: {other:?}"),
         };
-        assert_eq!(diagnostic.primary_span, Some(last_span));
+        let snapshot = numeric_mismatch_snapshot(diagnostic, &environment);
+        assert_eq!(snapshot.primary_span, Some(last_span));
         assert!(
-            diagnostic
+            snapshot
                 .labels
                 .iter()
                 .any(|label| label.span == Some(first_span))
@@ -1004,13 +1092,14 @@ fn complete_folded_body(binding_count: usize, conflicting: bool) {
     let mut interner = AstTypeInterner::new(&mut environment, &mut compatibility);
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
+    let mut warnings = DiagnosticBag::new();
     let parsed = function_body_to_ast(
         &mut cursor,
         root.clone(),
         &mut interner,
         &mut expressions,
         &mut constants,
-        &mut vec![],
+        &mut warnings,
         strings,
         &mut paths,
     )
@@ -1131,7 +1220,7 @@ fn receiver_conflict_witnesses_ignore_registration_and_union_traversal_order() {
         ),
     ];
     let environment = TypeEnvironment::new();
-    let mut baseline: Option<CompilerDiagnostic> = None;
+    let mut baseline: Option<NumericMismatchSnapshot> = None;
     for order in [
         [0, 1, 2],
         [2, 1, 0],
@@ -1171,20 +1260,18 @@ fn receiver_conflict_witnesses_ignore_registration_and_union_traversal_order() {
             Err(ExpressionParseError::Diagnostic(diagnostic)) => diagnostic,
             other => panic!("different exact receivers must diagnose: {other:?}"),
         };
-        assert_eq!(diagnostic.primary_span, Some(witnesses[1].1));
+        let snapshot = numeric_mismatch_snapshot(diagnostic, &environment);
+        assert_eq!(snapshot.primary_span, Some(witnesses[1].1));
         assert!(
-            diagnostic
+            snapshot
                 .labels
                 .iter()
                 .any(|label| label.span == Some(witnesses[0].1))
         );
         if let Some(expected) = &baseline {
-            assert_eq!(diagnostic.kind, expected.kind);
-            assert_eq!(diagnostic.payload, expected.payload);
-            assert_eq!(diagnostic.primary_span, expected.primary_span);
-            assert_eq!(diagnostic.labels, expected.labels);
+            assert_eq!(&snapshot, expected);
         } else {
-            baseline = Some(diagnostic);
+            baseline = Some(snapshot);
         }
     }
 }
@@ -1224,6 +1311,7 @@ fn completion_receiver_seed_reuses_the_declarations_authored_order() {
             },
         )
         .expect("pending binding");
+    let environment = TypeEnvironment::new();
     let mut state = context.numeric_state_mut();
     let class = state.binding(binding).class;
     let order = state.binding_authored_order(binding);
@@ -1231,7 +1319,7 @@ fn completion_receiver_seed_reuses_the_declarations_authored_order() {
         class,
         builtin_type_ids::fixed_scalar(FixedScalar::U64),
         Some(receiver),
-        &TypeEnvironment::new(),
+        &environment,
     );
     // Storage seeding happens after parsing, but its diagnostic witness belongs to the
     // declaration that was parsed before the receiving use.
@@ -1240,15 +1328,16 @@ fn completion_receiver_seed_reuses_the_declarations_authored_order() {
         builtin_type_ids::fixed_scalar(FixedScalar::I64),
         Some(declaration),
         order,
-        &TypeEnvironment::new(),
+        &environment,
     );
     let diagnostic = match merged_receiver_type(&mut state, class) {
         Err(ExpressionParseError::Diagnostic(diagnostic)) => diagnostic,
         other => panic!("different exact receivers must diagnose: {other:?}"),
     };
-    assert_eq!(diagnostic.primary_span, Some(receiver));
+    let snapshot = numeric_mismatch_snapshot(diagnostic, &environment);
+    assert_eq!(snapshot.primary_span, Some(receiver));
     assert!(
-        diagnostic
+        snapshot
             .labels
             .iter()
             .any(|label| label.span == Some(declaration))
@@ -1274,7 +1363,7 @@ fn family_and_forward_conflicts_use_authored_receivers_after_ranked_unions() {
     let receiver_type = builtin_type_ids::fixed_scalar(FixedScalar::F32);
     let computed_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let environment = TypeEnvironment::new();
-    let mut baseline: Option<[CompilerDiagnostic; 2]> = None;
+    let mut baseline: Option<[NumericMismatchSnapshot; 2]> = None;
     for higher_rank in [None, Some(0), Some(1)] {
         for reverse_merge in [false, true] {
             let context = body_context(scope, &paths);
@@ -1352,30 +1441,26 @@ fn family_and_forward_conflicts_use_authored_receivers_after_ranked_unions() {
                 other => panic!("computed I32 cannot receive F32: {other:?}"),
             };
             let diagnostics = [family_diagnostic, forward_diagnostic];
-            for diagnostic in &diagnostics {
-                assert_eq!(diagnostic.primary_span, Some(earlier_span));
+            let snapshots =
+                diagnostics.map(|diagnostic| numeric_mismatch_snapshot(diagnostic, &environment));
+            for snapshot in &snapshots {
                 assert!(
-                    diagnostic
+                    snapshot
                         .labels
                         .iter()
                         .any(|label| label.span == Some(recipe_span))
                 );
                 assert!(
-                    diagnostic
+                    !snapshot
                         .labels
                         .iter()
-                        .all(|label| label.span != Some(later_span))
+                        .any(|label| label.span == Some(later_span))
                 );
             }
             if let Some(expected) = &baseline {
-                for (diagnostic, expected) in diagnostics.iter().zip(expected) {
-                    assert_eq!(diagnostic.kind, expected.kind);
-                    assert_eq!(diagnostic.payload, expected.payload);
-                    assert_eq!(diagnostic.primary_span, expected.primary_span);
-                    assert_eq!(diagnostic.labels, expected.labels);
-                }
+                assert_eq!(&snapshots, expected);
             } else {
-                baseline = Some(diagnostics);
+                baseline = Some(snapshots);
             }
         }
     }
@@ -1452,9 +1537,10 @@ fn receiver_summary_preserves_type_ties_and_replaced_first_across_ranked_unions(
                     Err(ExpressionParseError::Diagnostic(diagnostic)) => diagnostic,
                     other => panic!("three exact types must conflict: {other:?}"),
                 };
-                assert_eq!(diagnostic.primary_span, Some(sites[4]));
+                let snapshot = numeric_mismatch_snapshot(diagnostic, &environment);
+                assert_eq!(snapshot.primary_span, Some(sites[4]));
                 assert!(
-                    diagnostic
+                    snapshot
                         .labels
                         .iter()
                         .any(|label| label.span == Some(sites[5]))
@@ -1526,12 +1612,13 @@ fn late_loop_pin_merges_earliest_ineligible_receiver_and_every_refused_peer() {
                     Err(ExpressionParseError::Diagnostic(diagnostic)) => diagnostic,
                     other => panic!("late loop pin must reject retained offender: {other:?}"),
                 };
+                let snapshot = numeric_mismatch_snapshot(diagnostic, &environment);
                 assert_eq!(
-                    diagnostic.primary_span,
+                    snapshot.primary_span,
                     Some(sites[usize::from(!refused_first)])
                 );
                 assert!(
-                    diagnostic.labels.is_empty(),
+                    snapshot.labels.is_empty(),
                     "loop policy precedes exact-type conflict"
                 );
             }
@@ -1554,7 +1641,11 @@ fn late_loop_pin_merges_earliest_ineligible_receiver_and_every_refused_peer() {
         Some(integer)
     );
     state.pin_numeric_origin(class, NumericPin::LoopItem);
-    assert!(
-        matches!(merged_receiver_type(&mut state, class), Err(ExpressionParseError::Diagnostic(diagnostic)) if diagnostic.primary_span == Some(sites[0]))
-    );
+    let diagnostic = merged_receiver_type(&mut state, class)
+        .expect_err("the loop pin must reject the refused receiver");
+    let ExpressionParseError::Diagnostic(diagnostic) = diagnostic else {
+        panic!("the loop pin should produce a diagnostic: {diagnostic:?}");
+    };
+    let snapshot = numeric_mismatch_snapshot(diagnostic, &environment);
+    assert_eq!(snapshot.primary_span, Some(sites[0]));
 }

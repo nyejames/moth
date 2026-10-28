@@ -7,6 +7,7 @@
 //!      must share the normal expression parser for item/key/value type-checking, and a literal
 //!      that cannot be typed yet must keep its numeric entries retained instead of guessing a type.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::HashMap;
 
 use crate::compiler_frontend::ast::ScopeContext;
@@ -38,10 +39,13 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 use crate::compiler_frontend::ast::statements::fallible_handling::apply_completed_handling_suffix;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::validate_map_key_type;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, token_lexical, types_borrows_targets,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext,
-    ValueReceiverContext,
+    InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -721,7 +725,9 @@ fn intern_concrete_shape(
 }
 
 fn internal_literal_error(message: &'static str) -> ExpressionParseError {
-    ExpressionParseError::Infrastructure(CompilerError::compiler_error(message).into())
+    ExpressionParseError::Infrastructure(
+        InfrastructureFailure::internal(CompilerStage::AstConstruction, message).into(),
+    )
 }
 
 /// Rejects a literal whose closing `}` was never reached, before any constructor is built.
@@ -734,7 +740,7 @@ fn require_closing_curly(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::missing_closing_delimiter(
+    Err(token_lexical::missing_closing_delimiter(
         string_table.get_or_intern("}".to_owned()),
         Some(token_stream.current_span()),
     )
@@ -1128,7 +1134,7 @@ fn parse_collection_literal(
         ExpectedCollectionContext::CapacityOnlyShorthand { .. }
     ) && build.entries.is_empty()
     {
-        return Err(CompilerDiagnostic::invalid_collection_type(
+        return Err(calls_data::invalid_collection_type(
             InvalidCollectionTypeReason::ShorthandEmptyLiteralAmbiguous,
             collection_span,
         )
@@ -1138,7 +1144,7 @@ fn parse_collection_literal(
     if let Some(capacity) = fixed_capacity
         && build.entries.len() > capacity
     {
-        return Err(CompilerDiagnostic::invalid_collection_type(
+        return Err(calls_data::invalid_collection_type(
             InvalidCollectionTypeReason::InitializerExceedsFixedCapacity {
                 capacity,
                 length: build.entries.len(),
@@ -1147,7 +1153,6 @@ fn parse_collection_literal(
         )
         .into());
     }
-
     if let Some(element_shape) = build.element.shape {
         let shape = context
             .numeric_state_mut()
@@ -1216,24 +1221,22 @@ fn parse_collection_entries(
 
             TokenTag::COMMA => {
                 if awaiting_item {
-                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                    return Err(token_lexical::missing_collection_item(Some(
                         token_stream.current_span(),
                     ))
                     .into());
                 }
-
                 awaiting_item = true;
                 token_stream.advance();
             }
 
             _ => {
                 if !awaiting_item {
-                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                    return Err(token_lexical::missing_collection_item(Some(
                         token_stream.current_span(),
                     ))
                     .into());
                 }
-
                 let mut expectation = side_expectation(
                     build.element.known_type,
                     type_interner,
@@ -1301,9 +1304,9 @@ fn try_extract_known_map_key(
     key: ExpressionView<'_>,
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
-) -> CollectionParseResult<Option<KnownMapKey>> {
+) -> Option<KnownMapKey> {
     let ExpressionOperationView::Constant(id) = key.operation() else {
-        return Ok(None);
+        return None;
     };
     let known_key = match const_values.payload(id) {
         Some(ConstValuePayload::String(_)) => {
@@ -1316,7 +1319,7 @@ fn try_extract_known_map_key(
                 ConstStringRequirement::DuplicateKeyValidation,
                 string_table,
             ) else {
-                return Ok(None);
+                return None;
             };
             KnownMapKey::String(id)
         }
@@ -1325,10 +1328,10 @@ fn try_extract_known_map_key(
         Some(ConstValuePayload::FixedScalar(value)) => KnownMapKey::FixedScalar(*value),
         Some(ConstValuePayload::Bool(value)) => KnownMapKey::Bool(*value),
         Some(ConstValuePayload::Char(value)) => KnownMapKey::Char(*value),
-        _ => return Ok(None),
+        _ => return None,
     };
 
-    Ok(Some(known_key))
+    Some(known_key)
 }
 
 /// Require concrete text before a string enters compile-time map-key handling.
@@ -1366,18 +1369,17 @@ fn record_known_map_key(
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
 ) -> CollectionParseResult<()> {
-    let Some(known_key) = try_extract_known_map_key(key, const_values, string_table)? else {
+    let Some(known_key) = try_extract_known_map_key(key, const_values, string_table) else {
         return Ok(());
     };
 
     if known_keys.insert(known_key, key.span()).is_some() {
-        return Err(CompilerDiagnostic::invalid_map_literal(
+        return Err(calls_data::invalid_map_literal(
             InvalidMapLiteralReason::DuplicateKnownKey,
             key.span(),
         )
         .into());
     }
-
     Ok(())
 }
 
@@ -1396,7 +1398,7 @@ fn validate_map_key_entry(
     record_known_map_key(known_keys, key, const_values, string_table)
 }
 
-fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiagnostic> {
+fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<DiagnosticDraft> {
     if token_stream.current_tag() != TokenTag::ASSIGN {
         return None;
     }
@@ -1405,7 +1407,7 @@ fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiag
         return check_expression_common_mistake(token_stream, false);
     }
 
-    Some(CompilerDiagnostic::invalid_map_literal(
+    Some(calls_data::invalid_map_literal(
         InvalidMapLiteralReason::MixedCollectionMapEntries,
         Some(token_stream.current_span()),
     ))
@@ -1413,13 +1415,12 @@ fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiag
 
 fn consume_map_entry_separator(token_stream: &mut AstCursor) -> CollectionParseResult<()> {
     if token_stream.current_tag() != TokenTag::ASSIGN {
-        return Err(CompilerDiagnostic::invalid_map_literal(
+        return Err(calls_data::invalid_map_literal(
             InvalidMapLiteralReason::MixedCollectionMapEntries,
             Some(token_stream.current_span()),
         )
         .into());
     }
-
     if token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
         && let Some(error) = check_expression_common_mistake(token_stream, false)
     {
@@ -1432,13 +1433,12 @@ fn consume_map_entry_separator(token_stream: &mut AstCursor) -> CollectionParseR
 
 fn reject_missing_map_key_expression(token_stream: &AstCursor) -> CollectionParseResult<()> {
     if token_stream.current_tag() == TokenTag::ASSIGN {
-        return Err(CompilerDiagnostic::invalid_map_literal(
+        return Err(calls_data::invalid_map_literal(
             InvalidMapLiteralReason::MissingKeyExpression,
             Some(token_stream.current_span()),
         )
         .into());
     }
-
     Ok(())
 }
 
@@ -1448,7 +1448,7 @@ fn reject_missing_map_value_expression(token_stream: &mut AstCursor) -> Collecti
     }
 
     match token_stream.current_tag() {
-        TokenTag::CLOSE_CURLY | TokenTag::COMMA => Err(CompilerDiagnostic::invalid_map_literal(
+        TokenTag::CLOSE_CURLY | TokenTag::COMMA => Err(calls_data::invalid_map_literal(
             InvalidMapLiteralReason::MissingValueExpression,
             Some(token_stream.current_span()),
         )
@@ -1568,19 +1568,18 @@ fn parse_map_entries(
 
             TokenTag::COMMA => {
                 if awaiting_entry {
-                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                    return Err(token_lexical::missing_collection_item(Some(
                         token_stream.current_span(),
                     ))
                     .into());
                 }
-
                 awaiting_entry = true;
                 token_stream.advance();
             }
 
             _ => {
                 if !awaiting_entry {
-                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                    return Err(token_lexical::missing_collection_item(Some(
                         token_stream.current_span(),
                     ))
                     .into());
@@ -1728,7 +1727,7 @@ fn parse_inferred_curly_literal(
     // Empty inferred `{}` keeps existing collection ambiguity behavior.
     if token_stream.current_tag() == TokenTag::CLOSE_CURLY {
         token_stream.advance();
-        return Err(CompilerDiagnostic::empty_collection_type_ambiguity(literal_span).into());
+        return Err(types_borrows_targets::empty_collection_type_ambiguity(literal_span).into());
     }
     reject_missing_map_key_expression(token_stream)?;
 
@@ -1887,10 +1886,7 @@ fn parse_inferred_curly_literal(
 
         _ => {
             // Any other token after the first expression is invalid in both shapes.
-            Err(
-                CompilerDiagnostic::missing_collection_item(Some(token_stream.current_span()))
-                    .into(),
-            )
+            Err(token_lexical::missing_collection_item(Some(token_stream.current_span())).into())
         }
     }
 }

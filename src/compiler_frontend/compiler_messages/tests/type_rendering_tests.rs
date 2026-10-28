@@ -1,50 +1,131 @@
 //! Unit tests for type-name rendering at the diagnostic boundary.
 //!
-//! WHAT: exercises `DiagnosticRenderContext` rather than raw datatype display helpers.
-//! WHY: diagnostics carry `TypeId`s, so the renderer is the contract that turns semantic type
-//! identity into source-level names when a module `TypeEnvironment` is available.
+//! WHAT: exercises production-captured type snapshots through frozen report views and renderers.
+//! WHY: diagnostics carry `TypeId`s, so the boundary captures semantic type identity before the
+//! renderer turns it into source-level names.
 
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::compiler_messages::render::terminal::format_payload_guidance;
-use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostics_with_context;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    self, InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    self, InvalidGenericInstantiationView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    self, IncompatibleChoiceComparisonView, TypeMismatchView, UnsupportedOperatorTypesView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_guidance_view;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, diagnostic_type_name, unsupported_operator_types_message,
+    DiagnosticRenderContext, terminal, terse, unsupported_operator_types_message,
 };
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticOperator,
-    InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, InvalidFieldAccessReason,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, DiagnosticBag, DiagnosticOperator,
+    GenericInferenceSubject, IncompatibleChoiceComparisonReason, InvalidAssignmentTargetReason,
+    InvalidFallibleHandlingReason, InvalidFieldAccessReason, InvalidGenericInstantiationReason,
     InvalidReceiverDeclarationReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
     StructTypeDefinition,
 };
+use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{
-    BuiltinTypeConstructor, NominalTypeId, TypeConstructor, TypeId, builtin_type_ids,
+    BuiltinTypeConstructor, GenericParameterId, NominalTypeId, TypeConstructor, TypeId,
+    builtin_type_ids,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use std::sync::Arc;
+
+fn capture_frozen_failure(
+    diagnostics: Vec<DiagnosticDraft>,
+    string_table: StringTable,
+    type_environment: Option<&TypeEnvironment>,
+    path_table: PathTable,
+) -> CompilationResult<()> {
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        string_table,
+        type_environment,
+        Some(Arc::new(path_table)),
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, None);
+    accumulator
+        .finish(InstallMode::Frozen)
+        .map(CompilationOutcome::Diagnosed)
+}
+
+fn diagnosed_reports(
+    result: &CompilationResult<()>,
+) -> &crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        other => panic!("expected diagnosed result, got {other:?}"),
+    }
+}
+
+fn frozen_type_names(
+    type_ids: &[TypeId],
+    string_table: StringTable,
+    type_environment: Option<&TypeEnvironment>,
+    path_table: PathTable,
+) -> Vec<String> {
+    let diagnostics = type_ids
+        .iter()
+        .map(|type_id| {
+            types_borrows_targets::type_mismatch(
+                *type_id,
+                *type_id,
+                TypeMismatchContext::Assignment,
+                None,
+            )
+        })
+        .collect();
+    let failure = capture_frozen_failure(diagnostics, string_table, type_environment, path_table);
+
+    diagnosed_reports(&failure)
+        .iter()
+        .map(|(report, view)| {
+            let mismatch = view
+                .family_view::<TypeMismatchView>()
+                .expect("the frozen diagnostic must retain type-mismatch facts");
+            let context = DiagnosticRenderContext::for_report(report);
+            view.types().display_for_render(
+                mismatch.expected,
+                context.string_table,
+                context.path_table(),
+            )
+        })
+        .collect()
+}
 
 #[test]
-fn diagnostic_render_context_renders_builtin_type_names() {
+fn frozen_snapshot_renders_builtin_type_names() {
     let type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
+    let type_names = frozen_type_names(
+        &[
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            type_environment.builtins().string,
+        ],
+        string_table,
+        Some(&type_environment),
+        path_fork.snapshot_table(),
+    );
 
-    assert_eq!(
-        diagnostic_type_name(builtin_type_ids::fixed_scalar(FixedScalar::I32), context),
-        "I32"
-    );
-    assert_eq!(
-        diagnostic_type_name(type_environment.builtins().string, context),
-        "String"
-    );
+    assert_eq!(type_names, vec!["I32", "String"]);
 }
 
 #[test]
@@ -52,32 +133,35 @@ fn rule_diagnostics_render_receiver_type_names() {
     let type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
     let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
-    let field_access = CompilerDiagnostic::invalid_field_access(
+    let field_access = calls_data::invalid_field_access(
         InvalidFieldAccessReason::UnknownMember,
         None,
         Some(int_type),
         Vec::new(),
         None,
     );
-    let field_guidance = format_payload_guidance(&field_access.payload, context);
-    assert!(field_guidance.iter().any(|line| line.contains("'I32'")));
-
-    let assignment = CompilerDiagnostic::invalid_assignment_target(
+    let assignment = names_declarations::invalid_assignment_target(
         InvalidAssignmentTargetReason::TemporaryNotAssignable,
-        None,
-        Some(int_type),
         None,
         None,
         None,
         None,
     );
-    let assignment_guidance = format_payload_guidance(&assignment.payload, context);
+    let failure = capture_frozen_failure(
+        vec![field_access, assignment],
+        string_table,
+        Some(&type_environment),
+        path_fork.snapshot_table(),
+    );
+    let mut guidance = diagnosed_reports(&failure).iter().map(|(report, view)| {
+        format_guidance_view(view, DiagnosticRenderContext::for_report(report))
+    });
+    let field_guidance = guidance.next().expect("field-access report");
+    assert!(field_guidance.iter().any(|line| line.contains("'I32'")));
+
+    let assignment_guidance = guidance.next().expect("assignment report");
     assert!(
         assignment_guidance
             .iter()
@@ -88,26 +172,32 @@ fn rule_diagnostics_render_receiver_type_names() {
 #[test]
 fn receiver_declaration_reason_renders_the_receiver_type_identity() {
     // WHAT: the payload carries the receiver type as semantic identity, so the rule message must
-    //       name it through the render context rather than an interned spelling.
+    //       name it through the captured type snapshot rather than an interned spelling.
     let mut type_environment = TypeEnvironment::new();
     let element_type = type_environment.builtins().string;
     let receiver_type = type_environment.intern_collection(element_type, None);
     let mut string_table = StringTable::new();
     let function_name = string_table.intern("describe");
     let path_fork = PathInternerFork::empty();
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
 
-    let diagnostic = CompilerDiagnostic::invalid_receiver_declaration(
+    let diagnostic = generics_traits_api::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name,
             type_id: receiver_type,
         },
         None,
     );
-    let guidance = format_payload_guidance(&diagnostic.payload, context);
+    let failure = capture_frozen_failure(
+        vec![diagnostic],
+        string_table,
+        Some(&type_environment),
+        path_fork.snapshot_table(),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("receiver report");
+    let guidance = format_guidance_view(view, DiagnosticRenderContext::for_report(report));
     assert!(
         guidance
             .iter()
@@ -139,9 +229,6 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
     }
 
     let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
     let cases = [
         (
             InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
@@ -172,7 +259,6 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 error_type_id: error_types[0],
                 witness: Box::new(BuiltinFailureWitness {
-                    codes: vec![BuiltinErrorCode::IntOverflow],
                     call_spans: vec![None, None, None],
                     origin_span: None,
                     origin: BuiltinFailureOriginKind::Operation,
@@ -191,7 +277,6 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
         (
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
                 witness: Box::new(BuiltinFailureWitness {
-                    codes: vec![BuiltinErrorCode::DivideByZero],
                     call_spans: Vec::new(),
                     origin_span: None,
                     origin: BuiltinFailureOriginKind::Operation,
@@ -214,30 +299,47 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
         ),
     ];
 
-    for (reason, expected_fragments) in cases {
-        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(reason, None);
-        let guidance = format_payload_guidance(&diagnostic.payload, context).join("\n");
-        if matches!(
-            &diagnostic.payload,
-            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-            }
-        ) {
-            assert!(diagnostic.labels.is_empty());
+    let (diagnostics, expected_fragments): (Vec<DiagnosticDraft>, Vec<Vec<&str>>) = cases
+        .into_iter()
+        .map(|(reason, expected_fragments)| {
+            (
+                choices_control_flow::invalid_fallible_handling(reason, None),
+                expected_fragments,
+            )
+        })
+        .unzip();
+    let failure = capture_frozen_failure(
+        diagnostics,
+        string_table,
+        Some(&type_environment),
+        path_table,
+    );
+    let terse_lines = format_terse_compilation_result(&failure);
+
+    let reports = diagnosed_reports(&failure);
+    for ((expected_fragments, (report, view)), terse) in expected_fragments
+        .iter()
+        .zip(reports.iter())
+        .zip(terse_lines.iter())
+    {
+        let fallible = view
+            .family_view::<InvalidFallibleHandlingView>()
+            .expect("the frozen diagnostic must retain fallible-handling facts");
+        let guidance =
+            format_guidance_view(view, DiagnosticRenderContext::for_report(report)).join("\n");
+        if fallible.reason == InvalidFallibleHandlingCode::AssertionMessageCannotEscape {
+            assert_eq!(view.durable_labels().count(), 0);
             assert!(!guidance.contains("explicit invariant choice"));
             assert!(!guidance.contains("Error!"));
         }
         if matches!(
-            &diagnostic.payload,
-            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. }
-                    | InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-            }
+            fallible.reason,
+            InvalidFallibleHandlingCode::UnhandledBuiltinFailureInExportedFunction
+                | InvalidFallibleHandlingCode::AssertionMessageCannotEscape,
         ) {
             assert!(!guidance.contains("Witness omits"));
         }
-        let terse = format_terse_diagnostics_with_context(&[diagnostic], context).join("\n");
-        for fragment in expected_fragments {
+        for &fragment in expected_fragments {
             assert!(
                 guidance.contains(fragment),
                 "missing {fragment:?} in {guidance}"
@@ -248,7 +350,7 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
 }
 
 #[test]
-fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
+fn frozen_snapshot_renders_nominal_struct_and_choice_names() {
     let mut type_environment = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -292,20 +394,18 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
         generic_parameters: None,
     });
 
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
-
-    assert_eq!(diagnostic_type_name(point_type, context), "Point");
-    assert_eq!(
-        diagnostic_type_name(status_type, context),
-        "Status::{Ready, Failed(...)}"
+    let type_names = frozen_type_names(
+        &[point_type, status_type],
+        string_table,
+        Some(&type_environment),
+        path_fork.snapshot_table(),
     );
+
+    assert_eq!(type_names, vec!["Point", "Status::{Ready, Failed(...)}"]);
 }
 
 #[test]
-fn diagnostic_render_context_renders_constructed_type_names() {
+fn frozen_snapshot_renders_constructed_type_names() {
     let mut type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
@@ -322,56 +422,86 @@ fn diagnostic_render_context_renders_constructed_type_names() {
         Box::new([builtins.string]),
     );
 
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
+    let type_names = frozen_type_names(
+        &[collection, option],
+        string_table,
+        Some(&type_environment),
+        path_fork.snapshot_table(),
+    );
 
-    assert_eq!(diagnostic_type_name(collection, context), "{I32}");
-    assert_eq!(diagnostic_type_name(option, context), "String?");
+    assert_eq!(type_names, vec!["{I32}", "String?"]);
 }
 
 #[test]
-fn diagnostic_render_context_falls_back_to_type_id_without_matching_environment() {
-    let type_environment = TypeEnvironment::new();
-    let string_table = StringTable::new();
+fn captured_unresolved_type_ids_preserve_their_raw_spelling() {
     let orphan_type = TypeId(999);
+    let path_fork = PathInternerFork::empty();
 
-    let no_environment_context = DiagnosticRenderContext::new(&string_table);
-    assert_eq!(
-        diagnostic_type_name(orphan_type, no_environment_context),
-        "TypeId(999)"
+    let no_environment_names = frozen_type_names(
+        &[orphan_type],
+        StringTable::new(),
+        None,
+        path_fork.snapshot_table(),
     );
+    assert_eq!(no_environment_names, vec!["TypeId(999)"]);
 
-    let missing_type_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment));
-    assert_eq!(
-        diagnostic_type_name(orphan_type, missing_type_context),
-        "TypeId(999)"
+    let type_environment = TypeEnvironment::new();
+    let missing_type_names = frozen_type_names(
+        &[orphan_type],
+        StringTable::new(),
+        Some(&type_environment),
+        path_fork.snapshot_table(),
     );
+    assert_eq!(missing_type_names, vec!["TypeId(999)"]);
 }
 
 #[test]
-fn terse_type_mismatch_uses_type_environment_names_when_available() {
+fn terse_type_mismatch_uses_captured_type_names() {
     let type_environment = TypeEnvironment::new();
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
-    let diagnostic = CompilerDiagnostic::type_mismatch(
+    let diagnostic = types_borrows_targets::type_mismatch(
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         type_environment.builtins().string,
         TypeMismatchContext::Assignment,
         None,
     );
-
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
-    let lines = format_terse_diagnostics_with_context(&[diagnostic], context);
+    let failure = capture_frozen_failure(
+        vec![diagnostic],
+        string_table,
+        Some(&type_environment),
+        path_fork.snapshot_table(),
+    );
+    let lines = format_terse_compilation_result(&failure);
 
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("expected I32, found String"));
     assert!(!lines[0].contains("TypeId("));
+}
+
+#[test]
+fn terse_type_mismatch_without_environment_prints_type_ids() {
+    let path_fork = PathInternerFork::empty();
+    let diagnostic = types_borrows_targets::type_mismatch(
+        TypeId(999),
+        TypeId(1000),
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let failure = capture_frozen_failure(
+        vec![diagnostic],
+        StringTable::new(),
+        None,
+        path_fork.snapshot_table(),
+    );
+    let lines = format_terse_compilation_result(&failure);
+
+    assert_eq!(
+        lines,
+        vec![String::from(
+            "E|MOTH-TYPE-0001|||Type mismatch in assignment: expected TypeId(999), found TypeId(1000)"
+        )]
+    );
 }
 
 #[test]
@@ -425,12 +555,204 @@ fn unsupported_operator_message(
     rhs: Option<TypeId>,
 ) -> String {
     let type_environment = TypeEnvironment::new();
-    let string_table = StringTable::new();
+    let diagnostic = types_borrows_targets::unsupported_operator_types(operator, lhs, rhs, None);
     let path_fork = PathInternerFork::empty();
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
+    let failure = capture_frozen_failure(
+        vec![diagnostic],
+        StringTable::new(),
+        Some(&type_environment),
+        path_fork.snapshot_table(),
+    );
+    let (report, view) = diagnosed_reports(&failure)
+        .iter()
+        .next()
+        .expect("unsupported-operator report");
+    let facts = view
+        .family_view::<UnsupportedOperatorTypesView>()
+        .expect("the frozen diagnostic must retain operator type facts");
+    unsupported_operator_types_message(
+        facts.operator,
+        facts.lhs,
+        facts.rhs,
+        view.types(),
+        DiagnosticRenderContext::for_report(report),
+    )
+}
 
-    unsupported_operator_types_message(operator, lhs, rhs, context)
+#[test]
+fn type_mismatch_constructor_carries_type_facts_without_rendering() {
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(types_borrows_targets::type_mismatch(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            type_environment.builtins().string,
+            TypeMismatchContext::Declaration,
+            None,
+        )),
+        Some(&type_environment),
+    );
+    let view = compact.first().expect("type mismatch compacts");
+    let facts = view
+        .family_view::<TypeMismatchView>()
+        .expect("type mismatch facts");
+    assert_eq!(facts.context, TypeMismatchContext::Declaration);
+    assert_eq!(
+        view.types().shape(facts.expected),
+        TypeDisplayShape::FixedScalar(FixedScalar::I32)
+    );
+    assert_eq!(view.types().shape(facts.found), TypeDisplayShape::String);
+}
+
+#[test]
+fn type_mismatch_terminal_guidance_renders_captured_type_names() {
+    let string_table = StringTable::new();
+    let path_table = PathInternerFork::empty().snapshot_table();
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(types_borrows_targets::type_mismatch(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            type_environment.builtins().string,
+            TypeMismatchContext::Declaration,
+            None,
+        )),
+        Some(&type_environment),
+    );
+    let view = compact.first().expect("captured mismatch");
+    let guidance = terminal::format_guidance_view(
+        view,
+        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
+    );
+    assert!(guidance.iter().any(|line| line == "Expected: I32"));
+    assert!(guidance.iter().any(|line| line == "Found: String"));
+    assert!(!guidance.iter().any(|line| line.contains("type id")));
+}
+
+#[test]
+fn type_mismatch_terse_renderer_renders_captured_type_names() {
+    let string_table = StringTable::new();
+    let path_table = PathInternerFork::empty().snapshot_table();
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(types_borrows_targets::type_mismatch(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            type_environment.builtins().string,
+            TypeMismatchContext::FunctionArgument,
+            None,
+        )),
+        Some(&type_environment),
+    );
+    let view = compact.first().expect("captured mismatch");
+    let line = terse::format_terse_diagnostic_view(
+        view,
+        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
+    );
+    assert!(line.contains("expected I32"));
+    assert!(line.contains("found String"));
+    assert!(!line.contains("Expected type id"));
+    assert!(!line.contains("Found type id"));
+}
+
+#[test]
+fn incompatible_choice_comparison_renderer_hides_reason_debug_names() {
+    let string_table = StringTable::new();
+    let path_table = PathInternerFork::empty().snapshot_table();
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(types_borrows_targets::incompatible_choice_comparison(
+            IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
+            builtin_type_ids::BOOL,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            None,
+        )),
+        Some(&type_environment),
+    );
+    let view = compact.first().expect("choice-comparison draft compacts");
+    assert!(
+        view.family_view::<IncompatibleChoiceComparisonView>()
+            .is_some()
+    );
+    let context = DiagnosticRenderContext::new(&string_table).with_path_table(&path_table);
+    let guidance = terminal::format_guidance_view(view, context);
+    let terse_line = terse::format_terse_diagnostic_view(view, context);
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("Cannot compare choice")),
+        "{guidance:?}"
+    );
+    assert!(terse_line.contains("Cannot compare choice"), "{terse_line}");
+    assert!(
+        !guidance
+            .iter()
+            .any(|line| line.contains("ChoiceWithNonChoice"))
+    );
+    assert!(!terse_line.contains("ChoiceWithNonChoice"));
+}
+
+#[test]
+fn generic_instantiation_rendering_resolves_type_name() {
+    let mut string_table = StringTable::new();
+    let box_name = string_table.intern("Box");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(generics_traits_api::invalid_generic_instantiation(
+            Some(box_name),
+            InvalidGenericInstantiationReason::WrongArgumentCount {
+                expected: 1,
+                found: 2,
+            },
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("generic diagnostic compacts");
+    assert!(
+        view.family_view::<InvalidGenericInstantiationView>()
+            .is_some()
+    );
+    let terse_line =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(&string_table));
+    assert!(
+        terse_line.contains("'Box'"),
+        "Expected 'Box' in message, got: {terse_line}"
+    );
+}
+
+#[test]
+fn generic_conflict_rendering_resolves_concrete_type_names() {
+    let mut string_table = StringTable::new();
+    let function_name = string_table.intern("first");
+    let parameter_name = string_table.intern("T");
+    let path_table = PathInternerFork::empty().snapshot_table();
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(generics_traits_api::invalid_generic_instantiation(
+            Some(function_name),
+            InvalidGenericInstantiationReason::ConflictingInference {
+                subject: GenericInferenceSubject::Function,
+                parameter_id: GenericParameterId(0),
+                parameter_name,
+                existing_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                replacement_type_id: type_environment.builtins().string,
+            },
+            None,
+        )),
+        Some(&type_environment),
+    );
+    let view = compact.first().expect("generic conflict compacts");
+    assert!(
+        view.family_view::<InvalidGenericInstantiationView>()
+            .is_some()
+    );
+    let guidance = terminal::format_guidance_view(
+        view,
+        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
+    );
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("Generic parameter 'T'")
+                && line.contains("I32")
+                && line.contains("String")),
+        "expected captured types, got: {guidance:?}"
+    );
 }

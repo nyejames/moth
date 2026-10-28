@@ -532,7 +532,6 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
         run_id: "test-run".to_string(),
         root: tmp.path().to_path_buf(),
     };
-    // Create the case directory.
     let case_paths = run_paths.case_paths("test_case");
     case_paths.create_dir().expect("create case dir");
 

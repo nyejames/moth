@@ -415,7 +415,7 @@ Remedy order remains:
 4. shorten the retained edge;
 5. repair package-owned metadata where applicable.
 
-User-authored topology that is invalid or cannot be proven legal produces a structured `CompilerDiagnostic`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce `CompilerError`.
+User-authored topology that is invalid or cannot be proven legal produces a typed `DiagnosticDraft`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce `InfrastructureFailure`.
 
 There is no backend-specific escape from semantic lifetime diagnostics. A GC-native backend may ignore physical grouping while preserving the source contract.
 

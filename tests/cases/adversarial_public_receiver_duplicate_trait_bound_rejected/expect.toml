@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0020"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0020"
+reason = "invalid_generic_parameter.duplicate_trait_bound"
+path = "input/api/@mod.moth"
+line = 5
+column = 50

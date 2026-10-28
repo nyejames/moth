@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
@@ -105,7 +105,7 @@ fn foreign_postfix_receiver_at_eof_is_rejected_before_token_erasure() {
     let Err(ExpressionParseError::Infrastructure(error)) = result else {
         panic!("a foreign postfix receiver must return an invariant error");
     };
-    assert_eq!(error.primary.error_type, ErrorType::Compiler);
+    assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
     assert_eq!(storage_state(&second), before);
     assert_eq!(cursor.current_tag(), TokenTag::EOF);
 

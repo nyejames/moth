@@ -10,7 +10,8 @@ use super::super::problem::{
     PlaceOverlap, PointId, RebindValue, Use, UseId, UseKind, ValueOriginId,
 };
 use super::{OriginOverlapDecision, OriginSolution};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// One solver-owned loan, including loans inferred from normalized source events.
@@ -97,7 +98,7 @@ impl LoanSolver {
         problem: &BorrowProblem,
         origins: &OriginSolution,
         exclusive_liveness: ExclusiveLoanLiveness,
-    ) -> Result<LoanSolution, CompilerError> {
+    ) -> Result<LoanSolution, InfrastructureFailure> {
         problem.validate()?;
         let graph = EventGraph::new(problem, exclusive_liveness)?;
 
@@ -207,14 +208,14 @@ fn event_accesses(
     problem: &BorrowProblem,
     origins: &OriginSolution,
     event: &Event,
-) -> Result<Vec<AccessFact>, CompilerError> {
+) -> Result<Vec<AccessFact>, InfrastructureFailure> {
     match &event.kind {
         EventKind::Access { use_id } => {
             let use_row = problem.uses().get(use_id.index()).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Boracle loan solver cannot locate access use {:?}",
-                    use_id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!("Boracle loan solver cannot locate access use {:?}", use_id),
+                )
             })?;
             Ok(vec![AccessFact {
                 use_id: Some(*use_id),
@@ -257,7 +258,7 @@ fn access_conflict_overlap(
     access: &AccessFact,
     access_origins: &[ValueOriginId],
     loan: &LoanFact,
-) -> Result<Option<(PlaceOverlap, OriginOverlapDecision)>, CompilerError> {
+) -> Result<Option<(PlaceOverlap, OriginOverlapDecision)>, InfrastructureFailure> {
     if access.definition {
         return Ok(None);
     }
@@ -349,7 +350,7 @@ fn derive_alias_loans(
     origins: &OriginSolution,
     graph: &EventGraph,
     first_id: usize,
-) -> Result<Vec<LoanFact>, CompilerError> {
+) -> Result<Vec<LoanFact>, InfrastructureFailure> {
     let mut result = Vec::new();
     for event in problem.events() {
         let Some((kind, source, destination)) = alias_event(event) else {
@@ -403,7 +404,7 @@ fn derive_provenance_loans(
     origins: &OriginSolution,
     graph: &EventGraph,
     first_id: usize,
-) -> Result<Vec<LoanFact>, CompilerError> {
+) -> Result<Vec<LoanFact>, InfrastructureFailure> {
     let mut result = Vec::new();
     for event in problem.events() {
         match &event.kind {
@@ -562,10 +563,13 @@ fn derive_provenance_loans(
             EventKind::CallEffect(effect) => {
                 for result_row in &effect.results {
                     let Some(origin_row) = problem.origins().get(result_row.origin.index()) else {
-                        return Err(CompilerError::compiler_error(format!(
-                            "Boracle loan solver cannot locate call-result origin {:?}",
-                            result_row.origin
-                        )));
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::BorrowChecking,
+                            format!(
+                                "Boracle loan solver cannot locate call-result origin {:?}",
+                                result_row.origin
+                            ),
+                        ));
                     };
                     let super::super::problem::OriginKind::CallResult { provenance, .. } =
                         &origin_row.kind
@@ -694,7 +698,7 @@ fn push_provenance_loan(
     result: &mut Vec<LoanFact>,
     first_id: usize,
     spec: ProvenanceLoanSpec<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let ProvenanceLoanSpec {
         event,
         kind,
@@ -732,9 +736,12 @@ fn push_provenance_loan(
         until_event: None,
         live_points: Box::new([]),
     });
-    let loan = result
-        .last_mut()
-        .ok_or_else(|| CompilerError::compiler_error("Boracle provenance loan was not inserted"))?;
+    let loan = result.last_mut().ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            "Boracle provenance loan was not inserted",
+        )
+    })?;
     loan.live_points = graph.live_points(problem, loan).into_boxed_slice();
     Ok(())
 }
@@ -783,7 +790,7 @@ fn derive_call_argument_loans(
     origins: &OriginSolution,
     graph: &EventGraph,
     first_id: usize,
-) -> Result<Vec<LoanFact>, CompilerError> {
+) -> Result<Vec<LoanFact>, InfrastructureFailure> {
     let mut result = Vec::new();
     for event in problem.events() {
         if let EventKind::CallArgument { argument, call, .. } = &event.kind {
@@ -826,10 +833,13 @@ fn call_argument_loan(
     }
 }
 
-fn next_loan_id(index: usize) -> Result<LoanId, CompilerError> {
-    u32::try_from(index)
-        .map(LoanId::new)
-        .map_err(|_| CompilerError::compiler_error("Boracle loan table is larger than u32::MAX"))
+fn next_loan_id(index: usize) -> Result<LoanId, InfrastructureFailure> {
+    u32::try_from(index).map(LoanId::new).map_err(|_| {
+        InfrastructureFailure::internal(
+            CompilerStage::BorrowChecking,
+            "Boracle loan table is larger than u32::MAX",
+        )
+    })
 }
 
 fn holder_uses(
@@ -839,14 +849,17 @@ fn holder_uses(
     issue_event: EventId,
     holder: PlaceId,
     kills: &[PointId],
-) -> Result<Vec<UseId>, CompilerError> {
+) -> Result<Vec<UseId>, InfrastructureFailure> {
     let mut uses = Vec::new();
     for use_row in problem.uses() {
         let Some(event_id) = graph.event_by_use.get(&use_row.id).copied() else {
-            return Err(CompilerError::compiler_error(format!(
-                "Boracle loan solver cannot locate owner of holder use {:?}",
-                use_row.id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle loan solver cannot locate owner of holder use {:?}",
+                    use_row.id
+                ),
+            ));
         };
         if event_id == issue_event || !places_cover(problem, holder, use_row.place) {
             continue;
@@ -970,7 +983,7 @@ impl EventGraph {
     fn new(
         problem: &BorrowProblem,
         exclusive_liveness: ExclusiveLoanLiveness,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let mut events_by_block = BTreeMap::new();
         let mut event_location = BTreeMap::new();
         for block in &problem.control_flow().blocks {
@@ -1013,7 +1026,8 @@ impl EventGraph {
         }
 
         if event_location.len() != problem.events().len() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
                 "Boracle loan solver found an event without CFG ownership",
             ));
         }
@@ -1069,16 +1083,19 @@ impl EventGraph {
         problem: &BorrowProblem,
         origins: &OriginSolution,
         loan: &Loan,
-    ) -> Result<LoanFact, CompilerError> {
+    ) -> Result<LoanFact, InfrastructureFailure> {
         let issue_event = problem.events().iter().find_map(|event| {
             matches!(event.kind, EventKind::LoanIssue { loan: id } if id == loan.id)
                 .then_some(event.id)
         });
         let Some(issue_event) = issue_event else {
-            return Err(CompilerError::compiler_error(format!(
-                "Boracle loan solver cannot locate issue event for loan {:?}",
-                loan.id
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BorrowChecking,
+                format!(
+                    "Boracle loan solver cannot locate issue event for loan {:?}",
+                    loan.id
+                ),
+            ));
         };
         let loan_origins = if loan.origins.is_empty() {
             origins_for_access(problem, origins, issue_event, loan.place)
@@ -1116,7 +1133,7 @@ impl EventGraph {
         origins_for_access(problem, origins, event.id, access.place)
     }
 
-    // LEAVE-LOCAL: counterpart is boracle/oracle/conflicts.rs:31 exercise_capabilities.
+    // Its counterpart is boracle/oracle/conflicts.rs:31 exercise_capabilities.
     // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
     fn loan_live_at_event(
         &self,

@@ -756,7 +756,6 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
         StoredProfileHistoryRecord::Current(latest.clone()),
     ];
 
-    // Debug: verify find_comparable_previous finds the previous record.
     let found = crate::profile::drift::find_comparable_previous(
         &records,
         "TEST-UUID-001",
@@ -770,7 +769,6 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
     );
     assert_eq!(found.unwrap().run_id, "2026-06-18T10-00-old0001");
 
-    // Debug: verify compute_drift finds the function drift.
     let drift_cases = vec![crate::profile::drift::DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
@@ -803,7 +801,6 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
         drift_report.counter_movements.len()
     );
 
-    // Now test the full format_top_drift_item path.
     let system = test_system("TEST-UUID-001");
     let top_drift = format_top_drift_item(&records, Some(&system), &latest);
 

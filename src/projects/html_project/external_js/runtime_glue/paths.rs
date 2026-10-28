@@ -82,7 +82,6 @@ pub(super) fn relative_url_path(from_output_file: &Path, to_asset: &Path) -> Str
         path.push_str("../");
     }
 
-    // Go down through the remaining asset components.
     for component in to_components.iter().skip(common) {
         if !path.is_empty() && !path.ends_with('/') {
             path.push('/');

@@ -20,7 +20,8 @@ use crate::compiler_frontend::ast::numeric_construction::{
     merged_receiver_type, numeric_witness_type, raw_fragment_result_is_independently_fixed,
     retained_known_shape, single_direct_pending_reference,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
@@ -39,9 +40,12 @@ pub(crate) struct KnownShapeId(u32);
 
 impl KnownShapeId {
     /// Wrap a dense index as a shape ID, rejecting indices that do not fit the ID space.
-    pub(crate) fn from_dense_index(index: usize) -> Result<Self, CompilerError> {
+    pub(crate) fn from_dense_index(index: usize) -> Result<Self, InfrastructureFailure> {
         let raw = u32::try_from(index).map_err(|_| {
-            CompilerError::compiler_error("numeric known-shape table exhausted its 32-bit ID space")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "numeric known-shape table exhausted its 32-bit ID space",
+            )
         })?;
         Ok(Self(raw))
     }
@@ -1284,7 +1288,7 @@ pub(crate) fn materialise_known_shape(
                 }
                 let materialised = environment.substitute_type_id(declared_type_id, &mapping);
                 if environment.contains_generic_parameter(materialised) {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "declared substitution is missing a binding for a parameter its type mentions",
                     )
                     .into());

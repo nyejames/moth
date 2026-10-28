@@ -149,7 +149,6 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         }
     }
 
-    // Write root artifacts.
     write_run_manifest(
         &run_paths,
         &run_paths.run_id,
@@ -259,7 +258,6 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
         no_previous_drift_report()
     };
 
-    // Write profile-drift.md.
     let drift_md = format_drift_markdown(&drift_report);
     let drift_path = run_paths.root.join("profile-drift.md");
     std::fs::write(&drift_path, drift_md).map_err(|e| {
@@ -305,7 +303,6 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                 .map(|f| f.bucket_label.clone())
                 .unwrap_or_else(|| "unknown".to_string());
 
-            // Build typed identity from the computed fingerprints.
             let identity = prepared
                 .fingerprints
                 .identity_for(&prepared.manifest, case)

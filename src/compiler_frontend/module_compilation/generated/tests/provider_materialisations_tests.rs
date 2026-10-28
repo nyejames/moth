@@ -2,9 +2,8 @@
 //!
 //! WHAT: which declaring context one generated request resolves to — a published provider, the
 //!       requester's own preparation, or nothing — and whether a cross-lane collision is diagnosed.
-//! WHY: the registry previously replaced a package seed when a project module published the same
-//!      identity. The focused collision test now proves that duplicate is diagnosed while the
-//!      original seed remains authoritative.
+//! WHY: a colliding project-module publication must be diagnosed without replacing the package
+//!      seed. The focused test checks both outcomes.
 
 use super::*;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
@@ -71,9 +70,9 @@ fn a_cross_lane_publish_for_the_same_identity_is_diagnosed() {
         .publish(declaration("shared"), Arc::clone(&project_module), 0, false)
         .expect_err("a different declaring context must be diagnosed");
     assert!(
-        error.msg.contains("multiple declaring contexts"),
+        error.message.contains("multiple declaring contexts"),
         "collision should identify the duplicate declaring contexts: {}",
-        error.msg
+        error.message
     );
 
     let resolved = registry
@@ -116,9 +115,9 @@ fn a_context_publish_is_atomic_when_a_later_row_collides() {
         .publish_context(&project_module)
         .expect_err("a later colliding row must reject the whole context");
     assert!(
-        error.msg.contains("multiple declaring contexts"),
+        error.message.contains("multiple declaring contexts"),
         "collision should identify the duplicate declaring contexts: {}",
-        error.msg
+        error.message
     );
 
     assert!(

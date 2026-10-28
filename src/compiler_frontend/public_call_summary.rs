@@ -5,7 +5,8 @@
 //! WHY: both stages consume the same semantic contract. Keeping the vocabulary at the frontend
 //! boundary prevents either stage from becoming the source of a second interpretation.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// The source-level access contract for one function parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,13 +83,16 @@ pub(crate) enum PublicCallSummaryTransition {
 pub(crate) fn validate_public_call_summary(
     declared_parameter_access: &[PublicCallParameterAccess],
     summary: &PublicCallSummary,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if summary.parameters.len() != declared_parameter_access.len() {
-        return Err(CompilerError::compiler_error(format!(
-            "public call summary has {} parameter(s), but its declaration has {} parameter(s)",
-            summary.parameters.len(),
-            declared_parameter_access.len()
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public call summary has {} parameter(s), but its declaration has {} parameter(s)",
+                summary.parameters.len(),
+                declared_parameter_access.len()
+            ),
+        ));
     }
 
     for (parameter_index, (declared_access, parameter)) in declared_parameter_access
@@ -112,7 +116,7 @@ pub(crate) fn validate_public_call_summary(
 pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
     previous: &PublicCallSummary,
     next: &PublicCallSummary,
-) -> Result<PublicCallSummaryTransition, CompilerError> {
+) -> Result<PublicCallSummaryTransition, InfrastructureFailure> {
     let declared_parameter_access = previous
         .parameters
         .iter()
@@ -122,14 +126,16 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
     validate_public_call_summary(&declared_parameter_access, next)?;
 
     if previous.parameters.len() != next.parameters.len() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "public call summary transition changed parameter count",
         ));
     }
 
     let mut widened = false;
     if previous.escapes_builtin_failure && !next.escapes_builtin_failure {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "public call summary transition narrowed escaping builtin failure",
         ));
     }
@@ -138,14 +144,20 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
         previous.parameters.iter().zip(&next.parameters).enumerate()
     {
         if previous.access != next.access {
-            return Err(CompilerError::compiler_error(format!(
-                "public call summary transition changed parameter {parameter_index} access"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public call summary transition changed parameter {parameter_index} access"
+                ),
+            ));
         }
         if previous.transfer_effect != next.transfer_effect {
-            return Err(CompilerError::compiler_error(format!(
-                "public call summary transition changed parameter {parameter_index} transfer effect"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public call summary transition changed parameter {parameter_index} transfer effect"
+                ),
+            ));
         }
 
         match (previous.mutation, next.mutation) {
@@ -155,15 +167,19 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
                 widened = true;
             }
             (PublicCallMutationEffect::Writes, PublicCallMutationEffect::NoWrite) => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public call summary transition narrowed parameter {parameter_index} mutation"
-                )));
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "public call summary transition narrowed parameter {parameter_index} mutation"
+                    ),
+                ));
             }
         }
     }
 
     if !return_alias_is_widening(&previous.return_alias, &next.return_alias) {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "public call summary transition narrowed or changed return alias incompatibly",
         ));
     }
@@ -206,12 +222,15 @@ fn validate_parameter_summary(
     parameter_index: usize,
     declared_access: PublicCallParameterAccess,
     parameter: &PublicCallParameterSummary,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if parameter.access != declared_access {
-        return Err(CompilerError::compiler_error(format!(
-            "public call summary parameter {parameter_index} has {:?} access, but its declaration has {:?} access",
-            parameter.access, declared_access
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public call summary parameter {parameter_index} has {:?} access, but its declaration has {:?} access",
+                parameter.access, declared_access
+            ),
+        ));
     }
 
     let valid = match declared_access {
@@ -225,10 +244,13 @@ fn validate_parameter_summary(
     };
 
     if !valid {
-        return Err(CompilerError::compiler_error(format!(
-            "public call summary parameter {parameter_index} has an invalid effect combination for {:?} access: {parameter:?}",
-            declared_access,
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public call summary parameter {parameter_index} has an invalid effect combination for {:?} access: {parameter:?}",
+                declared_access,
+            ),
+        ));
     }
 
     Ok(())
@@ -237,13 +259,14 @@ fn validate_parameter_summary(
 fn validate_return_alias_summary(
     parameter_count: usize,
     return_alias: &FunctionReturnAliasSummary,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let FunctionReturnAliasSummary::AliasParams(parameter_indices) = return_alias else {
         return Ok(());
     };
 
     if parameter_indices.is_empty() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "public call summary uses an empty AliasParams return; use Fresh instead",
         ));
     }
@@ -251,14 +274,20 @@ fn validate_return_alias_summary(
     let mut previous_index = None;
     for parameter_index in parameter_indices {
         if *parameter_index >= parameter_count {
-            return Err(CompilerError::compiler_error(format!(
-                "public call summary return alias references parameter index {parameter_index}, but the declaration has {parameter_count} parameter(s)"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public call summary return alias references parameter index {parameter_index}, but the declaration has {parameter_count} parameter(s)"
+                ),
+            ));
         }
         if previous_index.is_some_and(|previous| previous >= *parameter_index) {
-            return Err(CompilerError::compiler_error(format!(
-                "public call summary return alias parameter indices must be strictly increasing; found {parameter_indices:?}"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public call summary return alias parameter indices must be strictly increasing; found {parameter_indices:?}"
+                ),
+            ));
         }
         previous_index = Some(*parameter_index);
     }

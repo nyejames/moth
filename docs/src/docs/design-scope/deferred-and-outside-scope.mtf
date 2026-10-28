@@ -189,7 +189,7 @@ landed yet. An outside-design-scope diagnostic tells the author that the form
 conflicts with the language model and won't be accepted without an explicit
 design change.
 
-Both use structured `CompilerDiagnostic`. The distinction matters because the
+Both produce typed user-facing `DiagnosticDraft` values. The distinction matters because the
 remedy differs: a deferred feature needs implementation progress, while an
 outside-scope form needs a different approach or a language philosophy change.
 

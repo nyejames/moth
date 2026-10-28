@@ -2,6 +2,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOpaqueKind, FormatterOpaquePiece,
     FormatterOutputPiece, FormatterTextPiece,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::styles::code::{
     CodeLanguage, code_formatter, highlight_code_html,
@@ -88,9 +89,10 @@ fn text_code_formatter_escapes_html_without_highlighting() {
         })],
     };
 
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     let output = formatter
         .formatter
-        .format(input, &mut string_table)
+        .format(input, &mut diagnostic_strings)
         .expect("code formatter should succeed");
     let content = output
         .output
@@ -129,9 +131,10 @@ fn code_formatter_wraps_opaque_pieces_inside_the_code_block() {
         ],
     };
 
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     let output = formatter
         .formatter
-        .format(input, &mut string_table)
+        .format(input, &mut diagnostic_strings)
         .expect("code formatter should succeed");
     let pieces = output.output.pieces;
 
@@ -181,9 +184,10 @@ fn code_formatter_wraps_an_opaque_only_body() {
         pieces: vec![FormatterInputPiece::Opaque(opaque)],
     };
 
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     let output = formatter
         .formatter
-        .format(input, &mut string_table)
+        .format(input, &mut diagnostic_strings)
         .expect("code formatter should succeed");
     let pieces = output.output.pieces;
 
@@ -866,9 +870,10 @@ fn escape_html_formatter_covers_all_special_chars_and_unicode() {
         })],
     };
 
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     let output = formatter
         .formatter
-        .format(input, &mut string_table)
+        .format(input, &mut diagnostic_strings)
         .expect("escape formatter should succeed");
     let content = match &output.output.pieces[0] {
         FormatterOutputPiece::Text(text) => text,

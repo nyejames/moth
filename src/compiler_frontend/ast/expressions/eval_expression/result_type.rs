@@ -23,9 +23,11 @@ use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailure
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition, ValueReceiverContext,
+    InvalidExpressionReason, OperatorOperandPosition, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -82,7 +84,7 @@ pub(crate) fn resolve_expression_result_type(
         )?;
     }
     let [root] = roots.as_slice() else {
-        return Err(CompilerDiagnostic::invalid_expression(
+        return Err(token_lexical::invalid_expression(
             InvalidExpressionReason::UnresolvedStackShape,
             expression_span,
         )
@@ -186,9 +188,12 @@ fn index_expression_nodes(
                         }
                     }
                     _ => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "Unsupported operator arity during expression typing: {operator:?}",
-                        ))
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            format!(
+                                "Unsupported operator arity during expression typing: {operator:?}",
+                            ),
+                        )
                         .into());
                     }
                 }
@@ -375,7 +380,8 @@ fn resolve_indexed_expression(
                             }
                         }
                         ExpressionChildren::Leaf => {
-                            return Err(CompilerError::compiler_error(
+                            return Err(InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
                                 "Expression typing indexed an operator without children.",
                             )
                             .into());
@@ -482,7 +488,8 @@ fn resolve_indexed_expression(
                     continue;
                 }
                 let ExpressionRpnItem::Operator { operator, span } = &items[index] else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Expression typing lost an indexed operator.",
                     )
                     .into());
@@ -503,7 +510,8 @@ fn resolve_indexed_expression(
                         path_fork,
                     )?,
                     ExpressionChildren::Leaf => {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "Expression typing completed an operator without children.",
                         )
                         .into());
@@ -516,7 +524,10 @@ fn resolve_indexed_expression(
                         resolved_type(nodes, left)?,
                         Some(resolved_type(nodes, right)?),
                     ),
-                    ExpressionChildren::Leaf => unreachable!("operator children validated above"),
+                    ExpressionChildren::Leaf => crate::compiler_bug!(
+                        CompilerStage::AstConstruction,
+                        "type_id match returns Err for Leaf; children are unchanged since"
+                    ),
                 };
                 let operation = resolved_operation(
                     *operator,
@@ -538,7 +549,8 @@ fn resolved_type(
     index: usize,
 ) -> Result<TypeId, ExpressionTypingError> {
     nodes[index].type_id.ok_or_else(|| {
-        CompilerError::compiler_error(
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "Expression typing consumed a child before resolving its type.",
         )
         .into()
@@ -573,10 +585,16 @@ pub(crate) fn resolved_operation(
     let mut failure = None;
     let kind = if let Some(numeric_operator) = operator.numeric_operator() {
         let left_domain = left.ok_or_else(|| {
-            CompilerError::compiler_error("Resolved arithmetic lost its canonical operand domain.")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "Resolved arithmetic lost its canonical operand domain.",
+            )
         })?;
         let domain = NumericScalar::from_type_id(result_type, environment).ok_or_else(|| {
-            CompilerError::compiler_error("Resolved arithmetic lost its canonical result domain.")
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "Resolved arithmetic lost its canonical result domain.",
+            )
         })?;
         let discharged =
             numeric_operation_cannot_fail(numeric_operator, left_domain, right, domain);
@@ -606,7 +624,10 @@ pub(crate) fn resolved_operation(
             .zip(right)
             .and_then(|(left, right)| range_iteration_domain(left, right, None))
             .ok_or_else(|| {
-                CompilerError::compiler_error("Resolved range lost its iteration domain.")
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Resolved range lost its iteration domain.",
+                )
             })?;
         ResolvedOperationKind::Range { domain }
     } else if let Some((left_domain, right_domain, domain)) =
@@ -705,10 +726,6 @@ fn missing_operand_error(
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> ExpressionTypingError {
-    CompilerDiagnostic::missing_operator_operand(
-        string_table.intern(operator.to_str()),
-        position,
-        span,
-    )
-    .into()
+    token_lexical::missing_operator_operand(string_table.intern(operator.to_str()), position, span)
+        .into()
 }

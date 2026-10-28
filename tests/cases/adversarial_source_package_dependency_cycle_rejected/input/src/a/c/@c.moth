@@ -1,0 +1,5 @@
+@b beta
+
+call_beta |x I32| -> I32:
+    return beta(x)
+;

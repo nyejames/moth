@@ -6,6 +6,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 };
 use crate::compiler_frontend::ast::templates::styles::markdown::render_markdown_stream;
 use crate::compiler_frontend::ast::templates::template::TemplateFormatter;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn child_anchor(id: usize) -> FormatterOpaquePiece {
@@ -68,13 +69,12 @@ fn markdown_formatter_output_from_text_and_anchors(
         })
         .collect();
 
+    let input = FormatterInput {
+        pieces: input_pieces,
+    };
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
     MarkdownTemplateFormatter
-        .format(
-            FormatterInput {
-                pieces: input_pieces,
-            },
-            &mut string_table,
-        )
+        .format(input, &mut diagnostic_strings)
         .expect("markdown formatter should succeed")
         .output
         .pieces

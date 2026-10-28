@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCata
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
 
 use super::resolved_public_trait_roots::ResolvedPublicTraitRoot;
 use super::resolved_public_type_roots::ResolvedPublicTypeRootTable;
@@ -39,7 +39,6 @@ use std::sync::Arc;
 /// WHAT: one flat struct that carries every side table produced during environment construction.
 /// WHY: `ScopeContext` and AST finalization need random access to declarations, signatures, type
 /// aliases, and receiver methods without re-traversing headers or re-resolving paths.
-#[derive(Clone)]
 pub(crate) struct AstModuleLookups {
     // Header-stage source data.
     // WHY: these are moved straight from the header/dependency-sort phase; AST does not rebuild them.
@@ -47,7 +46,7 @@ pub(crate) struct AstModuleLookups {
     // Shared immutable header bindings; wrapped once at environment finish so generated
     // sidecars and materialisation preparations reuse one owner instead of deep-cloning.
     pub(crate) binding_environment: Rc<HeaderBindingEnvironment>,
-    pub(crate) warnings: Vec<CompilerDiagnostic>,
+    pub(crate) warnings: Vec<DiagnosticDraft>,
 
     // Declaration tables and resolved constant artifacts.
     // WHY: body emission and type resolution share one indexed declaration source.
@@ -85,7 +84,6 @@ pub(crate) struct AstModuleLookups {
     //      nominal types, constants, and values.
     pub(crate) declaration_semantics: Rc<DeclarationSemanticTable>,
 
-    // Generic declaration kinds.
     pub(crate) generic_declarations_by_path: Rc<FxHashMap<PathId, GenericDeclarationKind>>,
 
     // Canonical TypeId for each nominal struct/choice registered in type_environment.

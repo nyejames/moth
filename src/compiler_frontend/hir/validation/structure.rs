@@ -5,9 +5,8 @@
 //! function and that semantic function origins are complete.
 
 use super::HirValidator;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId};
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::hir::utils::terminator_targets;
@@ -19,7 +18,7 @@ impl<'a> HirValidator<'a> {
     //  Structural Validation
     // -------------------------
 
-    pub(super) fn validate_region_graph(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_region_graph(&self) -> Result<(), InfrastructureFailure> {
         let parent_by_region = self
             .module
             .regions
@@ -31,14 +30,11 @@ impl<'a> HirValidator<'a> {
             if let Some(parent) = region.parent()
                 && !self.region_ids.contains(&parent)
             {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Region {} references missing parent region {}",
-                        region.id().0,
-                        parent.0
-                    ),
-                    None,
-                ));
+                return Err(self.error_with_hir(format!(
+                    "Region {} references missing parent region {}",
+                    region.id().0,
+                    parent.0
+                )));
             }
         }
 
@@ -48,13 +44,10 @@ impl<'a> HirValidator<'a> {
 
             while let Some(region_id) = current {
                 if !chain.insert(region_id) {
-                    return Err(self.error_with_hir(
-                        format!(
-                            "Region parent graph contains a cycle at region {}",
-                            region_id.0
-                        ),
-                        None,
-                    ));
+                    return Err(self.error_with_hir(format!(
+                        "Region parent graph contains a cycle at region {}",
+                        region_id.0
+                    )));
                 }
 
                 current = parent_by_region.get(&region_id).copied().flatten();
@@ -64,42 +57,36 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    pub(super) fn validate_start_function(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_start_function(&self) -> Result<(), InfrastructureFailure> {
         if let Some(start_function) = self.module.start_function
             && !self.function_ids.contains(&start_function)
         {
-            return Err(self.error_with_hir(
-                format!(
-                    "HIR start_function {:?} is not present in module functions",
-                    start_function
-                ),
-                Some(HirLocation::Function(start_function)),
-            ));
+            return Err(self.error_with_hir(format!(
+                "HIR start_function {:?} is not present in module functions",
+                start_function
+            )));
         }
 
         Ok(())
     }
 
-    pub(super) fn validate_function_origins(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_function_origins(&self) -> Result<(), InfrastructureFailure> {
         // WHAT: enforce complete and consistent function-origin coverage.
         // WHY: backends rely on this map to preserve entry/runtime semantics.
         if self.module.function_origins.len() != self.module.functions.len() {
-            return Err(self.error_with_hir(
-                format!(
-                    "HIR function_origins contains {} entries, but module has {} functions",
-                    self.module.function_origins.len(),
-                    self.module.functions.len()
-                ),
-                None,
-            ));
+            return Err(self.error_with_hir(format!(
+                "HIR function_origins contains {} entries, but module has {} functions",
+                self.module.function_origins.len(),
+                self.module.functions.len()
+            )));
         }
 
         for function in &self.module.functions {
             if !self.module.function_origins.contains_key(&function.id) {
-                return Err(self.error_with_hir(
-                    format!("HIR function {:?} is missing an origin entry", function.id),
-                    Some(HirLocation::Function(function.id)),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "HIR function {:?} is missing an origin entry",
+                    function.id
+                )));
             }
         }
 
@@ -108,13 +95,10 @@ impl<'a> HirValidator<'a> {
                 self.module.function_origins.get(&start_function),
                 Some(HirFunctionOrigin::EntryStart)
             ) {
-                return Err(self.error_with_hir(
-                    format!(
-                        "HIR start function {:?} must be tagged as EntryStart",
-                        start_function
-                    ),
-                    Some(HirLocation::Function(start_function)),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "HIR start function {:?} must be tagged as EntryStart",
+                    start_function
+                )));
             }
         } else if self
             .module
@@ -124,7 +108,6 @@ impl<'a> HirValidator<'a> {
         {
             return Err(self.error_with_hir(
                 "HIR module without start_function contains an EntryStart origin".to_owned(),
-                None,
             ));
         }
 
@@ -152,28 +135,21 @@ impl<'a> HirValidator<'a> {
                         "HIR implicit start function {:?} must not carry a stable executable identity {}",
                         function_id, identity
                     ),
-                    Some(HirLocation::Function(*function_id)),
                 ));
             }
 
             if !self.function_ids.contains(function_id) {
-                return Err(self.error_with_hir(
-                    format!(
-                        "HIR stable executable identity {} references missing function {:?}",
-                        identity, function_id
-                    ),
-                    Some(HirLocation::Function(*function_id)),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "HIR stable executable identity {} references missing function {:?}",
+                    identity, function_id
+                )));
             }
 
             if let Some(existing_identity) = identity_for_local_function.get(function_id) {
-                return Err(self.error_with_hir(
-                    format!(
-                        "HIR stable executable identities {} and {} both map to local function {:?}",
-                        existing_identity, identity, function_id
-                    ),
-                    Some(HirLocation::Function(*function_id)),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "HIR stable executable identities {} and {} both map to local function {:?}",
+                    existing_identity, identity, function_id
+                )));
             }
 
             identity_for_local_function.insert(*function_id, identity);
@@ -182,7 +158,7 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    pub(super) fn validate_function_cfg_ownership(&mut self) -> Result<(), CompilerError> {
+    pub(super) fn validate_function_cfg_ownership(&mut self) -> Result<(), InfrastructureFailure> {
         // WHAT: ensure every block belongs to exactly one function CFG.
         // WHY: prevents cross-function jumps and ensures clear ownership for analysis.
         self.block_owner_by_id.clear();
@@ -203,13 +179,10 @@ impl<'a> HirValidator<'a> {
         for record in &self.module.catch_protected_calls {
             let Some(statement_block) = statement_block_by_id.get(&record.statement).copied()
             else {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Catch-protected call record references missing statement {:?}",
-                        record.statement
-                    ),
-                    None,
-                ));
+                return Err(self.error_with_hir(format!(
+                    "Catch-protected call record references missing statement {:?}",
+                    record.statement
+                )));
             };
             pending_handlers
                 .entry((record.owner, statement_block))
@@ -237,17 +210,14 @@ impl<'a> HirValidator<'a> {
                     continue;
                 }
 
-                self.require_block_id(block_id, Some(HirLocation::Function(function.id)))?;
+                self.require_block_id(block_id)?;
 
                 if let Some(existing_owner) = self.block_owner_by_id.get(&block_id).copied() {
                     if existing_owner != function.id {
-                        return Err(self.error_with_hir(
-                            format!(
-                                "Block {} is reachable from multiple functions ({:?} and {:?})",
-                                block_id, existing_owner, function.id
-                            ),
-                            Some(HirLocation::Block(block_id)),
-                        ));
+                        return Err(self.error_with_hir(format!(
+                            "Block {} is reachable from multiple functions ({:?} and {:?})",
+                            block_id, existing_owner, function.id
+                        )));
                     }
                 } else {
                     self.block_owner_by_id.insert(block_id, function.id);
@@ -270,13 +240,10 @@ impl<'a> HirValidator<'a> {
                 continue;
             }
 
-            return Err(self.error_with_hir(
-                format!(
-                    "Block {} is not reachable from any function entry and has no CFG owner",
-                    block.id
-                ),
-                Some(HirLocation::Block(block.id)),
-            ));
+            return Err(self.error_with_hir(format!(
+                "Block {} is not reachable from any function entry and has no CFG owner",
+                block.id
+            )));
         }
 
         // A pending edge never crosses a function boundary: the recorded statement block
@@ -289,27 +256,18 @@ impl<'a> HirValidator<'a> {
             let statement_owner = self.block_owner_by_id.get(&statement_block).copied();
             let handler_owner = self.block_owner_by_id.get(&record.handler.block).copied();
             if statement_owner != Some(record.owner) || handler_owner != Some(record.owner) {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Catch-protected call record for statement {:?} crosses a function boundary",
-                        record.statement
-                    ),
-                    Some(HirLocation::Block(record.handler.block)),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "Catch-protected call record for statement {:?} crosses a function boundary",
+                    record.statement
+                )));
             }
         }
 
         for record in &self.module.catch_handlers {
-            self.require_block_id(
-                record.handler.block,
-                Some(HirLocation::Function(record.owner)),
-            )?;
+            self.require_block_id(record.handler.block)?;
             let handler_owner = self.block_owner_by_id.get(&record.handler.block).copied();
             if handler_owner != Some(record.owner) {
-                return Err(self.error_with_hir(
-                    "Catch handler record crosses a function boundary",
-                    Some(HirLocation::Block(record.handler.block)),
-                ));
+                return Err(self.error_with_hir("Catch handler record crosses a function boundary"));
             }
         }
         self.validate_incoming_edge_destinations()?;
@@ -317,7 +275,7 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    fn validate_incoming_edge_destinations(&self) -> Result<(), CompilerError> {
+    fn validate_incoming_edge_destinations(&self) -> Result<(), InfrastructureFailure> {
         // The existing HIR edge contract names destinations on Jump edges. All other
         // terminators transfer zero local values, so every predecessor of a block must agree
         // on the same destination set regardless of edge kind or argument ordering.
@@ -346,7 +304,6 @@ impl<'a> HirValidator<'a> {
                                 "Incoming CFG edges to block {target} disagree on explicit destination set or arity: blocks {first_source} and {}",
                                 source.id
                             ),
-                            Some(HirLocation::Block(source.id)),
                         ));
                     }
                 } else {
@@ -358,31 +315,25 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    pub(super) fn validate_function_provenance(&self) -> Result<(), CompilerError> {
+    pub(super) fn validate_function_provenance(&self) -> Result<(), InfrastructureFailure> {
         // WHAT: enforce exactly one direct synthetic-interface provenance fact per local function.
         // WHY: the per-function link-fact lane requires complete, in-range coverage. Missing,
-        // extra or out-of-range provenance is an internal `CompilerError` because the fact is
+        // extra or out-of-range provenance is an internal `InfrastructureFailure` because the fact is
         // compiler-owned metadata, not user-facing source state.
         if self.module.function_provenance.len() != self.module.functions.len() {
-            return Err(self.error_with_hir(
-                format!(
-                    "HIR function_provenance contains {} entries, but module has {} functions",
-                    self.module.function_provenance.len(),
-                    self.module.functions.len()
-                ),
-                None,
-            ));
+            return Err(self.error_with_hir(format!(
+                "HIR function_provenance contains {} entries, but module has {} functions",
+                self.module.function_provenance.len(),
+                self.module.functions.len()
+            )));
         }
 
         for function in &self.module.functions {
             if !self.module.function_provenance.contains_key(&function.id) {
-                return Err(self.error_with_hir(
-                    format!(
-                        "HIR function {:?} is missing a function_provenance synthetic-interface fact",
-                        function.id
-                    ),
-                    Some(HirLocation::Function(function.id)),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "HIR function {:?} is missing a function_provenance synthetic-interface fact",
+                    function.id
+                )));
             }
         }
 

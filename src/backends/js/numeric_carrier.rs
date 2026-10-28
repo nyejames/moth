@@ -11,7 +11,8 @@
 
 use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -138,20 +139,20 @@ impl JsNumericCarrier {
     }
 
     /// Family stem used by checked numeric helper names.
-    pub(crate) fn helper_family(self) -> Option<&'static str> {
+    pub(crate) fn helper_family(self) -> &'static str {
         match self {
-            Self::ExactInteger { .. } => Some("int"),
-            Self::BigInteger { .. } => Some("bigint"),
+            Self::ExactInteger { .. } => "int",
+            Self::BigInteger { .. } => "bigint",
             Self::BinaryFloat {
                 precision: BinaryFloatPrecision::Binary16,
-            } => Some("float16"),
+            } => "float16",
             Self::BinaryFloat {
                 precision: BinaryFloatPrecision::Binary32,
-            } => Some("float32"),
+            } => "float32",
             Self::BinaryFloat {
                 precision: BinaryFloatPrecision::Binary64,
-            } => Some("float"),
-            Self::ScaledInteger { .. } => Some("number"),
+            } => "float",
+            Self::ScaledInteger { .. } => "number",
         }
     }
 
@@ -161,7 +162,10 @@ impl JsNumericCarrier {
             Self::ExactInteger { .. } => (min.to_string(), max.to_string()),
             Self::BigInteger { .. } => (format!("{min}n"), format!("{max}n")),
             Self::BinaryFloat { .. } | Self::ScaledInteger { .. } => {
-                unreachable!("bounded helper has no float or scaled carrier")
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "bounded helper has no float or scaled carrier"
+                )
             }
         })
     }
@@ -228,12 +232,13 @@ impl JsNumericConversion {
     pub(crate) fn classify(
         source: NumericScalar,
         target: NumericScalar,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let carrier = |scalar: NumericScalar| {
             JsNumericCarrier::for_scalar(scalar).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JS backend has no numeric carrier for {scalar:?}"
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
+                    format!("JS backend has no numeric carrier for {scalar:?}"),
+                )
             })
         };
         let source_carrier = carrier(source)?;
@@ -267,7 +272,8 @@ impl JsNumericConversion {
                 });
             }
             (NumericScalar::Number(_), NumericScalar::Number(_), _, _) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
                     "JS backend received a same-scale Number cast policy",
                 ));
             }
@@ -302,9 +308,12 @@ impl JsNumericConversion {
         }
         if matches!(source, NumericScalar::Number(_)) || matches!(target, NumericScalar::Number(_))
         {
-            return Err(CompilerError::compiler_error(format!(
-                "JS backend received unsupported Number conversion from {source} to {target}"
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!(
+                    "JS backend received unsupported Number conversion from {source} to {target}"
+                ),
+            ));
         }
 
         Ok(match (source_carrier, target_carrier) {
@@ -499,10 +508,16 @@ impl JsNumericConversion {
     }
 }
 
-fn number_conversion_policy_error(source: NumericScalar, target: NumericScalar) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "JS backend received inconsistent Number conversion evidence for {source} to {target}"
-    ))
+fn number_conversion_policy_error(
+    source: NumericScalar,
+    target: NumericScalar,
+) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::BackendLowering,
+        format!(
+            "JS backend received inconsistent Number conversion evidence for {source} to {target}"
+        ),
+    )
 }
 
 /// Emits a compile-time exact base-ten factor for a validated Number scale.

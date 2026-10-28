@@ -213,6 +213,13 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
                 .host_package(HostPackage::new("@platform")),
         ),
         (
+            "case-only duplicate host package",
+            "@PLATFORM",
+            BuilderDefinition::new("game")
+                .host_package(HostPackage::new("@platform"))
+                .host_package(HostPackage::new("@PLATFORM")),
+        ),
+        (
             "conflicting host signatures",
             "read",
             BuilderDefinition::new("game").host_package(

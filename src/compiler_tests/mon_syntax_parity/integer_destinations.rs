@@ -3,7 +3,6 @@
 //! WHAT: exercises every fixed integer width and `Byte` through typed nominal fields.
 //! WHY: boundaries and retained numeric identities belong to the receiving type, not the spelling.
 
-use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
 use crate::compiler_frontend::instrumentation::lock_counter_test;
 use crate::mon::{Field, MonErrorCode, PathSegment, Schema, SchemaType, Value};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -299,10 +298,7 @@ fn fixed_integer_boundary_fixtures() -> Vec<ParityFixture> {
             name,
             spelling,
             type_name,
-            source_type_mismatch(
-                TypeMismatchContext::ConstructorArgument,
-                in_literal(&literal, spelling, 1),
-            ),
+            source_type_mismatch(in_literal(&literal, spelling, 1)),
             MonErrorCode::NumericType,
         ));
     }
@@ -392,10 +388,7 @@ fn uint_spelling_fixtures() -> Vec<ParityFixture> {
             name,
             spelling,
             "U32",
-            source_type_mismatch(
-                TypeMismatchContext::ConstructorArgument,
-                in_literal(&literal, spelling, 1),
-            ),
+            source_type_mismatch(in_literal(&literal, spelling, 1)),
             MonErrorCode::NumericType,
         ));
     }

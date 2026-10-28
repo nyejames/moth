@@ -11,7 +11,8 @@ use super::super::last_use::{
 use super::super::problem::{BindingDestination, BorrowProblem, EventId};
 use super::service::BoracleRuleSelection;
 use super::{LoanSolution, OriginSolution};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 /// One complete Boracle solver report, including the typed rule selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,17 +66,17 @@ pub(crate) struct BoracleSolver;
 
 impl BoracleSolver {
     #[cfg(test)]
-    pub(crate) fn solve(problem: &BorrowProblem) -> Result<BoracleReport, CompilerError> {
+    pub(crate) fn solve(problem: &BorrowProblem) -> Result<BoracleReport, InfrastructureFailure> {
         Self::solve_with_rule_selection(problem, BoracleRuleSelection::default())
     }
 
     pub(crate) fn solve_with_rule_selection(
         problem: &BorrowProblem,
         rule_selection: BoracleRuleSelection,
-    ) -> Result<BoracleReport, CompilerError> {
-        rule_selection
-            .validate()
-            .map_err(CompilerError::compiler_error)?;
+    ) -> Result<BoracleReport, InfrastructureFailure> {
+        rule_selection.validate().map_err(|message| {
+            InfrastructureFailure::internal(CompilerStage::BorrowChecking, message)
+        })?;
 
         let origin = super::OriginSolver::solve(problem)?;
         let exclusive_liveness = if rule_selection
@@ -100,10 +101,10 @@ impl BoracleSolver {
             }
             let event_id = event_for_use(problem, use_row.id)?;
             let event = problem.events().get(event_id.index()).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Boracle report cannot locate use event {:?}",
-                    event_id
-                ))
+                InfrastructureFailure::internal(
+                    CompilerStage::BorrowChecking,
+                    format!("Boracle report cannot locate use event {:?}", event_id),
+                )
             })?;
             let location = LastUseLocation::after_event(event_id, event.point);
             let origins = origin.origins_for_place_after_event(problem, event_id, use_row.place);
@@ -121,10 +122,10 @@ impl BoracleSolver {
             for use_id in &loan.uses {
                 let event_id = event_for_use(problem, *use_id)?;
                 let event = problem.events().get(event_id.index()).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Boracle report cannot locate loan-use event {:?}",
-                        event_id
-                    ))
+                    InfrastructureFailure::internal(
+                        CompilerStage::BorrowChecking,
+                        format!("Boracle report cannot locate loan-use event {:?}", event_id),
+                    )
                 })?;
                 last_use_observations.push(LastUseObservation {
                     subject: LastUseSubject::Loan(loan.id),

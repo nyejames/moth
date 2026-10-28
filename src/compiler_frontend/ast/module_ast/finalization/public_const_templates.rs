@@ -11,7 +11,8 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstValueId, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, owned_folded_string_from_store_string,
 };
@@ -43,7 +44,8 @@ impl AstFinalizer<'_, '_> {
                 .declaration_table
                 .get_by_id(declaration_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "Resolved module-constant ID had no declaration-table row.",
                     )
                 })?;
@@ -88,7 +90,10 @@ fn insert_default_template(
     string_table: &StringTable,
 ) -> Result<(), TemplateNormalizationError> {
     let payload = constants.payload(value).ok_or_else(|| {
-        CompilerError::compiler_error("Template default references missing constant content.")
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "Template default references missing constant content.",
+        )
     })?;
     let ConstValuePayload::Template { template, folded } = payload else {
         return Ok(());
@@ -101,7 +106,7 @@ fn insert_default_template(
     if let Some(existing) = by_path.get(&path)
         && *existing != entry
     {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
             "Public const-template projection produced conflicting values for one declaration path.",
         ).into());
     }

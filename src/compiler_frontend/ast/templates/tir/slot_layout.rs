@@ -4,6 +4,7 @@
 //! occurrence. Schema discovery, placeholder collection and the structural
 //! slot-presence probe share this walk. It is not a generic TIR visitor.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
@@ -14,7 +15,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
 };
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -131,7 +132,7 @@ pub(crate) struct TirSlotLayout {
 pub(crate) fn collect_tir_slot_layout(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<TirSlotLayout, CompilerError> {
+) -> Result<TirSlotLayout, InfrastructureFailure> {
     increment_ast_counter(AstCounter::TirSlotSchemaWalks);
 
     let Some(template) = store.get_template(template_id) else {
@@ -147,7 +148,7 @@ pub(crate) fn collect_tir_slot_layout(
 pub(crate) fn collect_tir_slot_layout_from_root(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
-) -> Result<TirSlotLayout, CompilerError> {
+) -> Result<TirSlotLayout, InfrastructureFailure> {
     increment_ast_counter(AstCounter::TirSlotSchemaWalks);
     collect_layout_from_root(store, root_node_id)
 }
@@ -156,14 +157,14 @@ pub(crate) fn collect_tir_slot_layout_from_root(
 pub(crate) fn collect_tir_slot_schema(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<TirSlotSchema, CompilerError> {
+) -> Result<TirSlotSchema, InfrastructureFailure> {
     Ok(collect_tir_slot_layout(store, template_id)?.schema)
 }
 
 fn collect_layout_from_root(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
-) -> Result<TirSlotLayout, CompilerError> {
+) -> Result<TirSlotLayout, InfrastructureFailure> {
     let mut schema = TirSlotSchema::default();
     let mut placeholders = Vec::new();
     let mut visiting_nodes = FxHashSet::default();
@@ -191,7 +192,7 @@ fn collect_from_node(
     placeholders: &mut Vec<TirSlotPlaceholderRef>,
     visiting_nodes: &mut FxHashSet<TemplateIrNodeId>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if !visiting_nodes.insert(node_id) {
         return Err(layout_error(format!(
             "TIR slot layout encountered a node cycle at {node_id:?}"
@@ -299,7 +300,7 @@ fn collect_from_child_template(
     schema: &mut TirSlotSchema,
     placeholders: &mut Vec<TirSlotPlaceholderRef>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let Some(child_template) = store.get_template(child_template_id) else {
         return Err(layout_error(format!(
             "TIR slot layout referenced missing child template {child_template_id}."
@@ -333,6 +334,6 @@ fn collect_from_child_template(
     result
 }
 
-fn layout_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::compiler_error(message)
+fn layout_error(message: impl Into<Box<str>>) -> InfrastructureFailure {
+    InfrastructureFailure::internal(CompilerStage::AstConstruction, message)
 }

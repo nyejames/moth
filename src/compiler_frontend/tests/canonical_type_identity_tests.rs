@@ -3,7 +3,7 @@
 //!
 //! WHAT: exercises the structural invariants of `CanonicalTypeIdentity` values and the
 //! `TypeId -> CanonicalTypeIdentity` projection that integration output cannot inspect:
-//! equality/stability of every closed-type shape, and `CompilerError` for every unsupported or
+//! equality/stability of every closed-type shape, and `InfrastructureFailure` for every unsupported or
 //! incomplete state.
 //! WHY: these are pure value and projection invariants owned by
 //! `compiler_frontend::canonical_type_identity`, so they own a focused test beside the module
@@ -18,7 +18,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     ExternalOpaqueTypeIdentity, GenericDeclarationOrigin, GenericParameterOriginResolver,
     NominalOriginResolver, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, FieldDefinition, FunctionParameterDefinition,
@@ -71,12 +72,15 @@ impl NominalOriginResolver for MapNominalOriginResolver {
     fn resolve_nominal_origin(
         &self,
         nominal_id: NominalTypeId,
-    ) -> Result<OriginTypeId, CompilerError> {
+    ) -> Result<OriginTypeId, InfrastructureFailure> {
         self.origins.get(&nominal_id).cloned().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "no source-nominal origin registered for NominalTypeId({})",
-                nominal_id.0
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "no source-nominal origin registered for NominalTypeId({})",
+                    nominal_id.0
+                ),
+            )
         })
     }
 }
@@ -106,12 +110,15 @@ impl GenericParameterOriginResolver for MapGenericParameterOriginResolver {
     fn resolve_generic_parameter_origin(
         &self,
         parameter_id: GenericParameterId,
-    ) -> Result<ExportedGenericParameterIdentity, CompilerError> {
+    ) -> Result<ExportedGenericParameterIdentity, InfrastructureFailure> {
         self.origins.get(&parameter_id).cloned().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "no exported generic-parameter identity registered for GenericParameterId({})",
-                parameter_id.0
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "no exported generic-parameter identity registered for GenericParameterId({})",
+                    parameter_id.0
+                ),
+            )
         })
     }
 }
@@ -786,11 +793,11 @@ fn generic_instance_distinguishes_different_concrete_arguments() {
 }
 
 // ---------------------------------------------------------------------------
-//  CompilerError states
+//  InfrastructureFailure states
 // ---------------------------------------------------------------------------
 
 #[test]
-fn absent_nominal_origin_returns_compiler_error() {
+fn absent_nominal_origin_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -805,21 +812,21 @@ fn absent_nominal_origin_returns_compiler_error() {
         .expect_err("absent nominal origin must return an error");
 
     assert_eq!(
-        error.error_type,
-        ErrorType::Compiler,
+        error.kind,
+        InfrastructureFailureKind::Internal,
         "absent nominal origin must use the compiler-error lane"
     );
     assert!(
-        error.msg.contains("source-nominal origin") && error.msg.contains("struct"),
+        error.message.contains("source-nominal origin") && error.message.contains("struct"),
         "error should name the struct nominal origin: {}",
-        error.msg
+        error.message
     );
     // The NominalTypeId is part of the context but not embedded in the canonical identity.
     let _ = nominal_id;
 }
 
 #[test]
-fn absent_external_identity_returns_compiler_error() {
+fn absent_external_identity_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let unregistered_external_id = ExternalTypeId(999);
     let type_id = env.intern_external(unregistered_external_id);
@@ -833,19 +840,19 @@ fn absent_external_identity_returns_compiler_error() {
         .expect_err("absent external identity must return an error");
 
     assert_eq!(
-        error.error_type,
-        ErrorType::Compiler,
+        error.kind,
+        InfrastructureFailureKind::Internal,
         "absent external identity must use the compiler-error lane"
     );
     assert!(
-        error.msg.contains("ExternalTypeId") && error.msg.contains("999"),
+        error.message.contains("ExternalTypeId") && error.message.contains("999"),
         "error should name the unregistered ExternalTypeId: {}",
-        error.msg
+        error.message
     );
 }
 
 #[test]
-fn unresolved_generic_parameter_returns_compiler_error() {
+fn unresolved_generic_parameter_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let param_type_id =
         env.intern_generic_parameter(GenericParameterId(0), StringTable::new().intern("T"));
@@ -858,17 +865,17 @@ fn unresolved_generic_parameter_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(param_type_id, &env, &context)
         .expect_err("generic parameter must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("exported generic-parameter")
-            && error.msg.contains("GenericParameterId"),
+        error.message.contains("exported generic-parameter")
+            && error.message.contains("GenericParameterId"),
         "error should name the missing exported generic-parameter identity: {}",
-        error.msg
+        error.message
     );
 }
 
 #[test]
-fn function_type_returns_compiler_error() {
+fn function_type_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let function_id = env.insert_function_type_for_test(FunctionTypeDefinition {
@@ -888,16 +895,16 @@ fn function_type_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(function_id, &env, &context)
         .expect_err("function type must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("function"),
+        error.message.contains("function"),
         "error should name the function type state: {}",
-        error.msg
+        error.message
     );
 }
 
 #[test]
-fn malformed_collection_arity_returns_compiler_error() {
+fn malformed_collection_arity_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     // Directly intern a collection with zero arguments, which is a malformed arity.
     let malformed_id = env.intern_constructed(
@@ -915,16 +922,16 @@ fn malformed_collection_arity_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(malformed_id, &env, &context)
         .expect_err("malformed collection arity must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("collection") && error.msg.contains("arity"),
+        error.message.contains("collection") && error.message.contains("arity"),
         "error should name the collection arity: {}",
-        error.msg
+        error.message
     );
 }
 
 #[test]
-fn malformed_map_arity_returns_compiler_error() {
+fn malformed_map_arity_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     // Directly intern an ordered map with one argument, which is a malformed arity.
@@ -941,16 +948,16 @@ fn malformed_map_arity_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(malformed_id, &env, &context)
         .expect_err("malformed map arity must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("ordered map") && error.msg.contains("arity"),
+        error.message.contains("ordered map") && error.message.contains("arity"),
         "error should name the map arity: {}",
-        error.msg
+        error.message
     );
 }
 
 #[test]
-fn malformed_generic_instance_arity_returns_compiler_error() {
+fn malformed_generic_instance_arity_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -970,11 +977,11 @@ fn malformed_generic_instance_arity_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(malformed_id, &env, &context)
         .expect_err("malformed generic-instance arity must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("malformed generic-instance arity"),
+        error.message.contains("malformed generic-instance arity"),
         "error should name the generic-instance arity: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -983,7 +990,7 @@ fn malformed_generic_instance_arity_returns_compiler_error() {
 /// The previous silent `0` fallback let `Thing[]` project as a legal concrete instance of a
 /// nominal that does not actually declare generic parameters. The projection must reject it.
 #[test]
-fn generic_instance_of_non_generic_base_returns_compiler_error() {
+fn generic_instance_of_non_generic_base_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1001,18 +1008,18 @@ fn generic_instance_of_non_generic_base_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(instance_id, &env, &context)
         .expect_err("a generic instance of a non-generic base must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("generic parameter list is absent"),
+        error.message.contains("generic parameter list is absent"),
         "error should name the absent generic parameter list: {}",
-        error.msg
+        error.message
     );
 }
 
 /// Verifies that a `GenericInstance` whose base nominal is unknown to the `TypeEnvironment` is
 /// rejected even when the origin resolver claims an origin for it.
 #[test]
-fn generic_instance_of_unknown_base_returns_compiler_error() {
+fn generic_instance_of_unknown_base_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     // NominalTypeId(999) is never registered in the TypeEnvironment.
     let unknown_base = NominalTypeId(999);
@@ -1029,13 +1036,13 @@ fn generic_instance_of_unknown_base_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(instance_id, &env, &context)
         .expect_err("a generic instance of an unknown base must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
         error
-            .msg
+            .message
             .contains("neither a registered struct nor a choice"),
         "error should name the unknown nominal base: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1044,7 +1051,7 @@ fn generic_instance_of_unknown_base_returns_compiler_error() {
 /// `GenericParameterListId` through the normal registration API, so no production escape hatch
 /// is needed to construct this inconsistent state.
 #[test]
-fn generic_instance_with_missing_parameter_list_returns_compiler_error() {
+fn generic_instance_with_missing_parameter_list_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1067,11 +1074,11 @@ fn generic_instance_with_missing_parameter_list_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(instance_id, &env, &context)
         .expect_err("a generic instance whose parameter list is missing must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("missing from the TypeEnvironment"),
+        error.message.contains("missing from the TypeEnvironment"),
         "error should name the missing parameter list: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1285,11 +1292,11 @@ fn transparent_alias_cannot_be_a_generic_declaration_origin() {
     let error = GenericDeclarationOrigin::nominal_type(alias_origin)
         .expect_err("a transparent alias must not be a valid generic declaration origin");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("transparent alias"),
+        error.message.contains("transparent alias"),
         "error should reject transparent alias as a generic declaration owner: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1306,11 +1313,11 @@ fn receiver_method_cannot_be_a_generic_declaration_origin() {
     let error = GenericDeclarationOrigin::free_function(receiver_method)
         .expect_err("a receiver method must not be a valid generic declaration origin");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("receiver method"),
+        error.message.contains("receiver method"),
         "error should reject the receiver-method function kind, not the receiver type: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1407,7 +1414,7 @@ fn projects_collection_of_exported_generic_parameter() {
 }
 
 #[test]
-fn missing_generic_parameter_resolver_entry_returns_compiler_error() {
+fn missing_generic_parameter_resolver_entry_returns_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1434,12 +1441,12 @@ fn missing_generic_parameter_resolver_entry_returns_compiler_error() {
     let error = project_type_id_to_canonical_identity(param_type_id, &env, &context)
         .expect_err("a missing resolver entry must return an error");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("exported generic-parameter")
-            && error.msg.contains("GenericParameterId"),
+        error.message.contains("exported generic-parameter")
+            && error.message.contains("GenericParameterId"),
         "error should name the missing exported generic-parameter identity: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -1460,11 +1467,11 @@ fn synthetic_generic_parameter_rejected_by_absence_from_resolver() {
     let error = project_type_id_to_canonical_identity(synthetic_type_id, &env, &context)
         .expect_err("a synthetic parameter absent from the resolver must be rejected");
 
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
     assert!(
-        error.msg.contains("exported generic-parameter"),
+        error.message.contains("exported generic-parameter"),
         "error should reject the synthetic parameter through the resolver: {}",
-        error.msg
+        error.message
     );
 }
 

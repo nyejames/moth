@@ -4,6 +4,7 @@
 //! and uses checked one-based `u32` handles so `0` remains an absent marker.
 
 use super::token::NumericLiteralToken;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 #[cfg(test)]
@@ -265,7 +266,10 @@ impl NumericLiteralStore {
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
     ) -> Result<(), E> {
         if self.frozen {
-            panic!("numeric literal remapping was requested after the source publication freeze");
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "numeric literal remapping was requested after the source publication freeze"
+            );
         }
         for literal in &mut self.literals {
             literal.try_remap_string_ids(map)?;

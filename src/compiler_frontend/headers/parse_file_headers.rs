@@ -8,12 +8,16 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
+use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::{
+    DiagnosticDraft, validate_preparation_draft_spans,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
-    InvalidDeclarationReason,
+    CommonSyntaxMistakeReason, DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
 pub(crate) use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -146,7 +150,8 @@ pub fn parse_file_headers_with_table(
         let canonical = owner.tokens_ref();
         if canonical.source() != file_id {
             return Err(FileFrontendPrepareFailure::Infrastructure(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "header parse source token owner does not match its file identity",
                 ),
             ));
@@ -194,21 +199,17 @@ fn capture_preparation_spans(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     match &mut file_output {
         Ok(output) => {
-            for warning in &mut output.warnings {
-                warning
-                    .capture_preparation_span(file_id)
+            for warning in output.warnings.iter_mut() {
+                validate_preparation_draft_spans(warning, file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
         }
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-            for warning in &mut error.warnings {
-                warning
-                    .capture_preparation_span(file_id)
+            for warning in error.warnings.iter_mut() {
+                validate_preparation_draft_spans(warning, file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
-            error
-                .diagnostic
-                .capture_preparation_span(file_id)
+            validate_preparation_draft_spans(&error.diagnostic, file_id)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
         }
         Err(FileFrontendPrepareFailure::Infrastructure(_)) => {}
@@ -246,10 +247,13 @@ pub(crate) fn prepare_file_from_tokens(
     // reads and panic on out-of-domain indices.
     if path_fork.try_depth(source_file).is_none() {
         return Err(FileFrontendPrepareFailure::Infrastructure(
-            CompilerError::compiler_error(format!(
-                "token stream for {entry_file_path:?} carries source path {src:?} that was not issued by the supplied path table",
-                src = source_file,
-            )),
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "token stream for {entry_file_path:?} carries source path {src:?} that was not issued by the supplied path table",
+                    src = source_file,
+                ),
+            ),
         ));
     }
     let fork_source = string_table.fork_source();
@@ -274,9 +278,10 @@ pub(crate) fn prepare_file_from_tokens(
     let path_remap = path_fork
         .merge_delta_from(&local_path_fork, &remap)
         .map_err(|error| {
-            FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "file path merge failed: {error:?}"
-            )))
+            FileFrontendPrepareFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("file path merge failed: {error:?}"),
+            ))
         })?;
 
     match file_output {
@@ -314,20 +319,6 @@ impl From<DiagnosticBag> for HeaderPreparationFailure {
     }
 }
 
-impl From<CompilerMessages> for HeaderPreparationFailure {
-    fn from(messages: CompilerMessages) -> Self {
-        let CompilerMessages {
-            infrastructure_errors,
-            diagnostics,
-            ..
-        } = messages;
-        match infrastructure_errors {
-            Some(errors) => Self::Infrastructure(errors),
-            None => Self::Diagnosed(DiagnosticBag::from_diagnostics(diagnostics)),
-        }
-    }
-}
-
 /// Aggregate per-file frontend preparation outputs into provider-independent
 /// `PreparedHeaderSyntax`.
 ///
@@ -338,7 +329,7 @@ impl From<CompilerMessages> for HeaderPreparationFailure {
 pub fn prepare_header_syntax(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+    capture: &mut impl FnMut(SourceId, &mut DiagnosticDraft) -> Result<(), InfrastructureFailure>,
     path_fork: &mut PathInternerFork,
 ) -> Result<PreparedHeaderSyntax, HeaderPreparationFailure> {
     let source_build_config_contracts =
@@ -358,7 +349,8 @@ pub fn prepare_header_syntax(
             let owner = crate::compiler_frontend::headers::SourceTokenOwner::new(stream);
             if source_token_owners.insert(output.file_id, owner).is_some() {
                 return Err(HeaderPreparationFailure::Infrastructure(
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "multiple canonical source token streams were prepared for one SourceId",
                     )
                     .into(),
@@ -371,7 +363,8 @@ pub fn prepare_header_syntax(
             .checked_add(output.runtime_fragment_count)
             .ok_or_else(|| {
                 HeaderPreparationFailure::Infrastructure(
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "runtime fragment count overflowed header aggregation",
                     )
                     .into(),
@@ -404,7 +397,7 @@ pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
     header: &Header,
     source_tokens: &SourceTokens,
     string_table: &StringTable,
-) -> Result<Option<SourceSpan>, CompilerError> {
+) -> Result<Option<SourceSpan>, InfrastructureFailure> {
     fn marker_in_cursor(
         mut cursor: TokenCursor<'_>,
         string_table: &StringTable,
@@ -432,17 +425,18 @@ pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
         None
     }
 
-    let marker_in_range = |range: Option<TokenRange>| -> Result<Option<SourceSpan>, CompilerError> {
-        let Some(range) = range else {
-            return Ok(None);
-        };
-        let cursor = source_tokens.cursor(range).map_err(|error| {
-            CompilerError::compiler_error(format!(
+    let marker_in_range =
+        |range: Option<TokenRange>| -> Result<Option<SourceSpan>, InfrastructureFailure> {
+            let Some(range) = range else {
+                return Ok(None);
+            };
+            let cursor = source_tokens.cursor(range).map_err(|error| {
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "declaration marker range could not be resolved through its source owner: {error:?}"
             ))
         })?;
-        Ok(marker_in_cursor(cursor, string_table))
-    };
+            Ok(marker_in_cursor(cursor, string_table))
+        };
 
     match &header.kind {
         HeaderKind::Constant { declaration } => marker_in_range(declaration.initializer_range),
@@ -500,17 +494,19 @@ pub(super) fn find_config_qualifier_marker_in_header(
     header: &Header,
     source_tokens: Option<&SourceTokens>,
     string_table: &StringTable,
-) -> Result<Option<(SourceSpan, bool)>, CompilerError> {
+) -> Result<Option<(SourceSpan, bool)>, InfrastructureFailure> {
     let Some(source_tokens) = source_tokens else {
         if header.token_sequence.is_some() || !header.tokens.is_empty() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
                 "retained header marker scan has no source token owner",
             ));
         }
         return Ok(None);
     };
     if header.tokens.source() != source_tokens.source() {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "retained header marker scan does not match its source token owner",
         ));
     }
@@ -522,12 +518,15 @@ pub(super) fn find_config_qualifier_marker_in_header(
     }
     let body_cursor = if let Some(sequence) = header.token_sequence {
         let view = source_tokens.token_sequence(sequence).map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "retained header marker scan could not resolve its token sequence: {error:?}"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "retained header marker scan could not resolve its token sequence: {error:?}"
+                ),
+            )
         })?;
         Some(view.cursor().map_err(|error| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "retained header marker scan could not construct its token sequence cursor: {error:?}"
             ))
         })?)
@@ -535,7 +534,7 @@ pub(super) fn find_config_qualifier_marker_in_header(
         None
     } else {
         Some(source_tokens.cursor(header.tokens).map_err(|error| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "retained header marker scan could not construct its token range cursor: {error:?}"
             ))
         })?)
@@ -580,7 +579,7 @@ pub(super) fn find_config_qualifier_marker_in_header(
 fn collect_source_build_config_contracts(
     prepared_files: &[FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+    capture: &mut impl FnMut(SourceId, &mut DiagnosticDraft) -> Result<(), InfrastructureFailure>,
     path_fork: &PathInternerFork,
 ) -> Result<Vec<SourceBuildConfigContract>, HeaderPreparationFailure> {
     let mut contracts = Vec::new();
@@ -601,7 +600,8 @@ fn collect_source_build_config_contracts(
             && source_tokens.source() != output.file_id
         {
             return Err(HeaderPreparationFailure::Infrastructure(
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
                     "config marker scan source token owner does not match its file identity",
                 )
                 .into(),
@@ -611,13 +611,13 @@ fn collect_source_build_config_contracts(
         for header in &output.headers {
             let report_marker = |span: SourceSpan, adjacent: bool| {
                 if adjacent {
-                    CompilerDiagnostic::invalid_config_reason(
+                    project_config::invalid_config_reason(
                         path_fork.component(header.declaration_path),
                         InvalidConfigReason::ConfigQualifierInvalidPlacement,
                         Some(span),
                     )
                 } else {
-                    CompilerDiagnostic::common_syntax_mistake(
+                    token_lexical::common_syntax_mistake(
                         CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
                         Some(span),
                     )
@@ -642,7 +642,7 @@ fn collect_source_build_config_contracts(
                 continue;
             };
             let Some(name) = path_fork.component(header.declaration_path) else {
-                let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+                let mut diagnostic = project_config::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigContractNameInvalid,
                     header.name_span,
@@ -659,7 +659,8 @@ fn collect_source_build_config_contracts(
             let normalized = if let Some(range) = declaration.initializer_range {
                 let source = source_tokens.ok_or_else(|| {
                     HeaderPreparationFailure::Infrastructure(
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
                             "source config initializer has no canonical source token owner",
                         )
                         .into(),
@@ -667,16 +668,20 @@ fn collect_source_build_config_contracts(
                 })?;
                 let mut cursor = source.cursor(range).map_err(|error| {
                     HeaderPreparationFailure::Infrastructure(
-                        CompilerError::compiler_error(format!(
-                            "source config initializer range is invalid: {error:?}"
-                        ))
+                        InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
+                            format!("source config initializer range is invalid: {error:?}"),
+                        )
                         .into(),
                     )
                 })?;
                 let token = cursor.advance().ok_or_else(|| {
                     HeaderPreparationFailure::Infrastructure(
-                        CompilerError::compiler_error("source config initializer range is empty")
-                            .into(),
+                        InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
+                            "source config initializer range is empty",
+                        )
+                        .into(),
                     )
                 })?;
                 if range.len() == 1 {
@@ -800,8 +805,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         source_files,
         string_table,
         path_fork,
-    })
-    .map_err(HeaderPreparationFailure::from)?;
+    })?;
 
     canonicalize_local_ordering_hints(
         &mut headers,
@@ -853,7 +857,7 @@ fn validate_prelude_declaration_shells(
         if let Some(name) = path_fork.component(header.declaration_path)
             && external_package_registry.is_prelude_function(string_table.resolve(name))
         {
-            collision_bag.push(CompilerDiagnostic::reserved_builtin_name(
+            collision_bag.push(names_declarations::reserved_builtin_name(
                 name,
                 header.name_span,
             ));
@@ -879,7 +883,7 @@ fn validate_prelude_declaration_shells(
                     continue;
                 }
 
-                collision_bag.push(CompilerDiagnostic::invalid_declaration(
+                collision_bag.push(names_declarations::invalid_declaration(
                     InvalidDeclarationReason::GenericParameterNameCollision {
                         parameter_name: parameter.name,
                     },

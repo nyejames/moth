@@ -10,13 +10,14 @@ use super::fork::{PathInternerFork, PathInternerForkSource};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_max_depth,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use rustc_hash::FxHashMap;
-use std::collections::hash_map::Entry;
 use std::path::Path;
+use std::sync::Arc;
 
 /// One path-trie node. The root's component is deliberately uninterpreted.
 #[repr(C)]
@@ -28,24 +29,26 @@ pub(super) struct PathNode {
 
 /// Mutable builder for a dense parent-linked logical path table.
 ///
-/// The table is shared with reader operations while the builder is live. Its `lookup` map is used
-/// only while interning and is dropped when the table freezes.
+/// The table shares sealed prefixes with sibling builders and owns only its append-only suffix.
 #[derive(Clone, Debug)]
 pub struct PathInternerBuilder {
     table: PathTable,
+    lookup_layers: Vec<Arc<FxHashMap<(PathId, StringId), PathId>>>,
     lookup: FxHashMap<(PathId, StringId), PathId>,
 }
 
 impl PathInternerBuilder {
-    /// Rebuild a mutable builder from a complete fork snapshot.
-    ///
-    /// This preserves every inherited and worker-local `PathId` while giving the
-    /// destination source database the same lookup domain as the discovery fork.
-    pub(super) fn from_parts(
+    /// Rebuild a mutable builder from a shared fork prefix and its local suffix.
+    pub(super) fn from_shared_parts(
         table: PathTable,
+        lookup_layers: Vec<Arc<FxHashMap<(PathId, StringId), PathId>>>,
         lookup: FxHashMap<(PathId, StringId), PathId>,
     ) -> Self {
-        Self { table, lookup }
+        Self {
+            table,
+            lookup_layers,
+            lookup,
+        }
     }
 
     /// Create an empty interner whose first node is the root path.
@@ -53,8 +56,39 @@ impl PathInternerBuilder {
         increment_frontend_counter(FrontendCounter::PathNodeCount);
         Self {
             table: PathTable::new(),
+            lookup_layers: Vec::new(),
             lookup: FxHashMap::default(),
         }
+    }
+
+    /// Fork a sibling builder that shares all already-issued path identities.
+    ///
+    /// The current suffix becomes an immutable segment and the returned builder starts with an
+    /// empty local delta. This is used when a source-registration table gives compilation a
+    /// sibling builder without copying the complete source-path prefix.
+    pub(crate) fn fork_with_shared_prefix(&mut self) -> Self {
+        self.seal_shared_prefix();
+        Self {
+            table: self.table.clone(),
+            lookup_layers: self.lookup_layers.clone(),
+            lookup: FxHashMap::default(),
+        }
+    }
+
+    fn seal_shared_prefix(&mut self) {
+        self.table.seal_shared_base();
+        if !self.lookup.is_empty() {
+            self.lookup_layers
+                .push(Arc::new(std::mem::take(&mut self.lookup)));
+        }
+    }
+
+    /// Capture the complete current table while keeping this builder available for adoption.
+    ///
+    /// The mutable suffix is sealed into shared segments before the immutable view is returned.
+    pub(crate) fn shared_table(&mut self) -> PathTable {
+        self.seal_shared_prefix();
+        self.table.clone()
     }
 
     /// Borrow the path table while this builder remains mutable.
@@ -71,15 +105,24 @@ impl PathInternerBuilder {
     ///
     /// `None` reports authored exhaustion of the compact path-node domain.
     pub fn try_intern_child(&mut self, parent: PathId, component: StringId) -> Option<PathId> {
-        match self.lookup.entry((parent, component)) {
-            Entry::Occupied(entry) => Some(*entry.get()),
-            Entry::Vacant(entry) => {
-                let child = self.table.try_append_child(parent, component)?;
-                increment_frontend_counter(FrontendCounter::PathNodeCount);
-                record_path_max_depth(self.table.depth(child));
-                Some(*entry.insert(child))
-            }
+        let key = (parent, component);
+        if let Some(&existing) = self.lookup.get(&key) {
+            return Some(existing);
         }
+        if let Some(existing) = self
+            .lookup_layers
+            .iter()
+            .rev()
+            .find_map(|layer| layer.get(&key).copied())
+        {
+            return Some(existing);
+        }
+
+        let child = self.table.try_append_child(parent, component)?;
+        increment_frontend_counter(FrontendCounter::PathNodeCount);
+        record_path_max_depth(self.table.depth(child));
+        self.lookup.insert(key, child);
+        Some(child)
     }
 
     /// Intern a filesystem path using the exact component semantics of the path table.
@@ -137,12 +180,15 @@ impl PathInternerBuilder {
 
     /// Snapshot the live table into a reusable fork source without consuming the builder.
     ///
-    /// Building the shared base copies the current nodes once. Each fork after that clones only
-    /// an `Arc` and starts with an empty local delta.
+    /// The immutable prefix is shared. Only path rows added since the last shared boundary and
+    /// their reverse-lookup entries are copied into the new fork source.
     pub fn fork_source(&self) -> PathInternerForkSource {
-        let (nodes, depths) = self.table.snapshot();
-
-        PathInternerForkSource::new(nodes, depths, self.lookup.clone())
+        let table = self.table.snapshot_base();
+        let mut lookup_layers = self.lookup_layers.clone();
+        if !self.lookup.is_empty() {
+            lookup_layers.push(Arc::new(self.lookup.clone()));
+        }
+        PathInternerForkSource::new(table, lookup_layers)
     }
 
     /// Merge one worker delta into this builder in node-index order.
@@ -159,6 +205,8 @@ impl PathInternerBuilder {
         delta: &PathInternerFork,
         string_remap: &StringIdRemap,
     ) -> Result<PathIdRemap, PathInternError> {
+        #[cfg(feature = "data_layout_memory_probe")]
+        let merge_clock = crate::compiler_frontend::instrumentation::start_merge_remap_clock();
         let base_len = delta.base_len();
 
         if base_len > self.table.len() || base_len > delta.len() {
@@ -280,11 +328,115 @@ impl PathInternerBuilder {
             );
         }
 
-        Ok(PathIdRemap::new(base_len, mapped_suffix, is_identity))
+        let remap = PathIdRemap::new(base_len, mapped_suffix, is_identity);
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_path_merge_remap(merge_clock);
+        Ok(remap)
+    }
+
+    /// Append-only merge of a flat path-table snapshot into this builder.
+    ///
+    /// WHAT: returns the remap from snapshot `PathId`s to this builder's `PathId`s. Nodes before
+    ///       the first disagreement with this builder keep their numbers; every later node is
+    ///       re-interned under its already-mapped parent, reusing an existing child when one
+    ///       matches. Snapshot component IDs must already belong to this builder's string domain.
+    /// WHY:  a converted diagnostic carries a path table frozen in its own build, so its IDs must
+    ///       be rewritten before they can join this builder without renumbering existing paths.
+    ///
+    /// `is_identity` is exact by value: it is set exactly when every snapshot ID keeps its own
+    /// number. That includes a builder that is a strict prefix of the snapshot, where each
+    /// appended node lands at its snapshot index. `false` means "rewrite", not "moved".
+    ///
+    /// Returns [`PathInternError::TableFull`] when a new node cannot be addressed. Nodes appended
+    /// before that point stay in the append-only table, as with [`Self::merge_delta_from`].
+    pub(crate) fn merge_snapshot(
+        &mut self,
+        snapshot: &PathTable,
+    ) -> Result<PathIdRemap, PathInternError> {
+        #[cfg(feature = "data_layout_memory_probe")]
+        let merge_clock = crate::compiler_frontend::instrumentation::start_merge_remap_clock();
+        let snapshot_len = snapshot.len();
+        let shared_len = snapshot_len.min(self.len());
+
+        // Nodes before the first disagreement name the same parent and component in both tables,
+        // so their IDs keep their numbers.
+        let identity_prefix_len = (0..shared_len)
+            .find(|&index| {
+                let path = Self::snapshot_path_id(index);
+                self.table.try_parent(path) != snapshot.try_parent(path)
+                    || self.table.try_component(path) != snapshot.try_component(path)
+            })
+            .unwrap_or(shared_len);
+
+        let mut mapped_suffix = Vec::with_capacity(snapshot_len - identity_prefix_len);
+        for index in identity_prefix_len..snapshot_len {
+            let path = Self::snapshot_path_id(index);
+            let (Some(parent), Some(component)) =
+                (snapshot.try_parent(path), snapshot.try_component(path))
+            else {
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "path snapshot node {index} lacks a parent or component link; this is a compiler bug"
+                );
+            };
+
+            // Parents precede children, so a parent is either inside the identity prefix or
+            // already mapped into `mapped_suffix`.
+            let parent_index = parent.index();
+            if parent_index >= index {
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "path snapshot node {index} names parent {parent_index} that does not precede it; this is a compiler bug"
+                );
+            }
+            let mapped_parent = if parent_index < identity_prefix_len {
+                parent
+            } else {
+                mapped_suffix[parent_index - identity_prefix_len]
+            };
+
+            let mapped = self
+                .try_intern_child(mapped_parent, component)
+                .ok_or(PathInternError::TableFull)?;
+            mapped_suffix.push(mapped);
+        }
+
+        // Compare by value: a node keeps its number when it lands at its snapshot index. A
+        // builder that is a strict prefix of the snapshot does this for every appended node.
+        let is_identity = mapped_suffix
+            .iter()
+            .enumerate()
+            .all(|(offset, mapped)| mapped.index() == identity_prefix_len + offset);
+
+        let remap = PathIdRemap::new(identity_prefix_len, mapped_suffix, is_identity);
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_path_merge_remap(merge_clock);
+        Ok(remap)
+    }
+
+    /// Name the node at `index`; every index below a table's length fits the compact domain.
+    fn snapshot_path_id(index: usize) -> PathId {
+        PathId::try_from_index(index).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "path table index {index} exceeds the compact path domain; this is a compiler bug"
+            )
+        })
     }
 
     /// Freeze the append-only table into lookup-only path storage.
     pub fn freeze(self) -> PathTable {
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_mutable_path_builder(
+            self.table.storage_bytes(),
+            self.lookup_layers.len(),
+            self.lookup_layers
+                .iter()
+                .map(|layer| layer.capacity())
+                .sum::<usize>()
+                .saturating_add(self.lookup.capacity()),
+            self.lookup.capacity(),
+        );
         self.table
     }
 }

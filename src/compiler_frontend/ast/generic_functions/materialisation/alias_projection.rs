@@ -4,12 +4,14 @@ use super::artefact_emit::{ModuleMaterialisationContext, append_materialised_dec
 use super::nominal_blueprints::intern_generated_canonical_type;
 use super::preparation_freeze::ModuleMaterialisationCapture;
 use super::stable_types::GenericTemplateArtefact;
+use super::stable_types::const_store_error_into_prepared_failure;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -20,17 +22,16 @@ impl ModuleMaterialisationCapture {
         &self,
         path: &PathId,
         alias: &ResolvedTypeAlias,
-    ) -> Result<CanonicalTypeIdentity, CompilerError> {
+    ) -> Result<CanonicalTypeIdentity, InfrastructureFailure> {
         self.stable_type_identity(alias.target_type_id)
             .map_err(|error| {
-                CompilerError::new(
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
                     format!(
                         "Retained local type alias at path {:?} violated the completed-target invariant: {}",
                         path,
-                        error.msg,
+                        error.message,
                     ),
-                    alias.declaration_span,
-                    ErrorType::Compiler,
                 )
             })
     }
@@ -48,7 +49,7 @@ pub(super) fn restore_generated_local_alias(
     external_package_registry: &ExternalPackageRegistry,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<bool, CompilerError> {
+) -> Result<bool, PreparedFailure> {
     let Some(alias) = context
         .semantic_closure
         .aliases
@@ -64,7 +65,14 @@ pub(super) fn restore_generated_local_alias(
         nominal_source,
         string_table,
         path_fork,
-    )?;
+    )
+    .map_err(|error| {
+        const_store_error_into_prepared_failure(
+            error,
+            string_table,
+            Some(&environment.type_environment),
+        )
+    })?;
     let declaration = Declaration {
         id: local_path,
         type_id,
@@ -74,7 +82,8 @@ pub(super) fn restore_generated_local_alias(
         binding_span: None,
         config_qualifier: None,
     };
-    let lookups = Rc::make_mut(&mut environment.lookups);
+    let lookups = Rc::get_mut(&mut environment.lookups)
+        .expect("AST environment lookups are uniquely owned before materialisation");
     if lookups.declaration_table.get_by_path(&local_path).is_none() {
         append_materialised_declaration(lookups, declaration, path_fork)?;
     }

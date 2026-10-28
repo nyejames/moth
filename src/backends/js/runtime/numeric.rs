@@ -382,7 +382,7 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Emits checked operations for one binary-float precision.
     ///
-    /// WHY: D15 completes every binary-float operation at its selected precision, so each family
+    /// WHY: every binary-float operation completes at its selected precision, so each family
     ///      rounds once after the operation (binary16/binary32) and then checks finiteness on the
     ///      rounded result; binary64 needs no rounding step.
     fn emit_float_helpers(&mut self, family: &str, precision: BinaryFloatPrecision) {

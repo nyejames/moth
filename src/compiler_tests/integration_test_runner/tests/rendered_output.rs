@@ -151,7 +151,7 @@ fn validate_wasm_page(
         (PathBuf::from("page.js"), FileKind::Js(page_js)),
         (PathBuf::from("page.wasm"), FileKind::Wasm(wasm_bytes)),
     ]);
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     (result.passed, result.failure_kind, result.failure_reason)
 }
@@ -303,8 +303,7 @@ fn script_extraction_returns_supported_inline_sources_in_document_order() {
 
 #[test]
 fn script_extraction_skips_recognised_data_blocks() {
-    // An import map is JSON, not a program. Executing it as JavaScript is what the previous
-    // scanner did; skipping it is what a browser does.
+    // An import map is JSON, not a JavaScript program, so the harness skips it as a browser does.
     let html = r#"<script type="importmap">{"imports":{"a":"./a.js"}}</script>
 <script>run()</script>"#;
 
@@ -340,8 +339,8 @@ fn script_extraction_rejects_an_unterminated_script_block() {
 
 #[test]
 fn script_extraction_rejects_a_malformed_closing_tag() {
-    // `</script` without the `>` used to end extraction quietly, dropping this block and every
-    // later one from the harness input.
+    // Reject `</script` without `>` rather than silently dropping this block and later scripts
+    // from the harness input.
     let message = rejected_script_shape(
         "<script>run()</script\n<script>later()</script>",
         "a malformed closing tag must be rejected, not silently truncate the page",
@@ -493,7 +492,7 @@ document.getElementById("slot").insertAdjacentHTML("beforeend", state);
         ),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         result.passed,
@@ -561,17 +560,16 @@ console.log(external_value);
         },
     ];
 
-    let result = validate_success_result(&case, build_result, &expectation);
-
-    assert!(
-        result.passed,
-        "the imported export should execute from its deferred source: {:?}",
-        result.failure_reason
+    let failure = super::super::assertions::validate_indexed_success_assertions(
+        &case,
+        &build_result.project.output_files,
+        &build_result.project.deferred_resources,
+        &mut build_result.project.resource_inputs,
+        &expectation,
     );
-    let retained_build = result
-        .build_result
-        .expect("a successful rendered-output result should retain its build");
-    let resource_records = retained_build.project.resource_inputs.records();
+
+    assert_eq!(failure, None);
+    let resource_records = build_result.project.resource_inputs.records();
     assert!(
         matches!(
             resource_records[0].content(),
@@ -634,7 +632,7 @@ console.log(external_value);
         });
     drop(javascript_source);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         !result.passed,
@@ -673,7 +671,7 @@ fn module_harness_reports_import_maps_as_harness_failures() {
     let build_result =
         build_result_with_output_files(vec![(PathBuf::from("index.html"), FileKind::Html(html))]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         !result.passed,
@@ -1495,7 +1493,12 @@ fn validate_html_script(
         artifacts_must_not_exist: Vec::new(),
     };
     let case = success_test_case(BackendId::Html, expectation.clone());
-    let result = validate_success_result(&case, build_result_with_index_html(&html), &expectation);
+    let result = validate_success_result(
+        &case,
+        build_result_with_index_html(&html),
+        None,
+        &expectation,
+    );
 
     (result.passed, result.failure_kind, result.failure_reason)
 }
@@ -2079,7 +2082,7 @@ fn rendered_output_validation_reports_harness_failure_without_script_blocks() {
     let case = success_test_case(BackendId::Html, expectation.clone());
     let build_result = build_result_with_index_html(VALID_HTML);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
 }
@@ -2098,9 +2101,9 @@ fn rendered_output_node_is_not_invoked_without_a_rendered_assertion() {
     let result = validate_success_result(
         &case,
         build_result_with_index_html(VALID_HTML),
+        None,
         &expectation,
     );
-
     assert!(
         result.passed,
         "Node should not be needed without assertions"
@@ -2136,7 +2139,7 @@ fn rendered_output_executes_a_module_page_whose_import_graph_is_staged() {
         ),
     ]);
 
-    let result = validate_success_result(&case, build_result, &expectation);
+    let result = validate_success_result(&case, build_result, None, &expectation);
 
     assert!(
         result.passed,
@@ -2168,6 +2171,7 @@ fn rendered_output_rejects_a_mixed_classic_and_module_page_before_execution() {
     let result = validate_success_result(
         &case,
         build_result_with_index_html(&module_page),
+        None,
         &expectation,
     );
 

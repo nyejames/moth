@@ -15,11 +15,11 @@ Lifetime-region and escape validation is the mandatory semantic proof that every
 - cycle legality
 - external-boundary legality
 
-User-authored topology that is invalid or cannot be proven legal produces a structured `CompilerDiagnostic`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce `CompilerError`.
+User-authored topology that is invalid or cannot be proven legal produces a typed `DiagnosticDraft`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots, or metadata produce `InfrastructureFailure`.
 
 It also owns compiler-generated non-lexical intervals, retained-edge liveness and final cleanup frontiers. These decide how precisely a legal topology can be reclaimed, not whether it is legal.
 
-**Physical strategy selection** happens after this proof succeeds. It chooses stack placement, static affine cleanup, inferred region allocation, declared-region bulk reclamation, Retained Edge Counting or a host garbage-collected representation. Imprecise planning results in conservative retention, never in rejecting a legal program. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
+**Physical strategy selection** happens after this proof succeeds. It chooses stack placement, static affine cleanup, inferred region allocation, declared-region bulk reclamation, Retained Edge Counting or a host garbage-collected representation. Imprecise planning results in conservative retention, never in rejecting a legal program. A missing physical strategy after successful topology validation is an `InfrastructureFailure`, not a silent collector fallback.
 
 GC is a permitted runtime representation for a statically legal lifetime topology on debug profiles and GC-native backends. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles, and a capable full-control release backend must not fall back to it.
 
@@ -488,7 +488,7 @@ Lifetime diagnostics must distinguish:
 - unsupported external boundary profile
 - missing or inconsistent compiler-owned metadata
 
-User-facing diagnostics use stable codes and structured reason payloads. Internal impossible or inconsistent metadata uses `CompilerError`.
+User-facing diagnostics use stable codes and structured reason payloads. Internal impossible or inconsistent metadata uses `InfrastructureFailure`.
 
 Every lifetime diagnostic should identify, where applicable:
 

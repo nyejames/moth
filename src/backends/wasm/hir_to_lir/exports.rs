@@ -1,6 +1,5 @@
 //! Export-wrapper synthesis for Wasm lowering.
 
-use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext;
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
@@ -8,13 +7,15 @@ use crate::backends::wasm::lir::linkage::{WasmExport, WasmExportKind, WasmFuncti
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirFunctionId, WasmLirLocal, WasmLirLocalId, WasmLocalRole,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashSet;
 
 pub(crate) fn synthesize_export_wrappers(
     context: &mut WasmLirLoweringContext<'_>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     // WHAT: create synthetic wrapper functions for requested exports only.
     // WHY: keeps internal function linkage separate from externally stable names.
     // Wrappers round externally supplied F16 carriers before the internal call. Internal results
@@ -33,16 +34,18 @@ pub(crate) fn synthesize_export_wrappers(
             .export_policy
             .export_names
             .get(function_id)
-            .ok_or_else(|| {
-                lir_transformation_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm export wrapper synthesis missing export name for {function_id:?}"
-                ))
-            })?;
+                )
+            });
 
         if !seen_export_names.insert(export_name.clone()) {
-            return Err(lir_transformation_error(format!(
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
                 "Wasm export wrapper synthesis encountered duplicate export name '{export_name}'"
-            )));
+            );
         }
 
         let target_lir_id = context
@@ -50,7 +53,7 @@ pub(crate) fn synthesize_export_wrappers(
             .get(function_id)
             .copied()
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm export wrapper synthesis could not resolve target function {function_id:?}"
                 ))
             })?;
@@ -63,7 +66,7 @@ pub(crate) fn synthesize_export_wrappers(
             .find(|function| function.id == target_lir_id)
             .map(|function| function.signature.clone())
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm export wrapper synthesis missing lowered target function {target_lir_id:?}"
                 ))
             })?;
@@ -73,23 +76,24 @@ pub(crate) fn synthesize_export_wrappers(
             .functions
             .iter()
             .find(|function| function.id == *function_id)
-            .ok_or_else(|| {
-                lir_transformation_error(format!(
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
                     "Wasm export wrapper synthesis could not resolve HIR function {function_id:?}"
-                ))
-            })?;
+                )
+            });
         let target_entry_block = context
             .hir_module
             .blocks
             .iter()
             .find(|block| block.id == target_hir_function.entry)
             .ok_or_else(|| {
-                lir_transformation_error(format!(
+                InfrastructureFailure::lir_transformation(format!(
                     "Wasm export wrapper synthesis could not resolve entry block for {function_id:?}"
                 ))
             })?;
         if target_hir_function.params.len() != target_signature.params.len() {
-            return Err(lir_transformation_error(format!(
+            return Err(InfrastructureFailure::lir_transformation(format!(
                 "Wasm export wrapper synthesis found inconsistent parameter counts for {function_id:?}"
             )));
         }
@@ -120,7 +124,7 @@ pub(crate) fn synthesize_export_wrappers(
                 .find(|local| local.id == *parameter_local)
                 .map(|local| local.ty)
                 .ok_or_else(|| {
-                    lir_transformation_error(format!(
+                    InfrastructureFailure::lir_transformation(format!(
                         "Wasm export wrapper synthesis could not resolve parameter local {parameter_local:?} for {function_id:?}"
                     ))
                 })?;
@@ -128,7 +132,7 @@ pub(crate) fn synthesize_export_wrappers(
                 continue;
             }
             if target_signature.params[index] != WasmAbiType::F32 {
-                return Err(lir_transformation_error(format!(
+                return Err(InfrastructureFailure::lir_transformation(format!(
                     "Wasm export wrapper synthesis found a non-F32 carrier for F16 parameter {parameter_local:?} in {function_id:?}"
                 )));
             }

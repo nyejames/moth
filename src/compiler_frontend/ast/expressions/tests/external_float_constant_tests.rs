@@ -5,8 +5,13 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionConstructionFailure, ExpressionOperationView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::expressions::external_namespace_members::project_external_constant;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidNumberLiteralView, NumberLiteralCode,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, DiagnosticPayload,
+    CompileTimeEvaluationErrorReason, DiagnosticBag,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
@@ -116,14 +121,16 @@ fn external_float_constant_rejects_non_finite_host_value() {
         let ExpressionConstructionFailure::Diagnostic(error) = error else {
             panic!("host invalidity is a source diagnostic")
         };
-        let DiagnosticPayload::CompileTimeEvaluationError {
-            reason, operation, ..
-        } = error.payload
-        else {
-            panic!("compile-time evaluation lane")
-        };
-        assert_eq!(reason, CompileTimeEvaluationErrorReason::FloatOverflow);
-        assert_eq!(operation, Some(name));
+        let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+        let error = compact.first().expect("the diagnostic is retained");
+        let facts = error
+            .family_view::<CompileTimeEvaluationErrorView>()
+            .expect("the diagnostic is a compile-time evaluation failure");
+        assert_eq!(
+            facts.reason,
+            CompileTimeEvaluationErrorReason::FloatOverflow
+        );
+        assert_eq!(facts.operation, Some(name));
     }
     assert_eq!(
         expressions.len(),
@@ -302,18 +309,19 @@ fn raw_u32_constant_projects_exact_contract() {
             else {
                 panic!("range is a source diagnostic")
             };
-            let DiagnosticPayload::InvalidNumberLiteral {
-                literal_text,
-                reason,
-            } = error.payload
-            else {
-                panic!("numeric range lane")
-            };
-            assert_eq!(strings.resolve(literal_text), raw.to_string());
-            assert_eq!(
-                reason,
-                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32)
-            );
+            let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+            let error = compact.first().expect("the diagnostic is retained");
+            let facts = error
+                .family_view::<InvalidNumberLiteralView>()
+                .expect("the diagnostic is an invalid number literal");
+            assert_eq!(strings.resolve(facts.literal_text), raw.to_string());
+            let expected_reason =
+                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32);
+            let (expected_code, expected_scalar, expected_scale) =
+                NumberLiteralCode::split(&expected_reason);
+            assert_eq!(facts.code, expected_code);
+            assert_eq!(facts.scalar, expected_scalar);
+            assert_eq!(facts.scale, expected_scale);
         }
     }
 }

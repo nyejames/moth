@@ -13,7 +13,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
@@ -91,7 +92,7 @@ pub struct AstDocFragment {
 pub(crate) fn collect_const_top_level_fragments(
     top_level_const_fragments: &[TopLevelConstFragment],
     const_templates_by_path: &FxHashMap<PathId, FoldedConstTemplateResult>,
-) -> Result<Vec<AstConstTopLevelFragment>, CompilerError> {
+) -> Result<Vec<AstConstTopLevelFragment>, InfrastructureFailure> {
     let mut result = Vec::with_capacity(top_level_const_fragments.len());
 
     for fragment in top_level_const_fragments {
@@ -99,7 +100,7 @@ pub(crate) fn collect_const_top_level_fragments(
             .get(&fragment.header_path)
             .map(FoldedConstTemplateResult::value)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "Top-level const fragment has no corresponding folded template value. This is a compiler bug.",
                 )
             })?;

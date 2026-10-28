@@ -10,10 +10,22 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
-    ReservedNameOwner,
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::{
+        imports::{
+            DuplicateImportSurfaceMemberView, ExplicitMothExtensionView, ImportNameCollisionView,
+            NotExportedByPublicSurfaceView,
+        },
+        names_declarations::ReservedNameCollisionView,
+    },
+    foreign::SiteRef,
+    labels::DurableLabelMessage,
+    test_support::{CompactDiagnosticBagForTest, compact_bag_for_test},
+    view::DiagnosticView,
 };
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, ReservedNameOwner};
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalPackageRegistry,
@@ -30,6 +42,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
+use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelection, DependencySelectionRange, HeaderExportMode,
     RetainedDependencyClause,
@@ -142,15 +155,22 @@ fn add_selection(
     };
 }
 
-fn assert_duplicate_dependency_surface_member(error: CompilerDiagnostic) {
-    assert_eq!(
-        error.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::DuplicateImportSurfaceMember)
+fn assert_duplicate_dependency_surface_member(error: DiagnosticDraft) {
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one duplicate dependency diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<DuplicateImportSurfaceMemberView>()
+            .is_some(),
+        "expected duplicate dependency surface member diagnostic, got {}",
+        diagnostic.descriptor().code
     );
 }
 
 fn assert_keyword_shadow_dependency_diagnostic(
-    diagnostics: &[CompilerDiagnostic],
+    diagnostics: &CompactDiagnosticBagForTest,
     expected_name: StringId,
     expected_span: &SourceSpan,
 ) {
@@ -159,23 +179,43 @@ fn assert_keyword_shadow_dependency_diagnostic(
         1,
         "keyword-shadow validation should stop dependency registration before any other diagnostic"
     );
-    let diagnostic = &diagnostics[0];
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::ReservedNameCollision {
-                name,
-                reserved_by: ReservedNameOwner::Keyword,
-            } if *name == expected_name
-        ),
-        "expected the canonical keyword-shadow diagnostic, got {:?}",
-        diagnostic.payload
-    );
+    let diagnostic = diagnostics
+        .first()
+        .expect("one compact diagnostic was asserted");
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("expected the canonical keyword-shadow diagnostic family");
+    assert_eq!(facts.name, expected_name);
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
     assert_eq!(
-        diagnostic.primary_span,
+        primary_span(diagnostic),
         Some(*expected_span),
         "keyword-shadow diagnostics must point at the dependency-created local name"
     );
+}
+
+fn primary_span(diagnostic: DiagnosticView<'_>) -> Option<SourceSpan> {
+    match diagnostic.primary_site() {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+
+fn failure_diagnostics(failure: HeaderPreparationFailure) -> CompactDiagnosticBagForTest {
+    let bag = match failure {
+        HeaderPreparationFailure::Diagnosed(diagnostics) => diagnostics,
+        HeaderPreparationFailure::Infrastructure(_) => DiagnosticBag::new(),
+    };
+    compact_bag_for_test(bag, None)
+}
+
+fn primary_infrastructure_error(
+    failure: &HeaderPreparationFailure,
+) -> Option<&InfrastructureFailure> {
+    match failure {
+        HeaderPreparationFailure::Infrastructure(errors) => errors.iter().next(),
+        HeaderPreparationFailure::Diagnosed(_) => None,
+    }
 }
 
 fn register_keyword_test_package(
@@ -230,7 +270,7 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
         .expect_err("namespace names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -277,7 +317,7 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
         .expect_err("namespace aliases that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -343,18 +383,26 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
     })
     .expect_err("namespace alias should collide with the same-file declaration");
 
-    let diagnostic = &error.diagnostics[0];
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
+    let diagnostics = failure_diagnostics(error);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one collision diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<ImportNameCollisionView>()
+            .is_some(),
+        "expected a dependency binding name collision"
     );
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
-    let previous_label = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.style == DiagnosticLabelStyle::Secondary)
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+    let previous_span = diagnostic
+        .durable_labels()
+        .find(|label| matches!(label.message, DurableLabelMessage::PreviousDeclaration))
+        .and_then(|label| match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        })
         .expect("collision should retain the previous declaration label");
-    assert_eq!(previous_label.span, Some(expected_previous_span));
+    assert_eq!(previous_span, expected_previous_span);
 }
 
 #[test]
@@ -390,12 +438,17 @@ fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     })
     .expect_err("explicit .moth dependency should be rejected during binding");
 
-    let diagnostic = &error.diagnostics[0];
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension)
-    ));
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
+    let diagnostics = failure_diagnostics(error);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one extension diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<ExplicitMothExtensionView>()
+            .is_some(),
+        "expected the explicit .moth extension diagnostic"
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
 }
 
 #[test]
@@ -449,7 +502,7 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
         .expect_err("selected names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -510,7 +563,7 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
         .expect_err("selected aliases that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -572,7 +625,7 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
         .expect_err("source dependency names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -635,7 +688,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
         .expect_err("provider declaration names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -746,7 +799,7 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
 
 fn dependency_error_diagnostic(
     error: crate::compiler_frontend::headers::binding_environment::BindingEnvironmentError,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     match error {
         crate::compiler_frontend::headers::binding_environment::BindingEnvironmentError::Diagnostic(
             diagnostic,
@@ -1032,7 +1085,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
         source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
 
@@ -1084,12 +1137,13 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
 
-    let Some(ResolvedNamespaceTarget::SourceFile(path)) =
-        builder.resolve_module_root_public_export(&dependency.dependency.path, &source_file)
+    let Some(ResolvedNamespaceTarget::SourceFile(path)) = builder
+        .resolve_module_root_public_export(&dependency.dependency.path, &source_file)
+        .expect("test path table should intern a module-root public export")
     else {
         panic!("module root namespace should use the prepared root file");
     };
@@ -1346,12 +1400,18 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
 
     let error =
         result.expect_err("same-file declaration should collide with prelude namespace alias");
-    assert_eq!(
-        error.diagnostics[0].kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
+    let diagnostics = failure_diagnostics(error);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one collision diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<ImportNameCollisionView>()
+            .is_some(),
+        "expected a dependency binding name collision"
     );
     assert_eq!(
-        error.diagnostics[0].primary_span,
+        primary_span(diagnostic),
         Some(SourceSpan::new(
             SourceId::COMPILATION_ROOT,
             declaration_span
@@ -1469,12 +1529,13 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
 
-    let Some(ResolvedNamespaceTarget::SourceFile(path)) =
-        builder.resolve_module_root_public_export(&dependency.dependency.path, &helper_mod_file)
+    let Some(ResolvedNamespaceTarget::SourceFile(path)) = builder
+        .resolve_module_root_public_export(&dependency.dependency.path, &helper_mod_file)
+        .expect("test path table should intern a nested module-root public export")
     else {
         panic!(
             "nested module root depending on a child facade should resolve to the child root file"
@@ -1807,7 +1868,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     ])
     .expect("two distinct providers should register");
 
-    let messages = prepare_binding_environment(BindingEnvironmentInput {
+    let failure = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
@@ -1818,11 +1879,11 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     })
     .expect_err("differing evidence records with one identity must fail before AST projection");
 
-    let error = messages.primary_infrastructure_error().expect(
+    let error = primary_infrastructure_error(&failure).expect(
         "differing evidence records with one identity must fail with an infrastructure error",
     );
     assert!(
-        error.msg.contains("evidence identity"),
+        error.message.contains("evidence identity"),
         "unexpected infrastructure error: {error:?}"
     );
 }
@@ -2026,7 +2087,7 @@ fn bind_environment(
     path_fork: &mut PathInternerFork,
 ) -> Result<
     crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment,
-    crate::compiler_frontend::compiler_errors::CompilerMessages,
+    HeaderPreparationFailure,
 > {
     prepare_binding_environment(BindingEnvironmentInput {
         module_symbols,
@@ -2070,7 +2131,7 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
         path_fork: &mut path_fork,
         string_table: &mut string_table,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2136,7 +2197,7 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
         string_table: &mut string_table,
         environment: Default::default(),
         path_fork: &mut path_fork,
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2197,7 +2258,7 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2255,7 +2316,7 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2307,7 +2368,7 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2329,7 +2390,7 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
         .expect_err("missing provider shell should remain an internal error");
     match error {
         BindingEnvironmentError::Internal(error) => {
-            assert!(error.msg.contains("has no resolved provider"));
+            assert!(error.message.contains("has no resolved provider"));
         }
         BindingEnvironmentError::Diagnostic(diagnostic) => {
             panic!("missing provider shell became a source diagnostic: {diagnostic:?}");
@@ -2365,7 +2426,7 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2387,7 +2448,7 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
         .expect_err("missing provider member should remain an internal error");
     match error {
         BindingEnvironmentError::Internal(error) => {
-            assert!(error.msg.contains("has no exported provider member"));
+            assert!(error.message.contains("has no exported provider member"));
         }
         BindingEnvironmentError::Diagnostic(diagnostic) => {
             panic!("missing provider member became a source diagnostic: {diagnostic:?}");
@@ -2583,23 +2644,25 @@ fn missing_provider_record_fails_deterministically() {
     }])
     .expect("one shell should register");
 
-    let messages = bind_environment(
+    let failure = bind_environment(
         &provider_dependencies,
         &mut module_symbols,
         &mut string_table,
         &mut path_fork,
     )
     .expect_err("a missing provider record must fail binding deterministically");
-    let diagnostic = &messages.diagnostics[0];
-    let DiagnosticPayload::NotExportedByPublicSurface { requested_path, .. } = &diagnostic.payload
-    else {
-        panic!("unexpected diagnostic payload: {:?}", diagnostic.payload);
-    };
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one missing provider record diagnostic");
+    let facts = diagnostic
+        .family_view::<NotExportedByPublicSurfaceView>()
+        .expect("expected a public-surface export diagnostic");
     assert_eq!(
-        requested_path, &expected_requested_path,
+        facts.requested_path, expected_requested_path,
         "diagnostic should retain the logical selected dependency path",
     );
-    assert_eq!(diagnostic.primary_span, Some(expected_source_span));
+    assert_eq!(primary_span(diagnostic), Some(expected_source_span));
 }
 
 #[test]
@@ -2664,7 +2727,7 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
 }
 
 #[test]
-fn differing_provider_declarations_with_one_origin_fail_as_compiler_error() {
+fn differing_provider_declarations_with_one_origin_fail_as_infrastructure_failure() {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("shared"),
         "shared/@mod.moth".to_owned(),
@@ -2693,11 +2756,11 @@ fn differing_provider_declarations_with_one_origin_fail_as_compiler_error() {
     let error =
         super::super::builder::insert_agreed(&mut table, origin, &second, "declaration origin")
             .expect_err("second publisher must disagree");
-    assert!(error.msg.contains("declaration origin"));
+    assert!(error.message.contains("declaration origin"));
 }
 
 #[test]
-fn differing_provider_summaries_with_one_origin_fail_as_compiler_error() {
+fn differing_provider_summaries_with_one_origin_fail_as_infrastructure_failure() {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("shared"),
         "shared/@mod.moth".to_owned(),
@@ -2720,11 +2783,11 @@ fn differing_provider_summaries_with_one_origin_fail_as_compiler_error() {
         .expect("first publisher should insert");
     let error = super::super::builder::insert_agreed(&mut table, origin, &second, "summary origin")
         .expect_err("second publisher must disagree");
-    assert!(error.msg.contains("summary origin"));
+    assert!(error.message.contains("summary origin"));
 }
 
 #[test]
-fn differing_evidence_records_with_one_identity_fail_as_compiler_error() {
+fn differing_evidence_records_with_one_identity_fail_as_infrastructure_failure() {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("shared"),
         "shared/@mod.moth".to_owned(),
@@ -2757,7 +2820,7 @@ fn differing_evidence_records_with_one_identity_fail_as_compiler_error() {
     let error =
         super::super::builder::insert_agreed(&mut table, identity, &second, "evidence identity")
             .expect_err("second publisher must disagree");
-    assert!(error.msg.contains("evidence identity"));
+    assert!(error.message.contains("evidence identity"));
 }
 
 #[test]
@@ -2808,7 +2871,7 @@ fn occupied_agreement_insertion_borrows_without_cloning() {
         "clone counting",
     )
     .expect_err("occupied disagreement must fail");
-    assert!(error.msg.contains("clone counting"));
+    assert!(error.message.contains("clone counting"));
     assert_eq!(
         clones.load(Ordering::Relaxed),
         1,
@@ -2831,7 +2894,7 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
         .file_dependency_clauses_by_source
         .insert(source_file, vec![dependency]);
 
-    let messages = prepare_binding_environment(BindingEnvironmentInput {
+    let failure = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
@@ -2842,11 +2905,10 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
     })
     .expect_err("a retained local edge with no source slot must fail closed");
 
-    let error = messages
-        .primary_infrastructure_error()
+    let error = primary_infrastructure_error(&failure)
         .expect("missing retained source identity should be an infrastructure error");
     assert!(
-        error.msg.contains("missing source identity"),
+        error.message.contains("missing source identity"),
         "unexpected retained-edge validation error: {error:?}"
     );
 }
@@ -2906,7 +2968,7 @@ fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
         .file_dependency_clauses_by_source
         .insert(page_source, vec![dependency]);
 
-    let messages = prepare_binding_environment(BindingEnvironmentInput {
+    let failure = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
@@ -2917,12 +2979,11 @@ fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
     })
     .expect_err("a wrong but valid in-module local edge must fail closed");
 
-    let error = messages
-        .primary_infrastructure_error()
+    let error = primary_infrastructure_error(&failure)
         .expect("contradictory local source identity should be an infrastructure error");
     assert!(
         error
-            .msg
+            .message
             .contains("disagrees with its resolved source path"),
         "unexpected wrong-edge validation error: {error:?}"
     );

@@ -1,5 +1,8 @@
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::token_lexical::UnexpectedEndOfFileView, test_support::compact_bag_for_test,
+};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -103,8 +106,8 @@ fn canonical_range_view_rejects_foreign_source() {
     let canonical = &owner;
     let foreign = TokenRange::new(
         SourceId::from_index(1),
-        TokenIndex::try_from_raw(0).expect("zero index is representable"),
-        TokenIndex::try_from_raw(1).expect("one index is representable"),
+        TokenIndex::from_raw(0),
+        TokenIndex::from_raw(1),
     )
     .expect("ordered foreign range should construct");
 
@@ -125,8 +128,8 @@ fn canonical_range_view_rejects_out_of_owner_range() {
     );
     let out_of_owner = TokenRange::new(
         owner.source(),
-        TokenIndex::try_from_raw(0).expect("zero index is representable"),
-        TokenIndex::try_from_raw(2).expect("two index is representable"),
+        TokenIndex::from_raw(0),
+        TokenIndex::from_raw(2),
     )
     .expect("ordered range should construct");
 
@@ -481,23 +484,22 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_choice_nam
 // Declaration-initializer EOF delimiter reporting
 // ---------------------------------------------------------------------------
 
-fn eof_expected_delimiter(
-    failure: &TokenScanFailure,
-    string_table: &StringTable,
-) -> Option<String> {
-    let diagnostic = match failure {
+fn eof_expected_delimiter(failure: TokenScanFailure, string_table: &StringTable) -> Option<String> {
+    let draft = match failure {
         TokenScanFailure::Diagnostic(diagnostic) => diagnostic,
         TokenScanFailure::Infrastructure(error) => {
             panic!("token scanner infrastructure failure: {error:?}")
         }
     };
-    let DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } = &diagnostic.payload else {
-        panic!(
-            "expected UnexpectedEndOfFile diagnostic, got {:?}",
-            diagnostic.payload
-        );
-    };
-    expected_delimiter.map(|id| string_table.resolve(id).to_owned())
+    let compacted = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compacted
+        .first()
+        .expect("the failed scan should retain its diagnostic");
+    let view = diagnostic
+        .family_view::<UnexpectedEndOfFileView>()
+        .expect("the failed scan should report an unexpected end of file");
+    view.expected_delimiter
+        .map(|id| string_table.resolve(id).to_owned())
 }
 
 #[test]
@@ -515,7 +517,7 @@ fn eof_in_template_reports_closing_bracket() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated template should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some("]".to_owned()),
         "open template expects ]"
     );
@@ -536,7 +538,7 @@ fn eof_in_parenthesis_reports_closing_paren() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated parenthesis should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some(")".to_owned()),
         "open parenthesis expects )"
     );
@@ -557,7 +559,7 @@ fn eof_in_collection_reports_closing_brace() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated collection should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some("}".to_owned()),
         "open collection/map expects }}",
     );
@@ -583,7 +585,7 @@ fn eof_in_catch_block_reports_semicolon() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated catch block should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some(";".to_owned()),
         "open catch block expects ;"
     );
@@ -607,7 +609,7 @@ fn eof_in_value_producing_if_reports_semicolon() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated value-producing if should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some(";".to_owned()),
         "open value-producing if expects ;"
     );
@@ -634,7 +636,7 @@ fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated nested parenthesis should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some(")".to_owned()),
         "innermost open parenthesis inside catch expects ) not ;"
     );
@@ -655,7 +657,7 @@ fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated parenthesis inside template should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some(")".to_owned())
     );
 }
@@ -675,7 +677,7 @@ fn eof_in_template_inside_parenthesis_reports_innermost_template() {
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated template inside parenthesis should report EOF");
     assert_eq!(
-        eof_expected_delimiter(&error, &string_table),
+        eof_expected_delimiter(error, &string_table),
         Some("]".to_owned())
     );
 }

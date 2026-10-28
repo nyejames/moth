@@ -1,13 +1,14 @@
 //! Frozen generic body ownership and donor file-reference capture.
 //!
 //! Persistent generic syntax keeps the canonical declaring-source owner and checked body view.
-//! Stage 0 file-reference facts cross the source-preparation lifetime independently; no
-//! compatibility parser adapter or copied token window is materialised.
+//! Stage 0 file-reference facts cross the source-preparation lifetime independently. Generic
+//! parsers consume checked ranges and sequences from the retained canonical owner.
 
 use super::super::{GenericFunctionBody, MaterialisedDonorContext};
 use super::frozen_file_references::StableResolvedFileReference;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
@@ -32,7 +33,7 @@ pub(crate) struct SharedDonorIdentity {
 impl SharedDonorIdentity {
     pub(crate) fn freeze(table: &StringTable) -> Self {
         Self {
-            strings: Arc::new(table.clone().freeze()),
+            strings: Arc::new(table.freeze_snapshot()),
         }
     }
 
@@ -44,11 +45,10 @@ impl SharedDonorIdentity {
 /// Durable generic body syntax.
 ///
 /// The owner/range pair is the only retained syntax payload: every lane shares the canonical
-/// `SourceTokens` allocation published with its prepared source. No parser adapter or copied
-/// token vector is retained. Source bodies share one declaring-domain frozen string owner
-/// created once per `freeze()` or request capture; donor bodies retain the exact identity tables
-/// that issued their payloads. File-reference rows remain stable semantic facts for generated
-/// value resolution.
+/// `SourceTokens` allocation published with its prepared source. Source bodies share one
+/// declaring-domain frozen string owner created once per `freeze()` or request capture; donor
+/// bodies retain the exact identity tables that issued their payloads. File-reference rows remain
+/// stable semantic facts for generated value resolution.
 pub(super) struct StableBodySyntax {
     pub(super) declaration_path: PathId,
     pub(super) donor_file_id: SourceId,
@@ -124,7 +124,7 @@ impl MaterialisedBody {
         self.source_owner.source_tokens.source()
     }
 
-    pub(super) fn into_generic_body(self) -> Result<GenericFunctionBody, CompilerError> {
+    pub(super) fn into_generic_body(self) -> Result<GenericFunctionBody, InfrastructureFailure> {
         GenericFunctionBody::materialised(
             self.source_owner.source_tokens,
             self.token_range,
@@ -170,11 +170,12 @@ impl StableBodySyntax {
             &PathId,
         ) -> Result<
             crate::compiler_frontend::folded_value::PublicFoldedValue,
-            CompilerError,
+            InfrastructureFailure,
         >,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         if !path_fork.starts_with(body.declaration_path(), source_file) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "frozen generic body declaration path is outside its owning source file",
             ));
         }
@@ -191,7 +192,8 @@ impl StableBodySyntax {
         let declaring_domain_strings = || {
             donor_identity
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::GenericMaterialisation,
                         "frozen generic source body has no declaring-domain donor identity",
                     )
                 })
@@ -227,14 +229,14 @@ impl StableBodySyntax {
                 path_syntax.try_path_for_token(source_path_id, token.source_span())?;
                 if seen_paths.insert(source_path_id) {
                     let facts = stage0_resolution_facts.ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(CompilerStage::GenericMaterialisation,
                             "persistent generic body has path syntax but no Stage 0 resolution facts",
                         )
                     })?;
                     let resolved = facts
                         .lookup(donor_file_id, source_path_id)?
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(format!(
+                            InfrastructureFailure::internal(CompilerStage::GenericMaterialisation, format!(
                                 "persistent generic body path handle {:?} had no matching Stage 0 resolved-reference row",
                                 source_path_id
                             ))
@@ -280,9 +282,9 @@ impl StableBodySyntax {
         path_fork: &mut PathInternerFork,
         _string_table: &mut StringTable,
         identity_tables: Option<(&Arc<PathTable>, &Arc<FrozenStringTable>)>,
-    ) -> Result<MaterialisedBody, CompilerError> {
-        // Validate the retained canonical owner before handing its range/sequence to a parser
-        // consumer; no compatibility adapter or copied parser window is created.
+    ) -> Result<MaterialisedBody, InfrastructureFailure> {
+        // Validate the retained canonical owner before handing its range and sequence to a parser
+        // consumer.
         crate::compiler_frontend::ast::generic_functions::templates::validate_source_owner(
             &self.source_owner.source_tokens,
             self.token_range,
@@ -290,7 +292,8 @@ impl StableBodySyntax {
             "frozen generic body materialisation",
         )?;
         if !path_fork.starts_with(self.declaration_path, source_file) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
                 "frozen generic body declaration path is outside its materialised source file",
             ));
         }
@@ -299,7 +302,7 @@ impl StableBodySyntax {
             .resolved_file_references
             .iter()
             .map(StableResolvedFileReference::materialise)
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
         let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
             self.donor_file_id,
             resolved_file_references,

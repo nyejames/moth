@@ -6,6 +6,7 @@
 //! overflow reports a capacity diagnostic instead of growing past the limit.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 impl<E: Copy> CompletedOperation<E> {
     pub(crate) fn visit_edges(&self, visit: &mut dyn FnMut(E)) {
         match self {
@@ -93,7 +94,7 @@ impl<E: Copy> CompletedOperation<E> {
         owner: &ExpressionStore,
         success: &SuccessShape,
         mut raw: impl FnMut(E) -> ExprId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut valid = Ok(());
         self.visit_committed_edges(&mut |id| {
             if valid.is_ok() {
@@ -313,7 +314,7 @@ impl CompletedOperation<OwnedExpr> {
     pub(super) fn validate_owned_edges(
         &self,
         builder: &AstExpressionBuilder,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let mut valid = Ok(());
         self.visit_edges(&mut |id| {
             if valid.is_ok() {
@@ -583,7 +584,7 @@ impl SideCounts {
             ($field:ident,$amount:expr) => {
                 self.$field = self.$field.checked_add($amount).ok_or_else(|| {
                     ExpressionConstructionFailure::Diagnostic(
-                        CompilerDiagnostic::compiler_capacity_exceeded(
+                        token_lexical::compiler_capacity_exceeded(
                             AstCapacityResource::ExpressionSideEntries,
                             span,
                         ),

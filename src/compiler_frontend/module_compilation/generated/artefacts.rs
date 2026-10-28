@@ -8,7 +8,7 @@
 //!       deduplicates, stores and publishes these records at its compilation boundary; it never
 //!       produces or mutates their semantic content.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
@@ -17,8 +17,7 @@ use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 /// One independently lowered concrete generic executable.
 ///
-/// The stable identity is stored beside, rather than rediscovered from, its HIR module. Base
-/// canonical modules and generated sidecars therefore remain distinct project-compilation lanes.
+/// The stable identity is stored beside, rather than rediscovered from, its HIR module.
 pub(crate) struct GeneratedFunctionSidecar {
     pub(crate) identity: GeneratedFunctionIdentity,
     pub(crate) module: Module,
@@ -27,6 +26,10 @@ pub(crate) struct GeneratedFunctionSidecar {
 impl GeneratedFunctionSidecar {
     pub(crate) fn new(identity: GeneratedFunctionIdentity, module: Module) -> Self {
         Self { identity, module }
+    }
+
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.module.remap_path_ids(remap);
     }
 
     pub(crate) fn remap_string_ids_with_type_environment_cache(
@@ -91,7 +94,7 @@ impl GeneratedFunctionDelta {
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         for record in &mut self.records {
-            record.sidecar.module.remap_path_ids(remap);
+            record.sidecar.remap_path_ids(remap);
         }
     }
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
@@ -112,35 +115,39 @@ impl GeneratedFunctionDelta {
 /// WHY: generated summaries and sidecars publish together, so a boundary store must never accept a
 ///      sidecar whose root identity or summary cannot back the record. The proof reads compiler
 ///      semantic state, so the compiler owns it and the build boundary calls it during preflight.
-pub(crate) fn validate_completed_generated_record(
-    record: &CompletedGeneratedFunction,
-) -> Result<(), CompilerError> {
+pub(crate) fn validate_completed_generated_record(record: &CompletedGeneratedFunction) {
     let hir = &record.sidecar.module.executable.hir;
 
     let mut roots = hir.function_ids_by_generated.iter();
     let Some((root_identity, function_id)) = roots.next() else {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "Generated sidecar {:?} has no generated root executable identity",
             record.identity
-        )));
+        );
     };
     if roots.next().is_some() {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "Generated sidecar {:?} presents more than one generated root identity",
             record.identity
-        )));
+        );
     }
     if root_identity != &record.identity {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "Generated sidecar root identity {:?} disagrees with its record identity {:?}",
-            root_identity, record.identity
-        )));
+            root_identity,
+            record.identity
+        );
     }
     if function_id.0 as usize >= hir.functions.len() {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "Generated sidecar {:?} references out-of-range HIR FunctionId {}",
-            record.identity, function_id.0
-        )));
+            record.identity,
+            function_id.0
+        );
     }
 
     let exact_summary = record
@@ -151,20 +158,20 @@ pub(crate) fn validate_completed_generated_record(
         .analysis
         .public_call_summaries
         .get(function_id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
                 "Generated function {:?} has no exact borrow summary",
                 record.identity
-            ))
-        })?;
+            )
+        });
     if exact_summary != &record.summary {
-        return Err(CompilerError::compiler_error(format!(
+        crate::compiler_bug!(
+            CompilerStage::ProjectBuildAssembly,
             "Generated function {:?} summary disagrees with its sidecar borrow summary",
             record.identity
-        )));
+        );
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 //! output.
 //! WHY: loop heads and conditional child wrappers both apply around aggregate output once, while
 //! skipped branches and zero-output loops preserve structural no-output semantics. Conditional
-//! child wrappers now consume a TIR-derived owned wrapper node; the shared emitted-guard
+//! child wrappers consume a TIR-derived owned wrapper node; the shared emitted-guard
 //! infrastructure below is reused by both paths.
 
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -36,12 +36,12 @@ impl<'a> HirBuilder<'a> {
             &Option<SourceSpan>,
         ) -> Result<(), HirConstructionFailure>,
     ) -> Result<(), HirConstructionFailure> {
-        let condition_block = self.current_block_id_or_error(span_ref)?;
-        let parent_region = self.current_region_or_error(span_ref)?;
+        let condition_block = self.current_block_id_or_error()?;
+        let parent_region = self.current_region_or_error()?;
         let then_region = self.create_child_region(parent_region);
         let else_region = self.create_child_region(parent_region);
-        let then_block = self.create_block(then_region, span_ref, "template-aggregate-emitted")?;
-        let else_block = self.create_block(else_region, span_ref, "template-aggregate-skipped")?;
+        let then_block = self.create_block(then_region, span_ref, "template-aggregate-emitted");
+        let else_block = self.create_block(else_region, span_ref, "template-aggregate-skipped");
         let condition = self.make_local_load_expression(
             append.emitted_output,
             builtin_type_ids::BOOL,
@@ -58,21 +58,21 @@ impl<'a> HirBuilder<'a> {
             },
             span_ref,
         )?;
-        self.set_current_block(then_block, span_ref)?;
+        self.set_current_block(then_block)?;
         append_aggregate(self, append, span_ref)?;
 
-        let then_tail_block = self.current_block_id_or_error(span_ref)?;
-        let then_terminated = self.block_has_explicit_terminator(then_tail_block, span_ref)?;
+        let then_tail_block = self.current_block_id_or_error()?;
+        let then_terminated = self.block_has_explicit_terminator(then_tail_block)?;
 
-        self.set_current_block(else_block, span_ref)?;
-        let else_tail_block = self.current_block_id_or_error(span_ref)?;
+        self.set_current_block(else_block)?;
+        let else_tail_block = self.current_block_id_or_error()?;
 
         if then_terminated {
-            self.set_current_block(else_tail_block, span_ref)?;
+            self.set_current_block(else_tail_block)?;
             return Ok(());
         }
 
-        let merge_block = self.create_block(parent_region, span_ref, "template-aggregate-merge")?;
+        let merge_block = self.create_block(parent_region, span_ref, "template-aggregate-merge");
         self.emit_jump_to(
             then_tail_block,
             merge_block,
@@ -86,7 +86,7 @@ impl<'a> HirBuilder<'a> {
             "template-aggregate.skipped.merge",
         )?;
 
-        self.set_current_block(merge_block, span_ref)?;
+        self.set_current_block(merge_block)?;
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<LocalId, HirConstructionFailure> {
         let flag = self.allocate_temp_local(builtin_type_ids::BOOL, None)?;
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let false_value = self.make_expression(
             span_ref,
             HirExpressionKind::Bool(false),
@@ -120,7 +120,7 @@ impl<'a> HirBuilder<'a> {
         emitted_output: LocalId,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let region = self.current_region_or_error(span_ref)?;
+        let region = self.current_region_or_error()?;
         let true_value = self.make_expression(
             span_ref,
             HirExpressionKind::Bool(true),

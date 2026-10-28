@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
-use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::SharedMutableConflictView;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -19,7 +19,7 @@ use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_kind, run_borrow_checker,
+    assert_borrow_error_view, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{expression, lower_hir};
@@ -58,7 +58,7 @@ loop items |item|:
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutating a collection while iterating it should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -84,7 +84,7 @@ after = items.length()
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("a mutable helper call on the active iterable should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -107,7 +107,7 @@ loop items |item|:
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutating an alias of the active iterable should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -132,7 +132,7 @@ loop inner |inner_item|:
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the outer iterable must stay protected inside a nested loop");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -157,7 +157,7 @@ loop inner |inner_item|:
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the inner iterable must stay protected inside a nested loop");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -521,7 +521,7 @@ first = shared.get(0) catch then "missing"
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("an alias read on every iteration should block mutating its source");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -553,7 +553,7 @@ value = alias
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("CFG future use through a branch join should preserve the alias conflict");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]
@@ -563,7 +563,7 @@ fn projected_assignment_rooted_in_user_local_preserves_source_alias_conflict() {
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("a user-local projected mutation should preserve the source alias conflict");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
 }
 
 #[test]

@@ -9,7 +9,7 @@
 //! its own [`Module`], so its module-local `ResourceId` values are always resolved through the
 //! sidecar's paired resource table.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplatePiece,
     PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue,
@@ -72,7 +72,7 @@ pub(crate) fn append_reachable_resource_uses(
     union: &mut ResourceOriginUnion,
     module: &Module,
     reachability: &HirReachability,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for resource_use in &reachability.reachable_resource_uses {
         let origin = module
             .executable
@@ -100,7 +100,7 @@ pub(crate) fn append_entry_module_resources(
     union: &mut ResourceOriginUnion,
     module: &Module,
     reachability: &HirReachability,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     append_reachable_resource_uses(union, module, reachability)?;
     append_const_fragment_resources(union, module);
     Ok(())
@@ -111,17 +111,18 @@ pub(crate) fn append_entry_module_resources(
 /// The interface's `declarations` vector is a closed semantic surface and may contain provider
 /// records that are not themselves selected by this interface. Walking `export_bindings` first is
 /// therefore essential: private/unselected closed records must not enter a package union.
-/// Missing declarations indicate compiler-owned interface corruption and return `CompilerError`.
+/// Missing declarations indicate compiler-owned interface corruption and return `InfrastructureFailure`.
 pub(crate) fn append_exported_interface_resources(
     union: &mut ResourceOriginUnion,
     interface: &PublicSemanticInterface,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     for binding in &interface.export_bindings {
         let origin = binding.origin();
         let declaration = interface.declaration(origin).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "export binding {origin:?} has no matching public declaration"
-            ))
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!("export binding {origin:?} has no matching public declaration"),
+            )
         })?;
         append_exported_declaration_resources(union, declaration);
     }

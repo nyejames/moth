@@ -313,7 +313,7 @@ One clause resolves one provider/module/package surface. Direct selections are f
 
 Normal modules may depend on owned ordinary files/directories, direct child normal modules, visible support packages, registered Core/Builder/dependency packages and explicitly permitted provider files.
 
-They cannot depend on parents, ancestors, normal siblings, grandchildren directly, sibling descendants, unrelated branches or private files of another module. A child facade re-exports deeper declarations needed by its parent. Legal normal-module topology is acyclic by construction, with a defensive graph cycle validator retained.
+They cannot depend on parents, ancestors, normal siblings, grandchildren directly, sibling descendants, unrelated branches or private files of another module. A child facade re-exports deeper declarations needed by its parent. Normal-module topology does not rule out every authored cycle, so the graph validator reports any remaining cycle as a circular-dependency diagnostic.
 
 ### Scoped support packages
 
@@ -461,7 +461,9 @@ Directory modules and synthetic single-file compilation use the same semantic se
 
 Graph outcomes separately retain successful artefacts, diagnosed modules and blocked modules. A blocked record identifies the required failed provider and is not a cascade source diagnostic by default. Blocked modules are not semantically compiled. Independent branches may continue and a shared failing module is diagnosed once.
 
-Operational failure aborts the owning compilation through `InfrastructureFailure`. A proven compiler bug also ends it, using the compiler-bug boundary rather than an ordinary diagnosed outcome. Neither publishes partial semantic state.
+Operational failure aborts the owning compilation through the ordered `InfrastructureErrors` result,
+which contains typed `InfrastructureFailure` causes. A proven compiler bug also ends it, using the
+compiler-bug boundary rather than an ordinary diagnosed outcome. Neither publishes partial semantic state.
 
 ### Success-only `ProjectCompilation`
 
@@ -579,11 +581,19 @@ In `moth dev`, a `start` `Error` must be unmistakable even when the static page 
 
 Report in the affected browser and the server terminal. Reuse dev-client injection, origin-aware routing and error-page rendering. The browser-to-server report is the only added path. It carries entry, build and invocation identity, plus bounded category, message, code and available source information.
 
-The protocol is dev-only and same-origin. Treat browser input as untrusted. Validate kind, shape, `U32` code, current build and known entry. Bound payloads and per-client reporting, escape display text and terminal control characters, and reject malformed or stale reports without panicking the server. Respect the configured origin prefix. Do not accept arbitrary HTML or compiler-ID payloads. A reporting failure must not recursively invoke the reporter.
+The protocol is dev-only and same-origin. Treat browser input as untrusted. Validate kind, shape, `U32` code, current build, and membership in the published generation's validated HTML entries. Bound payloads and per-client reporting, escape display text and terminal control characters, and reject malformed or stale reports without panicking the server. Respect the configured origin prefix. Do not accept arbitrary HTML or compiler-ID payloads. A reporting failure must not recursively invoke the reporter.
 
 A runtime report does not change global build success, block other entries or give other tabs a compile-error page. Deduplicate by build, entry and invocation. Ignore old-build reports. Clear the originating view on a fresh page invocation through normal reload. Do not clear a failed invocation merely because a compiler rebuild succeeded elsewhere. If the network drops, keep the local browser view and console report and do not retry application startup.
 
-Development publication couples output bytes with build identity. Compile outside the shared publication lock, then hold that lock through the existing output writer and the build-state update. Capture each HTTP response's state and complete output bytes under the same lock, then release it before network writes or reload broadcasts. A write failure publishes diagnostics rather than a successful generation, even if emission changed some files. Failed builds replace page HTML with diagnostics while keeping supporting assets reachable.
+Each development build uses a fresh worker. Compilation, output writing, finalization and report freezing run without a `DevServerState` lock. The worker writes outputs only after successful compilation and returns only after output finalization. After a successful worker returns, the host snapshots served artifact bytes from the output directory outside the lock. It publishes that snapshot together with success metadata under one short lock; HTTP captures metadata and response bytes from the same immutable snapshot while holding the lock, then sends the response after releasing it. A failed compile leaves the output directory untouched. A failed output write can leave partial files on disk, but it cannot publish them: the previous snapshot and associated served metadata remain the last-known-good generation while the host publishes the failure page/version. Compiler bugs also publish a failure page without replacing the snapshot; the watcher remains active and the next build gets a fresh worker. There is no staging output directory; an output writer or snapshot failure publishes a failure state, never a successful generation.
+
+On failed builds, all HTML responses, including exact `.html` asset routes, use the current failure
+page and failed build version; non-HTML assets remain available from the last-known-good snapshot.
+
+The shipped `moth` binary includes this host, so root `[profile.release]` and `[profile.profiling]`
+use `panic = "unwind"`; debug/test policy remains unchanged. The unwind policy lets the owning worker
+boundary render compiler-bug reports and discard failed worker state. The current failure and worker
+contract is defined in `docs/compiler-data-layout-design.md` under `Tooling host isolation`.
 
 A page from generation N can fetch JavaScript or Wasm companions after generation N+1 publishes. Each response captures one generation, but separate requests do not pin an output batch. Reports retain the page's generation N and the server rejects them as stale after N+1.
 
@@ -794,7 +804,7 @@ Entries relink or regenerate when their implementation, dormant-root, runtime-de
 
 Configuration and exact typed-input dependence use existing fingerprint domains, including private implementation and compatibility. Fingerprints carry the canonical exact numeric type and value wherever those facts affect semantics; there is no numeric-profile dimension. Static Bool selection creates no new fingerprint family and never changes declaration identity. Project-field dependencies remain field-granular. Documentation-only changes update documentation/editor indexes without invalidating semantic consumers or executable variants.
 
-The M02 reuse gate requires evidence that a semantic or physical cache reused an artefact before testing invalidation. Cover private effect/body changes, public contracts, entry outcome changes, generated sidecars and backend/profile/ABI compatibility against that demonstrated reuse. A cold recompilation or a writer's skipped-unchanged result alone cannot satisfy this gate. Rebuild/write/serve tests prove current output freshness separately, including exact entry cause codes and diagnosed exports without treating old successful output as the new result.
+The cache-reuse validation gate requires evidence that a semantic or physical cache reused an artefact before testing invalidation. Cover private effect/body changes, public contracts, entry outcome changes, generated sidecars and backend/profile/ABI compatibility against that demonstrated reuse. A cold recompilation or a writer's skipped-unchanged result alone cannot satisfy this gate. Rebuild/write/serve tests prove current output freshness separately, including exact entry cause codes and diagnosed exports without treating old successful output as the new result.
 
 ### Physical variant invalidation
 

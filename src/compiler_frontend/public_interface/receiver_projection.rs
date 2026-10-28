@@ -6,13 +6,13 @@
 //! classification; the declaration-record projection, HIR origin seeding and generic-template
 //! extraction all consume it.
 //!
-//! WHY: R2C3 requires one callable identity authority consumed by direct projection,
+//! WHY: one callable identity authority is consumed by direct projection,
 //! declaration-record projection, HIR origin seeding and generic-template extraction. Keeping
 //! the seed table and receiver-method signature projection in one module separates callable
 //! identity from the per-binding type and trait projection while preserving the proven,
 //! deterministic construction logic.
 
-use super::direct_projection::FoldedValueJoinContext;
+use super::direct_projection::{FoldedValueJoinContext, PublicInterfaceDraftBuildFailure};
 use super::model::{
     PublicGenericTemplateDescriptor, PublicParameterTypeSlot, PublicReceiverMethodCategory,
     PublicReceiverMethodSemantics,
@@ -31,7 +31,8 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeProjectionContext, GenericDeclarationOrigin, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::{
@@ -93,10 +94,10 @@ pub(crate) enum CallableSeedKind {
 ///       [`OriginTypeId`] through the nominal-type origin index. Each receiver-method seed
 ///       carries a narrow `method_index` into the root table so the signature is projected
 ///       exactly once by the receiver projection owner.
-/// WHY: R2C3 requires one callable identity authority consumed by direct projection,
+/// WHY: one callable identity authority is consumed by direct projection,
 ///      declaration-record projection, HIR origin seeding and generic-template extraction.
-///      Building the table at this single boundary — where all inputs are available — removes
-///      the former `ReceiverSurfaceOrigins` parallel authority and prevents any consumer from
+///      Building the table at this single boundary — where all inputs are available — leaves
+///      no parallel authority, and prevents any consumer from
 ///      reconstructing callable identity from the receiver catalog.
 ///
 /// Duplicate rejection: every duplicate exact declaration path and every duplicate stable public
@@ -110,7 +111,7 @@ pub(crate) fn build_callable_seed_table(
     generic_function_templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<CallableSeed>, CompilerError> {
+) -> Result<Vec<CallableSeed>, InfrastructureFailure> {
     let mut seeds = Vec::new();
 
     // Free-function seeds: match function export bindings to roots for the exact path and
@@ -160,18 +161,21 @@ pub(crate) fn build_callable_seed_table(
                 ReceiverKey::Struct(path) => (path, OriginTypeCategory::Struct),
                 ReceiverKey::Choice(path) => (path, OriginTypeCategory::Choice),
                 ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_) => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "callable seed construction: a resolved receiver-method entry carries a \
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "callable seed construction: a resolved receiver-method entry carries a \
                          non-nominal receiver key ({:?}); receiver methods must live on a \
                          nominal struct or choice",
-                        entry.receiver
-                    )));
+                            entry.receiver
+                        ),
+                    ));
                 }
             };
 
             let receiver_origin = public_nominal_type_origins.get(receiver_path).ok_or_else(
                 || {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "callable seed construction: a receiver-method entry's receiver path is \
                          not in the public nominal-type origin index (path: {:?}); the root \
                          table should only select public nominal receivers",
@@ -180,24 +184,30 @@ pub(crate) fn build_callable_seed_table(
                 },
             )?;
             if receiver_origin.category() != expected_category {
-                return Err(CompilerError::compiler_error(format!(
-                    "callable seed construction: a receiver-method entry's receiver key expects \
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "callable seed construction: a receiver-method entry's receiver key expects \
                      a {expected_category:?} origin but the resolved nominal origin is a {:?} \
                      (receiver path: {:?}); the receiver key and stable origin category disagree",
-                    receiver_origin.category(),
-                    receiver_path
-                )));
+                        receiver_origin.category(),
+                        receiver_path
+                    ),
+                ));
             }
 
             let method_name = path_fork
                 .component(entry.function_path)
                 .map(|component| string_table.resolve(component))
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "callable seed construction: a receiver-method entry has no resolvable \
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "callable seed construction: a receiver-method entry has no resolvable \
                              defining method name (path: {:?})",
-                        entry.function_path
-                    ))
+                            entry.function_path
+                        ),
+                    )
                 })?;
 
             let method_origin = OriginFunctionId::new_receiver(
@@ -238,18 +248,24 @@ fn push_seed(
     origin: OriginFunctionId,
     generic_template: bool,
     kind: CallableSeedKind,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     if seeds.iter().any(|existing| existing.origin == origin) {
-        return Err(CompilerError::compiler_error(format!(
-            "callable seed construction: duplicate stable function origin {:?}",
-            origin
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "callable seed construction: duplicate stable function origin {:?}",
+                origin
+            ),
+        ));
     }
     if seeds.iter().any(|existing| existing.path == path) {
-        return Err(CompilerError::compiler_error(format!(
-            "callable seed construction: duplicate public callable declaration path {:?}",
-            path
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "callable seed construction: duplicate public callable declaration path {:?}",
+                path
+            ),
+        ));
     }
     seeds.push(CallableSeed {
         path,
@@ -291,7 +307,7 @@ pub(crate) fn project_receiver_method_signatures(
     callable_seeds: &[CallableSeed],
     receiver_method_entries: &[ReceiverMethodEntry],
     context: &ReceiverProjectionContext<'_>,
-) -> Result<FxHashMap<usize, ProjectedReceiverMethodSignature>, CompilerError> {
+) -> Result<FxHashMap<usize, ProjectedReceiverMethodSignature>, PublicInterfaceDraftBuildFailure> {
     let type_environment = context.type_environment;
     let canonical_context = context.projection_context;
     let string_table = context.string_table;
@@ -307,12 +323,15 @@ pub(crate) fn project_receiver_method_signatures(
         };
 
         let entry = receiver_method_entries.get(*method_index).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "receiver-method signature projection: a receiver-method callable seed carries \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "receiver-method signature projection: a receiver-method callable seed carries \
                  method_index {} but the root table has only {} receiver-method entries",
-                method_index,
-                receiver_method_entries.len()
-            ))
+                    method_index,
+                    receiver_method_entries.len()
+                ),
+            )
         })?;
 
         let default_provenance = project_defaults_provenance(
@@ -352,7 +371,7 @@ pub(crate) fn project_receiver_method_signatures(
                     )?,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
         let (returns, error_return) = project_return_slots(
             &entry.signature.returns,
@@ -367,7 +386,7 @@ pub(crate) fn project_receiver_method_signatures(
                 .generic_function_templates
                 .get(&entry.function_path)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "receiver-method signature projection: generic receiver method {:?} has \
                          no generic function template",
                         seed.origin
@@ -380,6 +399,7 @@ pub(crate) fn project_receiver_method_signatures(
                 &GenericDeclarationOrigin::nominal_type(receiver_origin.clone())?,
                 context.trait_source_facts,
                 context.public_source_trait_origins,
+                template.declaration_span,
             )?
         } else {
             Vec::new()
@@ -398,11 +418,15 @@ pub(crate) fn project_receiver_method_signatures(
             )
             .is_some()
         {
-            return Err(CompilerError::compiler_error(format!(
-                "receiver-method signature projection: two receiver-method seeds share \
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "receiver-method signature projection: two receiver-method seeds share \
                  method_index {}; a duplicate must not silently overwrite the first",
-                method_index
-            )));
+                    method_index
+                ),
+            )
+            .into());
         }
     }
 
@@ -416,28 +440,34 @@ pub(crate) fn project_receiver_method_signatures(
 /// projected canonical parameter/return/error-return types from the signature map keyed by the
 /// seed's `method_index`. The receiver origin is not repeated here because the semantics attach
 /// to the owning struct or choice declaration record. A seed that is not a `ReceiverMethod` or
-/// whose `method_index` has no projected signature is a `CompilerError` rather than a panic:
+/// whose `method_index` has no projected signature is an `InfrastructureFailure` rather than a panic:
 /// the construction boundary makes invalid combinations impossible in production, but this
 /// function remains total for test-facing callers.
 pub(super) fn receiver_method_semantics_from_seed(
     seed: &CallableSeed,
     receiver_method_signatures: &FxHashMap<usize, ProjectedReceiverMethodSignature>,
-) -> Result<PublicReceiverMethodSemantics, CompilerError> {
+) -> Result<PublicReceiverMethodSemantics, InfrastructureFailure> {
     let CallableSeedKind::ReceiverMethod { method_index, .. } = &seed.kind else {
-        return Err(CompilerError::compiler_error(format!(
-            "public-interface draft join: a non-receiver callable seed {:?} was passed to \
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "public-interface draft join: a non-receiver callable seed {:?} was passed to \
              receiver-method semantics projection",
-            seed.origin
-        )));
+                seed.origin
+            ),
+        ));
     };
     let signature = receiver_method_signatures
         .get(method_index)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "public-interface draft join: receiver-method seed with method_index {} has no \
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "public-interface draft join: receiver-method seed with method_index {} has no \
              projected signature",
-                method_index
-            ))
+                    method_index
+                ),
+            )
         })?;
     Ok(PublicReceiverMethodSemantics {
         method_origin: seed.origin.clone(),

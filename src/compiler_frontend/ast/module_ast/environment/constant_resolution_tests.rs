@@ -13,25 +13,32 @@ use crate::compiler_frontend::ast::const_eval::{
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::choices_control_flow::{self, CompileTimeEvaluationErrorView},
+    families::token_lexical::{self, CompilerCapacityExceededView},
+    test_support::compact_bag_for_test,
+};
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticPayload,
+    AstCapacityResource, CompileTimeEvaluationErrorReason, DiagnosticBag, DiagnosticDraft,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-fn evaluation_diagnostic(reason: CompileTimeEvaluationErrorReason) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(reason, None, None)
+fn evaluation_diagnostic(reason: CompileTimeEvaluationErrorReason) -> DiagnosticDraft {
+    choices_control_flow::compile_time_evaluation_error(reason, None, None)
 }
 
 fn diagnostic_reason(error: ExpressionParseError) -> CompileTimeEvaluationErrorReason {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected a source diagnostic, found {error:?}");
     };
-    let DiagnosticPayload::CompileTimeEvaluationError { reason, .. } = diagnostic.payload else {
-        panic!("expected a compile-time evaluation diagnostic");
-    };
-    reason
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    compact
+        .first()
+        .and_then(|view| view.family_view::<CompileTimeEvaluationErrorView>())
+        .expect("expected a compile-time evaluation diagnostic")
+        .reason
 }
 
 #[test]
@@ -110,11 +117,16 @@ fn ordinary_non_constant_folds_defer_to_the_not_foldable_refusal() {
 #[test]
 fn builder_capacity_failure_propagates_instead_of_refusing() {
     let capacity =
-        CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::ExpressionRows, None);
+        token_lexical::compiler_capacity_exceeded(AstCapacityResource::ExpressionRows, None);
     let refusal =
         non_constant_initializer_fold_refusal(Err(ConstantFoldError::Diagnostic(capacity)));
     let Err(ExpressionParseError::Diagnostic(diagnostic)) = refusal else {
         panic!("expected the capacity diagnostic to propagate");
     };
-    assert!(diagnostic.is_compiler_capacity_exceeded());
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact.first().expect("expected the capacity diagnostic");
+    assert!(
+        view.family_view::<CompilerCapacityExceededView>().is_some(),
+        "expected the capacity diagnostic to propagate"
+    );
 }

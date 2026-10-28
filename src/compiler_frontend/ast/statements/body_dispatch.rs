@@ -39,9 +39,14 @@ use crate::compiler_frontend::ast::statements::value_production::{
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidControlFlowStatementReason,
+    DeferredFeatureReason, DiagnosticBag, InvalidControlFlowStatementReason,
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
     ReservedNameOwner,
 };
@@ -55,7 +60,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// AST body parsing carries authored diagnostics and internal retained-data failures separately.
 ///
 /// The module emitter is the reporting boundary: it renders diagnostics and forwards
-/// `CompilerError` values unchanged. Nested statement parsers therefore must not collapse this
+/// `InfrastructureFailure` values unchanged. Nested statement parsers therefore must not collapse this
 /// result back into a diagnostic when a loop header meets a stream without canonical provenance.
 type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
 
@@ -88,23 +93,23 @@ impl ParsedBody {
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         match self {
             ParsedBody::Complete(nodes) => Ok(nodes),
-            ParsedBody::Draft(_) => Err(CompilerError::compiler_error(format!(
-                "{position} returned a nested numeric draft instead of completed body nodes"
-            ))
+            ParsedBody::Draft(_) => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "{position} returned a nested numeric draft instead of completed body nodes"
+                ),
+            )
             .into()),
         }
     }
 }
 
-fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
+fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
 }
 
-fn reserved_keyword_as_name_error(
-    keyword: StringId,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::reserved_name_collision(keyword, ReservedNameOwner::Keyword, span)
+fn reserved_keyword_as_name_error(keyword: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    names_declarations::reserved_name_collision(keyword, ReservedNameOwner::Keyword, span)
 }
 
 /// Produce a diagnostic for a deferred block keyword (`checked`, `async`).
@@ -116,7 +121,7 @@ fn deferred_block_error(
     string_table: &mut StringTable,
     keyword: &str,
     reason: DeferredFeatureReason,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let span = Some(token_stream.current_span());
     let next_is_assignment = token_stream
         .peek_next_tag()
@@ -126,7 +131,7 @@ fn deferred_block_error(
         return reserved_keyword_as_name_error(keyword_id, span);
     }
 
-    CompilerDiagnostic::deferred_feature_reason(reason, span)
+    names_declarations::deferred_feature_reason(reason, span)
 }
 
 #[allow(
@@ -139,7 +144,7 @@ pub(crate) fn parse_function_body_statements(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<ParsedBody> {
@@ -164,7 +169,7 @@ pub(crate) fn parse_function_body_statements(
                 && current_line_contains_top_level_fat_arrow(token_stream)
             {
                 return Err(statement_dispatch_error(
-                    CompilerDiagnostic::invalid_match_arm(
+                    choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::ArmMustStartNewLine,
                         Some(token_stream.current_span()),
                     ),
@@ -177,7 +182,6 @@ pub(crate) fn parse_function_body_statements(
         }
 
         match current_tag {
-            // Module start marker
             TokenTag::MODULE_START => {
                 token_stream.advance();
             }
@@ -230,7 +234,7 @@ pub(crate) fn parse_function_body_statements(
 
                 create_loop(
                     token_stream,
-                    context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
+                    context.new_child_control_flow(ContextKind::Loop, string_table, path_fork)?,
                     type_interner,
                     expression_builder,
                     const_values,
@@ -246,7 +250,7 @@ pub(crate) fn parse_function_body_statements(
 
                 create_branch(
                     token_stream,
-                    context.new_child_control_flow(ContextKind::Branch, string_table, path_fork),
+                    context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?,
                     type_interner,
                     expression_builder,
                     const_values,
@@ -262,7 +266,7 @@ pub(crate) fn parse_function_body_statements(
                     break;
                 } else {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::ElseOutsideIfOrMatch,
                             Some(token_stream.current_span()),
                         ),
@@ -305,7 +309,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::BREAK => {
                 if !context.is_inside_loop() {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::BreakOutsideLoop,
                             Some(token_stream.current_span()),
                         ),
@@ -323,7 +327,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::CONTINUE => {
                 if !context.is_inside_loop() {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::ContinueOutsideLoop,
                             Some(token_stream.current_span()),
                         ),
@@ -353,7 +357,7 @@ pub(crate) fn parse_function_body_statements(
                     };
 
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(reason, then_span),
+                        choices_control_flow::invalid_fallible_handling(reason, then_span),
                     ));
                 };
 
@@ -361,7 +365,7 @@ pub(crate) fn parse_function_body_statements(
                     || is_missing_produced_value_boundary(token_stream.current_tag())
                 {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(
+                        choices_control_flow::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::ThenRequiresValues,
                             Some(token_stream.current_span()),
                         ),
@@ -373,7 +377,7 @@ pub(crate) fn parse_function_body_statements(
                     && active_target.expected_arity.is_none()
                 {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(
+                        choices_control_flow::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
                             then_span,
                         ),
@@ -401,7 +405,8 @@ pub(crate) fn parse_function_body_statements(
                     let mut expressions = Vec::with_capacity(values.len());
                     for value in values {
                         let StatementExpression::Built(expression) = value else {
-                            return Err(CompilerError::compiler_error(
+                            return Err(InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
                                 "a produced-value list reported ready while holding a retained \
                                  fallback",
                             )
@@ -465,7 +470,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::TEMPLATE_HEAD => {
                 if context.kind != ContextKind::Module {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_standalone_statement(
+                        choices_control_flow::invalid_standalone_statement(
                             InvalidStandaloneStatementReason::StandaloneTemplate,
                             Some(token_stream.current_span()),
                         ),

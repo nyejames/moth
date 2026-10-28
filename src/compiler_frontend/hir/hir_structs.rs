@@ -1,4 +1,3 @@
-//! Reserved home for extracted HIR struct-lowering helpers.
-//!
-//! WHAT: documents the module slot used when struct-specific lowering moves out of monolithic HIR files.
-//! WHY: the HIR module tree already exposes this boundary, even though the extraction has not landed yet.
+//! Struct layout metadata lives in `structs.rs`; declaration registration is in
+//! `hir_statement/declarations.rs`, and generic-instance registration is in
+//! `hir_expression/types.rs`.

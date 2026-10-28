@@ -12,7 +12,9 @@
 //! JS assignment mode. Only source `copy` selects deep cloning.
 
 use crate::backends::js::JsEmitter;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, compiler_errors::InfrastructureFailure,
+};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::HirValueId;
 
@@ -48,7 +50,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         expression_id: HirValueId,
         use_context: JsValueUse,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         match use_context {
             JsValueUse::PlainExpression
             | JsValueUse::AssignmentValue
@@ -67,7 +69,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn lower_moth_return_value(
         &mut self,
         expression_id: HirValueId,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let expression = hir.expressions.expression(expression_id);
         match &expression.kind {
@@ -85,7 +87,10 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn lower_concrete_value(&mut self, expression_id: HirValueId) -> Result<String, CompilerError> {
+    fn lower_concrete_value(
+        &mut self,
+        expression_id: HirValueId,
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let expression = hir.expressions.expression(expression_id);
         match &expression.kind {
@@ -103,13 +108,14 @@ impl<'hir> JsEmitter<'hir> {
     fn lower_call_argument_value(
         &mut self,
         expression_id: HirValueId,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let hir = self.hir;
         let expression = hir.expressions.expression(expression_id);
         match expression.value_kind {
             ValueKind::Place => {
                 let HirExpressionKind::Load(place) = &expression.kind else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
                         "JavaScript backend received a place-valued expression without a direct place load",
                     ));
                 };

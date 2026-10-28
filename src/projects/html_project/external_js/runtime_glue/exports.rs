@@ -5,7 +5,8 @@
 //! WHY: the JS backend may reference many external functions, but only module exports need
 //!      generated glue wrappers.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry,
     ExternalSignatureType,
@@ -31,7 +32,7 @@ pub(super) fn collect_referenced_exports(
     external_imports: &[ModuleExternalImport],
     referenced_external_functions: &HashSet<ExternalFunctionId>,
     registry: &ExternalPackageRegistry,
-) -> Result<Vec<ReferencedExport>, CompilerError> {
+) -> Result<Vec<ReferencedExport>, InfrastructureFailure> {
     let mut exports = Vec::new();
     // Validate in emission order so corrupt inputs also produce deterministic failures.
     let mut ordered_function_ids: Vec<_> = referenced_external_functions.iter().collect();
@@ -138,7 +139,7 @@ fn selected_export_error(
     registry: &ExternalPackageRegistry,
     function_id: ExternalFunctionId,
     reason: &str,
-) -> CompilerError {
+) -> InfrastructureFailure {
     let function_name = registry
         .get_function_by_id(function_id)
         .map(|function| function.name.as_str())
@@ -155,12 +156,15 @@ fn selected_export_error(
         .unwrap_or("<unknown>");
     let package_id = registry.resolve_function_package_id(function_id);
 
-    CompilerError::compiler_error(format!(
-        "HTML JS glue preparation: validated runtime metadata is inconsistent for entry module '{}': \
+    InfrastructureFailure::internal(
+        CompilerStage::ProjectBuildAssembly,
+        format!(
+            "HTML JS glue preparation: validated runtime metadata is inconsistent for entry module '{}': \
          Moth function '{function_name}' ({function_id:?}), JS export '{export_name}', \
          package '{package_path}' ({package_id:?}): {reason}.",
-        portable_path_text(&module.metadata.entry_point)
-    ))
+            portable_path_text(&module.metadata.entry_point)
+        ),
+    )
 }
 
 /// Produces a stable local import alias for a raw external export.

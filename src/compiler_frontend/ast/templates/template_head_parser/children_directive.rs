@@ -25,10 +25,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     wrapper_reference_for_template,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateDirectiveReason,
-};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -62,26 +62,14 @@ pub(super) fn parse_children_style_directive(
         string_table,
         path_fork,
     )
-    .map_err(|error| error.map_diagnostic(|diagnostic| {
-        // Convert the generic EmptyArguments reason into the children-specific
-        // InvalidChildrenArgument so rendered guidance mentions wrapper templates
-        // and strings rather than generic empty parens.
-        if matches!(
-            diagnostic.payload,
-            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidTemplateDirective {
-                reason: InvalidTemplateDirectiveReason::EmptyArguments,
-                ..
-            }
-        ) {
-            CompilerDiagnostic::invalid_template_directive(
-                Some(directive_name),
-                InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                diagnostic.primary_span,
-            )
-        } else {
-            diagnostic
-        }
-    }))?;
+    .map_err(|error| {
+        // Classify the required-argument failure while it still carries syntax provenance,
+        // then construct the final children-specific family draft.
+        error.into_template_error(
+            directive_name,
+            InvalidTemplateDirectiveReason::InvalidChildrenArgument,
+        )
+    })?;
     let directive_argument = expression_builder.view(directive_argument)?;
     let argument_span = directive_argument.span();
 
@@ -101,7 +89,7 @@ pub(super) fn parse_children_style_directive(
 
     if !argument_is_compile_time_constant {
         return Err(with_argument_span(
-            CompilerDiagnostic::invalid_template_directive(
+            templates::invalid_template_directive(
                 Some(string_table.intern("children")),
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                 argument_span,
@@ -123,7 +111,8 @@ pub(super) fn parse_children_style_directive(
                 .map(|template_ir| template_ir.kind.clone())
                 .ok_or_else(|| {
                     TemplateError::from(
-                        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "`$children` referenced a template missing from the module TIR store.",
                         ),
                     )
@@ -136,7 +125,7 @@ pub(super) fn parse_children_style_directive(
                     | TemplateType::Comment(_)
             ) {
                 return Err(with_argument_span(
-                    CompilerDiagnostic::invalid_template_directive(
+                    templates::invalid_template_directive(
                         Some(string_table.intern("children")),
                         InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                         argument_span,
@@ -147,7 +136,7 @@ pub(super) fn parse_children_style_directive(
             }
 
             // The wrapper-reference helper reports internal authority failures
-            // as `CompilerError`; carry them through `TemplateError` so the
+            // as `InfrastructureFailure`; carry them through `TemplateError` so the
             // diagnostic lane stays the infrastructure lane rather than a
             // fabricated user-facing directive diagnostic.
             wrapper_reference_for_template(child_template, &current_store)
@@ -157,12 +146,13 @@ pub(super) fn parse_children_style_directive(
         ExpressionOperationView::Constant(value) => {
             let ConstValuePayload::String(ConstStringValue::Text(text)) =
                 const_values.payload(value).ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "template expression references an absent constant value",
                     )
                 })?
             else {
-                return Err(CompilerDiagnostic::invalid_template_directive(
+                return Err(templates::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                     argument_span,
@@ -174,7 +164,7 @@ pub(super) fn parse_children_style_directive(
 
         _ => {
             return Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern("children")),
                     InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                     argument_span,
@@ -217,11 +207,11 @@ fn normalize_string_child_wrapper_reference(
 }
 
 fn with_argument_span(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft,
     argument_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = argument_span;
+) -> crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(argument_span);
     }
     diagnostic
 }

@@ -1,8 +1,10 @@
 use super::builder::PathNode;
 use super::{
-    PathId, PathIdRemap, PathInternError, PathInternerBuilder, PathInternerFork,
-    PathInternerForkSource,
+    ForcedExhaustionGuard, PathId, PathIdRemap, PathInternError, PathInternerBuilder,
+    PathInternerFork, PathInternerForkSource, PathTable,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::mem::{align_of, size_of};
 use std::path::PathBuf;
@@ -414,6 +416,44 @@ fn fork_shares_base_identities_and_continues_local_suffix() {
         .try_intern_filesystem_path(std::path::Path::new("base/leaf/child"), &mut string_table)
         .expect("fork filesystem interning must succeed");
     assert_eq!(filesystem_path, local);
+}
+
+#[test]
+fn shared_tables_stay_stable_as_producers_continue_interning() {
+    let mut string_table = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    let builder_path = builder
+        .try_intern_portable_path("builder/captured", &mut string_table)
+        .unwrap();
+    let builder_table = builder.shared_table();
+    let builder_later = builder
+        .try_intern_portable_path("builder/later", &mut string_table)
+        .unwrap();
+
+    let mut scratch = Vec::new();
+    assert!(builder_table.contains(builder_path));
+    assert!(!builder_table.contains(builder_later));
+    assert_eq!(
+        builder_table.render_portable(builder_path, &string_table, &mut scratch),
+        "builder/captured"
+    );
+
+    let path_source = builder.fork_source();
+    let mut fork = path_source.fork_for_module();
+    let fork_path = fork
+        .try_intern_portable_path("fork/captured", &mut string_table)
+        .unwrap();
+    let fork_table = fork.shared_table();
+    let fork_later = fork
+        .try_intern_portable_path("fork/later", &mut string_table)
+        .unwrap();
+
+    assert!(fork_table.contains(fork_path));
+    assert!(!fork_table.contains(fork_later));
+    assert_eq!(
+        fork_table.render_portable(fork_path, &string_table, &mut scratch),
+        "fork/captured"
+    );
 }
 
 fn intern_fork_paths(
@@ -901,6 +941,226 @@ fn merge_accepts_empty_and_identity_deltas() {
         .merge_delta_from(&second_fork, &second_string_remap)
         .expect("a matching local suffix must merge");
     assert_eq!(second_remap.get(leaf), leaf);
+}
+
+/// Render `path` through `table` so snapshot and destination spellings compare directly.
+fn render_path(table: &PathTable, path: PathId, strings: &StringTable) -> String {
+    let mut scratch = Vec::new();
+    table.render_portable(path, strings, &mut scratch)
+}
+
+#[test]
+fn merge_snapshot_maps_each_node_to_the_same_spelling() {
+    let mut strings = StringTable::new();
+
+    let mut snapshot_builder = PathInternerBuilder::new();
+    snapshot_builder
+        .try_intern_portable_path("docs/guide/intro", &mut strings)
+        .expect("test path fits");
+    snapshot_builder
+        .try_intern_portable_path("src/main", &mut strings)
+        .expect("test path fits");
+    let snapshot = snapshot_builder.freeze();
+
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .try_intern_portable_path("src/lib", &mut strings)
+        .expect("test path fits");
+    let remap = destination
+        .merge_snapshot(&snapshot)
+        .expect("a snapshot with room for new nodes must merge");
+
+    for index in 0..snapshot.len() {
+        let snapshot_path = PathId::try_from_index(index).expect("test index fits");
+        assert_eq!(
+            render_path(destination.paths(), remap.get(snapshot_path), &strings),
+            render_path(&snapshot, snapshot_path, &strings),
+            "snapshot node {index} must keep its spelling after the remap"
+        );
+    }
+}
+
+#[test]
+fn merge_snapshot_of_a_prefix_is_identity() {
+    let mut strings = StringTable::new();
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .try_intern_portable_path("a/b", &mut strings)
+        .expect("test path fits");
+    destination
+        .try_intern_portable_path("a/c", &mut strings)
+        .expect("test path fits");
+
+    let mut snapshot_builder = PathInternerBuilder::new();
+    snapshot_builder
+        .try_intern_portable_path("a/b", &mut strings)
+        .expect("test path fits");
+    let snapshot = snapshot_builder.freeze();
+
+    let remap = destination
+        .merge_snapshot(&snapshot)
+        .expect("a prefix of the destination merges without new nodes");
+
+    assert!(remap.is_identity());
+    assert_eq!(destination.len(), 4, "a prefix snapshot appends nothing");
+}
+
+#[test]
+fn merge_snapshot_reuses_matching_children_and_appends_the_rest() {
+    let mut strings = StringTable::new();
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .try_intern_portable_path("p/q", &mut strings)
+        .expect("test path fits");
+    destination
+        .try_intern_portable_path("a/c", &mut strings)
+        .expect("test path fits");
+    // Root, `p`, `p/q`, `a`, `a/c`.
+    let destination_len = destination.len();
+
+    let mut snapshot_builder = PathInternerBuilder::new();
+    snapshot_builder
+        .try_intern_portable_path("a/c/d", &mut strings)
+        .expect("test path fits");
+    let snapshot = snapshot_builder.freeze();
+
+    let remap = destination
+        .merge_snapshot(&snapshot)
+        .expect("a snapshot with room for new nodes must merge");
+
+    // Only `a/c/d` is new: `a` and `a/c` already exist under different numbers.
+    assert_eq!(destination.len(), destination_len + 1);
+    assert!(!remap.is_identity());
+    for index in 0..snapshot.len() {
+        let snapshot_path = PathId::try_from_index(index).expect("test index fits");
+        assert_eq!(
+            render_path(destination.paths(), remap.get(snapshot_path), &strings),
+            render_path(&snapshot, snapshot_path, &strings),
+        );
+    }
+    // Existing destination paths keep their numbers and spellings: the merge is append-only.
+    let p_q = PathId::try_from_index(2).expect("test index fits");
+    assert_eq!(render_path(destination.paths(), p_q, &strings), "p/q");
+}
+
+#[test]
+fn merge_snapshot_appends_a_pure_extension_at_its_own_numbers() {
+    let mut strings = StringTable::new();
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .try_intern_portable_path("a/b", &mut strings)
+        .expect("test path fits");
+
+    let mut snapshot_builder = PathInternerBuilder::new();
+    snapshot_builder
+        .try_intern_portable_path("a/b/c/d", &mut strings)
+        .expect("test path fits");
+    let snapshot = snapshot_builder.freeze();
+
+    let remap = destination
+        .merge_snapshot(&snapshot)
+        .expect("a pure extension must merge");
+
+    assert_eq!(destination.len(), snapshot.len());
+    // Each appended node lands at its snapshot number, so every ID maps to itself. The flag is
+    // exact by value, so it reports `true` even though the snapshot is longer than the builder.
+    assert!(remap.is_identity());
+    for index in 0..snapshot.len() {
+        let snapshot_path = PathId::try_from_index(index).expect("test index fits");
+        assert_eq!(remap.get(snapshot_path), snapshot_path);
+    }
+}
+
+#[test]
+fn merge_snapshot_reports_table_full_without_appending_the_rejected_node() {
+    let mut strings = StringTable::new();
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .try_intern_portable_path("a", &mut strings)
+        .expect("test path fits");
+    let destination_len = destination.len();
+
+    let mut snapshot_builder = PathInternerBuilder::new();
+    snapshot_builder
+        .try_intern_portable_path("a/b", &mut strings)
+        .expect("test path fits");
+    let snapshot = snapshot_builder.freeze();
+
+    let _exhausted = ForcedExhaustionGuard::new();
+    let result = destination.merge_snapshot(&snapshot);
+
+    assert!(
+        matches!(result, Err(PathInternError::TableFull)),
+        "a new node under forced exhaustion must report TableFull"
+    );
+    assert_eq!(
+        destination.len(),
+        destination_len,
+        "the rejected node must not be appended"
+    );
+}
+
+#[test]
+fn merge_snapshot_resolves_existing_children_under_forced_exhaustion() {
+    let mut strings = StringTable::new();
+    let mut destination = PathInternerBuilder::new();
+    destination
+        .try_intern_portable_path("p", &mut strings)
+        .expect("test path fits");
+    destination
+        .try_intern_portable_path("a", &mut strings)
+        .expect("test path fits");
+    let existing_a = PathId::try_from_index(2).expect("test index fits");
+
+    let mut snapshot_builder = PathInternerBuilder::new();
+    snapshot_builder
+        .try_intern_portable_path("a", &mut strings)
+        .expect("test path fits");
+    let snapshot = snapshot_builder.freeze();
+
+    let _exhausted = ForcedExhaustionGuard::new();
+    let remap = destination
+        .merge_snapshot(&snapshot)
+        .expect("an existing child must resolve even when new nodes are refused");
+
+    assert_eq!(
+        remap.get(PathId::try_from_index(1).expect("test index fits")),
+        existing_a
+    );
+    assert_eq!(destination.len(), 3, "nothing new is appended");
+}
+
+#[test]
+fn merge_snapshot_rejects_a_parent_that_does_not_precede_its_child() {
+    // Node 1 names itself as parent, which no builder-produced table can contain.
+    let malformed = PathTable::from_parts(
+        vec![
+            PathNode {
+                parent: None,
+                component: StringId::from_index(0),
+            },
+            PathNode {
+                parent: PathId::try_from_index(1),
+                component: StringId::from_index(1),
+            },
+        ],
+        vec![0, 1],
+    );
+
+    let mut destination = PathInternerBuilder::new();
+
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = destination.merge_snapshot(&malformed);
+    }))
+    .expect_err("malformed snapshot must raise a compiler bug");
+    let report = payload
+        .downcast_ref::<CompilerBugReport>()
+        .expect("malformed snapshot must use a structured compiler bug payload");
+    assert_eq!(report.stage, CompilerStage::AstConstruction);
+    assert_eq!(
+        report.message.as_ref(),
+        "path snapshot node 1 names parent 1 that does not precede it; this is a compiler bug"
+    );
 }
 
 /// An all-identity string remap for merges whose delta carries no new components.

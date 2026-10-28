@@ -20,9 +20,9 @@ fn inline_expression_rejects_missing_argument_placeholder() {
         .expect_err("missing argument placeholder should fail");
 
     assert!(
-        error.msg.contains("missing placeholder '#1'"),
+        error.message.contains("missing placeholder '#1'"),
         "expected missing placeholder diagnostic, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -34,9 +34,9 @@ fn inline_expression_rejects_duplicate_argument_placeholder() {
         .expect_err("duplicate argument placeholder should fail");
 
     assert!(
-        error.msg.contains("duplicate placeholder '#0'"),
+        error.message.contains("duplicate placeholder '#0'"),
         "expected duplicate placeholder diagnostic, got: {}",
-        error.msg
+        error.message
     );
 }
 
@@ -48,8 +48,8 @@ fn inline_expression_rejects_stray_placeholder() {
         .expect_err("placeholder without a matching argument should fail");
 
     assert!(
-        error.msg.contains("placeholder '#2'"),
+        error.message.contains("placeholder '#2'"),
         "expected stray placeholder diagnostic, got: {}",
-        error.msg
+        error.message
     );
 }

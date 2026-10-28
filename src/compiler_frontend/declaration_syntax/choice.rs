@@ -11,11 +11,15 @@
 
 use super::DeclarationCursor;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidChoiceVariantReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
@@ -83,7 +87,7 @@ impl ChoiceVariantSyntax {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         self.payload
             .validate_required_source_prefixes(provisional_source_file, path_fork)
     }
@@ -116,7 +120,7 @@ impl ChoiceVariantPayloadSyntax {
         &self,
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         match self {
             Self::Unit => Ok(()),
             Self::Record { fields } => {
@@ -151,13 +155,13 @@ pub(crate) fn parse_choice_shell(
     choice_path: PathId,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
 ) -> Result<Vec<ChoiceVariantSyntax>, HeaderParseFailure> {
     // Mutation: EOF diagnostic payloads intern delimiter symbols that are not present
     // in the source text.
     let mut variants = Vec::new();
     let mut seen_variants: FxHashMap<StringId, SourceSpan> = FxHashMap::default();
-    let mut bag = DiagnosticBag::new();
+    let mut duplicate_diagnostic: Option<DiagnosticDraft> = None;
 
     // Caller is positioned on the `::` token.
     token_stream.advance();
@@ -170,8 +174,7 @@ pub(crate) fn parse_choice_shell(
             TokenTag::MUST | TokenTag::TRAIT_THIS => {
                 let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                     token_stream.current_tag(),
-                    current_span,
-                    "Header Parsing",
+                    CompilerStage::HeaderParsing,
                     "choice header payload parsing",
                 )?;
 
@@ -183,7 +186,8 @@ pub(crate) fn parse_choice_shell(
                     .current_string_id_in(string_table)
                     .map_err(HeaderParseFailure::Infrastructure)?
                 else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "symbol token is missing its string payload",
                     )
                     .into());
@@ -192,11 +196,9 @@ pub(crate) fn parse_choice_shell(
 
                 // Make sure this is not a duplicate variant name.
                 if let Some(first_span) = seen_variants.get(&variant_name) {
-                    bag.push(CompilerDiagnostic::duplicate_declaration(
-                        variant_name,
-                        Some(*first_span),
-                        current_span,
-                    ));
+                    if duplicate_diagnostic.is_none() {
+                        duplicate_diagnostic = Some(names_declarations::duplicate_declaration(variant_name, current_span).with_label(Some(*first_span), Some(crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage::PreviousDeclaration)));
+                    }
                 } else if let Some(variant_span) = current_span {
                     seen_variants.insert(variant_name, variant_span);
                 }
@@ -210,7 +212,6 @@ pub(crate) fn parse_choice_shell(
                     warnings.push(warning);
                 }
 
-                // Advance past the variant name
                 token_stream.advance();
                 token_stream.skip_newlines();
 
@@ -227,7 +228,7 @@ pub(crate) fn parse_choice_shell(
                             path_fork,
                         )?;
                         if fields.is_empty() {
-                            return Err(CompilerDiagnostic::invalid_choice_variant(
+                            return Err(choices_control_flow::invalid_choice_variant(
                                 InvalidChoiceVariantReason::EmptyRecordBody,
                                 None,
                                 None,
@@ -247,7 +248,7 @@ pub(crate) fn parse_choice_shell(
                                 &field.type_annotation,
                                 path_fork.component(choice_path),
                             ) {
-                                return Err(CompilerDiagnostic::invalid_choice_variant(
+                                return Err(choices_control_flow::invalid_choice_variant(
                                     InvalidChoiceVariantReason::RecursiveDeclaration,
                                     None,
                                     None,
@@ -262,7 +263,7 @@ pub(crate) fn parse_choice_shell(
                     }
 
                     TokenTag::OPEN_PARENTHESIS => {
-                        return Err(CompilerDiagnostic::invalid_choice_variant(
+                        return Err(choices_control_flow::invalid_choice_variant(
                             InvalidChoiceVariantReason::ConstructorStyleNotSupported,
                             None,
                             None,
@@ -280,7 +281,7 @@ pub(crate) fn parse_choice_shell(
                     }
 
                     token if starts_rejected_choice_payload_shorthand(token) => {
-                        return Err(CompilerDiagnostic::invalid_choice_variant(
+                        return Err(choices_control_flow::invalid_choice_variant(
                             InvalidChoiceVariantReason::PayloadShorthandNotSupported,
                             None,
                             None,
@@ -330,8 +331,7 @@ pub(crate) fn parse_choice_shell(
                             TokenTag::MUST | TokenTag::TRAIT_THIS => {
                                 let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                                     token_stream.current_tag(),
-                                    current_source_span(token_stream),
-                                    "Header Parsing",
+                                    CompilerStage::HeaderParsing,
                                     "choice header payload parsing",
                                 )?;
 
@@ -345,7 +345,7 @@ pub(crate) fn parse_choice_shell(
                                 continue;
                             }
                             TokenTag::TYPE_PARAMETER_BRACKET => {
-                                return Err(CompilerDiagnostic::invalid_choice_variant(
+                                return Err(choices_control_flow::invalid_choice_variant(
                                     InvalidChoiceVariantReason::UnexpectedSeparator,
                                     None,
                                     None,
@@ -363,7 +363,7 @@ pub(crate) fn parse_choice_shell(
                             payload_token
                                 if starts_rejected_choice_payload_shorthand(payload_token) =>
                             {
-                                return Err(CompilerDiagnostic::invalid_choice_variant(
+                                return Err(choices_control_flow::invalid_choice_variant(
                                     InvalidChoiceVariantReason::PayloadShorthandNotSupported,
                                     None,
                                     None,
@@ -373,7 +373,7 @@ pub(crate) fn parse_choice_shell(
                                 .into());
                             }
                             _ => {
-                                return Err(CompilerDiagnostic::invalid_choice_variant(
+                                return Err(choices_control_flow::invalid_choice_variant(
                                     InvalidChoiceVariantReason::UnexpectedSeparator,
                                     None,
                                     None,
@@ -385,14 +385,14 @@ pub(crate) fn parse_choice_shell(
                         }
                     }
                     TokenTag::EOF => {
-                        return Err(CompilerDiagnostic::unexpected_end_of_file(
+                        return Err(token_lexical::unexpected_end_of_file(
                             Some(string_table.intern(";")),
                             current_source_span(token_stream),
                         )
                         .into());
                     }
                     _ => {
-                        return Err(CompilerDiagnostic::invalid_choice_variant(
+                        return Err(choices_control_flow::invalid_choice_variant(
                             InvalidChoiceVariantReason::UnexpectedSeparator,
                             None,
                             None,
@@ -404,7 +404,7 @@ pub(crate) fn parse_choice_shell(
                 }
             }
             TokenTag::TYPE_PARAMETER_BRACKET => {
-                return Err(CompilerDiagnostic::invalid_choice_variant(
+                return Err(choices_control_flow::invalid_choice_variant(
                     InvalidChoiceVariantReason::UnexpectedSeparator,
                     None,
                     None,
@@ -415,7 +415,7 @@ pub(crate) fn parse_choice_shell(
             }
             TokenTag::END => {
                 if variants.is_empty() {
-                    return Err(CompilerDiagnostic::invalid_choice_variant(
+                    return Err(choices_control_flow::invalid_choice_variant(
                         InvalidChoiceVariantReason::MissingVariants,
                         None,
                         None,
@@ -429,7 +429,7 @@ pub(crate) fn parse_choice_shell(
                 break;
             }
             TokenTag::EOF => {
-                return Err(CompilerDiagnostic::unexpected_end_of_file(
+                return Err(token_lexical::unexpected_end_of_file(
                     Some(string_table.intern(";")),
                     current_span,
                 )
@@ -441,34 +441,29 @@ pub(crate) fn parse_choice_shell(
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
                         HeaderParseFailure::Infrastructure(
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
+                            InfrastructureFailure::malformed_token_projection(
                                 "choice unexpected-token diagnostic",
+                                error,
                             ),
                         )
                     })?
                 else {
-                    return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+                    return Err(token_lexical::unexpected_end_of_file(None, span).into());
                 };
-                return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
+                return Err(token_lexical::unexpected_token_from_tag(found, span).into());
             }
         }
     }
 
-    if bag.has_errors() {
-        let first = bag
-            .into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("choice duplicate bag holds at least one diagnostic");
-        return Err(HeaderParseFailure::Diagnostic(first));
+    if let Some(diagnostic) = duplicate_diagnostic {
+        return Err(HeaderParseFailure::Diagnostic(diagnostic));
     }
 
     Ok(variants)
 }
 
-fn choice_variant_default_value_diagnostic(span: Option<SourceSpan>) -> CompilerDiagnostic {
-    CompilerDiagnostic::deferred_feature_reason(
+fn choice_variant_default_value_diagnostic(span: Option<SourceSpan>) -> DiagnosticDraft {
+    names_declarations::deferred_feature_reason(
         DeferredFeatureReason::ChoiceVariantDefaultValue,
         span,
     )

@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -49,19 +49,12 @@ use crate::compiler_frontend::tests::ast_fixture_support::runtime_template_hando
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
-// Re-export TypeId-first AST construction helpers from the bridge module so existing
-// HIR test imports continue to work without mentioning parse-era type syntax.
-pub(crate) use crate::compiler_frontend::tests::type_id_fixture_support::{
-    HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
-    build_ast_with_registered_types, lower_ast, lower_ast_with_metadata,
-};
-
 pub(crate) fn validate_module_for_tests(
     module: &HirModule,
     _string_table: &StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     super::validate_hir_module(module, type_environment, external_package_registry)
 }
 
@@ -214,7 +207,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn test_register_local_in_block(&mut self, local: HirLocal, name: PathId) {
         let current_block = self.current_block_id().unwrap_or(BlockId(0));
-        let _ = self.register_local_in_block(current_block, local.clone(), &None);
+        let _ = self.register_local_in_block(current_block, local.clone());
 
         self.locals_by_name.insert(name, local.id);
         self.side_table.bind_local_name(local.id, name);

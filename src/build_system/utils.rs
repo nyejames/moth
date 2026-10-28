@@ -3,10 +3,10 @@
 //! WHAT: small one-liner wrappers that appear in multiple build-system modules.
 //! WHY: avoids duplicating the same helper in every file that touches filesystem paths.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+    InfrastructureDetail, InfrastructureFailure,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::fs;
 use std::path::Path;
@@ -38,34 +38,21 @@ pub(crate) fn should_skip_unchanged_write(
 //  Diagnostic Helpers
 // -------------------------
 
-/// Shorthand to build a file-error diagnostic message.
+/// Shorthand to build a filesystem failure during output handling.
 ///
-/// WHAT: wraps `CompilerMessages::file_error` with the same argument shape everywhere.
-/// WHY: keeps call sites short and consistent across build, cleanup, and HTML builder modules.
-pub(crate) fn file_error_messages(
-    path: &Path,
-    msg: impl Into<String>,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    CompilerMessages::file_error(path, msg, string_table)
+/// WHAT: wraps the stage-bearing filesystem constructor with the same argument shape everywhere.
+/// WHY: keeps call sites short and consistent across output-writing modules.
+pub(crate) fn file_error(path: &Path, msg: impl Into<String>) -> InfrastructureFailure {
+    InfrastructureFailure::filesystem(CompilerStage::Output, path, msg.into())
 }
 
-/// Like `file_error_messages`, but also sets a typed rejection reason as metadata.
-///
-/// WHAT: creates a file-error `CompilerMessages` with the `OutputRejectionReason`
-/// metadata key set, so tests can assert the exact rejection contract.
-/// WHY: all writer rejections share `ErrorType::File`; the typed reason seam
-/// lets tests distinguish between distinct safety contracts.
+/// Like `file_error`, but also retains the typed output-rejection reason.
 pub(crate) fn file_error_with_rejection_reason(
     path: &Path,
     msg: impl Into<String>,
     reason: crate::build_system::output::OutputRejectionReason,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let mut error = CompilerError::file_error(path, msg);
-    error.new_metadata_entry(
-        CompilerErrorMetadataKey::OutputRejectionReason,
-        reason.as_metadata_value().to_owned(),
-    );
-    CompilerMessages::from_error(error, string_table.clone())
+) -> InfrastructureFailure {
+    InfrastructureFailure::filesystem(CompilerStage::Output, path, msg.into()).with_detail(
+        InfrastructureDetail::OutputRejectionReason(reason.as_metadata_value().into()),
+    )
 }

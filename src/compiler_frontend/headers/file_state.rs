@@ -5,8 +5,10 @@
 //! WHY: keeping mutable file-local state behind one owner lets `file_parser` read as the
 //! high-level header-state machine instead of a long list of unrelated vectors and counters.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, FileFrontendPrepareError, FileFrontendPrepareOutput, FileRole, Header,
     HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
@@ -30,7 +32,7 @@ use std::sync::Arc;
 /// WHY: these values are consumed together when building the per-file output, and keeping them
 /// together makes branch handlers explicit about which state they mutate.
 pub(super) struct HeaderFileParseState {
-    pub(super) warnings: Vec<CompilerDiagnostic>,
+    pub(super) warnings: DiagnosticBag,
     pub(super) headers: Vec<Header>,
     pub(super) encountered_symbols: HashMap<StringId, SourceSpan>,
     pub(super) start_body_symbols: HashSet<StringId>,
@@ -63,7 +65,7 @@ pub(super) struct HeaderFileParseState {
 impl HeaderFileParseState {
     pub(super) fn new(token_count: usize) -> Self {
         Self {
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
             headers: Vec::with_capacity(token_count / TOKEN_TO_HEADER_RATIO),
             encountered_symbols: HashMap::with_capacity(
                 MINIMUM_LIKELY_DECLARATIONS + (token_count / TOKEN_TO_DECLARATION_RATIO),
@@ -88,16 +90,26 @@ impl HeaderFileParseState {
     pub(super) fn record_start_body_token_ref(
         &mut self,
         token: TokenRef<'_>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let start = token.index();
         let end = TokenIndex::try_from_index(start.index().checked_add(1).ok_or_else(|| {
-            CompilerError::compiler_error("start-body token index overflowed its source range")
+            crate::compiler_bug!(
+                CompilerStage::HeaderParsing,
+                "start-body token index overflowed its source range",
+            )
         })?)
         .ok_or_else(|| {
-            CompilerError::compiler_error("start-body token end exceeded its checked domain")
+            crate::compiler_bug!(
+                CompilerStage::HeaderParsing,
+                "start-body token end exceeded its checked domain",
+            )
         })?;
-        let range = TokenRange::new(token.source(), start, end)
-            .ok_or_else(|| CompilerError::compiler_error("start-body token range was reversed"))?;
+        let range = TokenRange::new(token.source(), start, end).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::HeaderParsing,
+                "start-body token range was reversed",
+            )
+        });
         self.record_start_body_range(range);
         self.observe_start_body_token_ref(token);
         Ok(())
@@ -119,9 +131,12 @@ impl HeaderFileParseState {
         &mut self,
         range: TokenRange,
         source: &SourceTokens,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), InfrastructureFailure> {
         let cursor = source.cursor(range).map_err(|_| {
-            CompilerError::compiler_error("start-body range exceeds its source token owner")
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "start-body range exceeds its source token owner",
+            )
         })?;
         self.record_start_body_range(range);
         self.observe_start_body_cursor(cursor);
@@ -178,13 +193,13 @@ impl HeaderFileParseState {
         source_file: crate::compiler_frontend::symbols::path_interner::PathId,
         path_syntax: Arc<PathSyntaxTable>,
         file_role: FileRole,
-    ) -> Result<FileFrontendPrepareOutput, CompilerError> {
+    ) -> FileFrontendPrepareOutput {
         let file_id = owner.source_id();
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
         let token_stats = owner.token_stats();
         let source_token_stream = owner.into_tokens();
-        Ok(FileFrontendPrepareOutput {
+        FileFrontendPrepareOutput {
             source_file,
             file_id,
             path_syntax: PreparedFilePathSyntax::Preparing(path_syntax),
@@ -201,7 +216,7 @@ impl HeaderFileParseState {
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
             warnings: self.warnings,
-        })
+        }
     }
 
     pub(super) fn into_entry_output(
@@ -211,7 +226,7 @@ impl HeaderFileParseState {
         path_syntax: Arc<PathSyntaxTable>,
         end_index: TokenIndex,
         file_role: FileRole,
-    ) -> Result<FileFrontendPrepareOutput, CompilerError> {
+    ) -> Result<FileFrontendPrepareOutput, InfrastructureFailure> {
         let file_id = owner.source_id();
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
@@ -257,7 +272,7 @@ impl HeaderFileParseState {
         })
     }
 
-    pub(super) fn into_error(self, diagnostic: CompilerDiagnostic) -> FileFrontendPrepareError {
+    pub(super) fn into_error(self, diagnostic: DiagnosticDraft) -> FileFrontendPrepareError {
         FileFrontendPrepareError {
             warnings: self.warnings,
             diagnostic,

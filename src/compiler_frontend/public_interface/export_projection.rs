@@ -27,7 +27,7 @@
 //! The seed is destructured and consumed by [`PublicInterfaceDraftBuilder`](super::direct_projection::PublicInterfaceDraftBuilder):
 //! the module origin and export bindings move into the [`PublicInterfaceDraft`](super::model::PublicInterfaceDraft)
 //! and the nominal-type origin index is dropped before the draft boundary. It is not a durable
-//! aggregate surface: no renamed `DefinedPublicExportOrigins` component survives past the builder.
+//! aggregate surface.
 //!
 //! ## Scope
 //!
@@ -47,7 +47,8 @@
 
 use super::SourceProviderDependencySet;
 use super::model::{PublicBindingExport, PublicExportDiagnosticProvenance};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
@@ -194,7 +195,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<DirectExportSeed, CompilerError> {
+) -> Result<DirectExportSeed, InfrastructureFailure> {
     let active_origin =
         resolve_active_module_origin(source_module_origins, active_root_file_id, sorted_headers)?;
     let (export_bindings, export_diagnostic_provenance) = collect_free_export_bindings(
@@ -235,7 +236,7 @@ fn collect_binding_exports<'a>(
     source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
-) -> Result<Vec<PublicBindingExport>, CompilerError> {
+) -> Result<Vec<PublicBindingExport>, InfrastructureFailure> {
     // Synthetic single-file compilation does not construct a Stage 0 module namespace and never
     // publishes a provider interface. Binding-backed re-exports belong to canonical graph jobs,
     // whose prepared symbols always carry module-root membership.
@@ -282,7 +283,7 @@ fn collect_binding_exports<'a>(
             PublicExportTarget::External(symbol_id) => external_registry
                 .canonical_symbol_identity(*symbol_id)
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
+                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                         "binding re-export construction: external symbol {:?} has no canonical package identity",
                         symbol_id
                     ))
@@ -295,7 +296,7 @@ fn collect_binding_exports<'a>(
                 let provider_id = source_provider_dependencies
                     .resolve_reexport(dependency_selection.shell)
                     .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
+                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "binding re-export construction: provider selection {:?} has no resolved provider",
                             dependency_selection
                         ))
@@ -323,10 +324,13 @@ fn collect_binding_exports<'a>(
     exports.dedup_by(|left, right| left == right);
     for pair in exports.windows(2) {
         if pair[0].public_name == pair[1].public_name {
-            return Err(CompilerError::compiler_error(format!(
-                "binding re-export construction: duplicate public export name '{}' in module {:?}",
-                pair[0].public_name, module_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "binding re-export construction: duplicate public export name '{}' in module {:?}",
+                    pair[0].public_name, module_origin
+                ),
+            ));
         }
     }
     Ok(exports)
@@ -350,11 +354,11 @@ fn resolve_active_module_origin(
     source_module_origins: &SourceModuleOriginTable,
     active_root_file_id: SourceId,
     sorted_headers: &[Header],
-) -> Result<StableModuleOriginIdentity, CompilerError> {
+) -> Result<StableModuleOriginIdentity, InfrastructureFailure> {
     let active_origin = source_module_origins
         .origin_for(active_root_file_id)?
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "defined public export-origin construction: the active root (file id {}) has no owning module origin in the source module origin table",
                 active_root_file_id.index()
             ))
@@ -371,17 +375,20 @@ fn resolve_active_module_origin(
         let header_origin = source_module_origins
             .origin_for(file_id)?
             .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "defined public export-origin construction: a directly-defined public header's source file (file id {}) has no owning module origin",
                 file_id.index()
             ))
         })?;
 
         if header_origin != &active_origin {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a directly-defined public header's owning module origin ({:?}) does not match the active root origin ({:?})",
-                header_origin, active_origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a directly-defined public header's owning module origin ({:?}) does not match the active root origin ({:?})",
+                    header_origin, active_origin
+                ),
+            ));
         }
     }
 
@@ -404,7 +411,7 @@ fn index_public_nominal_type_origins(
     module_symbols: &ModuleSymbols,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<FxHashMap<PathId, OriginTypeId>, CompilerError> {
+) -> Result<FxHashMap<PathId, OriginTypeId>, InfrastructureFailure> {
     let mut nominal_type_origins = FxHashMap::default();
     let active_module_root = resolve_optional_active_module_root_membership(module_symbols)?;
 
@@ -413,10 +420,13 @@ fn index_public_nominal_type_origins(
         // records one for every authored declaration shell. A missing name here is an impossible
         // metadata gap, not an intentional exclusion, so it must surface as an internal failure
         let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a directly-defined public nominal type header has no resolvable defining name (path: {:?})",
-                header.declaration_path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a directly-defined public nominal type header has no resolvable defining name (path: {:?})",
+                    header.declaration_path
+                ),
+            ));
         };
 
         let category = match &header.kind {
@@ -468,7 +478,7 @@ fn index_public_nominal_type_origins(
 ///       active module origin. Source-package headers outside the project-module graph are
 ///       deliberately absent from the index because their nominals are not project-graph-owned,
 ///       and a projected public type that requires one fails through the total nominal resolver
-///       with a precise `CompilerError`.
+///       with a precise `InfrastructureFailure`.
 ///
 /// WHY: the directly-defined active-root index kept on the seed for receiver-surface
 ///      finalization excludes imported and alias-target nominals by design, because imported and
@@ -490,7 +500,7 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
     module_symbols: &ModuleSymbols,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<FxHashMap<PathId, OriginTypeId>, CompilerError> {
+) -> Result<FxHashMap<PathId, OriginTypeId>, InfrastructureFailure> {
     let mut origins: FxHashMap<PathId, OriginTypeId> = FxHashMap::default();
 
     for header in sorted_headers {
@@ -501,10 +511,13 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
         // A public export-targeted declaration always carries a defining name recorded by the
         // header parser. A missing name is an impossible metadata gap that must not silently
         let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a public export-targeted nominal type header has no resolvable defining name (path: {:?})",
-                header.declaration_path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a public export-targeted nominal type header has no resolvable defining name (path: {:?})",
+                    header.declaration_path
+                ),
+            ));
         };
 
         let category = match &header.kind {
@@ -522,10 +535,13 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
         let origin = OriginTypeId::new(module_origin.clone(), name.to_owned(), category);
 
         if let Some(existing) = origins.get(&header.declaration_path) {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a duplicate canonical nominal path resolves to conflicting origins (path: {:?}; existing {:?}, new {:?})",
-                header.declaration_path, existing, origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a duplicate canonical nominal path resolves to conflicting origins (path: {:?}; existing {:?}, new {:?})",
+                    header.declaration_path, existing, origin
+                ),
+            ));
         }
         origins.insert(header.declaration_path, origin);
     }
@@ -557,7 +573,7 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
     module_symbols: &ModuleSymbols,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<FxHashMap<PathId, OriginTraitId>, CompilerError> {
+) -> Result<FxHashMap<PathId, OriginTraitId>, InfrastructureFailure> {
     let mut origins: FxHashMap<PathId, OriginTraitId> = FxHashMap::default();
 
     for header in sorted_headers {
@@ -565,10 +581,13 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
             continue;
         }
         let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a public export-targeted trait header has no resolvable defining name (path: {:?})",
-                header.declaration_path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a public export-targeted trait header has no resolvable defining name (path: {:?})",
+                    header.declaration_path
+                ),
+            ));
         };
 
         let file_id = header.tokens.source();
@@ -580,10 +599,13 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
         let origin = OriginTraitId::new(module_origin.clone(), name.to_owned());
 
         if let Some(existing) = origins.get(&header.declaration_path) {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a duplicate canonical trait path resolves to conflicting origins (path: {:?}; existing {:?}, new {:?})",
-                header.declaration_path, existing, origin
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a duplicate canonical trait path resolves to conflicting origins (path: {:?}; existing {:?}, new {:?})",
+                    header.declaration_path, existing, origin
+                ),
+            ));
         }
         origins.insert(header.declaration_path, origin);
     }
@@ -676,7 +698,7 @@ fn collect_free_export_bindings(
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(Vec<ExportBinding>, Vec<PublicExportDiagnosticProvenance>), CompilerError> {
+) -> Result<(Vec<ExportBinding>, Vec<PublicExportDiagnosticProvenance>), InfrastructureFailure> {
     let mut export_bindings = Vec::new();
     let mut export_diagnostic_provenance = Vec::new();
     let mut seen_public_names: FxHashSet<String> = FxHashSet::default();
@@ -690,10 +712,13 @@ fn collect_free_export_bindings(
         // name is an impossible metadata gap that must not silently omit a public export from the
         // seed.
         let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a directly-defined public declaration header has no resolvable defining name (path: {:?})",
-                header.declaration_path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "defined public export-origin construction: a directly-defined public declaration header has no resolvable defining name (path: {:?})",
+                    header.declaration_path
+                ),
+            ));
         };
 
         let Some(origin) =
@@ -772,7 +797,7 @@ fn collect_reexport_bindings(
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<ReexportBinding>, CompilerError> {
+) -> Result<Vec<ReexportBinding>, InfrastructureFailure> {
     if module_symbols.file_module_membership.is_empty() {
         return Ok(Vec::new());
     }
@@ -831,7 +856,7 @@ struct ReexportBinding {
 fn resolve_active_root_source<'a>(
     module_symbols: &'a ModuleSymbols,
     active_module_root: &PathId,
-) -> Result<&'a PathId, CompilerError> {
+) -> Result<&'a PathId, InfrastructureFailure> {
     module_symbols
         .file_roles_by_source
         .iter()
@@ -841,7 +866,7 @@ fn resolve_active_root_source<'a>(
                 .then_some(source)
         })
         .ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "re-export binding construction: active module-root membership has no active root source",
             )
         })
@@ -849,7 +874,7 @@ fn resolve_active_root_source<'a>(
 
 fn resolve_optional_active_module_root_membership(
     module_symbols: &ModuleSymbols,
-) -> Result<Option<&PathId>, CompilerError> {
+) -> Result<Option<&PathId>, InfrastructureFailure> {
     let mut active_module_root = None;
 
     for (source, role) in &module_symbols.file_roles_by_source {
@@ -861,7 +886,8 @@ fn resolve_optional_active_module_root_membership(
         };
 
         if active_module_root.is_some_and(|existing| existing != module_root) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "re-export binding construction: active root sources resolve to more than one module-root membership",
             ));
         }
@@ -877,7 +903,7 @@ fn collect_one_reexport_binding<'a>(
     bindings: &mut Vec<ReexportBinding>,
     entry: &PublicExportEntry,
     context: &ReexportBindingContext<'a>,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let (target_path, provider_selection) = match &entry.target {
         PublicExportTarget::SourceDeclaration { path } => (path, None),
         PublicExportTarget::ProviderSelection {
@@ -896,7 +922,7 @@ fn collect_one_reexport_binding<'a>(
             .source_provider_dependencies
             .resolve_reexport(dependency_selection.shell)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "re-export binding construction: provider selection {:?} has no resolved provider",
                     dependency_selection
                 ))
@@ -912,10 +938,13 @@ fn collect_one_reexport_binding<'a>(
             if view.binding_export(selected_name_text).is_some() {
                 return Ok(());
             }
-            return Err(CompilerError::compiler_error(format!(
-                "re-export binding construction: completed provider interface {:?} has no public binding '{}' required by target {:?}",
-                provider_interface.module_origin, selected_name_text, target_path
-            )));
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "re-export binding construction: completed provider interface {:?} has no public binding '{}' required by target {:?}",
+                    provider_interface.module_origin, selected_name_text, target_path
+                ),
+            ));
         };
         let export_name = context.string_table.resolve(entry.export_name).to_owned();
         bindings.push(ReexportBinding {
@@ -931,10 +960,13 @@ fn collect_one_reexport_binding<'a>(
 
     // Same-module re-exports join the retained local declaration header.
     let Some(header) = context.header_by_path.get(target_path) else {
-        return Err(CompilerError::compiler_error(format!(
-            "re-export binding construction: source target {:?} has neither a local declaration header nor a completed provider interface",
-            target_path
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "re-export binding construction: source target {:?} has neither a local declaration header nor a completed provider interface",
+                target_path
+            ),
+        ));
     };
 
     let target_belongs_to_active_module = context
@@ -963,10 +995,13 @@ fn collect_one_reexport_binding<'a>(
         .component(header.declaration_path)
         .map(|component| context.string_table.resolve(component))
     else {
-        return Err(CompilerError::compiler_error(format!(
-            "re-export binding construction: a re-export target declaration has no resolvable defining name (path: {:?})",
-            target_path
-        )));
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "re-export binding construction: a re-export target declaration has no resolvable defining name (path: {:?})",
+                target_path
+            ),
+        ));
     };
 
     // Determine the declaration category from the header kind and build the origin.
@@ -989,7 +1024,7 @@ fn reexport_declaration_origin(
     header: &Header,
     module_origin: &StableModuleOriginIdentity,
     defining_name: &str,
-) -> Result<OriginDeclarationId, CompilerError> {
+) -> Result<OriginDeclarationId, InfrastructureFailure> {
     match &header.kind {
         HeaderKind::Function { .. } => Ok(OriginDeclarationId::Function(
             OriginFunctionId::new_free(module_origin.clone(), defining_name.to_owned()),
@@ -1021,10 +1056,13 @@ fn reexport_declaration_origin(
         HeaderKind::StartFunction
         | HeaderKind::ConstTemplate { .. }
         | HeaderKind::TraitConformance { .. }
-        | HeaderKind::TraitIncompatibility { .. } => Err(CompilerError::compiler_error(format!(
-            "re-export binding construction: a re-export target is a non-declaration header kind (path: {:?})",
-            header.declaration_path
-        ))),
+        | HeaderKind::TraitIncompatibility { .. } => Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            format!(
+                "re-export binding construction: a re-export target is a non-declaration header kind (path: {:?})",
+                header.declaration_path
+            ),
+        )),
     }
 }
 

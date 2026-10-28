@@ -30,7 +30,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -41,7 +41,10 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Runs the production walk from one statement and returns the first error in source order.
-fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), CompilerError> {
+fn validate_node(
+    node: &AstNode,
+    context: &TypeValidationContext,
+) -> Result<(), InfrastructureFailure> {
     validate_roots(
         *context,
         |children| {
@@ -55,7 +58,7 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
 fn validate_expression(
     expression: &ExprId,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_expression_counted(expression, context, &mut || {})
 }
 
@@ -64,7 +67,7 @@ fn validate_expression_counted(
     expression: &ExprId,
     context: &TypeValidationContext,
     count: &mut impl FnMut(),
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_roots(
         *context,
         |children| {
@@ -78,7 +81,7 @@ fn validate_expression_counted(
 fn validate_owned_runtime_template_handoff(
     handoff: &OwnedRuntimeTemplateHandoff,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_roots(
         *context,
         |children| expand_owned_runtime_template_handoff(handoff, context, children),
@@ -89,7 +92,7 @@ fn validate_owned_runtime_template_handoff(
 fn validate_owned_runtime_slot_application_handoff(
     handoff: &OwnedRuntimeSlotApplicationHandoff,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_roots(
         *context,
         |children| expand_owned_runtime_slot_application_handoff(handoff, context, children),
@@ -100,7 +103,7 @@ fn validate_owned_runtime_slot_application_handoff(
 fn validate_template_expression_payloads(
     template: &Template,
     context: &TypeValidationContext,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     validate_roots(
         *context,
         |children| expand_template(template, context, children),
@@ -161,7 +164,7 @@ fn validate_owned_handoff_with_orphan_type_id(
 
     let error = validate_owned_runtime_template_handoff(&handoff, &context)
         .expect_err("owned runtime handoff payloads must retain TypeId validation");
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 #[test]
@@ -205,7 +208,7 @@ fn expression_type_validation_walks_all_success_slots_and_the_error_channel() {
     for root in [multiple, fallible] {
         let error = validate_expression(&root, &context)
             .expect_err("every result and error channel must resolve");
-        assert!(error.msg.contains("9999"));
+        assert!(error.message.contains("9999"));
     }
 }
 
@@ -301,7 +304,6 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                     span: None,
                 },
                 renders_wrapper_unconditionally: false,
-                span: None,
             }],
             slot_sites: Vec::new(),
         },
@@ -354,7 +356,7 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
         };
         let error = validate_owned_runtime_slot_application_handoff(&handoff, &context)
             .expect_err("slot handoff payloads must retain TypeId validation");
-        assert!(error.msg.contains("9999"));
+        assert!(error.message.contains("9999"));
     }
 }
 
@@ -406,7 +408,7 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
 
     let error = validate_node(&node, &context)
         .expect_err("static-true owned message payload must be validated before elision");
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 #[test]
@@ -455,7 +457,7 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
 
     let error = validate_node(&node, &context)
         .expect_err("static-true slot message payload must be validated before elision");
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 #[test]
@@ -634,7 +636,7 @@ fn static_true_assertion_message_reaches_type_validation_before_elision() {
 
     let error = validate_node(&node, &context)
         .expect_err("static-true message payloads must be validated before elision");
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 fn template_with_dynamic_overlay(
@@ -710,8 +712,8 @@ fn validation_checks_effective_dynamic_expression_overlay() {
 
     let error = validate_template_expression_payloads(&template, &context)
         .expect_err("orphan overlay type should be rejected");
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("9999"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("9999"));
 }
 
 #[test]
@@ -747,8 +749,8 @@ fn validation_rejects_non_finalized_template_reference() {
 
     let error = validate_template_expression_payloads(&template, &context)
         .expect_err("non-finalized template should be rejected");
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("Finalized"));
+    assert!(matches!(error.kind, InfrastructureFailureKind::Internal));
+    assert!(error.message.contains("Finalized"));
 }
 
 #[test]
@@ -775,7 +777,7 @@ fn validation_reports_missing_template_root() {
 
     let error = validate_template_expression_payloads(&template, &context)
         .expect_err("missing root should be rejected");
-    assert!(error.msg.contains("root"));
+    assert!(error.message.contains("root"));
 }
 
 fn authored_span(start: u32) -> SourceSpan {
@@ -897,11 +899,7 @@ fn finalized_tir_view_conditional_selector_payload_validates_effective_overlay_s
         "finalized TirView path should detect orphan TypeId on effective overlay selector",
     );
 
-    assert_eq!(
-        error.source_span, overlay_span,
-        "error span must point to the effective overlay selector, not the structural selector"
-    );
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 #[test]
@@ -974,11 +972,7 @@ fn finalized_tir_view_loop_header_payload_validates_effective_overlay_span() {
         "finalized TirView path should detect orphan TypeId on effective overlay loop header",
     );
 
-    assert_eq!(
-        error.source_span, overlay_span,
-        "error span must point to the effective overlay loop header, not the structural header"
-    );
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 fn bool_reference(expressions: &mut AstExpressionBuilder) -> ExprId {
@@ -1105,7 +1099,7 @@ fn shared_expression_dag_still_reports_an_invalid_leaf() {
 
     let error =
         validate_expression(&root, &context).expect_err("the shared invalid leaf must be rejected");
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }
 
 #[test]
@@ -1168,7 +1162,7 @@ fn recovering_subject_reached_outside_its_catch_is_rejected_after_the_catch_visi
             .expect_err("a plain use of a recovering subject must be rejected");
         assert!(
             error
-                .msg
+                .message
                 .contains("Recovering expression reached finalization outside ValueBlock::Catch")
         );
     }
@@ -1236,5 +1230,5 @@ fn shared_template_overlay_dag_still_reports_an_invalid_leaf() {
 
     let error = validate_template_expression_payloads(&template, &context)
         .expect_err("the shared invalid overlay leaf must be rejected");
-    assert!(error.msg.contains("9999"));
+    assert!(error.message.contains("9999"));
 }

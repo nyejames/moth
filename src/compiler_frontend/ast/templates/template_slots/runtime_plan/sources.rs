@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TirSlotSchema, classify_tir_contribution_node, copy_tir_subtree_with_active_slot_plan,
     tir_node_is_const_evaluable_value,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runtime(
@@ -81,7 +82,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
                 .get_node(*node_id)
                 .map(|node| node.span)
                 .ok_or_else(|| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "TIR runtime slot planning: contribution node was not present in the store.",
                     )
                 })?;

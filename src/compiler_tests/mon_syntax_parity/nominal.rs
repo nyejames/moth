@@ -3,9 +3,7 @@
 //! WHAT: owns explicit qualifier, payload routing and nested nominal-value cases.
 //! WHY: equal record shapes do not replace the receiving type's nominal identity.
 
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, TypeMismatchContext,
-};
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::instrumentation::lock_counter_test;
 use crate::mon::{Field, MonErrorCode, PathSegment, Schema, SchemaType, Value};
 
@@ -145,7 +143,7 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
             box_schema(),
             SourceExpectation::Reject {
                 code: "MOTH-TYPE-0001",
-                reason: SourceReason::TypeMismatch(TypeMismatchContext::ConstructorArgument),
+                reason: SourceReason::TypeMismatch,
                 site: in_declarations(&typed_source, "Other", 2),
             },
             MonExpectation::Reject {

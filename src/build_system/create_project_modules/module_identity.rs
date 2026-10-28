@@ -15,7 +15,7 @@
 //! handle for one build boundary; the owned `StableModuleOriginIdentity` is the cross-build
 //! semantic identity that later exported declaration identities embed.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
@@ -94,7 +94,7 @@ impl ModuleIdentityRecord {
     /// dependency package graph). The portable stable origin identity is derived from
     /// `logical_module_path` so the dense `PathBuf` remains the single source of truth for the
     /// build-local relative path while the stable identity stores only the portable spelling.
-    /// Returns an internal `CompilerError` if `logical_module_path` contains an invalid or
+    /// Returns an internal `InfrastructureFailure` if `logical_module_path` contains an invalid or
     /// non-UTF-8 component; the caller surfaces it at the Stage 0 boundary.
     pub(crate) fn new(
         root_directory: PathBuf,
@@ -102,7 +102,7 @@ impl ModuleIdentityRecord {
         role: ModuleRootRole,
         logical_module_path: PathBuf,
         package: &StablePackageIdentity,
-    ) -> Result<Self, CompilerError> {
+    ) -> Result<Self, InfrastructureFailure> {
         let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
             package.clone(),
             &logical_module_path,
@@ -214,8 +214,8 @@ impl ModuleIdentityTable {
     /// Derive the narrow frontend module-root lookup table from the normal roots.
     ///
     /// Only `Normal` roots enter the frontend table so support and facade records stay out of
-    /// dependency-resolution and header-role lookup in this slice. The frontend table preserves its
-    /// pre-slice shape and responsibility.
+    /// dependency-resolution and header-role lookup. The frontend table keeps its normal-root
+    /// lookup shape and responsibility.
     pub(crate) fn derive_module_root_table(&self) -> ModuleRootTable {
         let normal_records = self
             .records
@@ -235,7 +235,7 @@ impl ModuleIdentityTable {
     /// needs every indexed non-facade root for membership and same-directory content preparation.
     /// The project-root facade remains a retained Stage 0 identity, but it is not a filesystem
     /// module root for resolver membership and must not replace a normal root when both share the
-    /// project directory in the compatibility layout.
+    /// project directory.
     pub(crate) fn derive_compilation_root_table(&self) -> ModuleRootTable {
         let records = self
             .records

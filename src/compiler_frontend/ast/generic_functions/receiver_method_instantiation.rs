@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -258,11 +258,12 @@ pub(crate) fn instantiate_generic_cast_evidence_method(
             string_table,
             path_fork,
         })?;
-    let receiver_argument = instantiation.receiver_argument.ok_or_else(|| {
-        CompilerError::compiler_error(
+    let Some(receiver_argument) = instantiation.receiver_argument else {
+        crate::compiler_bug!(
+            CompilerStage::GenericMaterialisation,
             "generic receiver instantiation omitted its actual receiver argument",
-        )
-    })?;
+        );
+    };
 
     // Template validation bodies are re-parsed per concrete instance, where the request is
     // recorded against the real requester evidence; the validated template keeps only the

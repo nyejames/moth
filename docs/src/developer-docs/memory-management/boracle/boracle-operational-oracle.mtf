@@ -242,7 +242,7 @@ An uninitialised destination has two rules:
   and owns the role decision. The paired definition's validity does not depend
   on the separate generation-evidence bit.
 - Other accesses to an `Unavailable` place are malformed normalized input and
-  return `CompilerError`.
+  return `InfrastructureFailure`.
 
 Every normalized event holds one or more roles. An event that both changes state and issues a
 capability appears under both roles:
@@ -394,7 +394,7 @@ Per-event runtime meaning, complete for all 16 `EventKind` variants:
 
     [td:
         [: `LoanKill { loan, reason }`]
-        [: ends that loan's live capability interval at this event. A loan with no live capability on the executed path is malformed and returns `CompilerError`. An attempt to end a capability more than once also returns `CompilerError`.]
+        [: ends that loan's live capability interval at this event. A loan with no live capability on the executed path is malformed and returns `InfrastructureFailure`. An attempt to end a capability more than once also returns `InfrastructureFailure`.]
     ]
 ]
 
@@ -454,7 +454,7 @@ name the same block. Each outcome retires both destination sets before defining 
 results. Operation inputs that overlap destinations are captured before retirement. The oracle
 executes one selected outcome and never merges success and failure.
 
-The projection element for `EventKind::Projection` comes from the `origin` row's `OriginKind::Projection { projection, .. }`. If the origin row has any other kind the problem is malformed and the oracle returns `CompilerError`. Expression projection reads the projected source and defines its produced value in a separate compiler temporary. An operation's projection result instead writes its explicit destination. Neither path defines or mutates source storage merely to prepare value provenance.
+The projection element for `EventKind::Projection` comes from the `origin` row's `OriginKind::Projection { projection, .. }`. If the origin row has any other kind the problem is malformed and the oracle returns `InfrastructureFailure`. Expression projection reads the projected source and defines its produced value in a separate compiler temporary. An operation's projection result instead writes its explicit destination. Neither path defines or mutates source storage merely to prepare value provenance.
 
 The parameter entry rule above applies to the builder's explicit parameter `Fresh` events. It
 does not add a separate normalized event or capability.
@@ -471,7 +471,7 @@ Dynamic state is keyed by `PlaceId`, and a place is a root binding plus a projec
 4. Descend: while the current node has an aggregate child edge for the next projection element, move to that child node and consume the element. When descent needs the child of a node under a decidable projection element and no aggregate child edge is recorded, the oracle creates one fresh node, records the child edge and continues the descent. Materialisation is idempotent, so a second resolution of the same position yields the same node, two places that select one position share one node, and a repeated child alias stays observable as aliasing. A materialised node counts against the per-execution generation-creation bound like any other node. The bound counts generations the execution creates, not generations that remain reachable. An undecidable element is never materialised and escalates under the overlap rules below.
 5. The result is a `RuntimeAccessTarget { node, path }` where `path` is the unconsumed remainder.
 
-When no candidate has state the accessed place is uninitialized. A definition access is then legal as initialization and installs no state, so the paired provenance event still observes an `Unavailable` destination and owns the role decision, per the uninitialised-destination rules above. Any other access is malformed normalized input and returns `CompilerError`.
+When no candidate has state the accessed place is uninitialized. A definition access is then legal as initialization and installs no state, so the paired provenance event still observes an `Unavailable` destination and owns the role decision, per the uninitialised-destination rules above. Any other access is malformed normalized input and returns `InfrastructureFailure`.
 
 The access kind comes from `UseKind`: `Read` and `LoanObservation` are `Shared`,
 while `Write` and `BindingWrite` are `Exclusive`. `LoanObservation` behaves exactly
@@ -522,10 +522,10 @@ Definitions on one completed execution, indexed by executed event position:
   only and extends no interval.
 - A capability ended by `ScopeExit` is not exercised when every holder covering the access has
   retired. If a surviving holder also covers the access, the access still exercises the capability
-  and a post-end access returns `CompilerError`.
-- A capability ended by `LoanKill` is not exercised when a later dynamic instance of the same loan has a later capability identity, the same `CapabilitySource::Loan` value, a runtime target with proven `DynamicOverlap::Overlap` against the accessed place's runtime target and a holder that covers the accessed place. Without those source, target and coverage conditions, the ended capability is exercised and the post-end access returns `CompilerError`.
+  and a post-end access returns `InfrastructureFailure`.
+- A capability ended by `LoanKill` is not exercised when a later dynamic instance of the same loan has a later capability identity, the same `CapabilitySource::Loan` value, a runtime target with proven `DynamicOverlap::Overlap` against the accessed place's runtime target and a holder that covers the accessed place. Without those source, target and coverage conditions, the ended capability is exercised and the post-end access returns `InfrastructureFailure`.
 - `C`'s interval is the inclusive event-index range `issue ..= last`, where `issue` is the index of its issuing event and `last` is the index of the last access that exercises `C`. A capability never exercised has the degenerate interval `issue ..= issue`.
-- An explicit end truncates the interval: a `LoanKill` for that loan, or a `ScopeExit` retiring a holder place. If an access exercises a capability after its explicit end the problem is malformed and the oracle returns `CompilerError`.
+- An explicit end truncates the interval: a `LoanKill` for that loan, or a `ScopeExit` retiring a holder place. If an access exercises a capability after its explicit end the problem is malformed and the oracle returns `InfrastructureFailure`.
 - A call argument capability's interval extends to the `CallEffect` event of its call unless an earlier explicit end truncates it first, see the Calls section.
 
 Two rules produce a runtime conflict.
@@ -617,7 +617,7 @@ carries the resolved source target as its left operand and the same node with an
 its right operand. Otherwise record an aggregate child edge from the outer node under
 `projection` to the resolved node.
 
-Two fields whose source places resolve to the same node therefore share one child node. If descent materialises that node, materialisation is idempotent, so resolving the same position again yields the same node. This is what makes a repeated child alias inside one aggregate observable as aliasing. Sibling children under distinct `Field` or distinct `FixedIndex` projections stay disjoint by the overlap rules of the evaluation-order section. A field whose source place is `Unavailable` is malformed and returns `CompilerError`.
+Two fields whose source places resolve to the same node therefore share one child node. If descent materialises that node, materialisation is idempotent, so resolving the same position again yields the same node. This is what makes a repeated child alias inside one aggregate observable as aliasing. Sibling children under distinct `Field` or distinct `FixedIndex` projections stay disjoint by the overlap rules of the evaluation-order section. A field whose source place is `Unavailable` is malformed and returns `InfrastructureFailure`.
 
 Two fields resolving to DIFFERENT nodes under one repeated projection are a different matter in the arm that records children. The children map keys on the projection alone, so keeping both is impossible and keeping the later one would detach the earlier child from every later observation of that position. The reference has semantics for the shape either way: its aggregate arm extends the projected place's alternatives with every repeated field's origins, so the projected slot ends up holding the union (`origins.rs:1253-1322`). The runtime graph holds one node per position and cannot represent that union, so the repeat returns typed `Inconclusive`. This applies to an identified `Field` or `FixedIndex` exactly as it does to a keyless domain. A keyless domain has no key to tell its children apart and an identified position would need the union, and neither is representable here.
 
@@ -695,7 +695,7 @@ Unsupported normalized shapes return typed `Inconclusive`. They never become imp
 - An aggregate storing two distinct nodes under one repeated projection, reported as `RepeatedProjectionChild`. The children map holds one node per position, and the reference instead unions every repeated field's origins into the projected slot, which this graph cannot represent. Two fields resolving to the SAME node stay supported, because that is one shared child rather than a collision, and it is what makes a repeated child alias observable. Modelling a position that holds several nodes belongs to the aggregate and builtin storage package.
 - A `Loan` row naming several DISTINCT holders, reported as `MultiHolderLoan`. The runtime ends a capability once, so a partly retired capability would report safe for an access its surviving holders do not cover. There is no reference semantics to mirror: the static solver accepts such a row but applies its `uses` and `kills` capability-wide rather than per holder, so per-holder retirement would be invented rather than checked. Nothing in production emits one, since HIR extraction publishes an empty explicit loan table and every derived loan fact and generated row carries exactly one holder. The count is over distinct places, because validation does not require holder uniqueness and a repeated place collapses to one holder with nothing to retire twice, so a row naming one place twice reaches a real outcome.
 
-Malformed or impossible normalized input returns `CompilerError`:
+Malformed or impossible normalized input returns `InfrastructureFailure`:
 
 - A non-defining access to an `Unavailable` place.
 - An `EventKind::Projection` whose `origin` row is not `OriginKind::Projection`.
@@ -709,7 +709,7 @@ Malformed or impossible normalized input returns `CompilerError`:
 - An event that retires or replaces the result place of a pending call result before its confirming write: a definition or provenance event at that place, or a `ScopeExit` covering its binding. The pending entry is bound to the exact generation the `CallEffect` installed, so the oracle rejects the interference rather than leaving a stale entry that could exempt an access its confirmation no longer covers.
 - Any event cross-reference that cannot resolve, even where construction validation would already have rejected it. The oracle re-checks rather than assuming.
 
-This mirrors the existing lane split. `CompilerError` is the internal malformed-input lane and never a user diagnostic. The oracle creates no user-facing diagnostics at all.
+This mirrors the existing lane split. `InfrastructureFailure` is the internal malformed-input lane and never a user diagnostic. The oracle creates no user-facing diagnostics at all.
 
 ## Scope exit and unreachable control flow
 
@@ -953,7 +953,7 @@ at its original value while other bounds decrease. That stuck bound follows from
 identity gate.
 
 `reduce_problem` rejects a zero bound at entry through `validate_bounds`, before it filters or
-executes candidates. The returned `CompilerError` uses the exact message for the zero component:
+executes candidates. The returned `InfrastructureFailure` uses the exact message for the zero component:
 
 [codeblock, $code("text"):
     Boracle reducer requires max_executions to be greater than zero

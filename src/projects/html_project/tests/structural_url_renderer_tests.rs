@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -21,7 +22,7 @@ impl<'a> StructuralUrlRenderer<'a> {
         pieces: &[ConstStringPiece],
         resources: &ModuleResourceTable,
         string_table: &StringTable,
-    ) -> Result<String, CompilerError> {
+    ) -> Result<String, InfrastructureFailure> {
         let mut rendered = String::new();
         for piece in pieces {
             match piece {
@@ -70,11 +71,12 @@ fn plan_origin_for(
     context: ResourceUrlContext,
     string_table: &mut StringTable,
 ) {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     plan.plan_origin(
         resource_origin,
         None,
         context,
-        string_table,
+        &mut diagnostic_strings,
         ResourceUseKind::Executable,
     )
     .expect("resource should be planned");

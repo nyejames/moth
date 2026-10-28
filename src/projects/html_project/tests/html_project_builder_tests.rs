@@ -3,7 +3,7 @@
 use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{FileKind, Project, ProjectCompilation};
+use crate::build_system::build::{BackendInvocationFailure, FileKind, Project, ProjectCompilation};
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
@@ -12,9 +12,20 @@ use crate::build_system::output::{
     WriteOptions, write_project_outputs,
 };
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigView, decode_invalid_config,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticSeverity, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageId;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
@@ -38,14 +49,14 @@ use crate::projects::html_project::tests::test_support::{
     js_runtime_asset_import, non_js_runtime_asset_import,
 };
 use crate::projects::settings::Config;
+use std::convert::Infallible;
 use std::fs;
-use std::path::Path;
 
 fn attach_origin(
     registry: &mut ResourceInputRegistry,
     origin: StableResourceOriginId,
     source: ResourceSourceId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let publication = registry
         .preflight_resource_source_associations(&[ResourceSourceAssociation { origin, source }])?;
     registry.reserve_resource_source_associations(&publication);
@@ -65,12 +76,53 @@ fn project_resource_origin(resource_path: &str) -> StableResourceOriginId {
     )
 }
 
+fn freeze_prepared_failure(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> Result<DiagnosticReportSet, InfrastructureErrors> {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table.clone());
+    match failure {
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors);
+        }
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
+impl HtmlProjectBuilder {
+    fn build_backend_with_test_context(
+        &self,
+        project_compilation: ProjectCompilation,
+        config: &Config,
+        build_profile: BuildProfile,
+        flags: &[Flag],
+        string_table: &mut StringTable,
+    ) -> Result<Project, BackendInvocationFailure<Infallible>> {
+        let root_string_table = std::mem::take(string_table);
+        let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
+        let result = {
+            let mut backend_context = BackendBuildContext::new(&mut accumulator);
+            <HtmlProjectBuilder as BackendBuilder>::build_backend(
+                self,
+                project_compilation,
+                config,
+                build_profile,
+                flags,
+                &mut backend_context,
+            )
+        };
+        *string_table = std::mem::take(accumulator.string_table_mut());
+        result
+    }
+}
+
 fn build_with_test_modules(
     builder: &HtmlProjectBuilder,
     entry_points: Vec<PathBuf>,
     config: &Config,
     flags: &[Flag],
-) -> Result<Project, CompilerMessages> {
+) -> CompilationResult<Project> {
     let mut string_table = StringTable::new();
     let modules: Vec<Module> = entry_points
         .into_iter()
@@ -79,13 +131,47 @@ fn build_with_test_modules(
     let project_compilation =
         crate::build_system::test_support::project_compilation_from_test_modules(modules)
             .expect("test modules should assemble entries");
-    builder.build_backend(
+    match builder.build_backend_with_test_context(
         project_compilation,
         config,
         BuildProfile::from_flags(flags),
         flags,
         &mut string_table,
-    )
+    ) {
+        Ok(value) => Ok(CompilationOutcome::Success {
+            value,
+            warnings: None,
+        }),
+        Err(BackendInvocationFailure::Prepared(failure)) => {
+            freeze_prepared_failure(failure, &string_table).map(CompilationOutcome::Diagnosed)
+        }
+        Err(BackendInvocationFailure::Builder(error)) => match error {},
+    }
+}
+
+fn expect_diagnosed<T>(result: CompilationResult<T>, message: &str) -> DiagnosticReportSet {
+    match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => panic!("{message}"),
+        Err(errors) => panic!("{message}: infrastructure failure: {errors:?}"),
+    }
+}
+
+fn expect_successful_build(result: CompilationResult<Project>) -> Project {
+    match result {
+        Ok(CompilationOutcome::Success {
+            value,
+            warnings: None,
+        }) => value,
+        Ok(CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        }) => panic!("test backend unexpectedly produced warnings: {warnings:?}"),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("test backend unexpectedly diagnosed: {reports:?}")
+        }
+        Err(errors) => panic!("test backend failed operationally: {errors:?}"),
+    }
 }
 
 fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
@@ -93,20 +179,28 @@ fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
         .expect("test modules should assemble entries")
 }
 
-fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
-    assert!(
-        messages.primary_infrastructure_error().is_none(),
-        "project policy failures should stay as typed config diagnostics"
-    );
-
-    let diagnostic = messages
-        .first_error()
+fn first_invalid_config_reason<'a>(
+    reports: &'a DiagnosticReportSet,
+) -> (InvalidConfigReason, DiagnosticRenderContext<'a>) {
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
         .expect("expected an error-severity diagnostic");
-    let DiagnosticPayload::InvalidConfig { reason, .. } = &diagnostic.payload else {
-        panic!("expected an invalid config diagnostic");
-    };
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected an invalid config diagnostic");
+    let (_, reason) = decode_invalid_config(&facts, diagnostic.string_ids())
+        .expect("invalid config diagnostic should retain typed facts");
+    (reason, DiagnosticRenderContext::for_report(report))
+}
 
-    reason
+fn prepared_invalid_config_reason(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> InvalidConfigReason {
+    let reports = freeze_prepared_failure(failure, string_table)
+        .expect("prepared invalid-config failure should remain diagnosed");
+    first_invalid_config_reason(&reports).0
 }
 
 #[test]
@@ -193,8 +287,12 @@ fn build_backend_emits_single_html_output_file() {
     let entry_path = PathBuf::from("@page.moth");
     let config = Config::new(entry_path.clone());
 
-    let project = build_with_test_modules(&builder, vec![entry_path], &config, &[])
-        .expect("build_backend should succeed");
+    let project = expect_successful_build(build_with_test_modules(
+        &builder,
+        vec![entry_path],
+        &config,
+        &[],
+    ));
 
     assert_eq!(project.output_files.len(), 1);
     assert_eq!(
@@ -252,7 +350,7 @@ fn shared_resource_origin_defers_one_output_file_across_pages() {
     let mut config = Config::new(PathBuf::from("docs.moth"));
     config.project_name = "test".to_owned();
     let project = HtmlProjectBuilder::new()
-        .build_backend(
+        .build_backend_with_test_context(
             crate::build_system::test_support::project_compilation_from_test_modules_with_resources(
                 vec![first_page, second_page],
                 resource_inputs,
@@ -302,7 +400,7 @@ fn resource_destination_collision_preflights_before_read() {
             origin,
             None,
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .expect("resource should be planned");
@@ -315,12 +413,12 @@ fn resource_destination_collision_preflights_before_read() {
         &resource_inputs,
         &output_files,
         &output_paths,
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
     );
 
-    let messages = result.expect_err("an existing destination should fail emission");
+    let failure = result.expect_err("an existing destination should fail emission");
     assert!(matches!(
-        first_invalid_config_reason(&messages),
+        prepared_invalid_config_reason(failure, &string_table),
         InvalidConfigReason::ResourceOutputPathReserved { .. }
     ));
     assert!(output_files.is_empty(), "a failed preflight emits no files");
@@ -363,7 +461,7 @@ fn missing_module_source_preflights_before_reading_other_records() {
                 origin,
                 None,
                 ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-                &mut string_table,
+                &mut DiagnosticStringBuilder::new(&mut string_table),
                 ResourceUseKind::Executable,
             )
             .expect("resource should be planned");
@@ -376,7 +474,7 @@ fn missing_module_source_preflights_before_reading_other_records() {
         &resource_inputs,
         &output_files,
         &output_paths,
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
     );
 
     assert!(
@@ -413,7 +511,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
             origin,
             None,
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
-            &mut string_table,
+            &mut DiagnosticStringBuilder::new(&mut string_table),
             ResourceUseKind::Executable,
         )
         .expect("resource should be planned");
@@ -425,7 +523,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
         &resource_inputs,
         &output_files,
         &output_paths,
-        &mut string_table,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
     )
     .expect("resource should remain deferred after HTML planning");
 
@@ -446,7 +544,6 @@ fn successful_resource_emit_reads_and_writes_bytes() {
         output_files,
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: CleanupPolicy::html(),
-        warnings: Vec::new(),
         deferred_resources,
         resource_inputs,
     };
@@ -458,12 +555,15 @@ fn successful_resource_emit_reads_and_writes_bytes() {
                 builder: BuilderIdentity::html(),
                 profile: BuildProfile::Dev,
             },
-            setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
     };
-    write_project_outputs(&mut project, &options, &mut string_table)
-        .expect("central writer should materialise deferred resource bytes");
+    write_project_outputs(
+        &mut project,
+        &options,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .expect("central writer should materialise deferred resource bytes");
 
     assert_eq!(
         fs::read(output_root.join("assets/logo.bin")).expect("resource output should exist"),
@@ -481,8 +581,12 @@ fn at_prefixed_route_name_strips_at_from_output() {
     let entry_path = PathBuf::from("@404.moth");
     let config = Config::new(entry_path.clone());
 
-    let project = build_with_test_modules(&builder, vec![entry_path], &config, &[])
-        .expect("build_backend should succeed");
+    let project = expect_successful_build(build_with_test_modules(
+        &builder,
+        vec![entry_path],
+        &config,
+        &[],
+    ));
 
     assert_eq!(
         project.output_files[0].relative_output_path(),
@@ -495,13 +599,12 @@ fn build_backend_emits_html_for_multiple_modules() {
     let builder = HtmlProjectBuilder::new();
     let config = Config::new(PathBuf::from("docs.moth"));
 
-    let project = build_with_test_modules(
+    let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![PathBuf::from("@page.moth"), PathBuf::from("@404.moth")],
         &config,
         &[],
-    )
-    .expect("build_backend should succeed");
+    ));
 
     let output_paths = collect_output_paths(&project.output_files);
     assert_eq!(project.output_files.len(), 2);
@@ -522,15 +625,12 @@ fn duplicate_output_paths_are_rejected() {
         &[],
     );
 
-    let err = match result {
-        Err(messages) => messages,
-        Ok(_) => panic!("duplicate output paths should fail"),
-    };
-    let reason = first_invalid_config_reason(&err);
+    let reports = expect_diagnosed(result, "duplicate output paths should diagnose");
+    let (reason, context) = first_invalid_config_reason(&reports);
     let InvalidConfigReason::DuplicateHtmlOutputPath { output_path, .. } = reason else {
         panic!("expected duplicate HTML output-path config reason");
     };
-    assert_eq!(err.string_table.resolve(*output_path), "index.html");
+    assert_eq!(context.string_table.resolve(output_path), "index.html");
 }
 
 #[test]
@@ -549,7 +649,7 @@ fn emits_const_fragment_and_calls_start() {
     }];
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![module]),
             &Config::new(entry_path),
             BuildProfile::Dev,
@@ -581,7 +681,7 @@ fn directory_build_maps_routes_relative_to_entry_root() {
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("src");
 
-    let project = build_with_test_modules(
+    let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![
             entry_root.join("@home.moth"),
@@ -591,8 +691,7 @@ fn directory_build_maps_routes_relative_to_entry_root() {
         ],
         &config,
         &[],
-    )
-    .expect("directory build should succeed");
+    ));
 
     let output_paths = collect_output_paths(&project.output_files);
     assert!(output_paths.contains(&PathBuf::from("index.html")));
@@ -600,6 +699,50 @@ fn directory_build_maps_routes_relative_to_entry_root() {
     assert!(output_paths.contains(&PathBuf::from("docs/basics/index.html")));
     assert!(output_paths.contains(&PathBuf::from("blog/index.html")));
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
+}
+
+// Windows cannot create the reserved directory.
+#[cfg(not(windows))]
+#[test]
+fn directory_build_rejects_reserved_output_path_component() {
+    use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/CON")).expect("should create reserved-name page dir");
+    let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
+
+    let builder = HtmlProjectBuilder::new();
+    let mut config = Config::new(root.clone());
+    config.entry_root = PathBuf::from("src");
+
+    let result = build_with_test_modules(
+        &builder,
+        vec![
+            entry_root.join("@home.moth"),
+            entry_root.join("CON").join("@page.moth"),
+        ],
+        &config,
+        &[],
+    );
+
+    let reports = expect_diagnosed(result, "reserved output path component should diagnose");
+    let (_, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected an error-severity diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("invalid_config.invalid_artefact_output_path.invalid_path_component")
+    );
+    assert!(matches!(
+        first_invalid_config_reason(&reports).0,
+        InvalidConfigReason::InvalidArtefactOutputPath {
+            reason: InvalidOutputFolderReason::InvalidPathComponent,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -628,7 +771,7 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
     );
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![module]),
             &config,
             BuildProfile::Dev,
@@ -667,12 +810,15 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
                 builder: BuilderIdentity::html(),
                 profile: BuildProfile::Dev,
             },
-            setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
     };
-    write_project_outputs(&mut project, &options, &mut string_table)
-        .expect("central writer should materialise the deferred JS asset");
+    write_project_outputs(
+        &mut project,
+        &options,
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+    )
+    .expect("central writer should materialise the deferred JS asset");
 
     assert_eq!(
         fs::read_to_string(output_root.join(&asset_output_path))
@@ -725,7 +871,7 @@ fn js_runtime_asset_deduped_across_modules() {
     );
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![module_a, module_b]),
             &config,
             BuildProfile::Dev,
@@ -780,7 +926,7 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
     );
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![module]),
             &config,
             BuildProfile::Dev,
@@ -834,7 +980,7 @@ fn non_js_runtime_asset_is_ignored() {
     );
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![module]),
             &config,
             BuildProfile::Dev,
@@ -863,7 +1009,7 @@ fn directory_build_supports_custom_entry_root_names() {
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("pages");
 
-    let project = build_with_test_modules(
+    let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![
             entry_root.join("@page.moth"),
@@ -871,8 +1017,7 @@ fn directory_build_supports_custom_entry_root_names() {
         ],
         &config,
         &[],
-    )
-    .expect("directory build should succeed");
+    ));
 
     let output_paths = collect_output_paths(&project.output_files);
     assert!(output_paths.contains(&PathBuf::from("index.html")));
@@ -898,11 +1043,8 @@ fn directory_build_requires_homepage_at_entry_root() {
         &[],
     );
 
-    let err = match result {
-        Err(messages) => messages,
-        Ok(_) => panic!("missing homepage should fail"),
-    };
-    let reason = first_invalid_config_reason(&err);
+    let reports = expect_diagnosed(result, "missing homepage should diagnose");
+    let (reason, context) = first_invalid_config_reason(&reports);
     let InvalidConfigReason::MissingHtmlHomepage {
         entry_root: reported_entry_root,
     } = reason
@@ -910,7 +1052,7 @@ fn directory_build_requires_homepage_at_entry_root() {
         panic!("expected missing HTML homepage config reason");
     };
     assert_eq!(
-        err.string_table.resolve(*reported_entry_root),
+        context.string_table.resolve(reported_entry_root),
         portable_path_text(&entry_root)
     );
 }
@@ -940,7 +1082,7 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     }];
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![homepage, api_only]),
             &config,
             BuildProfile::Dev,
@@ -963,7 +1105,7 @@ fn single_file_api_only_build_can_emit_no_artifacts() {
     api_only.metadata.root_activity = ModuleRootActivity::default();
 
     let project = builder
-        .build_backend(
+        .build_backend_with_test_context(
             project_compilation(vec![api_only]),
             &Config::new(entry_path),
             BuildProfile::Dev,
@@ -981,13 +1123,12 @@ fn wasm_flag_emits_html_js_and_wasm_artifacts() {
     let builder = HtmlProjectBuilder::new();
     let entry_path = PathBuf::from("@page.moth");
 
-    let project = build_with_test_modules(
+    let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![entry_path.clone()],
         &Config::new(entry_path),
         &[Flag::HtmlWasm],
-    )
-    .expect("wasm mode build should succeed");
+    ));
 
     let output_paths = collect_output_paths(&project.output_files);
     assert!(output_paths.contains(&PathBuf::from("index.html")));
@@ -1008,13 +1149,12 @@ fn wasm_mode_uses_per_page_folder_layout() {
     let builder = HtmlProjectBuilder::new();
     let config = Config::new(PathBuf::from("docs.moth"));
 
-    let project = build_with_test_modules(
+    let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![PathBuf::from("@page.moth"), PathBuf::from("@404.moth")],
         &config,
         &[Flag::HtmlWasm],
-    )
-    .expect("wasm mode build should succeed");
+    ));
 
     let output_paths = collect_output_paths(&project.output_files);
     assert!(output_paths.contains(&PathBuf::from("index.html")));
@@ -1037,7 +1177,7 @@ fn wasm_directory_build_preserves_nested_routes() {
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("src");
 
-    let project = build_with_test_modules(
+    let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![
             entry_root.join("@page.moth"),
@@ -1046,8 +1186,7 @@ fn wasm_directory_build_preserves_nested_routes() {
         ],
         &config,
         &[Flag::HtmlWasm],
-    )
-    .expect("wasm directory build should succeed without duplicate output paths");
+    ));
 
     let output_paths = collect_output_paths(&project.output_files);
     assert!(output_paths.contains(&PathBuf::from("index.html")));
@@ -1066,27 +1205,20 @@ fn wasm_directory_build_preserves_nested_routes() {
 fn builder_rejects_invalid_origin_config() {
     let builder = HtmlProjectBuilder::new();
     let mut config = Config::new(PathBuf::from("."));
-    config.html_section.origin = Some(String::from("not-a-slash"));
+    config
+        .builder_settings
+        .set_string(String::from("origin"), String::from("not-a-slash"), None);
 
     let result = build_with_test_modules(&builder, vec![PathBuf::from("@page.moth")], &config, &[]);
-    let messages = match result {
-        Err(messages) => messages,
-        Ok(_) => panic!("invalid origin should fail"),
-    };
-    let diagnostic = messages
-        .first_error()
-        .expect("invalid origin should produce a diagnostic");
-    let DiagnosticPayload::InvalidConfig {
-        reason: InvalidConfigReason::InvalidProjectSettingValue { expected, .. },
-        ..
-    } = &diagnostic.payload
-    else {
+    let reports = expect_diagnosed(result, "invalid origin should fail diagnostically");
+    let (reason, context) = first_invalid_config_reason(&reports);
+    let InvalidConfigReason::InvalidProjectSettingValue { expected, .. } = reason else {
         panic!("invalid origin should remain a typed config diagnostic");
     };
     assert!(
-        messages
+        context
             .string_table
-            .resolve(*expected)
+            .resolve(expected)
             .contains("starts with '/'")
     );
 }

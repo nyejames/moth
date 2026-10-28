@@ -22,6 +22,7 @@ impl ReportServer {
     fn new(origin: &str) -> Self {
         let output = tempfile::tempdir().expect("should create output directory");
         fs::create_dir(output.path().join("other")).expect("should create other entry directory");
+        fs::create_dir(output.path().join("docs")).expect("should create docs entry directory");
         fs::write(
             output.path().join("index.html"),
             "<html><body>home page</body></html>",
@@ -32,14 +33,29 @@ impl ReportServer {
             "<html><body>other page</body></html>",
         )
         .expect("should write other entry");
+        fs::write(
+            output.path().join("docs/index.html"),
+            "<html><body>docs page</body></html>",
+        )
+        .expect("should write docs entry");
+        let served_artifacts =
+            crate::projects::dev_server::build_loop::capture_served_artifacts(output.path())
+                .expect("capture successful artifacts");
+        let served_html_entries = crate::projects::dev_server::static_files::validated_html_entries(
+            output.path(),
+            &served_artifacts,
+        );
         let state = Arc::new(DevServerState::new(output.path().to_path_buf()));
         {
             let mut build = state.build_state.lock().expect("should lock build state");
             build.last_build_ok = true;
             build.last_build_version = 7;
+            build.served_artifacts_version = 7;
             build.entry_page_rel = Some("index.html".into());
             build.html_site_config.origin = origin.to_owned();
             build.last_build_messages_summary = "successful compilation".to_owned();
+            build.served_artifacts = served_artifacts;
+            build.served_html_entries = served_html_entries;
         }
         Self {
             _output: output,
@@ -171,6 +187,11 @@ fn runtime_reports_deduplicate_and_leave_successful_pages_and_build_unchanged() 
     assert_eq!(after.last_build_version, before.last_build_version);
     assert_eq!(after.entry_page_rel, before.entry_page_rel);
     assert_eq!(after.output_dir, before.output_dir);
+    assert_eq!(
+        after.served_artifacts_version,
+        before.served_artifacts_version
+    );
+    assert_eq!(after.served_html_entries, before.served_html_entries);
     assert_eq!(after.html_site_config, before.html_site_config);
     assert_eq!(
         after.last_build_messages_summary,
@@ -184,6 +205,26 @@ fn runtime_reports_deduplicate_and_leave_successful_pages_and_build_unchanged() 
             .expect("should lock clients")
             .is_empty()
     );
+}
+#[test]
+fn runtime_report_accepts_published_entry_after_output_file_is_deleted() {
+    let server = ReportServer::new("/");
+    fs::remove_file(server._output.path().join("index.html"))
+        .expect("remove entry from the live output directory");
+
+    assert_status(&server.post("/__moth/runtime-report", &entry_report()), 204);
+    assert_eq!(server.count(), 1);
+}
+
+#[test]
+fn runtime_reports_reject_aliased_spellings_of_published_entries() {
+    let server = ReportServer::new("/");
+    for entry in ["docs/./index.html", "docs//index.html", "index.html/"] {
+        let mut report = entry_report();
+        report["entry"] = json!(entry);
+        assert_status(&server.post("/__moth/runtime-report", &report), 409);
+    }
+    assert_eq!(server.count(), 0);
 }
 
 #[test]

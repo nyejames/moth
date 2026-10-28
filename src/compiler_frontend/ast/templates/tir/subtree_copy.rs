@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::node::{
 };
 use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_runtime_slot_site;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::overlays::{
@@ -82,7 +83,8 @@ fn copy_tir_node_with_active_slot_plan(
     identity_remap: &mut TirCopyIdentityRemap,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let source_node = store.get_node(source_node_id).cloned().ok_or_else(|| {
-        TemplateError::from(CompilerError::compiler_error(
+        TemplateError::from(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
             "active-context TIR copy: source node ID was not present in the store.",
         ))
     })?;
@@ -138,7 +140,7 @@ fn copy_tir_node_with_active_slot_plan(
                 let site_id = copy_state
                     .next_runtime_slot_site_for_key(plan_id, &placeholder.key, store)
                     .ok_or_else(|| {
-                        TemplateError::from(CompilerError::compiler_error(
+                        TemplateError::from(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                             "active-context TIR copy: no matching runtime slot site for a slot placeholder.",
                         ))
                     })?;
@@ -548,7 +550,8 @@ fn copy_tir_template_with_active_slot_plan(
 ) -> Result<TemplateIrId, TemplateError> {
     let (source_root, has_runtime_slot_plan) = {
         let source_template = store.get_template(source_template_id).ok_or_else(|| {
-            TemplateError::from(CompilerError::compiler_error(
+            TemplateError::from(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "active-context TIR copy: source template ID was not present in the store.",
             ))
         })?;
@@ -641,7 +644,7 @@ fn remap_view_context(
     store: &mut TemplateIrStore,
     context: TemplateViewContext,
     identity_remap: &TirCopyIdentityRemap,
-) -> Result<TemplateViewContext, CompilerError> {
+) -> Result<TemplateViewContext, InfrastructureFailure> {
     // Overlay dimensions stay present even when their copied subtree has no
     // matching entries. Presence is part of the exact view identity.
     let expression_overlay = context
@@ -668,11 +671,11 @@ fn remap_expression_overlay(
     store: &mut TemplateIrStore,
     overlay_id: TirExpressionOverlayId,
     identity_remap: &TirCopyIdentityRemap,
-) -> Result<TirExpressionOverlayId, CompilerError> {
+) -> Result<TirExpressionOverlayId, InfrastructureFailure> {
     let overrides = store
         .expression_overlay(overlay_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "active-context TIR copy: expression overlay {overlay_id} was not present in the store."
             ))
         })?
@@ -693,11 +696,11 @@ fn remap_slot_resolution_overlay(
     store: &mut TemplateIrStore,
     overlay_id: TirSlotResolutionOverlayId,
     identity_remap: &TirCopyIdentityRemap,
-) -> Result<TirSlotResolutionOverlayId, CompilerError> {
+) -> Result<TirSlotResolutionOverlayId, InfrastructureFailure> {
     let resolutions = store
         .slot_resolution_overlay(overlay_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "active-context TIR copy: slot-resolution overlay {overlay_id} was not present in the store."
             ))
         })?
@@ -718,11 +721,11 @@ fn remap_wrapper_context_overlay(
     store: &mut TemplateIrStore,
     overlay_id: TirWrapperContextOverlayId,
     identity_remap: &TirCopyIdentityRemap,
-) -> Result<TirWrapperContextOverlayId, CompilerError> {
+) -> Result<TirWrapperContextOverlayId, InfrastructureFailure> {
     let contexts = store
         .wrapper_context_overlay(overlay_id)
         .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
+            InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "active-context TIR copy: wrapper-context overlay {overlay_id} was not present in the store."
             ))
         })?

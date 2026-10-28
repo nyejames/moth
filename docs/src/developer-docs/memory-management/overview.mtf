@@ -39,7 +39,7 @@ Garbage collection is a permitted physical representation of a topology that has
 - cycle legality
 - external-boundary legality
 
-User-authored topology that is invalid or cannot be proven legal produces a structured `CompilerDiagnostic`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots or metadata produce `CompilerError`.
+User-authored topology that is invalid or cannot be proven legal produces a typed `DiagnosticDraft`. Missing or inconsistent compiler-owned summaries, boundary classifications, lifecycle roots or metadata produce `InfrastructureFailure`.
 
 **Physical strategy selection**
 
@@ -52,7 +52,7 @@ After shared topology and backend-neutral memory requirements are complete, targ
 - Retained Edge Counting for unresolved runtime-many persistent edges
 - host garbage-collected representation on debug profiles and GC-native backends
 
-Strategy selection changes memory quality, never source legality. A missing physical strategy after successful topology validation is a `CompilerError`, not a silent collector fallback.
+Strategy selection changes memory quality, never source legality. A missing physical strategy after successful topology validation is an `InfrastructureFailure`, not a silent collector fallback.
 
 Do not treat "no precise strategy found" and "topology unproven" as the same case. The first is a planning outcome bounded by the collector-free guarantee. The second is a source diagnostic.
 
@@ -363,7 +363,7 @@ Local module compilation produces local lifetime constraints and exported summar
 - Every allocation family has exactly one semantic lifetime owner.
 - GC cannot bypass topology validation or legalise invalid retained edges.
 - A capable full-control release backend must not fall back to a tracing or reachability collector.
-- A missing physical strategy after successful topology validation is `CompilerError`.
+- A missing physical strategy after successful topology validation is `InfrastructureFailure`.
 - Affine cleanup responsibility may move or be discharged, but it never duplicates.
 - For one REC-selected family `F`, `REC count(F) = live counted persistent-edge obligations(F) + optional affine-root obligation(F)`, where the affine-root term is zero or one. Ordinary aliases, parameters, temporary projections and `get()` results never contribute obligations, and REC never establishes legality.
 - Declared-region-owned storage is count-free, is never released individually and is the only source mechanism for cycles. Count-free describes the declared region's own targets: an edge from declared-region-owned storage into an externally owned REC family is still a counted edge into that external family, released at declared-region exit before bulk reclamation.

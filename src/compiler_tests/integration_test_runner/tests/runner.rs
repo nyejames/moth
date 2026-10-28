@@ -7,14 +7,9 @@ use super::super::errors::TestRunnerErrorKind;
 use super::super::runner::run_loaded_suite;
 use super::super::types::GoldenExpectation;
 use super::super::{
-    BackendId, CaseExecutionResult, CaseRole, ExpectedOutcome, FailureKind, SuccessExpectation,
-    TestCaseSpec, TestRunnerOptions, TestSuiteSpec, WarningExpectation,
+    BackendId, CaseExecutionResult, CaseRole, ExpectedOutcome, SuccessExpectation, TestCaseSpec,
+    TestRunnerOptions, TestSuiteSpec, WarningExpectation,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
-};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -221,24 +216,7 @@ fn triage_report_write_failure_returns_error() {
     let result = run_loaded_suite(
         suite_with_case(Some(CaseRole::Backend), Some("backend.lowering.shared")),
         TestRunnerOptions::default(),
-        |_| {
-            let table = StringTable::new();
-            let diagnostic = CompilerDiagnostic::with_severity(
-                DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-                DiagnosticSeverity::Error,
-                None,
-                DiagnosticPayload::None,
-            );
-            let messages = CompilerMessages::from_diagnostics(vec![diagnostic], table);
-            CaseExecutionResult {
-                passed: false,
-                panic_message: None,
-                build_result: None,
-                messages: Some(messages),
-                failure_reason: Some("forced test failure".to_owned()),
-                failure_kind: Some(FailureKind::ExpectationViolation),
-            }
-        },
+        panic_if_called,
         inventory_path
             .to_str()
             .expect("temporary path should be UTF-8"),
@@ -287,7 +265,6 @@ fn the_triage_report_says_the_run_is_incomplete_until_execution_finishes() {
             CaseExecutionResult {
                 passed: true,
                 panic_message: None,
-                build_result: None,
                 messages: None,
                 failure_reason: None,
                 failure_kind: None,
@@ -388,8 +365,8 @@ fn the_audit_report_records_the_run_and_the_repository_revision() {
         "the run identity should name a run: {}",
         json["run"]
     );
-    // The suite runs inside this repository, so discovery must produce a revision rather than
-    // the null a discarded Git failure used to leave behind.
+    // The suite runs inside this repository, so revision discovery must produce a commit identity
+    // rather than null.
     assert!(
         json["repository_revision"]["commit"].is_string(),
         "unexpected revision: {}",

@@ -1,6 +1,6 @@
 //! Finalization regression tests for HIR-boundary type ownership.
 //!
-//! WHAT: documents that typed constructors now own canonical call `TypeId` data before
+//! WHAT: documents that typed constructors own canonical call `TypeId` data before
 //! finalization.
 //! WHY: finalization validates expression `TypeId`s against the canonical environment;
 //! build expressions against the canonical AST type environment.

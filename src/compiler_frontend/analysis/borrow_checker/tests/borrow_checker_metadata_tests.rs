@@ -2,7 +2,7 @@
 //!
 //! WHAT: checks that assertion-message expressions contribute their local loads to terminator
 //!       metadata.
-//! WHY: the message is an ordinary shared terminal use and must not be skipped as legacy text.
+//! WHY: the message is a runtime expression whose loads must contribute to terminal liveness.
 
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;

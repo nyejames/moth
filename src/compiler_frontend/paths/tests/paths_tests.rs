@@ -1,6 +1,10 @@
 //! Path-only syntax tests.
 
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, PathKind};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PathKind};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
@@ -176,19 +180,27 @@ fn try_path_for_token_rejects_wrong_table_and_span_mismatch() {
         .try_path_for_token(path_id, token_span)
         .expect("the owning table must accept its own token");
 
-    let none_error = tokens
-        .path_syntax
-        .try_path_for_token(
+    let panic = std::panic::catch_unwind(|| {
+        tokens.path_syntax.try_path_for_token(
             crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
             token_span,
         )
-        .expect_err("NONE must stay an infrastructure failure");
-    assert!(none_error.msg.contains("absent PathSyntaxId marker"));
+    })
+    .expect_err("NONE is a compiler bug because try_from_raw never issues raw 0");
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .expect("compiler bug panic should carry a structured report");
+    assert_eq!(report.stage, CompilerStage::DependencyResolution);
+    assert!(
+        report.message.as_ref().contains("PathSyntaxId::NONE"),
+        "NONE must name the absent-handle invariant: {}",
+        report.message
+    );
 
     let empty_error = crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new()
         .try_path_for_token(path_id, token_span)
         .expect_err("an empty wrong table must stay an infrastructure failure");
-    assert!(empty_error.msg.contains("outside a table"));
+    assert!(empty_error.message.contains("outside a table"));
 
     let mut other_span_builder = ExtendedSpanBuilder::new();
     let (other, _) = tokenize_source_with_id(
@@ -196,31 +208,41 @@ fn try_path_for_token_rejects_wrong_table_and_span_mismatch() {
         &mut other_span_builder,
         SourceId::from_index(7),
     );
-    let other_error = other
-        .path_syntax
-        .try_path_for_token(path_id, token_span)
-        .expect_err("a same-index row from another source must stay an infrastructure failure");
-    assert!(
-        other_error
-            .msg
-            .contains("does not belong to the consumed path token")
+    let panic =
+        std::panic::catch_unwind(|| other.path_syntax.try_path_for_token(path_id, token_span))
+            .expect_err("a foreign table row must panic as a compiler bug");
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .expect("compiler bug panic should carry a structured report");
+    assert_eq!(report.stage, CompilerStage::DependencyResolution);
+    assert_eq!(
+        report.message.as_ref(),
+        "path syntax row does not belong to the consumed path token"
     );
 
     let mismatched_span = SourceSpan::new(path_token.source(), LocalSpan::source_start());
-    let span_error = tokens
-        .path_syntax
-        .try_path_for_token(path_id, mismatched_span)
-        .expect_err("a span mismatch must stay an infrastructure failure");
-    assert!(
-        span_error
-            .msg
-            .contains("does not belong to the consumed path token")
+    let panic = std::panic::catch_unwind(|| {
+        tokens
+            .path_syntax
+            .try_path_for_token(path_id, mismatched_span)
+    })
+    .expect_err("a path span mismatch must panic as a compiler bug");
+    let report = panic
+        .downcast_ref::<CompilerBugReport>()
+        .expect("compiler bug panic should carry a structured report");
+    assert_eq!(report.stage, CompilerStage::DependencyResolution);
+    assert_eq!(
+        report.message.as_ref(),
+        "path syntax row does not belong to the consumed path token"
     );
 }
 
 #[test]
 fn path_rejects_whitespace_after_introducer_or_separator() {
-    for source in ["@ docs\n", "@docs/ my\n"] {
+    for (source, expected_path_kind) in [
+        ("@ docs\n", PathKind::Empty),
+        ("@docs/ my\n", PathKind::TrailingSeparator),
+    ] {
         let mut strings = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_path = path_fork
@@ -245,10 +267,18 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
                 panic!("path fixture tokenization encountered infrastructure failure: {error:?}")
             }
         };
-        assert!(matches!(
-            error.payload,
-            DiagnosticPayload::InvalidPath { .. }
-        ));
+        let diagnostics = compact_bag_for_test(DiagnosticBag::from(error), None);
+        let diagnostic = diagnostics
+            .first()
+            .expect("the diagnostic bag contains one record");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0018");
+        assert_eq!(
+            diagnostic
+                .family_view::<InvalidPathView>()
+                .expect("the path failure remains an invalid-path diagnostic")
+                .path_kind,
+            expected_path_kind,
+        );
     }
 }
 
@@ -276,12 +306,16 @@ fn path_errors_remain_structured() {
             panic!("path fixture tokenization encountered infrastructure failure: {error:?}")
         }
     };
-    assert!(matches!(
-        error.payload,
-        DiagnosticPayload::InvalidPath {
-            path_kind: PathKind::OnlyRootSlashSupported
-        }
-    ));
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(error), None);
+    assert_eq!(
+        diagnostics
+            .first()
+            .expect("the diagnostic bag contains one record")
+            .family_view::<InvalidPathView>()
+            .expect("the diagnostic is an invalid path")
+            .path_kind,
+        PathKind::OnlyRootSlashSupported,
+    );
 }
 
 /// Long path rows retain the token's single source-owned encoding.
@@ -330,7 +364,15 @@ fn long_multibyte_path_retains_one_original_span() {
         .retain_text(source_id, source.clone())
         .expect("retain source snapshot");
     database.retain_span_builder(source_id, spans);
-    let database = database.finish().expect("install original span table");
+    database
+        .finish_source(source_id)
+        .expect("the source should finalize after tokenization");
+    database
+        .assemble_finalized_tables()
+        .expect("the frozen token span table should assemble");
+    let database = database
+        .finish()
+        .expect("the already-finalized source table should validate");
     let range = retained_span.byte_range(&database);
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],

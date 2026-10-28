@@ -1,7 +1,7 @@
 //! Function-body terminality helper regression tests.
 //!
 //! WHAT: checks the control-flow analysis used to reject non-unit functions that can fall through.
-//! WHY: these rules are the AST-side replacement for the old HIR fall-through diagnostic; keeping
+//! WHY: these rules produce the fall-through diagnostic on the AST side; keeping
 //! them in a focused unit test makes the contract explicit without duplicating integration coverage.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
@@ -12,7 +12,12 @@ use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchP
 use crate::compiler_frontend::ast::statements::terminality::{
     FunctionTerminalityPolicy, validate_function_body_terminality,
 };
-use crate::compiler_frontend::compiler_messages::InvalidReturnShapeReason;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidReturnShapeCode, InvalidReturnShapeView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     fresh_success_returns, node, test_if_branch_metadata,
@@ -43,10 +48,7 @@ impl TestExpressions {
             .expect("terminality I32 fixture")
             .id()
     }
-    fn require(
-        &self,
-        body: &[AstNode],
-    ) -> Option<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+    fn require(&self, body: &[AstNode]) -> Option<DiagnosticDraft> {
         validate_function_body_terminality(
             body,
             FunctionTerminalityPolicy::RequireExplicitReturn,
@@ -60,7 +62,7 @@ impl TestExpressions {
         &self,
         body: &[AstNode],
         policy: FunctionTerminalityPolicy,
-    ) -> Option<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+    ) -> Option<DiagnosticDraft> {
         validate_function_body_terminality(body, policy, None, &self.builder, &self.constants)
             .expect("terminality fixtures are structurally valid")
     }
@@ -133,12 +135,14 @@ fn require_explicit_return_rejects_empty_body() {
         "empty non-unit body should be rejected"
     );
     let diagnostic = diagnostic.unwrap();
-    assert!(matches!(
-        diagnostic.payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidReturnShape {
-            reason: InvalidReturnShapeReason::FunctionMayFallThrough,
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidReturnShapeView>()
+        .expect("the empty body has invalid return-shape facts");
+    assert_eq!(facts.reason, InvalidReturnShapeCode::FunctionMayFallThrough);
 }
 
 #[test]

@@ -57,12 +57,14 @@ fn entry_runtime_fragment_count_ignores_assigned_templates() {
 fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
     // An imported root with only declarations reports runtime fragment count 0.
     // WHY: only the active module root contributes runtime fragments.
-    let headers = parse_single_file_headers_with_entry(
-        "f || -> I32:\n    1\n;\n",
-        "src/lib.moth",
-        "src/@page.moth",
-    )
-    .expect("headers should parse");
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(
+            "f || -> I32:\n    1\n;\n",
+            "src/lib.moth",
+            "src/@page.moth",
+        ),
+        "headers should parse",
+    );
     assert_eq!(
         headers.entry_runtime_fragment_count, 0,
         "runtime_fragment_count must be 0 when the file is not the active root"
@@ -201,10 +203,10 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
         "a real duplicate after the closed expressions must still be rejected",
     );
     let duplicate_span = source_span_for(&duplicate_source, "Status", 3);
-    assert!(errors.diagnostics.iter().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::DuplicateDeclaration { .. }
-        ) && diagnostic.primary_span == Some(duplicate_span)
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::DuplicateDeclarationView>()
+            .is_some()
+            && diagnostic_primary_span(diagnostic) == Some(duplicate_span)
     }));
 }

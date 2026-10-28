@@ -5,10 +5,12 @@
 //! WHY: SDK callers branch on the kind and print the lines without matching compiler-private
 //!      diagnostic types.
 
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
-use crate::compiler_frontend::compiler_messages::render::infrastructure::{
-    InfrastructureClass, infrastructure_class,
+use crate::compiler_frontend::compiler_errors::{
+    CompilationResult, InfrastructureClass, InfrastructureErrors,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
+use crate::compiler_frontend::compiler_messages::render::terse::{
+    format_terse_compilation_result, format_terse_diagnostic_reports,
 };
 use std::fmt;
 
@@ -53,34 +55,36 @@ impl Error {
         Self::without_messages(ErrorKind::Infrastructure, message)
     }
 
-    /// Classifies a failed compiler result and renders its messages.
-    ///
-    /// Infrastructure failures take precedence over diagnostics, so a compiler bug is reported
-    /// as `CompilerBug` even when diagnostics accompany it.
-    pub(crate) fn from_compiler_messages(compiler_messages: &CompilerMessages) -> Self {
-        let messages = format_terse_compiler_messages(compiler_messages);
-        let (kind, summary) = match compiler_messages.infrastructure_errors() {
-            None => (ErrorKind::Compilation, "The project failed to compile."),
-            Some(infrastructure_errors) => {
-                if infrastructure_errors.iter().any(|error| {
-                    infrastructure_class(&error.error_type) == InfrastructureClass::CompilerBug
-                }) {
-                    (
-                        ErrorKind::CompilerBug,
-                        "The build hit an internal compiler error.",
-                    )
-                } else {
-                    (
-                        ErrorKind::Infrastructure,
-                        "The build hit an infrastructure error.",
-                    )
-                }
-            }
+    /// Converts diagnosed compiler reports without discarding their retained render contexts.
+    pub(crate) fn from_diagnostic_reports(reports: &DiagnosticReportSet) -> Self {
+        Self {
+            kind: ErrorKind::Compilation,
+            message: "The project failed to compile.".to_owned(),
+            messages: format_terse_diagnostic_reports(reports),
+        }
+    }
+
+    /// Converts ordered infrastructure causes using the compiler's current typed classification.
+    pub(crate) fn from_infrastructure_errors(errors: InfrastructureErrors) -> Self {
+        let is_compiler_bug = errors
+            .iter()
+            .any(|error| error.kind.class() == InfrastructureClass::CompilerBug);
+        let (kind, summary) = if is_compiler_bug {
+            (
+                ErrorKind::CompilerBug,
+                "The build hit an internal compiler error.",
+            )
+        } else {
+            (
+                ErrorKind::Infrastructure,
+                "The build hit an infrastructure error.",
+            )
         };
+        let compiler_result: CompilationResult<()> = Err(errors);
         Self {
             kind,
             message: summary.to_owned(),
-            messages,
+            messages: format_terse_compilation_result(&compiler_result),
         }
     }
 

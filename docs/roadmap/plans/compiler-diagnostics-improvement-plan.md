@@ -11,18 +11,29 @@ This is an implementation plan, not a research backlog. Each phase should leave 
 ## Required authority documents
 
 - `docs/compiler-design-overview.md` for diagnostic lanes, type rendering and stage ownership
+- `docs/compiler-data-layout-design.md` for source identities and spans, diagnostic schemas and storage, type-display capture, report rendering and failure lanes
 - `docs/build-system-design.md` when config, graph or output diagnostics are in scope
 - `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 
 ## Architecture alignment
 
-This plan does not own config or graph architecture. It consumes the accepted architecture from the two authority documents.
+This plan owns source-facing diagnostic improvements, not config or graph architecture. It consumes those contracts from the build/compiler authorities and the current data-layout authority.
 
-Key alignment rules:
+Diagnostic construction and storage:
+
+- Build user-facing failures through owning family constructors as typed `DiagnosticDraft` values, accumulated in `DiagnosticBag`.
+- Family schemas define stable codes and typed facts. Preserve factual names, source spans, operators, counts and reason enums rather than storing rendered prose.
+- Boundary freezing compacts drafts into `DiagnosticStore`. Keep each common `DiagnosticRecord` within 32 bytes and its four fact words. Put variable labels, lists, foreign sites and additional facts only in existing schema-declared typed side stores when needed. Do not widen the common record or add unbounded diagnostic-specific storage.
+- Capture display-relevant types into `TypeDisplaySnapshot` and `TypeDisplayId` at the owning boundary. Render frozen family data through `DiagnosticView`, not from raw `TypeId`s.
+- Store related labels through schema-defined `LabelMessageCode` values and source spans. Put variable label data in typed side stores, not string-valued label fields.
+- Preserve current stable codes, reason keys, severities and user-visible wording unless a named finding changes them.
+- Keep operational failures in the `InfrastructureFailure` / `InfrastructureErrors` lane. Do not route source mistakes through infrastructure failures.
+
+Build-system alignment:
 
 - use graph outcome terminology for diagnosed and blocked modules
 - preserve one diagnostic set per canonical module
-- keep warnings only on successful artefacts
+- keep warnings only on successful command outcomes
 - keep target-contract diagnostics shared by build and check
 
 Future diagnostic coverage needed for:
@@ -40,24 +51,22 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
-STATUS: paused
+STATUS: ready to resume; the compact diagnostic layout is delivered
 NEXT_SLICE: Phase 4.2, catch-recovery type context
-BLOCKERS: delivered compact diagnostic records, frozen type-display snapshots and failure-lane migration
-TRANSFERRED: 4.1c and 4.4 belong to the compact typed-expression and native result-channel work, recorded as delivered below
-NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their facts through the final schema without duplicating coverage
-RESUME_ACTION: reload routed authorities and current source, refresh producers/schema APIs and confirm the transferred capabilities are delivered before starting Phase 4.2
+BLOCKERS: none; bounded recovery is not a prerequisite
+TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
+NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
+RESUME_ACTION: start Phase 4.2 with `DiagnosticDraft`, `DiagnosticBag`, schema-typed facts, `DiagnosticStore` side stores and `DiagnosticView`; capture display types in `TypeDisplaySnapshot`/`TypeDisplayId` and keep `InfrastructureFailure`/`InfrastructureErrors` separate
 ```
 
-The native-result transfers below are recorded as delivered. Their coverage and source-visible
-messages belong to the compact typed-expression and native result-channel work.
-This plan retains their design record and owns the remaining diagnostic improvements after the
-layout migration.
+The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
+This plan retains their design record and owns the remaining diagnostic improvements.
 
 Delivered numeric semantics supply deterministic conflicting-receiver diagnostics with both source
 locations, out-of-range default diagnostics, diagnostics for statically invalid selected-width
 operations and normal handler/fallback type diagnostics for authored safety catches. Preserve their
 classification, authored-order witnesses and primary source coverage. This plan consumes the
-resolved diagnostic facts through the final schema after the layout migration and owns only the
+resolved diagnostic facts through the current family schema and typed report views, and owns only the
 remaining presentation and recovery-context improvements. Catch eligibility remains separate from
 actual failure effects, and an unreachable handler still receives ordinary type validation.
 
@@ -107,11 +116,11 @@ assignment targets.
 
 ## Required implementation rules
 
-- Emit user mistakes as typed `CompilerDiagnostic` values. Do not route malformed source through `CompilerError` or `MOTH-INFRA-0001`.
-- Keep diagnostic payloads factual. Carry names, `TypeId`s, operators, counts, locations and reason enums rather than pre-rendered prose.
-- Render type names through `DiagnosticRenderContext`.
+- Emit user mistakes through owning family constructors as typed `DiagnosticDraft` values and accumulate them in `DiagnosticBag`. Keep `InfrastructureFailure` / `InfrastructureErrors` for operational failures, not malformed source.
+- Keep family-schema facts typed and factual. Preserve names, semantic `TypeId`s, operators, counts, `SourceSpan`s and reason enums rather than pre-rendered prose or unbounded diagnostic-specific fields.
+- Capture display-relevant types in `TypeDisplaySnapshot` and use `TypeDisplayId` in frozen diagnostics. Render through `DiagnosticView`, never from raw `TypeId`s.
 - Reuse an existing stable code when the diagnostic category and contract remain the same. Add a new code only for a genuinely new diagnostic family.
-- Preserve the source location that identifies the actual mistake. Add a secondary label for the related declaration, delimiter, conflicting directive or active access when available.
+- Preserve the source span that identifies the actual mistake. Add related sites with schema-defined label message codes and spans where useful; use typed side-store data for variable label content.
 - Do not generate exact replacement source unless the compiler has enough structured facts to make it valid. Prefer a generic correction over a fabricated snippet.
 - Keep suggestions source-visible. Do not mention internal AST, HIR, parameter receiver placeholders, borrow lattice states or compiler-introduced locals.
 - Suggestions must favour normal Moth patterns:
@@ -131,9 +140,7 @@ assignment targets.
 **Original findings:** DIAG-013, DIAG-027
 **Status:** Complete in `df65c9ced`
 
-The terse renderer now uses one render-boundary fallback from an empty payload message to the
-descriptor title. Focused and all-kind invariant tests protect non-empty messages without changing
-stable codes, locations or the terminal and dev-server formats.
+The terse renderer uses the family descriptor title when the rendered message is empty. Focused and all-kind invariant tests protect non-empty messages without changing stable codes, locations or the terminal and dev-server formats.
 
 ### 1.2 Remove stale source terminology and misleading guidance
 
@@ -272,7 +279,7 @@ Duplicate parameter and record-field names are source declarations, not HIR inva
   bindings, parameters, fields and variants. Prefer: `Cannot declare 'name' because that name is
   already visible in this scope. Moth does not allow duplicate names or shadowing.`
 - Remove the later choice-payload-only duplicate scan once the shared owner covers it.
-- Do not create a function-scope `CompilerError`.
+- Do not route a user mistake through the infrastructure-failure lane.
 - Do not let duplicate struct fields reach the HIR duplicate-field invariant.
 
 The shared signature-member parser now owns ordinary member-name uniqueness for function
@@ -335,8 +342,7 @@ the invalid source fact is the authored key name. Header parsing already owns th
 - Do not add a location to the shared AST `Declaration` type or create a global header-to-AST side
   table for this Stage 0-only need.
 - Strengthen generic unknown-key coverage to assert the key span and keep `MOTH-CONFIG-0001`.
-- Preserve the exact authored-key payload and ordinary unknown-key message established in Phase
-  2.6.
+- Preserve the exact authored-key fact and ordinary unknown-key message established in Phase 2.6.
 
 `ParsedConfigFile` now preserves authored constant-name locations before AST construction consumes
 the sorted headers. Config validation uses that Stage 0-local map for `UnknownKey` and its duplicate
@@ -354,17 +360,9 @@ probes protect both diagnostic lanes.
 **Phase 3.1a call-argument status:** Complete in `bd2fa6328`.
 **Phase 3.1b receiver status:** Complete in this checkpoint.
 
-Call arguments now preserve distinct named-target, value and authored-`~` locations. One
-call-boundary classifier distinguishes fresh values, existing immutable places and existing mutable
-places without repeated expression walks. Plain fresh and explicit-copy values satisfy mutable
-parameters without `~`, while invalid markers and immutable sources retain precise reasons and
-source-facing guidance. Unnamed host parameters render one-based positions only.
+Call arguments preserve distinct named-target, value and authored-`~` locations. One call-boundary classifier distinguishes fresh values, existing immutable places and existing mutable places without repeated expression walks. Plain fresh and explicit-copy values satisfy mutable parameters without `~`, while invalid markers and immutable sources retain precise reasons and source-facing guidance. Unnamed host parameters render one-based positions only.
 
-Receiver calls now share one source-state classifier across source methods, collection builtins and
-map builtins. Temporary receivers, immutable places, mutable places missing `~` and invalid authored
-markers remain distinct. Authored-marker failures point at `~`, named `~binding.method(...)`
-guidance is emitted only from factual payload data, and const-record runtime calls use
-`ConstRecordNoRuntimeCalls` with the current `const record` source term.
+Receiver calls share one source-state classifier across source methods, collection builtins and map builtins. Temporary receivers, immutable places, mutable places missing `~` and invalid authored markers remain distinct. Authored-marker failures point at `~`, named `~binding.method(...)` guidance comes from factual schema facts, and const-record runtime calls use a dedicated reason and the source term `const record`.
 
 Mutable access diagnostics must distinguish these source states:
 
@@ -378,41 +376,13 @@ Mutable access diagnostics must distinguish these source states:
 
 State 5 is valid and must not be diagnosed.
 
-The current shared-argument/mutable-parameter branch checks only whether the expression is a
-place. An immutable existing place without `~` therefore reaches the same marker-only repair as an
-already-mutable place. The validator must classify place mutability before choosing the reason.
+**Status: Call-access classification is delivered; `RustBorrowPrefix` wording remains.** The shared-argument path classifies place mutability before choosing its repair. Fresh values, including `copy` results, satisfy mutable parameters without `~`; an authored marker on a fresh value remains invalid. Unnamed parameter messages use one-based positions. The `function_call_mutable_param_copy_arg` integration case covers an explicit copy passed to a mutable parameter.
 
-**Additional confirmed fresh-value gap:** `copy source` currently enters the existing-place branch
-and receives missing-`~` guidance. `copy` creates an independent value, so a plain copied value is a
-valid fresh argument for a mutable parameter. The call-boundary classifier must treat
-`ExpressionKind::Copy` as `FreshMutableValue`, while authored `~copy source` remains invalid because
-`~` accepts only an existing mutable place.
+The remaining wording item is the `CommonSyntaxMistakeReason::RustBorrowPrefix` renderer in `src/compiler_frontend/compiler_messages/render/syntax.rs`: the full and terse messages describe shared access as implicit and recommend `~` for mutation without specifying that `~` is valid only on an existing mutable binding or field at a mutable call or receiver boundary.
 
-**Additional confirmed rendering gaps:** the shared unnamed-parameter fallback currently exposes
-the internal zero-based slot before translating it to a one-based position. It must render only the
-one-based source position. The authored-`~` non-place branch also says `non-place expression` and
-`variable`, even though a plain fresh value is valid for the mutable parameter. Render this as an
-invalid marker on a fresh or computed value and tell the author to remove `~`. Generic immutable
-fallbacks must describe an immutable binding or field without compiler-facing place terminology.
+#### Delivered diagnostic facts
 
-The common Rust-style `&` syntax-mistake guidance has the same terminology drift: it says shared
-borrows are automatic and tells the author to prefix a place. Add a final narrow Phase 3.1 wording
-slice that says existing values use shared access automatically, and that `~` is valid only on an
-existing mutable binding or field at a mutable call or receiver boundary.
-
-#### Implementation
-
-Replace broad reasons with explicit call and receiver facts. The exact enum layout may remain split between `InvalidCallShapeReason` and `InvalidReceiverCallReason`, but both paths must use the same access classification from `value_mode` and place analysis.
-
-Carry:
-
-- callee or method name
-- parameter name/index where applicable
-- receiver or argument place name when it is a simple source place
-- whether the place is mutable
-- whether the marker was authored
-- source location of the place and marker
-
+The call and receiver schemas retain callee or method names, parameter or receiver names, mutability, authored-marker state and source spans where available. Fresh values use `FreshMutableValue`; invalid access states retain distinct reasons and source-facing repairs.
 #### Messages
 
 Existing mutable place, missing marker:
@@ -433,17 +403,15 @@ Immutable collection or map receiver:
 
 > `push` requires a mutable collection receiver. Declare the collection binding as mutable, then call it with explicit `~` access.
 
-Show a concrete receiver call only when the payload owns the simple receiver name.
+Show a concrete receiver call only when the family facts include the simple receiver name.
 
 Fallible collection and map examples must include `!` or `catch` when a complete example is shown.
 
-Const-record receiver diagnostics now use `ConstRecordNoRuntimeCalls` without an alias and render
-the current source term `const record`.
+Const-record receiver diagnostics use `ConstRecordNoRuntimeCalls` without an alias and render the source term `const record`.
 
-#### Required AST correction
+#### Delivered receiver classification
 
-`receiver_access.rs` no longer merges non-place and immutable-place receivers. A temporary mutating
-receiver and an immutable named receiver use distinct reasons and repairs.
+The shared receiver classifier distinguishes temporary mutating receivers from immutable named receivers and selects their respective reasons and repairs.
 
 #### Tests
 
@@ -454,7 +422,7 @@ Use one matrix covering user functions, source receiver methods, collection buil
 **Original finding:** DIAG-007
 **Rejected original proposal:** `~p.x = 10` is not Moth assignment syntax.
 
-**Phase 3.2a status:** Complete in this checkpoint. Reason taxonomy, message wording and field-write distinction are done. The secondary declaration label (scope-frame binding location) is Phase 3.2b.
+**Status: Delivered.** Assignment-target reasons distinguish temporary values, immutable bindings and immutable field roots. The diagnostics preserve authored binding locations through `ScopeDeclarationRef` and use the schema-defined immutable-binding declaration label.
 
 For:
 
@@ -470,42 +438,16 @@ p ~= Point(x = 1, y = 2)
 p.x = 10
 ```
 
-#### Implementation
+#### Delivered implementation
 
-- Keep assignment syntax marker-free.
-- When the target is a field, carry the field name and mutable root binding where available.
-- Render:
-
-  > Cannot assign to field `x` because root binding `p` is immutable. Declare `p` as mutable before this assignment.
-
-- A secondary label should point to the immutable declaration.
-- Body-local lookup currently retains only `Declaration`, whose expression location identifies the
-  initializer rather than the binding target. Preserve the authored binding location in the
-  scope-frame's local declaration entry and expose it through `ScopeDeclarationRef`. Do not add a
-  location field to the shared `Declaration` type solely for this diagnostic.
-- Keep a generic immutable-place fallback for projections whose root cannot be named cleanly.
-- Rename the temporary-assignment fallback away from `NotMutablePlace` and remove `place` and
-  `rvalue` from its renderer. A temporary value cannot be assigned through: receive it in a mutable
-  binding first, then assign through that binding.
-- Replace the vague direct-binding `ImmutableVariable` message in the same assignment-target
-  family. It currently says only to use `~`, which can be mistaken for assignment-target syntax or
-  an illegal redeclaration. Carry the original binding location and render without assuming whether
-  the declaration inferred or explicitly named its type:
-
-  > Cannot reassign `value` because its binding is immutable. Make the original binding mutable, then reassign it with ordinary `=`.
-
-- Do not fabricate a replacement declaration without the original initializer, authored type and
-  binding-mode facts. Focused labels may still identify the original declaration.
-- In the same assignment family, say `binding` rather than `variable` when an assignment operator
-  is missing after a resolved source binding.
-- Strengthen the existing direct immutable reassignment and immutable struct-field integration
-  cases so the current declaration and assignment guidance is contractual. Remove fixture
-  comments that call an ordinary immutable runtime binding a constant.
+The assignment-target family carries field and mutable-root names where available, preserves authored binding locations through `ScopeDeclarationRef`, and attaches the schema-defined immutable-binding declaration label. `TemporaryNotAssignable`, `ImmutableBinding` and `ImmutableFieldRoot` are the current factual reasons. Rendered guidance names bindings and fields, uses ordinary `=`, and avoids compiler-facing place or rvalue terminology.
 
 ### 3.3 Diagnose `~` on assignment targets accurately
 
 **Original finding:** DIAG-021
 **Rejected original proposal:** `x ~= 2` is a declaration form, not ordinary reassignment.
+
+**Status: Delivered.** `InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget` and the `mutable_marker_on_assignment_target_rejected` integration case protect the source-facing marker error and its stable rule code.
 
 For:
 
@@ -525,10 +467,7 @@ x ~= 1
 x = 2
 ```
 
-Add a dedicated assignment-target reason. Do not reuse `MutableMarkerOnNonReceiverCall`, whose message is call-specific.
-Do not universally tell the author to redeclare the binding: the marked target may already be
-mutable. Phase 3.2 owns the separate diagnostic for an ordinary assignment whose root binding is
-immutable.
+The marker error uses its dedicated assignment-target reason rather than call-specific `MutableMarkerOnNonReceiverCall`. An ordinary assignment with an immutable root has separate diagnostic ownership.
 
 ### 3.4 Diagnose `copy ~place` as an unnecessary access marker
 
@@ -536,30 +475,11 @@ immutable.
 
 `copy` accepts an existing place and creates independent value semantics. It does not take mutable-access syntax.
 
-Add `InvalidCopyTargetReason::MutableMarkerNotAllowed`:
+**Status: The reason model and rendering are delivered; computed-expression coverage remains.** Current reasons distinguish a function name, a function call, a non-place expression and a mutable marker on an otherwise valid copy target.
 
-> `copy` does not take `~`. Copy the existing binding or field projection without the access marker.
+The `MutableMarkerNotAllowed` reason applies only when removing `~` leaves a valid binding or field-projection copy target. A marked literal, call or computed expression uses `NonPlace`, because removing the marker does not make it copyable.
 
-Use this reason only when the operand after `~` is otherwise a valid binding or field-projection
-copy target. A marked literal, call or computed expression still needs the factual non-place
-diagnostic because removing `~` would not make it copyable.
-
-Keep the internal place classification, but make every rendered correction source-visible:
-
-- `NonPlace` for literals and computed expressions:
-
-  > `copy` requires an existing binding or field projection. Bind this value first, then copy that binding.
-
-- Replace `FunctionValue`, which is inaccurate because function values aren't part of the current
-  surface, with separate function-name and function-call facts when the following `(` makes the
-  distinction available.
-- A function name isn't a copyable value. A call should explain that its returned value must be
-  received by a binding before that binding can be copied.
-- Do not use compiler-facing `place` terminology or call source bindings variables in these
-  messages.
-
-Add focused coverage for a literal, computed expression, function name, function call and
-`copy ~binding`. Keep one integration owner where the stable code and wording are user-visible.
+Current messages distinguish function names and calls and direct authors to existing bindings or field projections. Integration cases cover a literal, function name, function call and `copy ~binding`. Add a computed-expression non-place case to complete the focused coverage.
 
 ### 3.5 Improve borrow-conflict explanations without inventing lifetimes
 
@@ -569,21 +489,8 @@ Borrow diagnostics should explain source ordering and aliases, not tell users to
 
 #### Implementation
 
-- Preserve the conflicting place and add its originating access location where known.
-- `StatementAccessTracker` currently retains only `AccessKind` per root even though both record
-  sites own the current source location. Retain the first conflicting location with the access
-  kind so same-statement conflicts can label the earlier access without changing transfer rules.
-- Add a secondary label at the access that remains live.
-- Delete the stale `ExistingBorrow` label variant and its `existing borrow here` rendering. These
-  diagnostics describe an earlier conflicting source access, so use one source-visible
-  `ConflictingAccess` label such as `earlier conflicting access here` for both shared/mutable and
-  duplicate-mutable conflicts.
-- Keep the stable borrow diagnostic codes, but make their rendered descriptor titles use the same
-  source-visible access vocabulary. `Borrow conflict`, `Multiple mutable borrows`, `Move while
-  borrowed` and `Whole-object borrow conflict` currently expose analysis terminology before the
-  payload message is rendered. Prefer `Access conflict`, `Conflicting mutable access`, `Ownership
-  transfer conflicts with active access` and `Whole-value access conflict` respectively.
-- Render by access pair.
+**Status: Delivered.** `StatementAccessTracker` retains the first available source span per root. Active conflicts use the schema-defined `ConflictingAccess` label, rendered as `earlier conflicting access here`. Descriptor titles use source-visible access terms, and renderers distinguish shared and mutable access pairs without exposing lifetime or ownership-analysis state.
+Renderers select conflict wording from the existing and requested access kinds.
 
 Mutable alias blocks shared read:
 
@@ -597,32 +504,15 @@ Second mutable access:
 
 > Cannot create another mutable access to `data` while `first` is active. Reuse `first`, or move the new access after its last use.
 
-- Keep generic fallbacks when a conflicting source place or location is unavailable.
-- Do not describe `~` as a move.
-- Do not expose exact lifetimes or ownership flags.
+When source-place or location facts are unavailable, renderers use generic fallbacks. The messages do not describe `~` as a move or expose exact lifetimes or ownership flags.
 
 #### Tests
 
-Add passing counterparts that resolve the conflict by reordering the last use, reusing the active alias, narrowing a scope or using explicit `copy`.
+Passing coverage includes reordering (`borrow_conflict_resolved_by_reordering`), a narrowed scope (`borrow_checker_alias_not_live_after_scope`) and explicit `copy` (`borrow_conflict_resolved_by_copy`). Add a positive case that reuses the active alias.
 
 ### 3.6 Remove migration state from collection and map assignment diagnostics
 
-**Additional audit finding:** `InvalidAssignmentTargetReason::{CollectionIndexedWriteRemoved,
-MapIndexedWriteRemoved, MapPropertyWriteRemoved}` and the
-`collection_indexed_write_removed` fixture encode implementation history instead of the current
-source rule. These are ordinary invalid assignment targets, not compatibility diagnostics.
-
-- Rename the reasons to factual current states such as `CollectionGetTargetNotWritable`,
-  `MapGetTargetNotWritable` and `ReadOnlyMapProperty`.
-- Render collection access as:
-
-  > Cannot assign through collection `get(...)`. Call `set(index, value)` with explicit `~` access on the collection instead, then recover with `catch` or propagate with `!` inside a compatible `Error!` function.
-
-- Render map access with the equivalent `set(key, value)` and explicit `~` access guidance. Do not fabricate a receiver name that the diagnostic payload does not own. Keep the correction valid at top level: `start` has built-in `Error!`, so compatible postfix `!` can propagate there.
-- Keep the read-only `length` message, but remove migration wording from its reason name.
-- Rename the integration fixture to describe current rejection rather than removal.
-- Preserve the existing stable diagnostic code and valid `set` coverage. Do not add a parser path
-  that recognises an older assignment feature.
+**Status: Delivered.** The current `InvalidAssignmentTargetReason` schema uses `CollectionGetTargetNotWritable`, `MapGetTargetNotWritable` and `ReadOnlyMapProperty`. Renderers explain the current `get`/`set` rule and read-only `length` property. Collection and map statement tests assert the stable `MOTH-RULE-0044` reason keys.
 
 ## Phase 4: Error, option and value-flow diagnostics
 
@@ -630,14 +520,9 @@ source rule. These are ordinary invalid assignment targets, not compatibility di
 
 **Original findings:** DIAG-025, DIAG-043, DIAG-044
 
-**Delivered terminology and operand families:** `MOTH-RULE-0051` now renders `Invalid fallible
-handling`. `InvalidFallibleHandlingReason` distinguishes authored handlers and operand channels,
-replacing the umbrella `NotResultExpression` path. Error-type mismatches use
-`TypeMismatchContext::ErrorReturn`, and builtin calls use
-`InvalidBuiltinCallReason::UnhandledFallibleCall`. The discontinued bang-handler recognisers and
-their dedicated diagnostic reasons have been removed.
+**Delivered terminology and operand families:** `MOTH-RULE-0051` renders `Invalid fallible handling`. `InvalidFallibleHandlingReason` distinguishes authored handlers and operand channels, replacing the umbrella `NotResultExpression` path. Error-type mismatches carry `TypeMismatchContext::ErrorReturn` as semantic context. Capture displayable types in `TypeDisplaySnapshot` and render through `DiagnosticView`. Builtin calls use `InvalidBuiltinCallReason::UnhandledFallibleCall`. The discontinued bang-handler recognisers and their dedicated diagnostic reasons are absent.
 
-The native result-channel work also deleted `InvalidFallibleOperand`, its payload and reason family
+The native result-channel work also deleted `InvalidFallibleOperand` and its reason family
 and `MOTH-TYPE-0004`. Unhandled error-returning operands use
 `InvalidFallibleHandlingReason::UnhandledErrorReturn` under `MOTH-RULE-0051`.
 The `result_operand_without_handler_in_operator` fixture expects that code and the
@@ -662,25 +547,7 @@ replacement reason matrix. Section 4.2 retains the catch-recovery type-context w
 
 #### Reclassify invalid public carrier type spellings
 
-**Additional confirmed design mismatch:** the canonical generic type-application contract states
-that `Option of T` and `Result of T, E` are not Moth language syntax. The compiler instead
-routes both through `DeferredFeatureReason` and `MOTH-DEFERRED-0001`, which falsely reserves a future
-public carrier syntax. First-class public result values are outside language design scope, while
-optional types use the current `T?` suffix.
-
-- Delete `DeferredFeatureReason::{PublicOptionTypeSyntax, PublicResultTypeSyntax}` and the helper
-  that classifies these authored forms as deferred.
-- Route the two generic-position spellings through factual structured
-  `InvalidGenericInstantiationReason` variants and existing `MOTH-RULE-0057` ownership.
-- Render:
-  - `` `Option of T` is not Moth type syntax. Use the `T?` optional suffix. ``
-  - `` `Result of T, E` is not Moth type syntax. Fallible functions declare a final `E!`
-    error return slot. ``
-- Rename the `_deferred` unit tests and integration fixtures around current rejection.
-- Delete the old reason names and deferred prose without aliases, reserved-future comments or a
-  compatibility diagnostic path.
-- Preserve ordinary user-defined generic type application and canonical `T?` / `E!` coverage.
-- Do not edit the generic type-application documentation. It already states the accepted design.
+**Status: Delivered.** Type lookup rejects `Option` and `Result` generic applications through `InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported` and `InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported`, under `MOTH-RULE-0057`. Rendered messages identify unsupported type syntax and direct authors to `T?` or a final `E!` slot. The focused owners in `src/compiler_frontend/declaration_syntax/tests/type_syntax_tests.rs` protect both cases.
 
 ### 4.2 Add catch-recovery type context
 
@@ -688,17 +555,17 @@ optional types use the current `T?` suffix.
 
 Add `TypeMismatchContext::CatchRecovery`.
 
-The shared produced-value checker already carries `ValueReceiverKind::CatchHandler`, but
-`mismatch_context_for_receiver` currently collapses it into `TypeMismatchContext::General`.
-Change that one mapping and update the existing fallible-handling unit test that currently
-asserts `General`. Keep declaration, assignment, return, multi-bind and nested-`then` contexts
-unchanged.
+The receiver mapping in `src/compiler_frontend/ast/statements/value_production/parse_values.rs` maps `ValueReceiverKind::CatchHandler` to `TypeMismatchContext::General`. Add `CatchRecovery` to the enum in `src/compiler_frontend/compiler_messages/diagnostics/reasons.rs` and assign it a new compact schema code in `src/compiler_frontend/compiler_messages/diagnostics/families/types_borrows_targets.rs` without changing existing codes.
+
+Update `unit_fact_round_trips_every_type_mismatch_context` in `src/compiler_frontend/compiler_messages/diagnostics/tests/codec_tests.rs` to include code 18 and round-trip `CatchRecovery`. Add the `CatchRecovery` arm to `type_mismatch_context_name` in `src/compiler_frontend/compiler_messages/render/context.rs` so the message uses “catch recovery.”
+
+Update the existing `General` assertion in `src/compiler_frontend/ast/statements/tests/fallible_handling_tests.rs` to expect `CatchRecovery`. Keep declaration, assignment, return, multi-bind and nested-`then` contexts unchanged.
 
 Message:
 
 > Type mismatch in catch recovery: expected `I32`, found `String`.
 
-Guidance may explain that each `then` value must match the corresponding success slot. Keep expected and found types as `TypeId`s.
+Guidance may explain that each `then` value must match the corresponding success slot. `TypeMismatchContext` remains a semantic fact. Keep expected and found `TypeId`s as typed inputs at the owning boundary, capture display data as `TypeDisplayId`s in `TypeDisplaySnapshot`, and render through `DiagnosticView`.
 
 ### 4.3 Reject statement-match expression bodies at the expression
 
@@ -726,7 +593,7 @@ Tests need:
 **Disposition: transferred and delivered in `00e4ad555`.** The compact typed-expression and native
 result-channel work enforces receiver arity before coercion or lowering through `InvalidValueReceiver`
 under `MOTH-RULE-0087`, without using `InvalidMultiBind` for source that has no multi-bind.
-The payload records receiver kind, target count, produced success-slot count and authored producer
+The family facts record receiver kind, target count, produced success-slot count and authored producer
 location. Guidance asks for one target per success slot without `_`, implicit discards, fabricated
 names or a source-tuple suggestion.
 
@@ -742,16 +609,13 @@ duplicating coverage.
 
 **Original finding:** DIAG-032
 
-Current routing already uses `ThenWithNoActiveValueTarget` in both module and function body
-dispatch. The remaining change is source-visible wording and ownership cleanup: the existing
-`result_then_outside_catch_rejected` fixture and `rejects_then_outside_catch_block` test name still
-describe `then` as catch-specific even though value-producing `if`, full match and catch all own it.
+**Delivered routing:** Module and function body dispatch emit `ThenWithNoActiveValueTarget`. The remaining work is source-visible wording and ownership cleanup: the `result_then_outside_catch_rejected` fixture ID, path and contract still describe `then` as catch-specific even though value-producing `if`, full match and catch all own it.
 
-Route top-level `then` through the existing structured `ThenWithNoActiveValueTarget` reason:
+Render the structured reason with source-visible guidance:
 
 > `then` is only valid inside a value-producing `if`, full match or `catch` recovery that has an active receiving site.
 
-Do not leave top-level parsing on generic `UnexpectedToken`.
+Preserve the structured reason rather than falling back to a generic unexpected-token diagnostic.
 
 ### 4.6 Reject bodyless non-`else` match arms
 
@@ -788,7 +652,7 @@ grammar. They preserve migration history in the current parser and renderer.
 ### 4.8 Delete the removed `in` loop compatibility diagnostic
 
 **Additional audit finding:** `InvalidLoopHeaderReason::RemovedInSyntax`,
-`reject_removed_in_loop_syntax` and their migration-only unit test exist only to recognise the
+`reject_removed_in_loop_syntax_cursor` and their migration-only unit test exist only to recognise the
 discontinued `loop <binding> in ...` grammar. The ordinary loop-header parser already owns malformed
 current headers.
 
@@ -895,7 +759,8 @@ offered as direct selections.
 
 **Original finding:** DIAG-045
 
-Extend `ExtraPositionalArgument` with `provided_count` and the extra argument location.
+Extend `ExtraPositionalArgument` with `provided_count`. The extra argument is already the
+diagnostic's primary span.
 
 Message:
 
@@ -915,11 +780,7 @@ Cover user functions, struct constructors and choice constructors where they sha
 
 #### Unknown variant
 
-Carry:
-
-- source-visible choice name
-- requested variant
-- available variants
+Keep the source-visible choice name and requested variant as schema-typed facts; store available variants in schema-declared typed side-store list data, bounded and deterministic.
 
 Message:
 
@@ -929,7 +790,7 @@ Do not offer a close-name suggestion when the threshold is not met.
 
 #### Qualifier mismatch
 
-Carry the authored qualifier and the scrutinee's source-visible choice name:
+Keep the authored qualifier and scrutinee's source-visible choice name as schema-typed facts:
 
 > Match arm uses qualifier `Size`, but the scrutinee is `Color`. Use a `Color` variant or omit the qualifier.
 
@@ -937,7 +798,7 @@ Dependency aliases must render using the visible source name where possible.
 
 #### Payload captures
 
-Carry expected field names, provided capture names and expected/found counts.
+Keep expected and found counts as fixed schema-typed facts. Store expected field names and provided capture names in schema-declared typed side-store lists.
 
 Count mismatches must point at the authored pattern's capture-list boundary. The current too-few
 path uses the choice variant declaration location, which identifies the related declaration rather
@@ -954,7 +815,7 @@ Messages:
 
   > Variant `Ok` has 1 payload field, `value`, but this pattern captures 0.
 
-Keep exact field lists bounded and deterministic.
+Keep exact field lists bounded, deterministic and in the schema-declared typed side store.
 
 #### Optional-pattern terminology
 
@@ -982,12 +843,12 @@ identities. Those spellings receive ordinary name or parse diagnostics, with no 
 reason or alias. The parser still needs a factual diagnostic when an active exact scalar type is
 called as a function.
 
-- Use one factual type-as-call reason such as `ScalarTypeCalledAsFunction` for active scalar types.
+- Use one factual type-as-call reason for active scalar types.
 - Render:
 
   > `I32` is a type, not a conversion function. Use `cast` at an explicit typed receiving boundary.
 
-- Carry the exact active builtin type name already available at the emission site.
+Keep the exact active builtin type name as a schema-typed fact available at the emission site.
 - Delete `InvalidCastReason::ScalarConstructorRemoved` and its render branch.
 - Rename focused fixtures and tests around the current rejection. Remove redundant per-scalar
   coverage only when one table test or primary integration case protects the same parser contract.
@@ -1010,7 +871,7 @@ Replace the bitset-only diagnostic path with retained seen-item facts:
 struct SeenTemplateHeadItem {
     display_name: TemplateHeadItemName,
     presence_tags: TemplateHeadTag,
-    location: SourceLocation,
+    location: SourceSpan,
 }
 
 enum TemplateHeadConflictReason {
@@ -1026,11 +887,11 @@ enum TemplateHeadConflictReason {
 
 Every compatibility rule that can reject a pair must provide a `TemplateHeadConflictReason`. Registry validation must reject a builder directive specification that blocks another item without declaring a renderable conflict reason.
 
-Diagnostic payload:
+Diagnostic family facts:
 
-- earlier item name and location
-- incoming item name and location
-- structured conflict reason
+- earlier item name and source span
+- incoming item name and source span
+- structured conflict reason encoded by the family schema
 
 Examples:
 
@@ -1038,8 +899,8 @@ Examples:
 
 > `$note` cannot be combined with `$children` because a discarded comment directive must be the template's only meaningful head item.
 
-- Primary label: incoming item
-- Secondary label: earlier conflicting item
+- Primary label: incoming item, with a schema-defined label message code and its source span
+- Secondary label: earlier conflicting item, with a schema-defined label message code and its source span
 - Keep `MOTH-SYNTAX-0022`
 
 #### Tests
@@ -1055,7 +916,7 @@ Examples:
 
 **Original finding:** DIAG-010
 
-Track the opening `[` location in the template-mode stack.
+Track the opening `SourceSpan` in the template-mode stack.
 
 Message:
 
@@ -1121,10 +982,7 @@ Render:
 
 **Original finding:** DIAG-023
 
-**Additional confirmed gap:** ordinary body-local typed and mutable redeclarations still use the
-parallel `ShadowedName` family and `MOTH-RULE-0038`. That path duplicates `DuplicateDeclaration`,
-labels the first initializer rather than the authored binding and leaves the scope-neutral message
-from Phase 2.5 unused for normal local bindings.
+**Additional confirmed gap:** ordinary body-local typed and mutable redeclarations still use the `SHADOWED_NAME` family in `src/compiler_frontend/compiler_messages/diagnostics/families/names_declarations.rs` and `MOTH-RULE-0038`. That path duplicates `DuplicateDeclaration` and leaves the scope-neutral message from Phase 2.5 unused for normal local bindings.
 
 **Additional confirmed dispatch gap:** the existing-symbol branch recognises only builtin type
 tokens and the mutable marker as declaration starts. A redeclaration with a nominal, alias,
@@ -1133,8 +991,7 @@ to expression parsing. Declaration-shape detection must reuse the canonical
 binding-target parser rather than grow another token whitelist. Plain `name = value` remains
 reassignment, not a second inferred declaration.
 
-- Delete `RuleDiagnosticKind::ShadowedName`, its descriptor, payload, constructor, remapping and
-  renderer branch.
+- Remove the current `SHADOWED_NAME` family, its descriptor, constructor, remapping and renderer branch.
 - Route ordinary body-local typed and mutable redeclarations through `DuplicateDeclaration`.
 - Parse every unambiguous current body-local binding declaration shape before duplicate
   registration rejects it, including user-defined/constructed type annotations and postfix
@@ -1172,13 +1029,13 @@ part of this diagnostics slice; those forms must remain rejected.
 **Original findings:** DIAG-015, DIAG-030
 **Status:** Moved earlier
 
-The exact operator payload and the `not`, string concatenation and generic-parameter messages now belong to Phase 1.2a. The generic-bound terminology fix already requires exact operator facts, so retaining a later category-only-to-exact migration would create transitional API and duplicate renderer work.
+The exact operator facts and the `not`, string concatenation and generic-parameter messages now belong to Phase 1.2a. The generic-bound terminology fix already requires exact operator facts, so retaining a later category-only-to-exact migration would create transitional API and duplicate renderer work.
 
 ### 7.3 Add actionable collection-loop guidance
 
 **Original finding:** DIAG-055
 
-Keep the found semantic `TypeId`.
+Keep the found semantic type as a family fact, capture its display data in `TypeDisplaySnapshot` and render through `DiagnosticView`.
 
 Message:
 
@@ -1186,27 +1043,12 @@ Message:
 
 Do not imply every non-collection source was intended as a range.
 
-Delete `InvalidLoopHeaderReason::RemovedInSyntax`, the dedicated `reject_removed_in_loop_syntax`
-pre-scan and its migration-only unit test. Current collection and range loop forms already have
-their own structured diagnostics. A discontinued `loop <binder> in ...` token sequence may fail
-through the ordinary current grammar without a compatibility message.
+The `RemovedInSyntax` reason and its `reject_removed_in_loop_syntax_cursor` pre-scan are deleted by
+Phase 4.8; this slice does not repeat that deletion.
 
 ### 7.4 Reject unsupported Wasm variant payloads before lowering
 
-**Additional audit finding:** `cast_optional_success_wraps_inner_value` currently expects `MOTH-INFRA-0001` because a reachable optional payload reaches Wasm LIR lowering, where `HirExpressionKind::VariantConstruct` with fields is rejected as a transformation error. This is valid Moth source using a target feature that HTML-Wasm does not yet lower. The existing pre-lowering `UnsupportedBackendFeature` lane owns this failure.
-
-#### Implementation
-
-- Extend Wasm backend feature validation to detect reachable variant constructions with payload fields before LIR lowering.
-- Emit the existing `MOTH-RULE-0064` `UnsupportedBackendFeature` diagnostic at the source expression. Name the unsupported feature as variant payload values without exposing HIR or LIR.
-- Preserve reachability policy. An unsupported variant payload in an unreachable helper must not block the selected target.
-- Keep empty/unit variant construction on the supported path.
-- Do not convert the Wasm lowering invariant itself into a user diagnostic. Backend feature validation must prevent valid reachable source from reaching that invariant.
-
-#### Tests
-
-- Update `cast_optional_success_wraps_inner_value` to expect `MOTH-RULE-0064` for HTML-Wasm while preserving HTML success.
-- Add a focused backend-feature validation test for reachable and unreachable payload construction if the integration case cannot protect both reachability branches.
+**Status: Delivered.** Wasm backend feature validation records `UnsupportedBackendFeatureReason::VariantPayloadValues` for reachable variant constructions with non-empty payload fields before lowering. Empty/unit variants are not rejected by this check, and the validation pass examines only selected blocks. The `cast_optional_success_wraps_inner_value` integration case preserves HTML success and expects `MOTH-RULE-0064` with `unsupported_backend_feature.variant_payload_values` for HTML-Wasm at the source expression.
 
 ## Phase 8: Doc comments and code comments review
 
@@ -1309,7 +1151,7 @@ Use focused subsystem tests for:
 - edit-distance thresholds and candidate filtering
 - template compatibility conflict selection
 - JavaScript annotation-to-declaration binding
-- diagnostic payload remapping for every new `StringId` or path field
+- diagnostic side-store ID remapping for every new `StringId` or `PathId` field
 - descriptor-code uniqueness after adding and removing kinds
 
 ### Regression requirements
@@ -1324,7 +1166,7 @@ Use focused subsystem tests for:
 Do not update general design docs, language docs, the progress matrix or generated documentation
 as part of this plan. A narrow documentation edit is allowed only when the file explicitly names
 the exact diagnostic being changed and would otherwise become inaccurate. This plan continues to record
-slice state and confirmed implementation findings while it is paused.
+slice state and confirmed implementation findings.
 
 ## Final validation
 
@@ -1337,13 +1179,13 @@ just validate
 
 Also perform the manual diagnostic audit required by the compiler style guide:
 
-- every user mistake uses `CompilerDiagnostic`
-- every new payload carries structured facts
+- every user mistake uses a typed `DiagnosticDraft` through its owning family constructor
+- every family's facts fit its schema and any additional data uses typed side stores
 - every source location points to the actual mistake
 - no stale or legacy message path remains
 - no suggestion teaches invalid syntax
 - no duplicate diagnostic owner remains across tokenizer, headers, AST, HIR or borrow validation
-- no type decision compares rendered syntax instead of `TypeId`
+- no semantic type decision compares rendered text instead of `TypeId`
 - no borrow diagnostic exposes compiler-internal lifetime or ownership machinery
 
 ## Completion criteria
@@ -1357,6 +1199,6 @@ Also perform the manual diagnostic audit required by the compiler style guide:
 - Mutable diagnostics distinguish missing `~`, immutable places, fresh values and invalid assignment markers.
 - Fallible and optional diagnostics name the authored operator and correct error channel or
   optional value shape.
-- Terse diagnostics never have an empty message field.
+- Terse rendering always supplies a non-empty message.
 - Malformed user source in this plan never produces `MOTH-INFRA-0001`.
 - `just validate` passes.

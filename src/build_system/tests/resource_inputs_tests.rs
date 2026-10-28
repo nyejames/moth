@@ -3,7 +3,7 @@
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -31,7 +31,7 @@ fn attach_origin(
     registry: &mut ResourceInputRegistry,
     origin: StableResourceOriginId,
     source: ResourceSourceId,
-) -> Result<(), CompilerError> {
+) -> Result<(), InfrastructureFailure> {
     let publication = registry
         .preflight_resource_source_associations(&[ResourceSourceAssociation { origin, source }])?;
     registry.reserve_resource_source_associations(&publication);
@@ -203,9 +203,9 @@ fn association_batch_preflight_failure_leaves_registry_unchanged() {
         .expect_err("one origin cannot target two sources in one publication batch");
 
     assert!(
-        error.msg.contains("attached to source ID"),
+        error.message.contains("attached to source ID"),
         "disagreement must be diagnosed at the publication boundary: {}",
-        error.msg
+        error.message
     );
     assert_eq!(
         registry, before,
@@ -225,9 +225,9 @@ fn equal_origins_cannot_attach_to_different_sources() {
     let error = attach_origin(&mut registry, resource_origin, second)
         .expect_err("one stable origin must not point at two physical sources");
     assert!(
-        error.msg.contains("attached to source ID"),
+        error.message.contains("attached to source ID"),
         "disagreement must be a compiler error with source ownership context: {}",
-        error.msg
+        error.message
     );
     registry
         .validate()
@@ -245,8 +245,8 @@ fn origin_attachment_rejects_unknown_source_id() {
     .expect_err("an origin cannot attach to a source from another registry");
 
     assert!(
-        error.msg.contains("unknown source ID"),
+        error.message.contains("unknown source ID"),
         "unknown source IDs must be compiler errors: {}",
-        error.msg
+        error.message
     );
 }

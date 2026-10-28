@@ -11,7 +11,8 @@
 
 use super::super::{
     DirectExportSeed, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput,
+    PublicInterfaceDraftBuildFailure, PublicInterfaceDraftBuilder,
+    PublicInterfaceDraftBuilderInput,
 };
 use super::test_support::{
     choice_origin, constant_origin, module_origin, nominal_origins_map, register_struct,
@@ -34,7 +35,8 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
@@ -96,7 +98,11 @@ impl ConstFixture {
             .view_owned(value)
             .expect("fixture expression is a bound row");
         self.constants.ingest_view(view, env, &mut |_| {
-            Err(CompilerError::compiler_error("folded-value fixtures contain no templates").into())
+            Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "folded-value fixtures contain no templates",
+            )
+            .into())
         })
     }
 
@@ -163,7 +169,7 @@ fn build_constant_records(
     env: &TypeEnvironment,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
+) -> Result<Vec<PublicDeclarationRecord>, PublicInterfaceDraftBuildFailure> {
     let root_table = ResolvedPublicTypeRootTable {
         roots,
         receiver_methods: vec![],
@@ -192,6 +198,17 @@ fn build_constant_records(
     })
     .build()
     .map(|result| result.draft.declarations)
+}
+
+fn expect_infrastructure_failure(
+    failure: PublicInterfaceDraftBuildFailure,
+) -> InfrastructureFailure {
+    match failure {
+        PublicInterfaceDraftBuildFailure::Infrastructure(error) => error,
+        PublicInterfaceDraftBuildFailure::Diagnostic(_) => {
+            panic!("expected an infrastructure failure")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1321,7 +1338,9 @@ fn join_rejects_constant_binding_without_matching_module_constant() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = expect_infrastructure_failure(result.unwrap_err())
+        .message
+        .clone();
     assert!(
         message.contains("no matching finalized module constant declaration"),
         "expected a missing-module-constant diagnostic, got: {message}"
@@ -1370,10 +1389,10 @@ fn const_store_rejects_duplicate_module_constant_defining_paths() {
         Err(ConstValueStoreError::Infrastructure(error)) => assert!(
             error
                 .primary
-                .msg
+                .message
                 .contains("Duplicate constant path binding."),
             "expected a duplicate-path diagnostic, got: {}",
-            error.primary.msg
+            error.primary.message
         ),
         other => panic!("expected a duplicate-path infrastructure error, got {other:?}"),
     }
@@ -1400,7 +1419,9 @@ fn join_rejects_extra_constant_root_without_export_binding() {
     );
 
     assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
+    let message = expect_infrastructure_failure(result.unwrap_err())
+        .message
+        .clone();
     assert!(
         message.contains("no matching export binding"),
         "expected an unconsumed-root diagnostic, got: {message}"
@@ -1435,10 +1456,10 @@ fn ingest_rejects_unbound_reference_in_module_constant() {
         Err(ConstValueStoreError::Infrastructure(error)) => assert!(
             error
                 .primary
-                .msg
+                .message
                 .contains("Constant reference has no folded binding."),
             "expected an unbound-reference diagnostic, got: {}",
-            error.primary.msg
+            error.primary.message
         ),
         Err(other) => panic!("expected an unbound-reference infrastructure error, got {other:?}"),
     }

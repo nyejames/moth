@@ -28,7 +28,7 @@ fn boracle_generated_shape_space_is_valid_and_executable() {
             let outcome = execute_bounded(&generated.problem, OracleBounds::default())
                 .unwrap_or_else(|error| {
                     panic!(
-                        "generated seed {seed} cyclic={cyclic} should execute without CompilerError: \
+                        "generated seed {seed} cyclic={cyclic} should execute without InfrastructureFailure: \
                          {error:?}"
                     )
                 });

@@ -13,20 +13,5 @@ pub(crate) mod expression_position;
 pub(crate) mod signature_position;
 pub(crate) mod statement_position;
 
-use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
-use crate::compiler_frontend::source::SourceSpan;
-
 #[cfg(test)]
 mod tests;
-
-/// Build a typed diagnostic for a known syntax habit from another language.
-///
-/// WHAT: keeps the detector modules focused on recognizing token patterns while the diagnostic
-/// payload carries only a stable reason enum.
-/// WHY: renderer text belongs at the render boundary, not inside syntax scanning helpers.
-pub(crate) fn common_syntax_mistake(
-    reason: CommonSyntaxMistakeReason,
-    span: SourceSpan,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::common_syntax_mistake(reason, Some(span))
-}

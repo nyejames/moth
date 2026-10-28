@@ -6,7 +6,12 @@
 //!      callers can share syntax without rebuilding type-environment policy here.
 
 use super::*;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, GenericApplicationErrorReason, InvalidParameterContractReason,
     InvalidTypeAnnotationReason, ParameterContractKind,
@@ -34,7 +39,7 @@ use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
 type TypeParseResult<T> = Result<T, HeaderParseFailure>;
 /// A borrowed, checked canonical window used for collection/map speculation.
 ///
-/// The type parser never projects a braced body into a second `Vec<Token>` stream. Every
+/// The type parser never materialises a second owned token stream from a braced body. Every
 /// speculative side and nested parse is a bounded range over the same source-owned arrays.
 #[derive(Clone, Copy)]
 struct TypeTokenWindow<'a> {
@@ -97,7 +102,7 @@ impl<'a> TypeTokenWindow<'a> {
         self,
         index: usize,
         destination: &mut StringTable,
-    ) -> Result<Option<StringId>, CompilerError> {
+    ) -> Result<Option<StringId>, InfrastructureFailure> {
         let Some(token) = self.get(index) else {
             return Ok(None);
         };
@@ -108,9 +113,10 @@ impl<'a> TypeTokenWindow<'a> {
             return Ok(Some(id));
         };
         let spelling = origin.strings.try_resolve(id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "donor string handle {id:?} is outside its issuing frozen table"
-            ))
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("donor string handle {id:?} is outside its issuing frozen table"),
+            )
         })?;
         Ok(Some(destination.intern(spelling)))
     }
@@ -220,7 +226,7 @@ fn parse_type_atom(
         }
 
         TokenTag::DATATYPE_NONE => Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
+            names_declarations::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::NoneNotAllowed,
                 current_source_span(token_stream),
@@ -236,13 +242,12 @@ fn parse_type_atom(
             }
             let _keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
                 token_stream.current_tag(),
-                current_source_span(token_stream),
-                compilation_stage(context),
+                CompilerStage::HeaderParsing,
                 "type annotation parsing",
             )?;
 
             Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_type_annotation(
+                names_declarations::invalid_type_annotation(
                     context,
                     InvalidTypeAnnotationReason::ReservedTraitKeyword,
                     current_source_span(token_stream),
@@ -253,7 +258,7 @@ fn parse_type_atom(
         TokenTag::OPEN_CURLY => parse_collection_type(token_stream, context, string_table),
 
         TokenTag::AS => Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
+            names_declarations::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::AsNotValidHere,
                 current_source_span(token_stream),
@@ -266,10 +271,7 @@ fn parse_type_atom(
         TokenTag::OF => {
             let found = current_diagnostic_token(token_stream, string_table)?;
             Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::unexpected_token_from_tag(
-                    found,
-                    current_source_span(token_stream),
-                ),
+                token_lexical::unexpected_token_from_tag(found, current_source_span(token_stream)),
             ))
         }
         TokenTag::SYMBOL => {
@@ -277,7 +279,8 @@ fn parse_type_atom(
                 .current_string_id_in(string_table)
                 .map_err(HeaderParseFailure::Infrastructure)?
                 .ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "symbol token is missing its string payload",
                     ))
                 })?;
@@ -297,6 +300,7 @@ fn parse_type_atom(
                 let mut path = vec![type_name];
 
                 while token_stream.current_tag() == TokenTag::DOT {
+                    let trailing_dot_span = current_source_span(token_stream);
                     token_stream.advance(); // consume '.'
 
                     if token_stream.current_tag() == TokenTag::SYMBOL {
@@ -304,17 +308,18 @@ fn parse_type_atom(
                             .current_string_id_in(string_table)
                             .map_err(HeaderParseFailure::Infrastructure)?
                             .ok_or_else(|| {
-                                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                                HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                                    CompilerStage::HeaderParsing,
                                     "symbol token is missing its string payload",
                                 ))
                             })?;
                         path.push(member_name);
                         token_stream.advance();
                     } else {
-                        let span = current_source_span(token_stream);
+                        let span = current_source_span(token_stream).or(trailing_dot_span);
                         let found = current_diagnostic_token(token_stream, string_table)?;
                         return Err(HeaderParseFailure::Diagnostic(
-                            CompilerDiagnostic::invalid_type_annotation(
+                            names_declarations::invalid_type_annotation(
                                 context,
                                 InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
                                 span,
@@ -332,7 +337,7 @@ fn parse_type_atom(
             })
         }
         TokenTag::COLON if matches!(context, TypeAnnotationContext::DeclarationTarget) => Err(
-            HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_type_annotation(
+            HeaderParseFailure::Diagnostic(names_declarations::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::UnexpectedColon,
                 current_source_span(token_stream),
@@ -352,7 +357,7 @@ fn parse_type_atom(
         {
             let found = current_diagnostic_token(token_stream, string_table)?;
             Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_type_annotation(
+                names_declarations::invalid_type_annotation(
                     context,
                     InvalidTypeAnnotationReason::InvalidTokenAfterName { token: found },
                     current_source_span(token_stream),
@@ -363,21 +368,21 @@ fn parse_type_atom(
             let span = current_source_span(token_stream);
             let Some(token) = token_stream.canonical_cursor().current() else {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_end_of_file(None, span),
+                    token_lexical::unexpected_end_of_file(None, span),
                 ));
             };
             let found = token_stream
                 .diagnostic_token_from_ref(token, string_table)
                 .map_err(|error| {
                     HeaderParseFailure::Infrastructure(
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
+                        InfrastructureFailure::malformed_token_projection(
                             "type annotation diagnostic projection",
+                            error,
                         ),
                     )
                 })?;
             Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_type_annotation(
+                names_declarations::invalid_type_annotation(
                     context,
                     InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
                     span,
@@ -427,7 +432,8 @@ fn parameter_contract_kind_at_cursor(
         .current_string_id_in(string_table)
         .map_err(HeaderParseFailure::Infrastructure)?
     else {
-        return Err(CompilerError::compiler_error(
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
             "parameter contract head symbol has no string payload",
         )
         .into());
@@ -458,7 +464,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
     let head_span = current_source_span(token_stream);
     if parameter_name.is_some_and(|name| string_table.resolve(name) == "this") {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_parameter_contract(
+            generics_traits_api::invalid_parameter_contract(
                 InvalidParameterContractReason::ReceiverContract {
                     contract: contract_kind,
                 },
@@ -470,7 +476,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
     token_stream.advance();
     if token_stream.current_tag() != TokenTag::OF {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_parameter_contract(
+            generics_traits_api::invalid_parameter_contract(
                 InvalidParameterContractReason::MissingSpecification {
                     contract: contract_kind,
                 },
@@ -484,7 +490,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
     }
     if missing_contract_type(token_stream.current_tag()) {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_parameter_contract(
+            generics_traits_api::invalid_parameter_contract(
                 InvalidParameterContractReason::MissingSpecification {
                     contract: contract_kind,
                 },
@@ -494,7 +500,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
     }
     if let Some(inner) = parameter_contract_kind_at_cursor(token_stream, string_table)? {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_parameter_contract(
+            generics_traits_api::invalid_parameter_contract(
                 InvalidParameterContractReason::NestedContract {
                     outer: contract_kind,
                     inner,
@@ -512,7 +518,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             _ => first_type_span,
         };
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_generic_application(
+            generics_traits_api::invalid_generic_application(
                 GenericApplicationErrorReason::NestedApplication,
                 application_span,
             ),
@@ -523,7 +529,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
         ParameterContractKind::Wire => {
             if token_stream.current_tag() == TokenTag::ARROW {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::WireArrowNotAllowed,
                         current_source_span(token_stream),
                     ),
@@ -531,7 +537,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             }
             if token_can_start_type_specification(token_stream.current_tag()) {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::MultipleSpecificationTypes {
                             contract: contract_kind,
                         },
@@ -548,7 +554,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             }
             if token_stream.current_tag() == TokenTag::ARROW {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::RouteRepeatedArrow,
                         current_source_span(token_stream),
                     ),
@@ -556,7 +562,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             }
             if missing_contract_type(token_stream.current_tag()) {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::RouteOutputMissing,
                         current_source_span(token_stream),
                     ),
@@ -564,7 +570,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             }
             if let Some(inner) = parameter_contract_kind_at_cursor(token_stream, string_table)? {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::NestedContract {
                             outer: contract_kind,
                             inner,
@@ -581,7 +587,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
                     _ => output_span,
                 };
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_generic_application(
+                    generics_traits_api::invalid_generic_application(
                         GenericApplicationErrorReason::NestedApplication,
                         application_span,
                     ),
@@ -589,7 +595,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             }
             if token_stream.current_tag() == TokenTag::ARROW {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::RouteRepeatedArrow,
                         current_source_span(token_stream),
                     ),
@@ -597,7 +603,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
             }
             if token_can_start_type_specification(token_stream.current_tag()) {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::MultipleSpecificationTypes {
                             contract: contract_kind,
                         },
@@ -616,7 +622,7 @@ pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
         ParameterContractKind::Route => {
             if token_can_start_type_specification(token_stream.current_tag()) {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_parameter_contract(
+                    generics_traits_api::invalid_parameter_contract(
                         InvalidParameterContractReason::MultipleSpecificationTypes {
                             contract: contract_kind,
                         },
@@ -668,7 +674,7 @@ fn parse_type_postfixes(
 ) -> TypeParseResult<ParsedTypeRef> {
     if let Some((contract, span)) = parameter_contract_head(&parsed_type, string_table) {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_parameter_contract(
+            generics_traits_api::invalid_parameter_contract(
                 InvalidParameterContractReason::InvalidPosition { contract },
                 span,
             ),
@@ -705,9 +711,10 @@ fn parse_collection_type(
     let source_tokens = token_stream.canonical_cursor().source_tokens();
     let inner = TypeTokenWindow::new(source_tokens, inner_range, token_stream.payload_origin())
         .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "collection type inner range was invalid: {error:?}",
-            )))
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("collection type inner range was invalid: {error:?}",),
+            ))
         })?;
     token_stream.advance(); // consume the outer '}'
 
@@ -733,10 +740,7 @@ fn parse_collection_type(
         }
         TopLevelAssignScan::Multiple => {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_map_type(
-                    InvalidMapTypeReason::MultipleMapSeparators,
-                    span,
-                ),
+                calls_data::invalid_map_type(InvalidMapTypeReason::MultipleMapSeparators, span),
             ));
         }
     }
@@ -748,15 +752,17 @@ fn parse_collection_type(
                 .diagnostic_token_from_ref(extra_token.view, string_table)
                 .map_err(|error| {
                     HeaderParseFailure::Infrastructure(
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
+                        InfrastructureFailure::malformed_token_projection(
                             "collection element trailing token",
+                            error,
                         ),
                     )
                 })?;
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::expected_token_from_tags(
-                    TokenTag::CLOSE_CURLY,
+                token_lexical::expected_token_from_projections(
+                    crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
+                        TokenTag::CLOSE_CURLY,
+                    ),
                     Some(found),
                     Some(SourceSpan::new(inner.source_id(), extra_token.span)),
                 ),
@@ -804,7 +810,7 @@ fn parse_collection_type(
     }
 
     Err(HeaderParseFailure::Diagnostic(
-        CompilerDiagnostic::invalid_collection_type(
+        calls_data::invalid_collection_type(
             InvalidCollectionTypeReason::ShorthandCapacityNotAllowed,
             span,
         ),
@@ -828,7 +834,7 @@ fn collect_collection_inner_range(
                     end,
                 )
                 .map_err(|error| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                         "collection type inner range exceeded its source owner: {error:?}",
                     )))
                 });
@@ -843,11 +849,7 @@ fn collect_collection_inner_range(
             }
             TokenTag::EOF => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::expected_token_from_tags(
-                        TokenTag::CLOSE_CURLY,
-                        Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
-                        current_source_span(token_stream),
-                    ),
+                    token_lexical::expected_token_from_projections(crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY), Some(DiagnosticToken::from_static_tag(TokenTag::EOF)), current_source_span(token_stream)),
                 ));
             }
             _ => token_stream.advance(),
@@ -876,7 +878,8 @@ fn parsed_capacity(
         match tokens.token_tag_at(0) {
             Some(TokenTag::NUMERIC_LITERAL) => {
                 let token = tokens.get(0).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "capacity token payload is invalid",
                     ))
                 })?;
@@ -886,21 +889,22 @@ fn parsed_capacity(
                 }
                 .map_err(|error| {
                     HeaderParseFailure::Infrastructure(
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
+                        InfrastructureFailure::malformed_token_projection(
                             "collection capacity numeric payload",
+                            error,
                         ),
                     )
                 })?
                 .ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "capacity token payload is invalid",
                     ))
                 })?;
 
                 if numeric.kind != NumericLiteralKind::WholeNumber {
                     return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::invalid_collection_type(
+                        calls_data::invalid_collection_type(
                             InvalidCollectionTypeReason::CapacityNotInt,
                             token_span,
                         ),
@@ -914,7 +918,7 @@ fn parsed_capacity(
                     string_table,
                 )
                 .map_err(|reason| {
-                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
+                    HeaderParseFailure::Diagnostic(token_lexical::invalid_number_literal(
                         numeric.source_text,
                         reason,
                         token_span,
@@ -922,14 +926,15 @@ fn parsed_capacity(
                 })?
                 .as_i64()
                 .ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
                         "capacity literal must materialise as a signed I64 carrier",
                     ))
                 })?;
 
                 if numeric.sign == NumericLiteralSign::Negative {
                     return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::invalid_collection_type(
+                        calls_data::invalid_collection_type(
                             InvalidCollectionTypeReason::NegativeCapacity,
                             token_span,
                         ),
@@ -947,7 +952,10 @@ fn parsed_capacity(
                     .map_err(HeaderParseFailure::Infrastructure)?
                 else {
                     return Err(HeaderParseFailure::Infrastructure(
-                        CompilerError::compiler_error("symbol token is missing its string payload"),
+                        InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
+                            "symbol token is missing its string payload",
+                        ),
                     ));
                 };
                 return Ok(Some(ParsedCollectionCapacity::BareConstant {
@@ -961,10 +969,7 @@ fn parsed_capacity(
 
     let span = tokens.get(0).map(TokenRef::source_span);
     Err(HeaderParseFailure::Diagnostic(
-        CompilerDiagnostic::invalid_collection_type(
-            InvalidCollectionTypeReason::CapacityNotConstant,
-            span,
-        ),
+        calls_data::invalid_collection_type(InvalidCollectionTypeReason::CapacityNotConstant, span),
     ))
 }
 
@@ -1021,13 +1026,13 @@ fn parse_map_type_from_inner_window(
 
     if key_tokens.is_empty() {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_map_type(InvalidMapTypeReason::EmptyMapKeyType, span),
+            calls_data::invalid_map_type(InvalidMapTypeReason::EmptyMapKeyType, span),
         ));
     }
 
     if value_tokens.is_empty() {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_map_type(InvalidMapTypeReason::EmptyMapValueType, span),
+            calls_data::invalid_map_type(InvalidMapTypeReason::EmptyMapValueType, span),
         ));
     }
 
@@ -1067,19 +1072,13 @@ fn try_parse_map_side(
 
     if map_side_looks_like_fixed_capacity(tokens, context, string_table)? {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_map_type(
-                InvalidMapTypeReason::FixedCapacityNotAllowed,
-                span,
-            ),
+            calls_data::invalid_map_type(InvalidMapTypeReason::FixedCapacityNotAllowed, span),
         ));
     }
 
     if map_side_looks_like_postfix_capacity(tokens, context, string_table)? {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_map_type(
-                InvalidMapTypeReason::FixedCapacityNotAllowed,
-                span,
-            ),
+            calls_data::invalid_map_type(InvalidMapTypeReason::FixedCapacityNotAllowed, span),
         ));
     }
 
@@ -1088,14 +1087,18 @@ fn try_parse_map_side(
         let found = tokens
             .diagnostic_token_from_ref(extra_token.view, string_table)
             .map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "map side trailing token",
-                ))
+                HeaderParseFailure::Infrastructure(
+                    InfrastructureFailure::malformed_token_projection(
+                        "map side trailing token",
+                        error,
+                    ),
+                )
             })?;
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::expected_token_from_tags(
-                TokenTag::CLOSE_CURLY,
+            token_lexical::expected_token_from_projections(
+                crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
+                    TokenTag::CLOSE_CURLY,
+                ),
                 Some(found),
                 Some(SourceSpan::new(tokens.source_id(), extra_token.span)),
             ),
@@ -1176,13 +1179,12 @@ fn parse_type_slice<'a>(
     string_table: &mut StringTable,
 ) -> TypeParseResult<ParsedTypeSlice<'a>> {
     let cursor = tokens.cursor().map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "type slice range was invalid: {error:?}",
-        )))
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("type slice range was invalid: {error:?}",),
+        ))
     })?;
-    let mut stream = DeclarationCursor::new(cursor)
-        .map_err(HeaderParseFailure::Infrastructure)?
-        .with_payload_origin(tokens.payload_origin);
+    let mut stream = DeclarationCursor::new(cursor).with_payload_origin(tokens.payload_origin);
     let parsed_type = parse_required_type(&mut stream, context, string_table)?;
     let next_token = match stream.canonical_cursor().current() {
         Some(view) if stream.current_tag() != TokenTag::EOF => Some(ParsedTypeSliceToken {
@@ -1284,12 +1286,11 @@ fn parse_generic_arguments(
         }
         ParsedTypeRef::Named { .. } => {}
         // Qualified paths such as `io.input.Input` are concrete type references,
-        // not generic bases. Generic application on namespace-qualified bases is
-        // deliberately deferred until there is a clear need and a resolved generic
-        // base policy; for now they fall through to the OnNonNamedType error.
+        // not generic bases. Generic application on them is unsupported because no resolved
+        // generic base policy exists, so these paths fall through to the `OnNonNamedType` error.
         _ => {
             return Err(HeaderParseFailure::Diagnostic(
-                CompilerDiagnostic::invalid_generic_application(
+                generics_traits_api::invalid_generic_application(
                     GenericApplicationErrorReason::OnNonNamedType,
                     current_source_span(token_stream),
                 ),
@@ -1304,7 +1305,7 @@ fn parse_generic_arguments(
         if generic_argument_list_is_finished(token_stream.current_tag()) {
             if arguments.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::invalid_generic_application(
+                    generics_traits_api::invalid_generic_application(
                         GenericApplicationErrorReason::EmptyArgumentList,
                         current_source_span(token_stream),
                     ),
@@ -1322,7 +1323,7 @@ fn parse_generic_arguments(
                 token_stream.advance();
                 if generic_argument_list_is_finished(token_stream.current_tag()) {
                     return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::invalid_generic_application(
+                        generics_traits_api::invalid_generic_application(
                             GenericApplicationErrorReason::MissingArgumentAfterComma,
                             current_source_span(token_stream),
                         ),
@@ -1339,7 +1340,7 @@ fn parse_generic_arguments(
                 let span = current_source_span(token_stream);
                 let found = current_diagnostic_token(token_stream, string_table)?;
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_from_tag(found, span),
+                    token_lexical::unexpected_token_from_tag(found, span),
                 ));
             }
         }
@@ -1422,7 +1423,7 @@ fn parse_generic_type_argument(
     let parsed_argument = parse_type_atom(token_stream, context, string_table)?;
     if let Some((contract, span)) = parameter_contract_head(&parsed_argument, string_table) {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_parameter_contract(
+            generics_traits_api::invalid_parameter_contract(
                 InvalidParameterContractReason::InvalidPosition { contract },
                 span,
             ),
@@ -1464,8 +1465,8 @@ fn generic_argument_list_is_finished(tag: TokenTag) -> bool {
 fn nested_generic_application_error(
     span: Option<SourceSpan>,
     _context: TypeAnnotationContext,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_generic_application(
+) -> DiagnosticDraft {
+    generics_traits_api::invalid_generic_application(
         GenericApplicationErrorReason::NestedApplication,
         span,
     )
@@ -1486,7 +1487,7 @@ fn parse_optional_type_suffix(
 
     if matches!(parsed_type, ParsedTypeRef::Optional { .. }) {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
+            names_declarations::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::DuplicateOptional,
                 current_source_span(token_stream),
@@ -1497,7 +1498,7 @@ fn parse_optional_type_suffix(
     token_stream.advance();
     if token_stream.current_tag() == TokenTag::QUESTION_MARK {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
+            names_declarations::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::DuplicateOptional,
                 current_source_span(token_stream),
@@ -1545,8 +1546,8 @@ fn reject_trait_this_composition(
 fn trait_this_composition_error(
     context: TypeAnnotationContext,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_type_annotation(
+) -> DiagnosticDraft {
+    names_declarations::invalid_type_annotation(
         context,
         InvalidTypeAnnotationReason::TraitThisMustBeDirect,
         span,
@@ -1556,8 +1557,8 @@ fn trait_this_composition_error(
 fn type_keyword_deferred_error(
     token_stream: &DeclarationCursor<'_>,
     context: TypeAnnotationContext,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_type_annotation(
+) -> DiagnosticDraft {
+    names_declarations::invalid_type_annotation(
         context,
         InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
             found: DiagnosticToken::from_static_tag(TokenTag::TYPE),
@@ -1566,34 +1567,20 @@ fn type_keyword_deferred_error(
     )
 }
 
-fn compilation_stage(context: TypeAnnotationContext) -> &'static str {
-    match context {
-        TypeAnnotationContext::DeclarationTarget => "Variable Declaration",
-        TypeAnnotationContext::BuildConfigContract => "Build-Configuration Contract",
-        TypeAnnotationContext::SignatureParameter => "Parameter Type Parsing",
-        TypeAnnotationContext::SignatureReturn => "Function Signature Parsing",
-        TypeAnnotationContext::TypeAliasTarget => "Type Alias Parsing",
-        TypeAnnotationContext::TraitRequirement => "Trait Requirement Parsing",
-    }
-}
-
 fn current_diagnostic_token(
     token_stream: &DeclarationCursor<'_>,
     string_table: &mut StringTable,
 ) -> TypeParseResult<DiagnosticToken> {
-    token_stream
-        .current_diagnostic_token(string_table)
-        .map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                error,
+    match token_stream.current_diagnostic_token(string_table) {
+        Ok(Some(token)) => Ok(token),
+        Ok(None) => Ok(DiagnosticToken::from_static_tag(TokenTag::EOF)),
+        Err(error) => Err(HeaderParseFailure::Infrastructure(
+            InfrastructureFailure::malformed_token_projection(
                 "type annotation diagnostic projection",
-            ))
-        })?
-        .ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-                "diagnostic projection requested without a current token",
-            ))
-        })
+                error,
+            ),
+        )),
+    }
 }
 
 fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {

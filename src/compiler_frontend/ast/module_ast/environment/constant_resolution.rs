@@ -52,9 +52,13 @@ use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, templates,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+    CompileTimeEvaluationErrorReason, DiagnosticBag,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -125,7 +129,7 @@ pub(crate) struct ConstantHeaderInput<'a> {
     pub type_environment: &'a mut TypeEnvironment,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
-    pub warnings: &'a mut Vec<CompilerDiagnostic>,
+    pub warnings: &'a mut DiagnosticBag,
     pub path_fork: &'a mut PathInternerFork,
 }
 
@@ -185,7 +189,8 @@ impl ConstantResolutionSession {
         } = input;
 
         let HeaderKind::Constant { declaration, .. } = &header.kind else {
-            let error = CompilerError::compiler_error(
+            let error = InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Constant header resolver called for a non-constant header.",
             );
             return Err(error.into());
@@ -214,7 +219,8 @@ impl ConstantResolutionSession {
         let payload = header.synthetic_content_payload;
         if matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_))) && file_owner.is_some()
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "RenderedHtml synthetic content retained a canonical source token owner",
             )
             .into());
@@ -222,7 +228,8 @@ impl ConstantResolutionSession {
         if file_tokens.is_none()
             && !matches!(payload, Some(SyntheticContentPayload::RenderedHtml(_)))
         {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "constant header has no canonical source token owner for its retained syntax",
             )
             .into());
@@ -244,7 +251,8 @@ impl ConstantResolutionSession {
             },
             Some(SyntheticContentPayload::MothTemplate { markdown_directive }) => {
                 let owner = file_owner.ok_or_else(|| {
-                    ExpressionParseError::from(CompilerError::compiler_error(
+                    ExpressionParseError::from(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "MothTemplate synthetic content has no canonical source token owner",
                     ))
                 })?;
@@ -255,7 +263,7 @@ impl ConstantResolutionSession {
                     .find(directive_name)
                     .is_none()
                 {
-                    return Err(CompilerDiagnostic::invalid_template_directive(
+                    return Err(templates::invalid_template_directive(
                     Some(markdown_directive),
                     crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnknownDirective,
                     None,
@@ -269,7 +277,7 @@ impl ConstantResolutionSession {
                 AstCursor::from_source_tokens(owner.tokens(), header.tokens)
             }
             .map_err(|error| {
-                ExpressionParseError::from(CompilerError::compiler_error(format!(
+                ExpressionParseError::from(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "MothTemplate synthetic body range is outside its canonical source owner: {error:?}"
                 )))
             })?;
@@ -297,7 +305,8 @@ impl ConstantResolutionSession {
                         .get_template(template.tir_reference.root)
                         .map(|template_ir| template_ir.kind.clone())
                         .ok_or_else(|| {
-                            CompilerError::compiler_error(
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
                                 "Parsed template kind was missing from its module-local TIR store.",
                             )
                         })?
@@ -377,13 +386,13 @@ impl ConstantResolutionSession {
                 .map(|owner| -> Result<AstCursor<'_>, ExpressionParseError> {
                     let tokens = owner.tokens_ref();
                     let full = tokens.full_range().map_err(|error| {
-                        ExpressionParseError::from(CompilerError::compiler_error(format!(
+                        ExpressionParseError::from(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "constant header source range could not be constructed: {error:?}"
                         )))
                     })?;
                     AstCursor::from_source_tokens_for_handoff(owner.tokens(), full).map_err(
                         |error| {
-                            ExpressionParseError::from(CompilerError::compiler_error(format!(
+                            ExpressionParseError::from(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                                 "constant header source range is outside its source owner: {error:?}"
                             )))
                         },
@@ -412,7 +421,8 @@ impl ConstantResolutionSession {
                     // declaration lowering never retains a pending numeric origin: compile-time
                     // constants fold at their own boundary and cannot return pending state.
                     DeclarationLowering::PendingNumeric(_) => {
-                        return Err(ExpressionParseError::from(CompilerError::compiler_error(
+                        return Err(ExpressionParseError::from(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "a numeric-dependent declaration outcome reached a constant header \
                              boundary, which cannot retain or complete it before the body root",
                         )));
@@ -436,13 +446,16 @@ impl ConstantResolutionSession {
                 path_fork,
             )?;
         }
-        warnings.extend(scope_context.take_emitted_warnings());
+        for warning in scope_context.take_emitted_warnings() {
+            warnings.push(warning);
+        }
 
         // After resolution, the initializer must be fully foldable at compile time.
         // Runtime expressions in constants are rejected here. Template payloads keep
         // their module-local reference, phase and overlay identity during classification.
         let initializer = declaration.value.initializer().ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "Constant header resolution completed without an initializer.",
             )
         })?;
@@ -474,7 +487,7 @@ impl ConstantResolutionSession {
                 crate::compiler_frontend::ast::const_eval::FoldRequirement::Required,
             ))?;
 
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
+            return Err(choices_control_flow::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(declaration.id),
                 header.name_span,
@@ -586,19 +599,22 @@ fn non_constant_initializer_fold_refusal(
 ) -> Result<(), ExpressionParseError> {
     match fold {
         Ok(ConstantFoldOutcome::Refused { reason, .. }) => {
-            Err(ExpressionParseError::from(reason.into_diagnostic()))
+            Err(ExpressionParseError::from(reason.into_draft()))
         }
         // A broken compiler invariant must not surface as a source refusal.
         Err(ConstantFoldError::Infrastructure(error)) => {
             Err(ExpressionParseError::Infrastructure(error))
         }
         // A builder capacity failure is not a source refusal: it must reach the module build.
-        Err(ConstantFoldError::Diagnostic(diagnostic))
-            if diagnostic.is_compiler_capacity_exceeded() =>
-        {
+        Err(
+            ConstantFoldError::Diagnostic(diagnostic)
+            | ConstantFoldError::NumericFailure(diagnostic),
+        ) if diagnostic.code() == "MOTH-SYNTAX-0037" => {
             Err(ExpressionParseError::Diagnostic(diagnostic))
         }
-        Ok(_) | Err(ConstantFoldError::Diagnostic(_)) => Ok(()),
+        Ok(_)
+        | Err(ConstantFoldError::Diagnostic(_))
+        | Err(ConstantFoldError::NumericFailure(_)) => Ok(()),
     }
 }
 

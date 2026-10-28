@@ -16,11 +16,12 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, PatternValue, PatternValueKind,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NonExhaustiveMatchReason};
+use crate::compiler_frontend::compiler_messages::NonExhaustiveMatchReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
@@ -327,7 +328,7 @@ pub(crate) struct MatchExhaustivenessCheck<'a> {
 /// actionable diagnostics listing the specific missing variants.
 pub(crate) fn enforce_match_exhaustiveness(
     check: MatchExhaustivenessCheck<'_>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let subject_span = match &check.subject {
         MatchExhaustivenessSubject::Known { span, .. } => *span,
         MatchExhaustivenessSubject::PendingChoice { span, .. }
@@ -354,7 +355,7 @@ pub(crate) fn enforce_match_exhaustiveness(
             return Ok(());
         }
 
-        return Err(CompilerDiagnostic::non_exhaustive_match(
+        return Err(choices_control_flow::non_exhaustive_match(
             NonExhaustiveMatchReason::MissingOptionPatterns,
             vec![],
             subject_span,
@@ -363,12 +364,13 @@ pub(crate) fn enforce_match_exhaustiveness(
 
     if let MatchExhaustivenessSubject::Known { type_id, .. } = &check.subject {
         let subject_type_id = *type_id;
-        let is_choice = matches!(
-            check.type_environment.type_kind(subject_type_id),
-            Some(TypeKind::Choice | TypeKind::GenericInstance)
-        );
-
-        if is_choice {
+        // A subject with a declared variant set follows the choice rule. Generic struct
+        // instances are also `GenericInstance`, so the variant set decides, not the kind.
+        if check
+            .type_environment
+            .variants_for(subject_type_id)
+            .is_some()
+        {
             return enforce_choice_variants(subject_type_id, subject_span, &check);
         }
 
@@ -391,7 +393,7 @@ pub(crate) fn enforce_match_exhaustiveness(
             NonExhaustiveMatchReason::MissingElseArm
         };
 
-        return Err(CompilerDiagnostic::non_exhaustive_match(
+        return Err(choices_control_flow::non_exhaustive_match(
             reason,
             vec![],
             subject_span,
@@ -404,7 +406,7 @@ pub(crate) fn enforce_match_exhaustiveness(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::non_exhaustive_match(
+    Err(choices_control_flow::non_exhaustive_match(
         NonExhaustiveMatchReason::MissingElseArm,
         vec![],
         subject_span,
@@ -420,14 +422,14 @@ fn enforce_choice_variants(
     subject_type_id: TypeId,
     subject_span: Option<SourceSpan>,
     check: &MatchExhaustivenessCheck<'_>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     // `else` intentionally acts as an explicit "future variants" fallback in Alpha.
     if check.has_default {
         return Ok(());
     }
 
     if check.facts.has_guarded_arms {
-        return Err(CompilerDiagnostic::non_exhaustive_match(
+        return Err(choices_control_flow::non_exhaustive_match(
             NonExhaustiveMatchReason::GuardedArmsRequireElse,
             vec![],
             subject_span,
@@ -450,7 +452,7 @@ fn enforce_choice_variants(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::non_exhaustive_match(
+    Err(choices_control_flow::non_exhaustive_match(
         NonExhaustiveMatchReason::MissingVariants,
         missing_variants,
         subject_span,

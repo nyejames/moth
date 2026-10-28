@@ -13,6 +13,7 @@
 //! the same ordered continuation list. No statement is re-parsed, no argument routing is rebuilt
 //! from tokens, and no pending ID or recipe can leave this module.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -80,9 +81,14 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    names_declarations, types_borrows_targets,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
+    InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -263,7 +269,8 @@ impl Completion<'_, '_> {
                     // before its owning authored position is emitted.
                     self.resolve_continuation(id)?;
                     let state = self.resumed.get_mut(id.as_usize()).ok_or_else(|| {
-                        CompilerError::compiler_error(
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "numeric construction completion addressed a continuation \
                                  outside its own dense table",
                         )
@@ -271,7 +278,8 @@ impl Completion<'_, '_> {
                     let ContinuationResolution::Completed(resumed) =
                         std::mem::replace(state, ContinuationResolution::Consumed)
                     else {
-                        return Err(CompilerError::compiler_error(
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "numeric construction completion reached a continuation whose nodes \
                              were already spliced into another AST position",
                         )
@@ -746,7 +754,8 @@ impl Completion<'_, '_> {
                 }
             }
             let (type_id, span) = selected_type.ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained multi-bind forward producer disappeared during slot resolution",
                 )
             })?;
@@ -759,13 +768,15 @@ impl Completion<'_, '_> {
         }
 
         let Some(producer) = producers.first().copied() else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "an inferred multi-bind target had no retained producer route",
             )
             .into());
         };
         let PendingMultiBindProducerKind::Raw(family) = producer.kind else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a direct multi-bind producer was not selected as its slot origin",
             )
             .into());
@@ -857,7 +868,8 @@ impl Completion<'_, '_> {
             BindingSlot::Pending | BindingSlot::Resolved(_) => None,
         };
         if seeded.is_some_and(|seeded| seeded != resolved.type_id) {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a cyclic numeric binding completed with a storage type other than its seeded type",
             )
             .into());
@@ -875,7 +887,8 @@ impl Completion<'_, '_> {
             .declaration
             .as_ref()
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a resolved binding reached its frame slot after its declaration payload moved",
                 )
             })?
@@ -887,7 +900,7 @@ impl Completion<'_, '_> {
             .frame_mut(frame)
             .upgrade_pending_numeric_var(name, domain, binding, declaration);
         if !upgraded {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "numeric construction completion found no pending frame slot for a resolved binding",
             )
             .into());
@@ -915,7 +928,8 @@ impl Completion<'_, '_> {
             _ => None,
         };
         declaration.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a numeric binding's completed declaration moved to a second AST position",
             )
             .into()
@@ -928,7 +942,8 @@ impl Completion<'_, '_> {
     ) -> Result<&ResolvedBinding, ExpressionParseError> {
         match self.bindings.get(binding.as_usize()) {
             Some(BindingSlot::Resolved(resolved)) => Ok(resolved),
-            _ => Err(CompilerError::compiler_error(
+            _ => Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "numeric construction completion used a resolved binding before it resolved",
             )
             .into()),
@@ -951,7 +966,8 @@ impl Completion<'_, '_> {
                 return Ok(());
             }
             Some(ContinuationResolution::Resolving) => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "numeric construction completion resumed a continuation that was still being \
                      resumed; the retained statement graph is not acyclic",
                 )
@@ -959,7 +975,8 @@ impl Completion<'_, '_> {
             }
             Some(ContinuationResolution::Unresolved) => {}
             None => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "numeric construction completion addressed a continuation outside its own \
                      dense table",
                 )
@@ -968,7 +985,8 @@ impl Completion<'_, '_> {
         }
         self.resumed[index] = ContinuationResolution::Resolving;
         let Some(continuation) = self.state.borrow_mut().take_continuation(id) else {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "numeric construction completion requested a continuation that was already taken",
             )
             .into());
@@ -1046,14 +1064,11 @@ impl Completion<'_, '_> {
                 let Some(place) =
                     place_expression_from_expression(self.expression_builder, expression)?
                 else {
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
+                    self.expression_builder
+                        .view_owned(expression)?
+                        .require_single(ValueReceiverContext::ReceiverBase)?;
+                    return Err(names_declarations::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                        None,
-                        Some(
-                            self.expression_builder
-                                .view_owned(expression)?
-                                .require_single(ValueReceiverContext::ReceiverBase)?,
-                        ),
                         None,
                         None,
                         None,
@@ -1082,12 +1097,7 @@ impl Completion<'_, '_> {
             self.assignment_target_facts(continuation.target)?;
         let target_type_id = self.expression_builder.place(target)?.metadata().type_id;
         if !place_expression_is_mutable(self.expression_builder.place(target)?) {
-            return Err(immutable_binding_diagnostic(
-                target_type_id,
-                declaration_span,
-                continuation.span,
-            )
-            .into());
+            return Err(immutable_binding_diagnostic(declaration_span, continuation.span).into());
         }
         let value = self.complete_mutation_value(continuation.value, target_type_id)?;
         let value = coerce_expression_to_explicit_type_boundary(
@@ -1115,12 +1125,7 @@ impl Completion<'_, '_> {
             self.assignment_target_facts(continuation.target)?;
         let target_type_id = self.expression_builder.place(target)?.metadata().type_id;
         if !place_expression_is_mutable(self.expression_builder.place(target)?) {
-            return Err(immutable_binding_diagnostic(
-                target_type_id,
-                declaration_span,
-                continuation.span,
-            )
-            .into());
+            return Err(immutable_binding_diagnostic(declaration_span, continuation.span).into());
         }
         let rhs = self.complete_mutation_value(continuation.value, target_type_id)?;
         let value = evaluate_compound_assignment_with_ready_rhs(CompoundAssignmentReadyInput {
@@ -1210,7 +1215,8 @@ impl Completion<'_, '_> {
 
         for (slot_index, producer) in producer_routes {
             let Some(apply_receiver) = apply_receiver_routes.get(slot_index).copied() else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained multi-bind producer addressed a slot outside its targets",
                 )
                 .into());
@@ -1239,7 +1245,8 @@ impl Completion<'_, '_> {
                     )?;
                 }
                 PendingMultiBindProducerKind::Binding(_) => {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a retained multi-bind receiver route contained a direct binding producer",
                     )
                     .into());
@@ -1253,7 +1260,8 @@ impl Completion<'_, '_> {
                 success_slot_count,
             } => {
                 if targets.len() != success_slot_count {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a retained catch-protected multi-bind call produced a different number of \
                          result slots than its parsed signature declared",
                     )
@@ -1273,20 +1281,22 @@ impl Completion<'_, '_> {
                     suffix: _,
                 } = *deferred;
                 let Some(deferred_item) = single_operand_mut(&mut items) else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a retained multi-bind value block lost its single deferred value item",
                     )
                     .into());
                 };
                 let ExpressionRpnItem::PendingNumericExpression { expression, .. } = deferred_item
                 else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a retained multi-bind value block lost its deferred expression",
                     )
                     .into());
                 };
                 let DeferredExpression::ValueBlock(block) = expression.as_mut() else {
-                    return Err(CompilerError::compiler_error(
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                         "a retained multi-bind expression was not owned by the value-block constructor",
                     )
                     .into());
@@ -1323,14 +1333,14 @@ impl Completion<'_, '_> {
     ) -> Result<(), ExpressionParseError> {
         let slot_types = self.expression_builder.view_owned(*value)?.success_types();
         if slot_types.len() != targets.len() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                 "a completed multi-bind value produced a different number of slots than its targets",
             )
             .into());
         }
         for (target, slot_type) in targets.iter().zip(slot_types) {
             if target.type_id != *slot_type {
-                return Err(CompilerDiagnostic::type_mismatch(
+                return Err(types_borrows_targets::type_mismatch(
                     target.type_id,
                     *slot_type,
                     TypeMismatchContext::General,
@@ -1395,7 +1405,8 @@ impl Completion<'_, '_> {
         if continuation.is_error_return {
             let mut values = values.into_iter();
             let error_value = values.next().ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "numeric construction completion resumed an error return without a value",
                 )
             })?;
@@ -1407,7 +1418,7 @@ impl Completion<'_, '_> {
                 .as_deref()
                 .and_then(|contract| contract.error_type)
             else {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "numeric construction completion resumed an error return outside an error function",
                 )
                 .into());
@@ -1430,7 +1441,8 @@ impl Completion<'_, '_> {
             .enclosing_callable
             .as_deref()
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "numeric construction completion resumed a return without a callable contract",
                 )
             })?
@@ -1438,7 +1450,8 @@ impl Completion<'_, '_> {
         // One producer may forward all success slots, whether it is a call or a value block.
         let forwarded = values.len() == 1 && expected_types.len() > 1;
         if !forwarded && values.len() != expected_types.len() {
-            return Err(CompilerError::compiler_error(
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "numeric construction completion resumed a return with the wrong number of slots",
             )
             .into());
@@ -1608,7 +1621,8 @@ impl Completion<'_, '_> {
                     // completed declaration moves into the loop's item binding, as a range counter's
                     // does, so the header carries the same declaration the body reads.
                     if bindings.item.is_some() {
-                        return Err(ExpressionParseError::from(CompilerError::compiler_error(
+                        return Err(ExpressionParseError::from(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
                             "collection loop header carried both a resolved and a pending item binding",
                         )));
                     }
@@ -1674,7 +1688,8 @@ impl Completion<'_, '_> {
             .get_mut(counter.as_usize())
             .and_then(Option::take)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained range loop resumed before its counter produced the range spec",
                 )
                 .into()
@@ -1695,7 +1710,7 @@ impl Completion<'_, '_> {
             .get(counter.as_usize())
             .and_then(Option::as_ref)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a retained range loop asked for its counter's spec before the counter resolved",
                 )
                 .into()
@@ -1731,7 +1746,8 @@ impl Completion<'_, '_> {
                 .declaration
                 .as_ref()
                 .ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "a retained template range header resolved after its counter's declaration \
                          payload moved",
                     )
@@ -1769,7 +1785,7 @@ impl Completion<'_, '_> {
             .declaration
             .as_ref()
             .ok_or_else(|| {
-                CompilerError::compiler_error(
+                InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "a retained template collection header's pending item resolved after its declaration payload moved",
                 )
             })?
@@ -2139,7 +2155,8 @@ impl Completion<'_, '_> {
         let (shape, cached) = match self.bindings.get(index) {
             Some(BindingSlot::Resolving(resolving)) => (resolving.shape, resolving.seed),
             _ => {
-                return Err(CompilerError::compiler_error(
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a cyclic numeric use found no resolving binding",
                 )
                 .into());
@@ -2444,7 +2461,8 @@ impl Completion<'_, '_> {
                 // authored value requirement, so no second decision exists here.
                 let propagation_span = span.or(call_span);
                 let error_type = error_return_type_id.ok_or_else(|| {
-                    CompilerError::compiler_error(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
                         "retained propagated call lost its declared error slot",
                     )
                 })?;
@@ -2626,7 +2644,8 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
                 ContinuationResolution::Consumed,
             ) {
                 ContinuationResolution::Completed(nodes) => Ok(nodes),
-                _ => Err(CompilerError::compiler_error(
+                _ => Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
                     "a retained handler continuation did not publish its statement nodes",
                 )
                 .into()),
@@ -2708,7 +2727,8 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
             .borrow_mut()
             .take_completed_forward_producer(producer)?;
         let expression = taken.ok_or_else(|| {
-            CompilerError::compiler_error(
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "a forward producer was read while still resolving or after it was taken",
             )
         })?;
@@ -2802,19 +2822,23 @@ fn alias_value(
 }
 
 fn immutable_binding_diagnostic(
-    type_id: TypeId,
     declaration_span: Option<SourceSpan>,
     assignment_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_assignment_target(
+) -> DiagnosticDraft {
+    let diagnostic = names_declarations::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
         None,
-        Some(type_id),
         None,
         None,
-        declaration_span,
         assignment_span,
-    )
+    );
+    match declaration_span {
+        Some(span) => diagnostic.with_label(
+            Some(span),
+            Some(LabelDraftMessage::ImmutableBindingDeclaration),
+        ),
+        None => diagnostic,
+    }
 }
 
 /// Finishes one retained option selector's capture pattern against its completed subject.
@@ -2842,7 +2866,8 @@ fn finish_retained_selector_pattern<'env>(
             finish_pending_option_pattern(pending, subject_type_id, completion)
         }
         DeferredArmPattern::PendingChoice(_) | DeferredArmPattern::Retained(_) => {
-            Err(CompilerError::compiler_error(
+            Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
                 "A retained template option selector carried a pattern only a choice or \
                  retained arm can hold.",
             )

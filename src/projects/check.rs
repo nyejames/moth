@@ -7,8 +7,8 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, BuilderSelection, ProjectAssemblyError, bootstrap_project_build,
-    validate_frontend_facade_boundaries,
+    BuildBootstrap, BuilderSelection, bootstrap_project_build, finalize_project_assembly_failure,
+    finish_successful_project_warnings, validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
@@ -17,16 +17,14 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 struct CheckOutcome {
-    messages: CompilerMessages,
-    status: ProjectCommandStatus,
+    messages: CompilationResult<()>,
 }
 
 /// One completed frontend-only check, ready for caller-owned terminal presentation.
@@ -35,23 +33,7 @@ pub struct CheckCommandReport {
     pub status: ProjectCommandStatus,
     pub error_count: usize,
     pub warning_count: usize,
-    pub messages: CompilerMessages,
-}
-
-fn attach_source_database_if_missing(
-    messages: &mut CompilerMessages,
-    source_database: Option<&Arc<crate::compiler_frontend::source::SourceDatabase>>,
-) {
-    let Some(source_database) = source_database else {
-        return;
-    };
-    if messages
-        .diagnostics()
-        .enumerate()
-        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
-    {
-        messages.set_source_database(Arc::clone(source_database));
-    }
+    pub messages: CompilationResult<()>,
 }
 
 /// Execute one frontend-only check before presenting its result to the caller.
@@ -68,15 +50,14 @@ pub fn run_check_command(
     let start = Instant::now();
     let outcome = execute_check(path, build_config_inputs, builder_selection);
     let completion = check_completion(&outcome);
-    let error_count = outcome.messages.error_count();
-    let warning_count = outcome.messages.warning_count();
+    let (error_count, warning_count) = diagnostic_counts(&outcome.messages);
 
     // Classification is decided inside `execute_check`, so the captured boundary includes it.
     let duration =
         capture_command_duration!(crate::timing::TimingMetric::CommandCheckTotal, start,);
     let report = CheckCommandReport {
         duration,
-        status: outcome.status,
+        status: completion.status,
         error_count,
         warning_count,
         messages: outcome.messages,
@@ -106,15 +87,14 @@ fn run_check_for_tests(
     renderer: impl FnOnce(&CheckCommandReport),
 ) -> ProjectCommandCompletion {
     let completion = check_completion(&outcome);
-    let error_count = outcome.messages.error_count();
-    let warning_count = outcome.messages.warning_count();
+    let (error_count, warning_count) = diagnostic_counts(&outcome.messages);
     crate::timing::record_command_total_timing(
         crate::timing::TimingMetric::CommandCheckTotal,
         duration,
     );
     let report = CheckCommandReport {
         duration,
-        status: outcome.status,
+        status: completion.status,
         error_count,
         warning_count,
         messages: outcome.messages,
@@ -123,10 +103,41 @@ fn run_check_for_tests(
     completion
 }
 
+fn diagnostic_counts(messages: &CompilationResult<()>) -> (usize, usize) {
+    match messages {
+        Ok(CompilationOutcome::Success { warnings, .. }) => (
+            0,
+            warnings
+                .as_ref()
+                .map_or(0, |reports| reports.counts().warnings as usize),
+        ),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            let counts = ProjectDiagnosticCounts::from_reports(reports);
+            (counts.errors, counts.warnings)
+        }
+        Err(_) => (1, 0),
+    }
+}
+
 fn check_completion(outcome: &CheckOutcome) -> ProjectCommandCompletion {
-    ProjectCommandCompletion {
-        status: outcome.status,
-        diagnostic_counts: ProjectDiagnosticCounts::from_messages(&outcome.messages),
+    match &outcome.messages {
+        Ok(CompilationOutcome::Success { warnings, .. }) => ProjectCommandCompletion {
+            status: ProjectCommandStatus::Success,
+            diagnostic_counts: Some(ProjectDiagnosticCounts {
+                errors: 0,
+                warnings: warnings
+                    .as_ref()
+                    .map_or(0, |reports| reports.counts().warnings as usize),
+            }),
+        },
+        Ok(CompilationOutcome::Diagnosed(reports)) => ProjectCommandCompletion {
+            status: ProjectCommandStatus::Failure,
+            diagnostic_counts: Some(ProjectDiagnosticCounts::from_reports(reports)),
+        },
+        Err(_) => ProjectCommandCompletion {
+            status: ProjectCommandStatus::Failure,
+            diagnostic_counts: None,
+        },
     }
 }
 
@@ -135,73 +146,107 @@ fn execute_check(
     build_config_inputs: &BuildConfigInputSet,
     builder_selection: &BuilderSelection,
 ) -> CheckOutcome {
-    let normalized_path = normalize_entry_path(path);
+    CheckOutcome {
+        messages: execute_check_messages(path, build_config_inputs, builder_selection),
+    }
+}
 
-    let valid_path = match check_if_valid_path(normalized_path) {
-        Ok(path) => path,
-        Err(error) => {
-            return CheckOutcome {
-                messages: CompilerMessages::from_error(error, StringTable::new()),
-                status: ProjectCommandStatus::Failure,
-            };
-        }
-    };
-
-    let BuildBootstrap {
-        mut config,
-        style_directives,
-        mut string_table,
-        mut frontend_surface,
-        validated_directory_output_settings,
-        mut project_source_files,
+fn execute_check_messages(
+    path: &str,
+    build_config_inputs: &BuildConfigInputSet,
+    builder_selection: &BuilderSelection,
+) -> CompilationResult<()> {
+    execute_check_messages_with_warning_owner(
+        path,
         build_config_inputs,
-    } = match bootstrap_project_build(
+        builder_selection,
+        BoundaryAccumulator::with_root_string_table,
+    )
+}
+
+fn execute_check_messages_with_warning_owner(
+    path: &str,
+    build_config_inputs: &BuildConfigInputSet,
+    builder_selection: &BuilderSelection,
+    create_warning_owner: impl FnOnce(
+        crate::compiler_frontend::symbols::string_interning::StringTable,
+    ) -> BoundaryAccumulator,
+) -> CompilationResult<()> {
+    let valid_path = check_if_valid_path(normalize_entry_path(path))?;
+    let bootstrap = match bootstrap_project_build(
         builder_selection.backend.as_ref(),
         valid_path,
         build_config_inputs,
     ) {
         Ok(bootstrap) => bootstrap,
-        Err(messages) => {
-            return CheckOutcome {
-                messages,
-                status: ProjectCommandStatus::Failure,
-            };
+        Err(failure) => {
+            return failure
+                .into_diagnostic_reports()
+                .map(CompilationOutcome::Diagnosed);
         }
     };
-
-    let messages = match compile_project_frontend_with_inputs(
+    let BuildBootstrap {
+        mut config,
+        style_directives,
+        string_table,
+        mut frontend_surface,
+        validated_directory_output_settings,
+        mut project_source_builder,
+        build_config_inputs,
+    } = bootstrap;
+    let mut project_source_files = None;
+    let mut warning_owner = create_warning_owner(string_table);
+    match compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
-        &mut string_table,
+        &mut warning_owner,
         &mut project_source_files,
+        &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Check,
-    ) {
-        Ok(frontend) => {
-            let facade_messages = validate_frontend_facade_boundaries(&frontend)
-                .err()
-                .map(ProjectAssemblyError::into_owned_messages);
-            frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                project_source_files.take(),
-                facade_messages,
-            )
+    )? {
+        CompilationOutcome::Diagnosed(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
+        CompilationOutcome::Success { value, .. } => {
+            let project_source_database = value
+                .project_source_database
+                .clone()
+                .or(project_source_files.take());
+            let validation = validate_frontend_facade_boundaries(&value);
+            drop(value);
+            match validation {
+                Err(error) => {
+                    finalize_project_assembly_failure(error, warning_owner, project_source_database)
+                        .map(CompilationOutcome::Diagnosed)
+                }
+                Ok(()) => finish_successful_project_warnings(
+                    &mut warning_owner,
+                    project_source_database,
+                    (),
+                ),
+            }
         }
-        Err(mut messages) => {
-            attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
-            messages
-        }
-    };
-
-    let status = if messages.error_count() > 0 {
-        ProjectCommandStatus::Failure
-    } else {
-        ProjectCommandStatus::Success
-    };
-    CheckOutcome { messages, status }
+    }
+}
+#[cfg(test)]
+fn execute_check_messages_with_record_limit(
+    path: &str,
+    build_config_inputs: &BuildConfigInputSet,
+    builder_selection: &BuilderSelection,
+    records: usize,
+) -> CompilationResult<()> {
+    execute_check_messages_with_warning_owner(
+        path,
+        build_config_inputs,
+        builder_selection,
+        |string_table| {
+            let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+            warning_owner.set_record_limit_for_test(records);
+            warning_owner
+        },
+    )
 }
 
 fn normalize_entry_path(path: &str) -> &str {

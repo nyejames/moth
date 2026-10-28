@@ -1,4 +1,4 @@
--- Plan section 5.2: the external binary-float boundary uses the resolved destination precision.
+-- The external binary-float boundary uses the resolved destination precision.
 -- Under the binary64 destination a finite high-range host value stays finite and is accepted
 -- unchanged, while raw NaN and both infinities are rejected with code 304 through the declared
 -- builtin Error! channel.
