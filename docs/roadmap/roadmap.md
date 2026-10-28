@@ -61,11 +61,11 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - TODO plan: Export directives. Replace export: with compiler-owned $export while preserving module-root public surfaces and re-exports. Decide prefix-only versus optional directive-block form before implementation. Keep one final visibility syntax.
 
-- TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
-
 - TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
 
 - [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
+
+- [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `+` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
 
 ## Adding and maintaining plans
 
