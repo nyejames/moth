@@ -33,7 +33,7 @@ octet U8 = 7
 handler_ran ~= false
 caught_wide U16 = cast octet catch |catch_error|:
     error_code U32 = catch_error.code
-    handler_ran = true
+    ~handler_ran = true
     then 0
 ;
 assert(caught_wide is 7)

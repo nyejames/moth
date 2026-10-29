@@ -645,7 +645,7 @@ fn failure_witness_prefers_only_the_same_compound_updates_writeback_through_priv
             "risky |amount I8| -> I8, Error!:\n    return amount\n;\n\
              bump |wide U32, one U32, amount I8| -> U8:\n\
              {earlier}    total ~U8 = 250\n\
-                 total += risky(amount) catch then amount\n    return total\n;\n\
+                 ~total += risky(amount) catch then amount\n    return total\n;\n\
              forward |wide U32, one U32, amount I8| -> U8:\n    return bump(wide, one, amount)\n;\n"
         ));
         let summaries = AstBuiltinFailureSummaries::compute(
@@ -841,7 +841,7 @@ fn recursive_back_edge_before_compound_update_keeps_writeback_origin() {
         "risky |amount I8| -> I8, Error!:\n    return amount\n;\n\
          helper |wide U32, one U32, amount I8, ready Bool| -> U8:\n\
              if ready:\n        return helper(wide, one, amount, ready)\n    ;\n\
-             total ~U8 = 250\n    total += risky(amount) catch then amount\n    return total\n;\n\
+             total ~U8 = 250\n    ~total += risky(amount) catch then amount\n    return total\n;\n\
          boundary |wide U32, one U32, amount I8, ready Bool| -> U8:\n\
              return helper(wide, one, amount, ready)\n;\n",
     );

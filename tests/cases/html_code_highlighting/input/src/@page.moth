@@ -37,8 +37,8 @@
         page #= $slot("title")
 
         -- operators and numbers
-        total //= 1_000
-        total += 5
+        ~total //= 1_000
+        ~total += 5
         ratio #= 1.5e-6
         range 1..10
         status -> ready

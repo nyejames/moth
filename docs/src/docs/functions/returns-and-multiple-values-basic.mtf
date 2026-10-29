@@ -18,5 +18,8 @@ A function can return more than one success value:
 
 The number of receiving names must match the number of returned success values.
 
+Prefix a receiving name with `~` to update an existing mutable binding. Leave
+new receiving names unmarked, for example `~count, message = next()`.
+
 Functions that can fail add one final error return marked with `!`. The Errors
 page explains how to propagate or recover from that path.

@@ -59,11 +59,11 @@ A field read uses normal shared access.
 
 ### Field writes
 
-The root value must be a mutable place.
+The root value must be a mutable place. Prefix the whole field target with `~`.
 
 [codeblock, $code("moth"):
     point ~= Point(10, 20)
-    point.x = 30
+    ~point.x = 30
 ]
 
 A field of an immutable binding cannot be assigned.

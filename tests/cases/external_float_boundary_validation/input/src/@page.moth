@@ -12,7 +12,7 @@ load_code || -> I32, Error!:
 
 code ~U32 = 0
 ignored = load_code() catch |err|:
-    code = err.code
+    ~code = err.code
     then 0
 ;
 

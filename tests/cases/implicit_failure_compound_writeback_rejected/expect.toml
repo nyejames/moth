@@ -15,7 +15,7 @@ count = 1
 occurrence = 1
 path = "input/@page.moth"
 line = 8
-column = 9
+column = 10
 
 [backends.html_wasm]
 mode = "failure"
@@ -34,4 +34,4 @@ count = 1
 occurrence = 1
 path = "input/@page.moth"
 line = 8
-column = 9
+column = 10

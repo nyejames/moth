@@ -23,14 +23,14 @@ pick |first I32, second I32| -> I32:
 ;
 observe_left |hit Bool, seen ~String| -> I32:
     value = pick(left_producer(hit), right_producer(false)) catch |left_err|:
-        seen = [: [left_err.marker] [left_err.detail]]
+        ~seen = [: [left_err.marker] [left_err.detail]]
         then 0 - 1
     ;
     return value
 ;
 observe_right |hit Bool, seen ~String| -> I32:
     value = pick(left_producer(false), right_producer(hit)) catch |right_err|:
-        seen = [: [right_err.marker] [right_err.detail]]
+        ~seen = [: [right_err.marker] [right_err.detail]]
         then 0 - 2
     ;
     return value

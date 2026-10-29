@@ -21,7 +21,7 @@ load_step || -> I32, Error!:
 sum_fallible_iterable || -> I32, Error!:
     total ~= 0
     loop load_items()! |item|:
-        total = total + item
+        ~total = total + item
     ;
     return total
 ;
@@ -29,7 +29,7 @@ sum_fallible_iterable || -> I32, Error!:
 sum_fallible_bounds || -> I32, Error!:
     total ~= 0
     loop load_start()! to load_end()! |i|:
-        total = total + i
+        ~total = total + i
     ;
     return total
 ;
@@ -37,7 +37,7 @@ sum_fallible_bounds || -> I32, Error!:
 sum_fallible_step || -> I32, Error!:
     total ~= 0
     loop 0 to & 6 by load_step()! |i|:
-        total = total + i
+        ~total = total + i
     ;
     return total
 ;
@@ -50,7 +50,7 @@ count_failed_iterable || -> I32, Error!:
 sum_unreachable_loop || -> I32, Error!:
     total ~= 0
     loop 0 to count_failed_iterable()! |i|:
-        total = total + i
+        ~total = total + i
     ;
     return total
 ;

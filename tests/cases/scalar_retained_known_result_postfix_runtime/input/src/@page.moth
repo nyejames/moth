@@ -54,11 +54,11 @@ make_scores |count U64| -> {String = I32}:
 ;
 
 set_amount |this ~Meter, value U64|:
-    this.amount = value
+    ~this.amount = value
 ;
 
 set_free |target ~Meter, value U64|:
-    target.amount = value
+    ~target.amount = value
 ;
 
 meter = Meter(amount = 0)

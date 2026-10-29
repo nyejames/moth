@@ -64,7 +64,7 @@ fn assert_invalid_mutable_access_at(
 fn ordinary_updates_reject_definitely_and_possibly_uninitialized_targets() {
     let source = "probe |flag Bool|:\n\
 target ~= \"old\"\n\
-target = \"replacement\"\n\
+~target = \"replacement\"\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
@@ -429,7 +429,7 @@ fn ordinary_update_rejects_immutable_slot_and_alias_bindings() {
     let source = "probe ||:\n\
 mutable_root ~= \"root\"\n\
 mutable_target ~= \"old\"\n\
-mutable_target = \"replacement\"\n\
+~mutable_target = \"replacement\"\n\
 immutable_target = \"old\"\n\
 sentinel = 0\n\
 ;";
@@ -532,11 +532,11 @@ observer = \"observer\"\n\
 source ~= \"source\"\n\
 target ~= \"old\"\n\
 if flag:\n\
-    target = source\n\
+    ~target = source\n\
 else\n\
-    target = \"branch\"\n\
+    ~target = \"branch\"\n\
 ;\n\
-target = \"replacement\"\n\
+~target = \"replacement\"\n\
 sentinel = 0\n\
 observed = copy observer\n\
 ;";
@@ -616,9 +616,9 @@ source ~= \"source\"\n\
 observer = \"observer\"\n\
 target ~= \"old\"\n\
 if flag:\n\
-    target = source\n\
+    ~target = source\n\
 else\n\
-    target = \"branch\"\n\
+    ~target = \"branch\"\n\
 ;\n\
 unused = identity(argument)\n\
 sentinel = 0\n\

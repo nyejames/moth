@@ -638,7 +638,7 @@ fn cast_operand_ends_at_statement_boundary_before_later_catch() {
         r#"
 octet U8 = 7
 value ~U64 = 0
-value = cast octet
+~value = cast octet
 parse_int |text String| -> I32, Error!:
     return cast text
 ;

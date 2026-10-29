@@ -1,8 +1,8 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_exact = """
+value catch multi bind
+ guest
+ 0"""
 
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["value catch multi bind", "guest", "0"]

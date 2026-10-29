@@ -26,7 +26,7 @@ make_byte_values |raw Byte, other Byte| -> {Byte}, U8:
 
 ledger ~= Ledger(balance = 9007199254740993)
 copied_ledger ~= copy ledger
-copied_ledger.balance = 99
+~copied_ledger.balance = 99
 original_balance = ledger.balance
 copied_balance = copied_ledger.balance
 

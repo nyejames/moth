@@ -1,7 +1,7 @@
 -- A skipped mutable RHS with no later use remains a legal positive path.
 
 rhs_skipped |calls ~I32| -> Bool:
-    calls = calls + 1
+    ~calls = calls + 1
     return true
 ;
 

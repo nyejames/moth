@@ -134,7 +134,7 @@ Assume `take_u64` accepts a `U64` parameter:
     take_u64(duplicate)
 
     count ~= 1
-    count += 1
+    ~count += 1
     take_u64(count)
 ]
 

@@ -216,7 +216,7 @@ fn boracle_source_differential_replays_plain_value() {
 
 #[test]
 fn boracle_source_differential_replays_boolean_mutated_binding() {
-    let source = "value ~= false\nvalue = not value\nresult = value\n";
+    let source = "value ~= false\n~value = not value\nresult = value\n";
     assert_mutable_reassignment_access_order(source);
     let differential = assert_source_differential_replay(source, &["Agreement", "Agreement"]);
     let oracle_outcomes = differential
@@ -232,7 +232,7 @@ fn boracle_source_differential_replays_boolean_mutated_binding() {
 
 #[test]
 fn boracle_source_differential_replays_checked_numeric_reassignment() {
-    let source = "value ~= 1\nvalue = value + 1\nresult = value\n";
+    let source = "value ~= 1\n~value = value + 1\nresult = value\n";
     assert_mutable_reassignment_access_order(source);
     let differential = assert_source_differential_replay(source, &["Agreement", "Agreement"]);
     let oracle_outcomes = differential
@@ -487,7 +487,7 @@ fn boracle_source_differential_replays_mutable_parameter_return() {
     let source = r#"
 measure |items ~{I32}| -> I32:
     shared = items
-    items = {2}
+    ~items = {2}
     return shared.length()
 ;
 "#;
@@ -546,9 +546,9 @@ choose |seed Bool| -> I32:
     condition ~= seed
     value ~= 0
     if condition:
-        value = 1
+        ~value = 1
     else
-        value = 2
+        ~value = 2
     ;
     return value
 ;
@@ -1136,7 +1136,7 @@ items ~= {1}
 writer ~= items
 ~items.push(2)
 payload ~= {3}
-writer = copy payload
+~writer = copy payload
 "#,
     );
     let function = report
@@ -1211,7 +1211,7 @@ fn boracle_source_rebind_separates_old_alias_origin() {
         r#"
 items ~= {"a"}
 shared = items
-items = {"b"}
+~items = {"b"}
 ~items.push("c")
 result = shared
 "#,
@@ -1230,7 +1230,7 @@ fn boracle_source_rebind_report_separates_old_and_new_generations() {
         r#"
 items ~= {"a"}
 shared = items
-items = {"b"}
+~items = {"b"}
 ~items.push("c")
 result = shared
 "#,
@@ -1333,9 +1333,9 @@ fn boracle_source_self_update_preserves_slot_before_a_different_place_update() {
     let source = r#"
 source ~= {"source"}
 slot ~= {"slot"}
-slot = slot
-slot = source
-slot = {"replacement"}
+~slot = slot
+~slot = source
+~slot = {"replacement"}
 ~slot.push("changed")
 result = source
 "#;
@@ -1470,9 +1470,9 @@ fn boracle_source_place_update_aliases_and_later_update_writes_through() {
         r#"
 source ~= {"source"}
 slot ~= {"slot"}
-slot = source
+~slot = source
 survivor = slot
-slot = {"new"}
+~slot = {"new"}
 ~slot.push("changed")
 result = survivor
 "#,
@@ -1633,7 +1633,7 @@ fn boracle_source_write_through_keeps_alias_loan_live_before_overlap() {
 items ~= {1}
 writer ~= items
 ~items.push(2)
-writer = {3}
+~writer = {3}
 "#,
     );
     let function = report
@@ -1665,7 +1665,7 @@ fn boracle_source_alias_valued_write_through_is_not_a_new_loan() {
         r#"
 items ~= {1}
 writer ~= items
-writer = items
+~writer = items
 result = items
 "#,
     );
@@ -1708,7 +1708,7 @@ observe |value {I32}| -> {I32}:
 items ~= {1}
 writer ~= items
 other ~= {2}
-writer = observe(value = other)
+~writer = observe(value = other)
 result = writer
 "#,
     );
@@ -1813,7 +1813,7 @@ fn boracle_source_local_mutable_parameter_is_exclusive() {
     let output = run_source_dump(
         r#"
 increment |value ~I32| -> I32:
-    value = value + 1
+    ~value = value + 1
     return value
 ;
 
@@ -1834,7 +1834,7 @@ fn boracle_source_local_mutable_parameter_report_is_exclusive() {
     let report = solve_source(
         r#"
 increment |value ~I32| -> I32:
-    value = value + 1
+    ~value = value + 1
     return value
 ;
 
@@ -1870,7 +1870,7 @@ fn boracle_source_mutable_parameter_existing_place_is_write_through_in_callee() 
         r#"
 mutate |value ~{I32}| -> {I32}:
     shared = value
-    value = {2}
+    ~value = {2}
     result = shared
     return result
 ;
@@ -1887,7 +1887,7 @@ fn boracle_source_mutable_parameter_fresh_rvalue_is_write_through_in_callee() {
         r#"
 mutate |value ~{I32}| -> {I32}:
     shared = value
-    value = {2}
+    ~value = {2}
     result = shared
     return result
 ;
@@ -2450,7 +2450,7 @@ fn boracle_source_mutable_alias_write_through_conflicts_with_shared_alias() {
 items ~= {1}
 shared = items
 writer ~= items
-writer = {2}
+~writer = {2}
 result = shared
 "#,
     );
@@ -2471,9 +2471,9 @@ fn boracle_source_write_through_remains_live_after_an_earlier_write() {
         r#"
 items ~= {1}
 writer ~= items
-writer = {2}
+~writer = {2}
 shared = items
-writer = {3}
+~writer = {3}
 result = shared
 "#,
     );
@@ -2565,10 +2565,10 @@ items ~= {1}
 counter ~= 0
 loop counter < 2:
     old = items
-    items = {2}
+    ~items = {2}
     ~items.push(3)
     result = old
-    counter = counter + 1
+    ~counter = counter + 1
 ;
 "#;
     let first = solve_source(source);

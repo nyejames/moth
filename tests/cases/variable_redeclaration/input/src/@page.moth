@@ -4,7 +4,7 @@
 value = 42
 
 -- INVALID: Trying to redeclare the same variable (shadowing not allowed)
-value = 84
+value I32 = 84
 
 -- Another case with mutable variables
 counter ~= 0

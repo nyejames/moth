@@ -5,9 +5,9 @@ i8u16_sum ~I32 = 0
 i8u16_count ~= 0
 i8u16_last_index ~= 0
 loop start_i8 to & end_u16 by step_u16 |value, index|:
-    i8u16_sum = i8u16_sum + value
-    i8u16_count = i8u16_count + 1
-    i8u16_last_index = copy index
+    ~i8u16_sum = i8u16_sum + value
+    ~i8u16_count = i8u16_count + 1
+    ~i8u16_last_index = copy index
 ;
 
 start_i32 I32 = 2147483646
@@ -17,9 +17,9 @@ mixed_sum ~I64 = 0
 mixed_count ~= 0
 mixed_last_index ~= 0
 loop start_i32 to & end_u32 by step_u32 |value, index|:
-    mixed_sum = mixed_sum + value
-    mixed_count = mixed_count + 1
-    mixed_last_index = copy index
+    ~mixed_sum = mixed_sum + value
+    ~mixed_count = mixed_count + 1
+    ~mixed_last_index = copy index
 ;
 
 above_i64 U64 = 9223372036854775808
@@ -31,17 +31,17 @@ saw_u64_above_i64 ~= false
 saw_u64_max ~= false
 high_u64_last_index ~= 0
 loop above_i64 to & above_i64 by u64_one |value, index|:
-    high_u64_count = high_u64_count + 1
-    high_u64_last_index = copy index
+    ~high_u64_count = high_u64_count + 1
+    ~high_u64_last_index = copy index
     if value is above_i64:
-        saw_u64_above_i64 = true
+        ~saw_u64_above_i64 = true
     ;
 ;
 loop near_max_u64 to & max_u64 by u64_one |value, index|:
-    high_u64_count = high_u64_count + 1
-    high_u64_last_index = copy index
+    ~high_u64_count = high_u64_count + 1
+    ~high_u64_last_index = copy index
     if value is max_u64:
-        saw_u64_max = true
+        ~saw_u64_max = true
     ;
 ;
 
@@ -51,9 +51,9 @@ desc_u64_count ~= 0
 desc_u64_last ~U64 = 9
 desc_u64_last_index ~= 0
 loop desc_start_u64 to & desc_end_u64 by u64_one |value, index|:
-    desc_u64_count = desc_u64_count + 1
-    desc_u64_last = copy value
-    desc_u64_last_index = copy index
+    ~desc_u64_count = desc_u64_count + 1
+    ~desc_u64_last = copy value
+    ~desc_u64_last_index = copy index
 ;
 
 signed_min I64 = -9223372036854775808
@@ -62,8 +62,8 @@ cross_step I64 = 9223372036854775807
 cross_count ~= 0
 cross_last ~I64 = 0
 loop signed_min to & signed_max by cross_step |value|:
-    cross_count = cross_count + 1
-    cross_last = copy value
+    ~cross_count = cross_count + 1
+    ~cross_last = copy value
 ;
 
 max_near I64 = 9223372036854775806
@@ -72,11 +72,11 @@ min_endpoint_count ~= 0
 max_endpoint_count ~= 0
 max_endpoint_last ~I64 = 0
 loop signed_min to & signed_min by i64_one |value|:
-    min_endpoint_count = min_endpoint_count + 1
+    ~min_endpoint_count = min_endpoint_count + 1
 ;
 loop max_near to & signed_max by i64_one |value|:
-    max_endpoint_count = max_endpoint_count + 1
-    max_endpoint_last = copy value
+    ~max_endpoint_count = max_endpoint_count + 1
+    ~max_endpoint_last = copy value
 ;
 
 half_start F16 = 0.5
@@ -85,8 +85,8 @@ half_step F16 = 0.5
 float_total ~F32 = 0.0
 float_count ~= 0
 loop half_start to & float_end by half_step |value|:
-    float_total = float_total + value
-    float_count = float_count + 1
+    ~float_total = float_total + value
+    ~float_count = float_count + 1
 ;
 float_expected F32 = 3.0
 float_total_matches = float_total is float_expected
@@ -96,16 +96,16 @@ desc_end_i32 I32 = -1
 desc_step_i32 I32 = 2
 desc_sum ~I32 = 0
 loop desc_start_i32 to & desc_end_i32 by desc_step_i32 |value|:
-    desc_sum = desc_sum + value
+    ~desc_sum = desc_sum + value
 ;
 
 equal_empty_count ~= 0
 equal_inclusive_count ~= 0
 loop 2 to 2 |value|:
-    equal_empty_count = equal_empty_count + 1
+    ~equal_empty_count = equal_empty_count + 1
 ;
 loop 2 to & 2 |value|:
-    equal_inclusive_count = equal_inclusive_count + 1
+    ~equal_inclusive_count = equal_inclusive_count + 1
 ;
 
 nested_if_sum ~I64 = 0
@@ -121,8 +121,8 @@ loop 0 to 10 |value|:
             break
         ;
     ;
-    nested_if_sum = nested_if_sum + value
-    nested_if_count = nested_if_count + 1
+    ~nested_if_sum = nested_if_sum + value
+    ~nested_if_count = nested_if_count + 1
 ;
 f64_asc_start F64 = 0.5
 f64_asc_end F64 = 1.5
@@ -130,8 +130,8 @@ f64_asc_step F64 = 0.5
 f64_asc_sum ~F64 = 0.0
 f64_asc_count ~= 0
 loop f64_asc_start to & f64_asc_end by f64_asc_step |value|:
-    f64_asc_sum = f64_asc_sum + value
-    f64_asc_count = f64_asc_count + 1
+    ~f64_asc_sum = f64_asc_sum + value
+    ~f64_asc_count = f64_asc_count + 1
 ;
 
 f64_desc_start F64 = 1.5
@@ -140,8 +140,8 @@ f64_desc_step F64 = 0.5
 f64_desc_sum ~F64 = 0.0
 f64_desc_count ~= 0
 loop f64_desc_start to & f64_desc_end by f64_desc_step |value|:
-    f64_desc_sum = f64_desc_sum + value
-    f64_desc_count = f64_desc_count + 1
+    ~f64_desc_sum = f64_desc_sum + value
+    ~f64_desc_count = f64_desc_count + 1
 ;
 
 u8_max_start U8 = 254
@@ -150,8 +150,8 @@ u8_max_step U8 = 1
 u8_max_count ~= 0
 u8_max_last ~U8 = 0
 loop u8_max_start to & u8_max_end by u8_max_step |value|:
-    u8_max_count = u8_max_count + 1
-    u8_max_last = copy value
+    ~u8_max_count = u8_max_count + 1
+    ~u8_max_last = copy value
 ;
 
 u8_zero_start U8 = 1
@@ -160,8 +160,8 @@ u8_zero_step U8 = 1
 u8_zero_count ~= 0
 u8_zero_last ~U8 = 9
 loop u8_zero_start to & u8_zero_end by u8_zero_step |value|:
-    u8_zero_count = u8_zero_count + 1
-    u8_zero_last = copy value
+    ~u8_zero_count = u8_zero_count + 1
+    ~u8_zero_last = copy value
 ;
 
 assert(i8u16_sum is 0)

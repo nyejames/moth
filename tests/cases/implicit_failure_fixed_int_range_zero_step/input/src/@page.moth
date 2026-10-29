@@ -2,7 +2,7 @@ walk_fixed |step I32, flag ~I32| -> I32:
     lower I32 = 0
     upper I32 = 10
     loop lower to upper by step:
-        flag = flag + 1
+        ~flag = flag + 1
     ;
     return flag
 ;
@@ -12,7 +12,7 @@ safe_walk |step I32, flag ~I32| -> I32, Error!:
 flag ~= 0
 info ~= ""
 recovered = safe_walk(0, ~flag) catch |err|:
-    info = [: [err.code] [err.message]]
+    ~info = [: [err.code] [err.message]]
     then 0 - 1
 ;
 report = copy info

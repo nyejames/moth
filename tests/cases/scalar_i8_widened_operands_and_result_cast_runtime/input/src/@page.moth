@@ -17,7 +17,7 @@ widened_text String = cast widened
 
 repair_code ~U32 = 0
 repaired = grow_via_i8(120, 10) catch |repair_error|:
-    repair_code = repair_error.code
+    ~repair_code = repair_error.code
     then 0
 ;
 repaired_text String = cast repaired

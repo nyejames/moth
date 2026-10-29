@@ -6,8 +6,8 @@ probe = missing_reading()
 render_none |probe U16?| -> String:
     state ~= "unexpected"
     if probe is:
-        |value| => state = [:some [value]]
-        none => state = "none"
+        |value| => ~state = [:some [value]]
+        none => ~state = "none"
     ;
     return [:fixed width option none=[state]]
 ;

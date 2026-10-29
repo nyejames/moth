@@ -21,8 +21,8 @@ successful = choose_alias("ok") catch then "unexpected failure"
 caught_code ~U32 = 0
 caught_message ~= "unset"
 recovered = api.choose("fail") catch |err|:
-    caught_code = copy err.code
-    caught_message = copy err.message
+    ~caught_code = copy err.code
+    ~caught_message = copy err.message
     then "caught"
 ;
 

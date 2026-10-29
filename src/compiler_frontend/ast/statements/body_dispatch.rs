@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
 use crate::compiler_frontend::ast::statements::body_expr_stmt::push_statement_expression;
 use crate::compiler_frontend::ast::statements::body_return::parse_return_statement;
 use crate::compiler_frontend::ast::statements::body_symbol::{
-    parse_symbol_statement, parse_this_statement,
+    parse_symbol_statement, parse_this_statement, reject_numeric_dependency_in_multi_bind,
 };
 use crate::compiler_frontend::ast::statements::branching::create_branch;
 use crate::compiler_frontend::ast::statements::declared_regions::classify_deferred_declared_region_header;
@@ -29,6 +29,9 @@ use crate::compiler_frontend::ast::statements::diagnostics::{
 use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
     current_line_contains_top_level_fat_arrow, current_token_starts_match_arm_header,
+};
+use crate::compiler_frontend::ast::statements::multi_bind::{
+    MultiBindStatement, parse_multi_bind_statement,
 };
 use crate::compiler_frontend::ast::statements::numeric_body_completion::complete_numeric_body;
 use crate::compiler_frontend::ast::statements::value_production::parse_values::ProducedValuesParseInput;
@@ -46,15 +49,16 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, names_declarations,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DeferredFeatureReason, DiagnosticBag, InvalidControlFlowStatementReason,
-    InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
-    ReservedNameOwner,
+    DeferredFeatureReason, DiagnosticBag, InvalidAssignmentTargetReason,
+    InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchArmReason,
+    InvalidStandaloneStatementReason, ReservedNameOwner,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// AST body parsing carries authored diagnostics and internal retained-data failures separately.
@@ -134,6 +138,57 @@ fn deferred_block_error(
     names_declarations::deferred_feature_reason(reason, span)
 }
 
+/// Recognize only a named place followed by an assignment operator. A method call
+/// interrupts this shape and remains owned by ordinary mutable-receiver parsing.
+fn starts_prefixed_write(cursor: &AstCursor) -> bool {
+    let mut index = cursor.position() + 1;
+    let tag = |index| cursor.token_ref_at(index).map(|token| token.tag());
+    if !matches!(tag(index), Some(TokenTag::SYMBOL | TokenTag::THIS)) {
+        return false;
+    }
+    index += 1;
+    while tag(index) == Some(TokenTag::DOT) && tag(index + 1) == Some(TokenTag::SYMBOL) {
+        index += 2;
+    }
+    tag(index).is_some_and(TokenTag::is_assignment_operator)
+}
+
+/// Detect an assignment after a non-place marker operand without parsing and rewinding
+/// a completed expression. Assignments nested in call arguments are not statement writes.
+fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
+    let mut index = cursor.position() + 1;
+    let mut depth = NestingDepth::default();
+    while let Some(token) = cursor.token_ref_at(index) {
+        let tag = token.tag();
+        if tag == TokenTag::EOF {
+            return false;
+        }
+        if depth.is_top_level() {
+            if matches!(
+                tag,
+                TokenTag::NEWLINE
+                    | TokenTag::COMMA
+                    | TokenTag::END
+                    | TokenTag::ELSE
+                    | TokenTag::CATCH
+                    | TokenTag::THEN
+                    | TokenTag::COLON
+                    | TokenTag::CLOSE_PARENTHESIS
+                    | TokenTag::CLOSE_CURLY
+                    | TokenTag::TEMPLATE_CLOSE
+            ) {
+                return false;
+            }
+            if tag.is_assignment_operator() {
+                return true;
+            }
+        }
+        depth.step_tag(tag);
+        index += 1;
+    }
+    false
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "function body keeps stream, scope, warnings and mutable parse resources apart"
@@ -181,6 +236,27 @@ pub(crate) fn parse_function_body_statements(
             return Err(statement_dispatch_error(diagnostic));
         }
 
+        // Give the single target-list parser the original marker before ordinary write dispatch.
+        if current_tag == TokenTag::MUTABLE
+            && token_stream.peek_next_tag() == Some(TokenTag::SYMBOL)
+            && let Some(multi_bind) = parse_multi_bind_statement(
+                token_stream,
+                &mut context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                path_fork,
+            )
+            .map_err(reject_numeric_dependency_in_multi_bind)?
+        {
+            match multi_bind {
+                MultiBindStatement::Completed(node) => draft.push_node(node),
+                MultiBindStatement::Retained(continuation) => draft.push_pending(continuation),
+            }
+            continue;
+        }
+
         match current_tag {
             TokenTag::MODULE_START => {
                 token_stream.advance();
@@ -208,6 +284,43 @@ pub(crate) fn parse_function_body_statements(
                 string_table,
                 path_fork,
             )?,
+
+            TokenTag::MUTABLE if starts_prefixed_write(token_stream) => {
+                token_stream.advance();
+                if token_stream.current_tag() == TokenTag::THIS {
+                    parse_this_statement(
+                        token_stream,
+                        &mut draft,
+                        &mut context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        string_table,
+                        path_fork,
+                    )?;
+                } else {
+                    parse_symbol_statement(
+                        token_stream,
+                        &mut draft,
+                        &mut context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        string_table,
+                        path_fork,
+                    )?;
+                }
+            }
+            TokenTag::MUTABLE if prefixed_nonplace_write(token_stream) => {
+                return Err(names_declarations::invalid_assignment_target(
+                    InvalidAssignmentTargetReason::MutableMarkerRequiresExistingPlace,
+                    None,
+                    None,
+                    None,
+                    Some(token_stream.current_span()),
+                )
+                .into());
+            }
 
             // Deferred keyword-led semantic scopes
             TokenTag::CHECKED => {

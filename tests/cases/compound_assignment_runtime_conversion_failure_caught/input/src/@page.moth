@@ -1,12 +1,12 @@
 divide |value ~I32, divisor I32| -> I32, Error!:
-    value /= divisor
+    ~value /= divisor
     return value
 ;
 
 target ~= -2147483648
 error_code ~U32 = 0
 result = divide(~target, -1) catch |conversion_error|:
-    error_code = conversion_error.code
+    ~error_code = conversion_error.code
     then target
 ;
 [: compound assignment conversion: error=[error_code], result=[result], target=[target] ]

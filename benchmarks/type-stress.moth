@@ -252,29 +252,29 @@ get_age_bucket |this Person| -> String:
 
 -- Receiver methods - mutable
 bump |this ~Counter|:
-    this.value = this.value + 1
+    ~this.value = this.value + 1
 ;
 
 add |this ~Counter, amount I32|:
-    this.value = this.value + amount
+    ~this.value = this.value + amount
 ;
 
 reset |this ~Counter|:
-    this.value = 0
+    ~this.value = 0
 ;
 
 scale |this ~Rectangle, factor F64|:
-    this.width = this.width * factor
-    this.height = this.height * factor
+    ~this.width = this.width * factor
+    ~this.height = this.height * factor
 ;
 
 translate |this ~Coordinates, lat_offset F64, lon_offset F64|:
-    this.latitude = this.latitude + lat_offset
-    this.longitude = this.longitude + lon_offset
+    ~this.latitude = this.latitude + lat_offset
+    ~this.longitude = this.longitude + lon_offset
 ;
 
 update_email |this ~Person, new_email String|:
-    this.email = new_email
+    ~this.email = new_email
 ;
 
 -- Method call chains
@@ -284,13 +284,13 @@ Container = |
 |
 
 add_item |this ~Container, item I32|:
-    this.count = this.count + 1
+    ~this.count = this.count + 1
 ;
 
 get_sum |this Container| -> I32:
     total ~= 0
     loop this.items |item|:
-        total = total + item
+        ~total = total + item
     ;
     return total
 ;

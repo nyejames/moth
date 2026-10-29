@@ -12,7 +12,14 @@ Use `copy` when you need a separate version of a value:
     -- original still has 3 items
 ]
 
-Without `copy`, both names point at the same collection.
+Without `copy`, names can refer to the same collection. A mutable declaration
+from an eligible mutable place creates a write-through alias:
+
+[codeblock, $code("moth"):
+    original ~= 10
+    writer ~= original
+    ~writer = 20  -- also changes original
+]
 
 ### Mutating existing values with `~`
 
@@ -25,11 +32,17 @@ To change an existing value, use `~` before the value name:
 
 The `~` tells the compiler you want exclusive access to mutate the value.
 
-### Fresh values don't need `~`
+### Fresh arguments don't need `~`
 
-When you create a new value from scratch, it doesn't need `~`:
+Pass a fresh value or an independent copy to a mutable parameter without `~`.
+An existing mutable place needs the marker, including in a named argument:
 
 [codeblock, $code("moth"):
-    fresh = {1, 2, 3}   -- new collection, no ~ needed
-    fresh_with_type ~{I32} = {1, 2, 3}  -- mutable binding, no ~ on the initializer
+    update(~items)
+    update(value = ~items)
+    update(copy items)
+    update({1, 2, 3})
 ]
+
+Mutable method receivers differ: they always need an existing mutable place,
+as in `~items.push(4)`.

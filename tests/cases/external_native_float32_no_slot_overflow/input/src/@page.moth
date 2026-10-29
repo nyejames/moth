@@ -18,7 +18,7 @@ checked_float || -> I32, Error!:
 
 code ~U32 = 0
 ignored = checked_float() catch |err|:
-    code = err.code
+    ~code = err.code
     then 0
 ;
 io.line([: external_native_float32_no_slot overflow-code=[code]])

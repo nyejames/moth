@@ -19,12 +19,12 @@ use tempfile::tempdir;
 const WARNING_SOURCE: &str = "value ~= \"hello\"\n\
 result ~= \"unset\"\n\
 if value is:\n\
-    \"one\" => result = \"one\"\n\
-    \"one\" => result = \"one\"\n\
-    \"one\" => result = \"one\"\n\
-    \"one\" => result = \"one\"\n\
-    \"two\" => result = \"two\"\n\
-    else => result = \"other\"\n\
+    \"one\" => ~result = \"one\"\n\
+    \"one\" => ~result = \"one\"\n\
+    \"one\" => ~result = \"one\"\n\
+    \"one\" => ~result = \"one\"\n\
+    \"two\" => ~result = \"two\"\n\
+    else => ~result = \"other\"\n\
 ;\n";
 
 const INVALID_SOURCE: &str = "value = (\n";
@@ -81,7 +81,7 @@ fn write_directory_html_config_input_project(root: &Path) {
     .expect("config should be written");
     fs::write(
         src.join("@page.moth"),
-        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    result = 1\n;\n",
+        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("page source should be written");
 }

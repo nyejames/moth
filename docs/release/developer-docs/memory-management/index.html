@@ -462,7 +462,7 @@ copied_items <span class='moth-code-operator'>=</span> <span class='moth-code-ke
 
 <span class='moth-code-function'>change</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>items<span class='moth-code-delimiter'>)</span>
 <span class='moth-code-function'>inspect</span><span class='moth-code-delimiter'>(</span>copied_items<span class='moth-code-delimiter'>)</span></code></pre></section>
-<section class="container"><h2 id="exclusive-access">Exclusive access</h2><p><code>~place</code> requests temporary mutation-capable access to an existing mutable place. It isn&#39;t a move marker or a type identity. Fresh rvalues satisfy ordinary mutable parameters without source <code>~</code>. Mutable receivers still require an existing mutable place.</p><pre style="
+<section class="container"><h2 id="exclusive-access">Exclusive access</h2><p>Prefix an existing-place write with <code>~</code>, as in <code>~count = 1</code>. An existing mutable place passed to a mutable parameter also needs <code>~</code>, including in a named argument. Mutable receivers use <code>~items.push(value)</code> and require an existing mutable place. Fresh values and <code>copy place</code> satisfy ordinary mutable parameters without <code>~</code>. A mutable alias uses <code>writer ~= original</code> with an unmarked source. <code>~</code> isn&#39;t a move marker or a type identity.</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;

@@ -195,7 +195,7 @@ return [: [card]]
 render_listing |cards {String}| -> String:
 output ~= [: <section>]
 loop cards |card|:
-    output = [: [output][render_card(card)]]
+    ~output = [: [output][render_card(card)]]
 ;
 return [: [output]</section>]
 ;
@@ -270,7 +270,7 @@ return [: [card]]
 render_listing |listing Listing| -> String:
 output ~= [: <section>]
 loop listing.cards |card|:
-    output = [: [output][render_card(card)]]
+    ~output = [: [output][render_card(card)]]
 ;
 return [: [output]</section>]
 ;
@@ -370,9 +370,9 @@ left ~{I32} = {1}
 writer ~= left
 again ~= true
 loop again:
-writer = left
+~writer = left
 sentinel ~= 0
-again = false
+~again = false
 ;
 return 0
 ;"#;
@@ -592,7 +592,7 @@ else
     if inner:
         inner_marker = 0
     else
-        point.value = 2
+        ~point.value = 2
     ;
 ;
 value = alias.value

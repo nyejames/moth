@@ -11,7 +11,7 @@ converted = number_to_i32(123.00) catch:
 ;
 fractional_error_code ~U32 = 0
 fractional = number_to_i32(1.25) catch |fractional_error|:
-    fractional_error_code = fractional_error.code
+    ~fractional_error_code = fractional_error.code
     then -1
 ;
 assert(converted is 123)
@@ -29,7 +29,7 @@ source_text ~String = "not an integer"
 forwarded_label Label = label_from_text(source_text)
 forwarded_error_code ~U32 = 0
 forwarded_result = label_to_i32(forwarded_label) catch |cast_error|:
-    forwarded_error_code = cast_error.code
+    ~forwarded_error_code = cast_error.code
     then -1
 ;
 assert(forwarded_result is -1)

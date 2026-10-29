@@ -17,7 +17,7 @@ direct = recover_direct(2)
 direct_ok = recover_direct(0 - 2147483646)
 via_helper = recover_bound(2)
 bound = double(2) catch |bound_err|:
-    bound_code = bound_err.code
+    ~bound_code = bound_err.code
     then 0 - 1
 ;
 

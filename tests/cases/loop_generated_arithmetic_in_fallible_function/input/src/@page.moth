@@ -9,7 +9,7 @@ LoopFault = |
 sum_items |items {I32}| -> I32, Error!:
     total ~= 0
     loop items |item|:
-        total = total + item
+        ~total = total + item
     ;
     return total
 ;
@@ -17,7 +17,7 @@ sum_items |items {I32}| -> I32, Error!:
 count_ascending |limit I32| -> I32, Error!:
     seen ~= 0
     loop 0 to limit |i|:
-        seen = seen + 1
+        ~seen = seen + 1
     ;
     return seen
 ;
@@ -27,7 +27,7 @@ count_ascending |limit I32| -> I32, Error!:
 sum_descending || -> I32, Error!:
     total ~= 0
     loop 10 to & 0 by -2 |i|:
-        total = total + i
+        ~total = total + i
     ;
     return total
 ;
@@ -37,7 +37,7 @@ sum_descending || -> I32, Error!:
 walk_to_int_max || -> I32, Error!:
     visited ~= 0
     loop 2147483645 to & 2147483647 |i|:
-        visited = visited + 1
+        ~visited = visited + 1
     ;
     return visited
 ;
@@ -47,7 +47,7 @@ walk_to_int_max || -> I32, Error!:
 count_with_custom_error |items {I32}| -> I32, LoopFault!:
     seen ~= 0
     loop items |item|:
-        seen = seen + 1 catch:
+        ~seen = seen + 1 catch:
             return! LoopFault("count overflow")
         ;
     ;

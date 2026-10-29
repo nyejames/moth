@@ -229,7 +229,7 @@ fn warning_capacity_failure_marks_build_command_completion_as_failed() {
     assert_eq!(codes, vec!["MOTH-SYNTAX-0037"]);
 }
 
-const WARNING_PAGE: &str = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n";
+const WARNING_PAGE: &str = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
 
 #[test]
 fn clean_cli_build_releases_its_source_owner_before_presentation() {
@@ -308,7 +308,7 @@ fn cli_warning_report_owns_its_identity_context_until_dropped() {
                     .site_position(warning.primary_site())
                     .expect("the warning should resolve through its report context");
                 assert!(position.path.ends_with("@page.moth"));
-                assert!(position.line.contains("\"one\" => result = \"one\""));
+                assert!(position.line.contains("\"one\" => ~result = \"one\""));
                 Arc::downgrade(&warning_report.shared_context())
             };
             assert!(

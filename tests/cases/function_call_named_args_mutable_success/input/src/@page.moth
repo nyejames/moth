@@ -1,5 +1,5 @@
 increment |value ~I32| -> I32:
-    value = value + 1
+    ~value = value + 1
     return value
 ;
 

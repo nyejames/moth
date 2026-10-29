@@ -8,7 +8,7 @@ Outer = |
 |
 
 bump_inner |this ~Outer|:
-    this.inner.value = this.inner.value + 1
+    ~this.inner.value = this.inner.value + 1
 ;
 
 o ~= Outer(Inner(10), "test")

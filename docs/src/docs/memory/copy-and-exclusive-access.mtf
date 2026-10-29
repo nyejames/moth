@@ -36,17 +36,17 @@
 
 ### Mutable aliases versus fresh mutable slots
 
-`alias ~= source` creates an exclusive write-through mutable alias to an existing place. Assignment through a mutable alias writes through to the referent.
+`alias ~= source` creates an exclusive write-through mutable alias when `source` is an eligible mutable place. Leave the source unmarked. A later write such as `~alias = value` writes through to the referent.
 
 A mutable declaration initialised from a fresh value creates an independent mutable slot.
 
 [codeblock, $code("moth"):
     original ~= 10
     alias ~= original  -- mutable alias
-    alias = 20         -- writes through to original
+    ~alias = 20        -- writes through to original
 
     fresh ~= 0         -- independent mutable slot
-    fresh = 1          -- doesn't affect original
+    ~fresh = 1         -- doesn't affect original
 ]
 
 ### Mutable receivers
@@ -60,7 +60,7 @@ Mutable receiver calls require explicit mutable or exclusive receiver syntax:
     -- items.push(4)   -- invalid: missing ~
 ]
 
-Fresh rvalues can satisfy mutable parameters without `~`. Existing places still require explicit `~`. Temporaries and rvalues cannot be mutable receivers.
+Fresh rvalues, including legal `copy` expressions, can satisfy mutable parameters without `~`. Existing places still require explicit `~`, including named arguments such as `update(value = ~items)`. An immutable place can't grant mutable access. Temporaries and rvalues cannot be mutable receivers.
 
 A fresh rvalue passed to an ordinary mutable parameter is materialised into a compiler-introduced hidden local before borrow analysis. That hidden local isn't source-visible lifetime syntax, and it doesn't make temporaries valid mutable receivers.
 

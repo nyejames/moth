@@ -1,7 +1,7 @@
 walk_f16 |start F16, end F16, step F16| -> I32, Error!:
     count ~I32 = 0
     loop start to & end by step |value|:
-        count += 1
+        ~count += 1
     ;
     return count
 ;
@@ -9,7 +9,7 @@ walk_f16 |start F16, end F16, step F16| -> I32, Error!:
 walk_f64 |start F64, end F64, step F64| -> I32, Error!:
     count ~I32 = 0
     loop start to & end by step |value|:
-        count += 1
+        ~count += 1
     ;
     return count
 ;
@@ -32,7 +32,7 @@ safe_walk |start F32, end F32, step F32| -> I32, Error!:
 private_zero_walk |step I32| -> I32:
     seen ~= 0
     loop 0 to 2 by step:
-        seen = 99
+        ~seen = 99
     ;
     return seen
 ;
@@ -50,32 +50,32 @@ f32_end F32 = 16777218.0
 f32_step F32 = 1.0
 code ~U32 = 0
 seen = walk(f32_start, f32_end, f32_step) catch |stall_error|:
-    code = stall_error.code
+    ~code = stall_error.code
     then -1
 ;
 private_code ~U32 = 0
 private_seen = safe_walk(f32_start, f32_end, f32_step) catch |private_error|:
-    private_code = private_error.code
+    ~private_code = private_error.code
     then -1
 ;
 zero_code ~U32 = 0
 zero = safe_zero_walk(0) catch |zero_error|:
-    zero_code = zero_error.code
+    ~zero_code = zero_error.code
     then -1
 ;
 float_zero_code ~U32 = 0
 float_zero = float_zero_walk(0.0) catch |float_zero_error|:
-    float_zero_code = float_zero_error.code
+    ~float_zero_code = float_zero_error.code
     then -1
 ;
 half_code ~U32 = 0
 half_seen = walk_f16(2048, 2050, 1) catch |half_error|:
-    half_code = half_error.code
+    ~half_code = half_error.code
     then -1
 ;
 double_code ~U32 = 0
 double_seen = walk_f64(9007199254740992, 9007199254740994, 1) catch |double_error|:
-    double_code = double_error.code
+    ~double_code = double_error.code
     then -1
 ;
 assert(half_seen is -1)

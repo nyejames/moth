@@ -1,0 +1,4 @@
+pair || -> I32, I32:
+    return 1, 2
+;
+~unknown, created = pair()

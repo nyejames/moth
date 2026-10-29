@@ -1,8 +1,54 @@
-pair || -> String, I32:
+pair |calls ~I32, first I32, second I32| -> I32, I32:
+    ~calls += 1
+    return copy second, copy first
+;
+
+fail_pair || -> I32, I32, Error!:
+    return! Error("pair failed")
+;
+
+try_update |first ~I32, second ~I32| -> I32, Error!:
+    ~first, ~second = fail_pair()!
+    return 1
+;
+
+swap |first ~I32, second ~I32, calls ~I32|:
+    ~first, ~second = pair(~calls, first, second)
+;
+
+description_pair || -> String, I32:
     return "fresh", 9
 ;
 
-existing ~= "old"
-existing, created = pair()
-io.line([:reassigned-existing=[existing]])
-io.line([:created-target=[created]])
+set_pair |items ~{I32}| -> I32, I32:
+    ~items.set(0, 9) catch: return 1, 2;
+    return 3, 4
+;
+
+calls ~= 0
+existing ~= 3
+~existing, created = pair(~calls, existing, 9)
+io.line([:mixed existing=[existing] created=[created] calls=[calls]])
+
+other ~= 7
+swap(~existing, ~other, ~calls)
+io.line([:all-existing first=[existing] second=[other] calls=[calls]])
+
+recovered = try_update(~existing, ~other) catch then 0
+io.line([:failure first=[existing] second=[other] recovered=[recovered]])
+
+label ~= "old"
+~label, index = description_pair()
+io.line([:heterogeneous label=[label] index=[index]])
+
+items ~{I32} = {}
+failed_first, failed_second = set_pair(~items)
+~items.push(0)
+passed_first, passed_second = set_pair(~items)
+stored = items.get(0) catch then 0
+io.line([:catch-boundaries=[failed_first]/[failed_second]:[passed_first]/[passed_second]:[stored]])
+
+original ~= 11
+writer ~= original
+~writer, alias_result = pair(~calls, 1, 20)
+io.line([:alias original=[original] result=[alias_result] calls=[calls]])

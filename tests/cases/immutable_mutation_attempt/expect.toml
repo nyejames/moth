@@ -2,4 +2,11 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0044"]
-message_contains = ["binding", "immutable"]
+message_contains = ["immutable", "Declare it mutable"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0044"
+reason = "invalid_assignment_target.immutable_binding"
+path = "input/@page.moth"
+line = 8
+column = 8

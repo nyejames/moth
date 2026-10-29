@@ -552,18 +552,6 @@ fn parse_postfix_chain_typed(
         // followed it. Fall back to the receiver boundary only when the marker was not threaded
         // through this chain entry.
         let marker_span = authored_marker_span.or(receiver_node.span);
-        // When the chain is followed by an assignment operator, the author wrote `~place = ...`
-        // and intended an assignment target, not a receiver call.
-        if token_stream.current_tag().is_assignment_operator() {
-            return Err(names_declarations::invalid_assignment_target(
-                InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
-                None,
-                None,
-                None,
-                marker_span,
-            )
-            .into());
-        }
         return Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
             None,

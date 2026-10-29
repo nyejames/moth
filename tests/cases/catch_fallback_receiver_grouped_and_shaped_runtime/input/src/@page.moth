@@ -56,14 +56,14 @@ consume_u64 |value U64| -> String:
 probe_signature || -> String:
     fallback U64 = 0
     value ~= fallible_identity(1) catch then fallback
-    value = 4294967301
+    ~value = 4294967301
     return [:[value]]
 ;
 
 probe_protected_group || -> String:
     fallback U64 = 0
     value ~= (fallible_identity(1)) catch then fallback
-    value = 4294967304
+    ~value = 4294967304
     return [:[value]]
 ;
 
@@ -71,7 +71,7 @@ probe_grouped || -> String:
     fallback = 1
     rendered = consume_u64(fallback)
     value ~= 1 + 2 catch then (fallback)
-    value = 4294967302
+    ~value = 4294967302
     return [:[value]]
 ;
 
@@ -79,7 +79,7 @@ probe_shaped || -> String:
     fallback = identity(1)
     rendered = consume_u64(fallback)
     value ~= 1 + 2 catch then fallback
-    value = 4294967303
+    ~value = 4294967303
     return [:[value]]
 ;
 
@@ -89,7 +89,7 @@ probe_container || -> String:
     ~values.push(4294967305)
     text ~= [:]
     loop values |item|:
-        text = [:[text][item],]
+        ~text = [:[text][item],]
     ;
     return text
 ;
@@ -104,7 +104,7 @@ probe_multi || -> String:
 
 probe_concrete_fallback || -> String:
     value ~= 1 + 2 catch then fixed_result(1)
-    value = 4294967307
+    ~value = 4294967307
     return [:[value]]
 ;
 
@@ -112,7 +112,7 @@ probe_named_origin || -> String:
     origin = 1
     fallback U64 = 0
     value ~= fallible_identity(origin) catch then fallback
-    value = 4294967308
+    ~value = 4294967308
     return [:[value]]
 ;
 
@@ -136,7 +136,7 @@ probe_branch |pick Bool| -> String:
         ;
     ;
     rendered = consume_u64(right)
-    value = 4294967311
+    ~value = 4294967311
     return [:[value]]
 ;
 
@@ -151,7 +151,7 @@ probe_raw_branch |pick Bool| -> String:
         ;
     ;
     rendered = consume_u64(right)
-    value = 4294967312
+    ~value = 4294967312
     return [:[value]]
 ;
 
@@ -161,7 +161,7 @@ probe_inline_generic || -> String:
     origin = 1
     value ~= 1 + 2 catch then identity(origin)
     rendered = consume_u64(origin)
-    value = 4294967313
+    ~value = 4294967313
     return [:[value]]
 ;
 
@@ -170,7 +170,7 @@ probe_inline_generic || -> String:
 probe_fixed_u64_fallback || -> String:
     origin = 1
     value ~= 1 + 2 catch then fixed_u64(origin)
-    value = 4294967314
+    ~value = 4294967314
     return [:[value]]
 ;
 

@@ -8,7 +8,7 @@ take_opt |value I32?| -> I32:
 
 coerced_info ~= ""
 coerced = take_opt(value = double(2)) catch |coerced_err|:
-    coerced_info = [: [coerced_err.code] [coerced_err.message]]
+    ~coerced_info = [: [coerced_err.code] [coerced_err.message]]
     then -1
 ;
 

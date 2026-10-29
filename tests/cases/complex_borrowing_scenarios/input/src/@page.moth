@@ -22,8 +22,8 @@ render_complex_borrowing || -> String:
     if user_active:
         local_name_ref = name_ref4
         local_score_ref = user_score
-        scope_msg = [:[local_name_ref] has score [local_score_ref]]
-        user_score = user_score + 10
+        ~scope_msg = [:[local_name_ref] has score [local_score_ref]]
+        ~user_score = user_score + 10
     ;
 
     final_name = name_ref1

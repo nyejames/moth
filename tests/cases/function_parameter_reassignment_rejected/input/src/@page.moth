@@ -2,7 +2,7 @@
 -- Assigning through the parameter is rejected because the binding stays immutable.
 
 render_count |count I32| -> String:
-    count = 2
+    ~count = 2
     return [:count=[count]]
 ;
 

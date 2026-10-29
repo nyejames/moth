@@ -6,7 +6,8 @@
 use super::super::schema::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    OptStringFact, OptTokenFact, StringFact, UnitFact, unit_code,
+    FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, StringFact, UnitFact,
+    unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
@@ -23,9 +24,10 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_unknown_value_name, render_value_used_as_type,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DeferredFeatureReason, DiagnosticSeverity, DiagnosticToken, InvalidAssignmentTargetReason,
-    InvalidDeclarationReason, InvalidSignatureMemberReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamingConvention, ReservedNameOwner, TypeAnnotationContext,
+    DeferredFeatureReason, DiagnosticCompoundAssignmentOperator, DiagnosticSeverity,
+    DiagnosticToken, InvalidAssignmentTargetReason, InvalidDeclarationReason,
+    InvalidSignatureMemberReason, InvalidTypeAnnotationReason, NameNamespace, NamingConvention,
+    ReservedNameOwner, TypeAnnotationContext,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -52,17 +54,85 @@ unit_code! {
         ParameterContract = 5,
     }
 }
-unit_code! {
-    impl InvalidAssignmentTargetReason {
-        TemporaryNotAssignable = 1,
-        ImmutableBinding = 2,
-        ImmutableFieldRoot = 3,
-        UnavailableInCatchRecovery = 4,
-        CollectionGetTargetNotWritable = 5,
-        MapGetTargetNotWritable = 6,
-        ReadOnlyMapProperty = 7,
-        ExpectedAssignmentOperator = 8,
-        MutableMarkerOnAssignmentTarget = 9,
+/// Assignment reasons, including the authored write operator, fit one word.
+///
+/// The operator belongs to missing-prefix guidance, not to a spare field-name fact. Explicit
+/// codes preserve the other reasons and reject unknown or retired encodings.
+pub(crate) struct AssignmentTargetReasonFact;
+
+impl FactCodec for AssignmentTargetReasonFact {
+    type Draft = InvalidAssignmentTargetReason;
+    type Durable = InvalidAssignmentTargetReason;
+    const WORDS: usize = 1;
+
+    fn encode(reason: &Self::Draft, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        use DiagnosticCompoundAssignmentOperator as Compound;
+        use InvalidAssignmentTargetReason as Reason;
+        words[0] = match reason {
+            Reason::TemporaryNotAssignable => 1,
+            Reason::ImmutableBinding => 2,
+            Reason::ImmutableFieldRoot => 3,
+            Reason::UnavailableInCatchRecovery => 4,
+            Reason::CollectionGetTargetNotWritable => 5,
+            Reason::MapGetTargetNotWritable => 6,
+            Reason::ReadOnlyMapProperty => 7,
+            Reason::ExpectedAssignmentOperator => 8,
+            Reason::MissingWritePrefix { operator } => match operator {
+                None => 10,
+                Some(Compound::Add) => 11,
+                Some(Compound::Subtract) => 12,
+                Some(Compound::Multiply) => 13,
+                Some(Compound::Divide) => 14,
+                Some(Compound::IntDivide) => 15,
+                Some(Compound::Modulus) => 16,
+                Some(Compound::Exponent) => 17,
+            },
+            Reason::MutableMarkerRequiresExistingPlace => 18,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Self::Durable> {
+        use DiagnosticCompoundAssignmentOperator as Compound;
+        use InvalidAssignmentTargetReason as Reason;
+        Some(match words[0] {
+            1 => Reason::TemporaryNotAssignable,
+            2 => Reason::ImmutableBinding,
+            3 => Reason::ImmutableFieldRoot,
+            4 => Reason::UnavailableInCatchRecovery,
+            5 => Reason::CollectionGetTargetNotWritable,
+            6 => Reason::MapGetTargetNotWritable,
+            7 => Reason::ReadOnlyMapProperty,
+            8 => Reason::ExpectedAssignmentOperator,
+            10 => Reason::MissingWritePrefix { operator: None },
+            11 => Reason::MissingWritePrefix {
+                operator: Some(Compound::Add),
+            },
+            12 => Reason::MissingWritePrefix {
+                operator: Some(Compound::Subtract),
+            },
+            13 => Reason::MissingWritePrefix {
+                operator: Some(Compound::Multiply),
+            },
+            14 => Reason::MissingWritePrefix {
+                operator: Some(Compound::Divide),
+            },
+            15 => Reason::MissingWritePrefix {
+                operator: Some(Compound::IntDivide),
+            },
+            16 => Reason::MissingWritePrefix {
+                operator: Some(Compound::Modulus),
+            },
+            17 => Reason::MissingWritePrefix {
+                operator: Some(Compound::Exponent),
+            },
+            18 => Reason::MutableMarkerRequiresExistingPlace,
+            _ => return None,
+        })
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 unit_code! {
@@ -451,7 +521,7 @@ pub(crate) fn invalid_assignment_target(
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&INVALID_ASSIGNMENT_TARGET, span, |cursor| {
-        cursor.push::<UnitFact<InvalidAssignmentTargetReason>>(&reason)?;
+        cursor.push::<AssignmentTargetReasonFact>(&reason)?;
         cursor.push::<OptStringFact>(&target_name)?;
         cursor.push::<OptStringFact>(&field_name)?;
         cursor.push::<OptStringFact>(&root_binding_name)
@@ -767,7 +837,7 @@ diagnostic_family! {
         severity: DiagnosticSeverity::Error,
         title: "Invalid assignment target",
         facts: [
-            reason: UnitFact<InvalidAssignmentTargetReason>,
+            reason: AssignmentTargetReasonFact,
             target_name: OptStringFact,
             field_name: OptStringFact,
             root_binding_name: OptStringFact,

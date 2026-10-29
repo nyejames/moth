@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Explicit place writes and signature-directed call access](./plans/explicit-place-writes-and-signature-directed-call-access-plan.md) - next: require `~` on existing-place writes and mutable method receivers, infer ordinary call access from parameter contracts, preserve mutable aliases and Wiring capabilities, and complete strict compiler, diagnostic, documentation and fixture cutover with an audit-driven cleanup.
-
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.
 
 - [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compiler diagnostics improvements: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.

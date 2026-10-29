@@ -788,9 +788,9 @@ fn mutable_alias_final_read_in_same_statement_blocks_source_read() {
 #[test]
 fn mutable_alias_reachable_write_keeps_loan_active() {
     for body in [
-        "snapshot = copy data\nif flag:\nwriter = 2\n;\n",
-        "observed = writer\nsnapshot = copy data\nif flag:\nwriter = 2\n;\n",
-        "loop flag:\nwriter = 2\nsnapshot = copy data\n;\n",
+        "snapshot = copy data\nif flag:\n~writer = 2\n;\n",
+        "observed = writer\nsnapshot = copy data\nif flag:\n~writer = 2\n;\n",
+        "loop flag:\n~writer = 2\nsnapshot = copy data\n;\n",
     ] {
         let source = format!("probe |flag Bool|:\ndata ~= 1\nwriter ~= data\n{body};\n");
         let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
@@ -814,7 +814,7 @@ return input
 ;
 source ~= "source"
 target ~= identity(source)
-target = target
+~target = target
 sentinel = 0
 observed = copy target
 "#;
@@ -888,11 +888,11 @@ fn fresh_update_preserves_possible_alias_write_through_after_join() {
 source ~= \"source\"\n\
 target ~= \"old\"\n\
 if flag:\n\
-    target = source\n\
+    ~target = source\n\
 else\n\
-    target = \"branch\"\n\
+    ~target = \"branch\"\n\
 ;\n\
-target = \"replacement\"\n\
+~target = \"replacement\"\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
@@ -964,9 +964,9 @@ argument ~= \"argument\"\n\
 source ~= \"source\"\n\
 target ~= \"old\"\n\
 if flag:\n\
-    target = source\n\
+    ~target = source\n\
 else\n\
-    target = \"branch\"\n\
+    ~target = \"branch\"\n\
 ;\n\
 unused = identity(argument)\n\
 sentinel = 0\n\
@@ -3124,7 +3124,7 @@ fn catch_failed_argument_releases_earlier_shared_and_mutable_call_borrows() {
              probe |trigger I32| -> String:\n\
              data ~= \"before\"\n\
              return combine(identity({access}data), trigger + 2147483647) catch:\n\
-                 data = \"handler\"\n\
+                 ~data = \"handler\"\n\
                  then data\n\
              ;\n;\n"
         );

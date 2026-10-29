@@ -3,11 +3,12 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0002"]
+diagnostic_codes = ["MOTH-RULE-0047"]
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-SYNTAX-0002"
+code = "MOTH-RULE-0047"
+reason = "invalid_receiver_call.mutable_marker_on_non_receiver_call"
 path = "input/@page.moth"
 line = 2
-column = 13
+column = 12
 count = 1

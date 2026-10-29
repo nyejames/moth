@@ -11,25 +11,25 @@ Bucket = |
 |
 
 increment |this ~Counter|:
-    this.value = this.value + 1
+    ~this.value = this.value + 1
 ;
 
 add |this ~Counter, amount I32|:
-    this.value = this.value + amount
+    ~this.value = this.value + amount
 ;
 
 reset |this ~Counter|:
-    this.value = 0
+    ~this.value = 0
 ;
 
 consume_bucket |bucket ~Bucket| -> String:
-    bucket.count = bucket.count + 1
+    ~bucket.count = bucket.count + 1
     return [: [bucket.label]:[bucket.count] ]
 ;
 
 bump_many |counter ~Counter, amount I32|:
     loop 0 to 20 |i|:
-        counter.value = counter.value + amount + i
+        ~counter.value = counter.value + amount + i
     ;
 ;
 

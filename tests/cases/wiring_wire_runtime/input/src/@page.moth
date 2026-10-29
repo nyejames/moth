@@ -16,7 +16,7 @@ forward_number |value Wire of I32| -> I32:
 
 immutable_value = "initial"
 mutable_value ~= "before"
-mutable_value = "after"
+~mutable_value = "after"
 read_result = read_text(immutable_value)
 forward_result = forward_text(immutable_value)
 mutable_result = forward_text(mutable_value)
@@ -28,11 +28,11 @@ loop_text ~= ""
 loop running:
     fresh ~= "a"
     if second:
-        fresh = "b"
-        running = false
+        ~fresh = "b"
+        ~running = false
     ;
-    loop_text = [:[loop_text][forward_text(fresh)]]
-    second = true
+    ~loop_text = [:[loop_text][forward_text(fresh)]]
+    ~second = true
 ;
 
 [:wire read=[read_result] forward=[forward_result] mutable=[mutable_result] number=[number_result] loop=[loop_text]]

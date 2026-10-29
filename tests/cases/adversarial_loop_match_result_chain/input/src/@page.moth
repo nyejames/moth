@@ -14,11 +14,11 @@ loop i < 4:
         then 1
     ;
     if value is:
-        10 => sum = sum + value
-        else => sum = sum + 2
+        10 => ~sum = sum + value
+        else => ~sum = sum + 2
     ;
 
-    i = i + 1
+    ~i = i + 1
 ;
 
 io.line([: adversarial_loop_match_result_chain final-total=[sum]])

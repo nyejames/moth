@@ -16,15 +16,15 @@ CodeBox = |
 |
 
 fill_zero |box ~CodeBox|:
-    box.code = 0
+    ~box.code = 0
 ;
 
 fill_i32_boundary |box ~CodeBox|:
-    box.code = 2147483648
+    ~box.code = 2147483648
 ;
 
 fill_u32_max |box ~CodeBox|:
-    box.code = 4294967295
+    ~box.code = 4294967295
 ;
 
 zero_box ~CodeBox = CodeBox(code = 0)
@@ -67,8 +67,8 @@ middle_error |carried U32| -> String, Error!:
 preserved_code ~U32 = 0
 preserved_message ~= "untouched"
 recovered_text = middle_error(max_code) catch |preserved_err|:
-    preserved_code = copy preserved_err.code
-    preserved_message = copy preserved_err.message
+    ~preserved_code = copy preserved_err.code
+    ~preserved_message = copy preserved_err.message
     then "outer fallback"
 ;
 
@@ -88,7 +88,7 @@ core_probe || -> I64, Error!:
 
 core_parse_code ~U32 = 0
 core_probe_value = core_probe() catch |core_err|:
-    core_parse_code = core_err.code
+    ~core_parse_code = core_err.code
     then 0
 ;
 core_code_plus_one = core_parse_code + 1
@@ -100,7 +100,7 @@ cast_probe |value F64| -> I64, Error!:
 
 backend_cast_code ~U32 = 0
 cast_probe_value = cast_probe(3.4028234663852886e38) catch |backend_err|:
-    backend_cast_code = backend_err.code
+    ~backend_cast_code = backend_err.code
     then 0
 ;
 backend_code_plus_one = backend_cast_code + 1
@@ -111,8 +111,8 @@ backend_code_plus_one = backend_cast_code + 1
 foreign_i32_code ~U32 = 0
 foreign_i32_message ~= "unset"
 foreign_i32_text = wide_i32_code() catch |i32_err|:
-    foreign_i32_code = copy i32_err.code
-    foreign_i32_message = copy i32_err.message
+    ~foreign_i32_code = copy i32_err.code
+    ~foreign_i32_message = copy i32_err.message
     then "recovered i32 boundary"
 ;
 foreign_i32_direct = foreign_i32_code is 2147483648
@@ -121,8 +121,8 @@ foreign_i32_recorded = code_is_i32_boundary(foreign_i32_code)
 foreign_max_code ~U32 = 0
 foreign_max_message ~= "unset"
 foreign_max_text = wide_u32_max_code() catch |max_err|:
-    foreign_max_code = copy max_err.code
-    foreign_max_message = copy max_err.message
+    ~foreign_max_code = copy max_err.code
+    ~foreign_max_message = copy max_err.message
     then "recovered u32 max"
 ;
 foreign_max_direct = foreign_max_code is 4294967295

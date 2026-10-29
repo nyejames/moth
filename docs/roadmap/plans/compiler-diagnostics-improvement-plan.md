@@ -79,17 +79,15 @@ current workspace or validation of this documentation change.
 Phase 3.2 renamed `NotMutablePlace` to `TemporaryNotAssignable` and `ImmutableVariable` to
 `ImmutableBinding`. It added `ImmutableFieldRoot`, field/root names and the authored binding
 location so immutable-binding failures carry a related declaration label. `ExpectedAssignmentOperator`
-uses binding terminology. Those changes preserve `MOTH-RULE-0044`, distinguish temporary/direct/field
-targets, name field roots when available and give ordinary `=` guidance without suggesting `~` on
-assignment targets.
+uses binding terminology. At that checkpoint, guidance used unprefixed assignments. The explicit
+place-write cutover has since superseded that syntax and its assignment-marker diagnostics.
 
 - Phases 1–2.6b and 3.1a–3.1b passed their focused checks and `just validate` at each recorded
   checkpoint. Completed phase notes retain the design and correction details.
 - The Phase 3.2a implementation passed `cargo fmt`, 3,609 Rust tests, 1,777 integration cases and
   library Clippy.
-- Phase 3.2a independent probes confirmed that immutable `p.x = 99` reports `ImmutableFieldRoot`
-  naming `x` and `p`, immutable `value = 200` reports `ImmutableBinding` with ordinary assignment
-  guidance, `Point(1,2).x = 5` reports `TemporaryNotAssignable` and a mutable `p` permits `p.x = 99`.
+- Phase 3.2a independent probes covered immutable field and binding writes, temporary targets and
+  mutable field writes under the assignment syntax then in force. That syntax has since changed.
 - Phase 3.2a `just validate` passed cross-target Clippy, 3,609 Rust tests, 1,777 integration cases,
   the docs check and 28 benchmark cases.
 
@@ -106,9 +104,8 @@ assignment targets.
 - Discontinued syntax receives no migration-specific compatibility diagnostics.
 - Incompatible template directives are rejected.
 - A directive-conflict diagnostic must name both conflicting items and explain the semantic reason they cannot be combined.
-- Existing mutable places require explicit `~place` only at mutable call and receiver-call boundaries.
+- Existing-place writes, existing mutable places passed to mutable parameters and mutable receivers require `~` on the whole place.
 - A binding must already be declared mutable before it can be reassigned or written through.
-- Reassignment and field assignment use ordinary `=`. `~` is not written on assignment targets.
 - Fresh values passed to mutable parameters remain valid without source `~`.
 - External package namespace access and delimiter-free direct selections are both valid for direct package exports. Diagnostics must not claim otherwise.
 - Error handling uses Moth's `Error!`, postfix `!` and `catch` terminology. User-facing diagnostics must not describe the source feature as a first-class `Result`.
@@ -124,8 +121,8 @@ assignment targets.
 - Do not generate exact replacement source unless the compiler has enough structured facts to make it valid. Prefer a generic correction over a fabricated snippet.
 - Keep suggestions source-visible. Do not mention internal AST, HIR, parameter receiver placeholders, borrow lattice states or compiler-introduced locals.
 - Suggestions must favour normal Moth patterns:
-  - explicit mutable declarations followed by ordinary assignment
-  - explicit `~place` at mutable call boundaries
+  - explicit mutable declarations followed by `~`-prefixed existing-place writes
+  - explicit `~place` for existing mutable arguments and mutable receivers
   - templates for mixed textual interpolation
   - choices for runtime heterogeneity
   - concrete types or bound-provided receiver methods for generic behaviour
@@ -378,7 +375,7 @@ State 5 is valid and must not be diagnosed.
 
 **Status: Call-access classification is delivered; `RustBorrowPrefix` wording remains.** The shared-argument path classifies place mutability before choosing its repair. Fresh values, including `copy` results, satisfy mutable parameters without `~`; an authored marker on a fresh value remains invalid. Unnamed parameter messages use one-based positions. The `function_call_mutable_param_copy_arg` integration case covers an explicit copy passed to a mutable parameter.
 
-The remaining wording item is the `CommonSyntaxMistakeReason::RustBorrowPrefix` renderer in `src/compiler_frontend/compiler_messages/render/syntax.rs`: the full and terse messages describe shared access as implicit and recommend `~` for mutation without specifying that `~` is valid only on an existing mutable binding or field at a mutable call or receiver boundary.
+The remaining wording item is the `CommonSyntaxMistakeReason::RustBorrowPrefix` renderer in `src/compiler_frontend/compiler_messages/render/syntax.rs`: explain that `~` applies to existing mutable places for writes, mutable call arguments and mutable receivers, not to fresh values or immutable places.
 
 #### Delivered diagnostic facts
 
@@ -420,7 +417,7 @@ Use one matrix covering user functions, source receiver methods, collection buil
 ### 3.2 Correct immutable assignment and field-write guidance
 
 **Original finding:** DIAG-007
-**Rejected original proposal:** `~p.x = 10` is not Moth assignment syntax.
+**Current decision:** Field writes prefix the whole existing place with `~`.
 
 **Status: Delivered.** Assignment-target reasons distinguish temporary values, immutable bindings and immutable field roots. The diagnostics preserve authored binding locations through `ScopeDeclarationRef` and use the schema-defined immutable-binding declaration label.
 
@@ -428,46 +425,28 @@ For:
 
 ```moth
 p = Point(x = 1, y = 2)
-p.x = 10
+~p.x = 10
 ```
 
 the root binding is immutable. The correct pattern is:
 
 ```moth
 p ~= Point(x = 1, y = 2)
-p.x = 10
+~p.x = 10
 ```
 
 #### Delivered implementation
 
-The assignment-target family carries field and mutable-root names where available, preserves authored binding locations through `ScopeDeclarationRef`, and attaches the schema-defined immutable-binding declaration label. `TemporaryNotAssignable`, `ImmutableBinding` and `ImmutableFieldRoot` are the current factual reasons. Rendered guidance names bindings and fields, uses ordinary `=`, and avoids compiler-facing place or rvalue terminology.
+The assignment-target family carries field and mutable-root names where available, preserves authored binding locations through `ScopeDeclarationRef`, and attaches the schema-defined immutable-binding declaration label. `TemporaryNotAssignable`, `ImmutableBinding` and `ImmutableFieldRoot` distinguish the causes. Guidance must preserve the explicit write prefix and avoid compiler-facing place or rvalue terminology.
 
-### 3.3 Diagnose `~` on assignment targets accurately
+### 3.3 Diagnose existing-place assignment markers accurately
 
 **Original finding:** DIAG-021
 **Rejected original proposal:** `x ~= 2` is a declaration form, not ordinary reassignment.
 
-**Status: Delivered.** `InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget` and the `mutable_marker_on_assignment_target_rejected` integration case protect the source-facing marker error and its stable rule code.
+**Status: Superseded by the explicit place-write cutover.** Existing-place writes require a leading `~`; the former `MutableMarkerOnAssignmentTarget` reason was removed and its fixture now checks the missing-prefix diagnostic.
 
-For:
-
-```moth
-x = 1
-~x = 2
-```
-
-render:
-
-> `~` is not written on assignment targets. Reassignment uses ordinary `=` and requires an already-mutable binding.
-
-A complete correction is:
-
-```moth
-x ~= 1
-x = 2
-```
-
-The marker error uses its dedicated assignment-target reason rather than call-specific `MutableMarkerOnNonReceiverCall`. An ordinary assignment with an immutable root has separate diagnostic ownership.
+For an immutable `x`, `~x = 2` reports the immutable binding rather than suggesting a marker-only repair. The valid form declares `x` mutable and writes `~x = 2`. An unmarked write to an existing binding receives the missing-prefix diagnostic.
 
 ### 3.4 Diagnose `copy ~place` as an unnecessary access marker
 
@@ -988,14 +967,14 @@ Render:
 tokens and the mutable marker as declaration starts. A redeclaration with a nominal, alias,
 generic, qualified or collection annotation or the postfix compile-time marker can fall through
 to expression parsing. Declaration-shape detection must reuse the canonical
-binding-target parser rather than grow another token whitelist. Plain `name = value` remains
-reassignment, not a second inferred declaration.
+binding-target parser rather than grow another token whitelist. Plain `name = value` declares a
+new binding or diagnoses a missing write prefix when the name already exists.
 
 - Remove the current `SHADOWED_NAME` family, its descriptor, constructor, remapping and renderer branch.
 - Route ordinary body-local typed and mutable redeclarations through `DuplicateDeclaration`.
 - Parse every unambiguous current body-local binding declaration shape before duplicate
   registration rejects it, including user-defined/constructed type annotations and postfix
-  compile-time markers. Keep plain `name = value` on reassignment.
+  compile-time markers. Preserve `~name = value` for reassignment and reject an unmarked existing write.
 - Reuse `DuplicateDeclaration`.
 - Reuse the scope-neutral duplicate-name message established in Phase 2.5.
 - Use the authored binding location preserved by Phase 3.2 and label both declarations.
@@ -1079,7 +1058,7 @@ These items must not be implemented as originally proposed.
 | DIAG-001 | Retained, rewritten | The original snippet used an immutable collection, so `~values.push(...)` alone was not a valid fix. |
 | DIAG-002 | Retained, rewritten | Generic construction uses `Box(...)` at a concrete receiving type, not `Box of T { ... }` or `~Box`. |
 | DIAG-006 | Removed, historical rationale superseded | The original snippet was not a const-required cast. Its old handling rationale relied on the removed `cast!` spelling. Plain `cast` now uses ordinary implicit-failure delivery. Keep the rejection of the proposed literal-failure branch, which conflated evidence selection with const failure. |
-| DIAG-007 | Retained, reversed | The binding does need to be mutable. Field assignment is `p.x = ...`, not `~p.x = ...`. |
+| DIAG-007 | Retained, updated | The root binding must be mutable and the field write uses `~p.x = ...`. |
 | DIAG-017 | Removed as stale | Current rendering identifies `|`, not `/`. A broader parser-context change is not justified without a current reproducible failure. |
 | DIAG-019 | Removed as ambiguous, historical example | At the recorded checkpoint, `MyList {Int}` parsed as a typed declaration missing an initializer. Exact numeric types now replace that old spelling. The compiler still cannot infer that a missing initializer meant a type alias. |
 | DIAG-022 | Removed as incorrect | Direct external package exports support delimiter-free direct selections. A missing symbol may receive a close-name suggestion instead. |

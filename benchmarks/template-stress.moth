@@ -210,10 +210,10 @@ build_repeated_slots |count I32| -> String:
     result ~= [: <div class="repeated">]
     
     loop 0 to count |i|:
-        result = [: [result]<span class="slot-[i]">item [i]</span>]
+        ~result = [: [result]<span class="slot-[i]">item [i]</span>]
     ;
     
-    result = [: [result]</div> ]
+    ~result = [: [result]</div> ]
     return result
 ;
 
@@ -222,17 +222,17 @@ build_fresh_mix || -> String:
     
     loop 0 to 8 |i|:
         if i % 3 is 0:
-            result = [: [result][: wrapped [i]]]
+            ~result = [: [result][: wrapped [i]]]
         ;
         if i % 3 is 1:
-            result = [: [result][$fresh: [: fresh [i]]]]
+            ~result = [: [result][$fresh: [: fresh [i]]]]
         ;
         if i % 3 is 2:
-            result = [: [result][: mixed [i]]]
+            ~result = [: [result][: mixed [i]]]
         ;
     ;
     
-    result = [: [result]</div> ]
+    ~result = [: [result]</div> ]
     return result
 ;
 

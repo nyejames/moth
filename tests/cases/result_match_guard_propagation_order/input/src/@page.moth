@@ -12,9 +12,9 @@ compute |subject I32| -> String, Error!:
     result ~= "unset"
 
     if subject is:
-        1 if guard_skip()! => result = "one"
-        2 if guard_fail()! => result = "two"
-        else => result = "fallback"
+        1 if guard_skip()! => ~result = "one"
+        2 if guard_fail()! => ~result = "two"
+        else => ~result = "fallback"
     ;
 
     return result

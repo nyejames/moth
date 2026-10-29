@@ -12,7 +12,7 @@ reassociate_i8 |left I8, right I8| -> I8, Error!:
 
 cancel_code ~U32 = 0
 cancel_value = cancel_i8(127, 1) catch |cancel_error|:
-    cancel_code = cancel_error.code
+    ~cancel_code = cancel_error.code
     then 0
 ;
 cancel_text String = cast cancel_value

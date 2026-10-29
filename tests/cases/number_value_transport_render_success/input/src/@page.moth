@@ -26,7 +26,7 @@ huge_text String = cast huge_alias
 
 copy_source ~Dec4 = -0.1200
 copy_snapshot Dec4 = copy copy_source
-copy_source = 0.34
+~copy_source = 0.34
 copy_current_text String = cast copy_source
 runtime_echo = keep(copy_snapshot)
 runtime_direct String = cast runtime_echo
@@ -49,7 +49,7 @@ first Dec2 = passed_values.get(0) catch:
 first_text String = cast first
 optional_text ~String = "none"
 if passed_optional is |optional_value|:
-    optional_text = cast optional_value
+    ~optional_text = cast optional_value
 ;
 
 tiny Dec256 = 1e-256

@@ -18,21 +18,21 @@ overflow_term |flag Bool, amount I32| -> I32:
 ;
 observe_first |hit Bool, seen ~String| -> I32:
     value = first_error(hit) + second_error(false) + overflow_term(false, 1) catch |first_err|:
-        seen = [: [first_err.code] [first_err.message]]
+        ~seen = [: [first_err.code] [first_err.message]]
         then 0 - 1
     ;
     return value
 ;
 observe_second |hit Bool, seen ~String| -> I32:
     value = first_error(false) + second_error(hit) + overflow_term(false, 1) catch |second_err|:
-        seen = [: [second_err.code] [second_err.message]]
+        ~seen = [: [second_err.code] [second_err.message]]
         then 0 - 2
     ;
     return value
 ;
 observe_overflow |flag Bool, amount I32, seen ~String| -> I32:
     value = first_error(false) + second_error(false) + overflow_term(flag, amount) catch |overflow_err|:
-        seen = [: [overflow_err.code] [overflow_err.message]]
+        ~seen = [: [overflow_err.code] [overflow_err.message]]
         then 0 - 3
     ;
     return value

@@ -9,17 +9,17 @@ asc_total ~U32 = 0
 asc_count ~= 0
 asc_last_index ~= 0
 loop asc_lo to & asc_hi |value, index|:
-    asc_total = asc_total + value
-    asc_count = asc_count + 1
-    asc_last_index = copy index
+    ~asc_total = asc_total + value
+    ~asc_count = asc_count + 1
+    ~asc_last_index = copy index
 ;
 
 step_two U32 = 2
 stepped_total ~U32 = 0
 stepped_count ~= 0
 loop asc_lo to & asc_hi by step_two |value|:
-    stepped_total = stepped_total + value
-    stepped_count = stepped_count + 1
+    ~stepped_total = stepped_total + value
+    ~stepped_count = stepped_count + 1
 ;
 
 desc_total ~U32 = 0
@@ -27,34 +27,34 @@ desc_count ~= 0
 desc_last ~U32 = 99
 desc_first_val ~U32 = 99
 loop asc_hi to & asc_lo |item, idx|:
-    desc_total = desc_total + item
-    desc_count = desc_count + 1
-    desc_last = copy item
+    ~desc_total = desc_total + item
+    ~desc_count = desc_count + 1
+    ~desc_last = copy item
     if desc_count is 0 + 1:
-        desc_first_val = copy item
+        ~desc_first_val = copy item
     ;
 ;
 desc_step_total ~U32 = 0
 desc_step_count ~= 0
 loop asc_hi to & asc_lo by step_two |value|:
-    desc_step_total = desc_step_total + value
-    desc_step_count = desc_step_count + 1
+    ~desc_step_total = desc_step_total + value
+    ~desc_step_count = desc_step_count + 1
 ;
 
 empty_count ~= 0
 loop asc_hi to asc_hi |value|:
-    empty_count = empty_count + 1
+    ~empty_count = empty_count + 1
 ;
 equal_inclusive_count ~= 0
 loop asc_hi to & asc_hi |value|:
-    equal_inclusive_count = equal_inclusive_count + 1
+    ~equal_inclusive_count = equal_inclusive_count + 1
 ;
 
 zero_terminal ~U32 = 99
 zero_count ~= 0
 loop step_two to & asc_lo by step_two |value|:
-    zero_terminal = copy value
-    zero_count = zero_count + 1
+    ~zero_terminal = copy value
+    ~zero_count = zero_count + 1
 ;
 
 max_lo U32 = 4294967293
@@ -62,8 +62,8 @@ max_hi U32 = 4294967295
 max_last ~U32 = 0
 max_count ~= 0
 loop max_lo to & max_hi |value|:
-    max_last = copy value
-    max_count = max_count + 1
+    ~max_last = copy value
+    ~max_count = max_count + 1
 ;
 
 mixed_lo U32 = 0
@@ -73,8 +73,8 @@ mixed_total ~F64 = 0.0
 mixed_count ~= 0
 mixed_lower F64 = cast mixed_lo
 loop mixed_lower to & mixed_hi by mixed_step |value|:
-    mixed_total = mixed_total + value
-    mixed_count = mixed_count + 1
+    ~mixed_total = mixed_total + value
+    ~mixed_count = mixed_count + 1
 ;
 
 float_end F64 = 3.0
@@ -82,24 +82,24 @@ bound_step F64 = 1.0
 bound_total ~F64 = 0.0
 bound_count ~= 0
 loop mixed_lower to & float_end by bound_step |value|:
-    bound_total = bound_total + value
-    bound_count = bound_count + 1
+    ~bound_total = bound_total + value
+    ~bound_count = bound_count + 1
 ;
 
 broken_count ~= 0
 loop asc_lo to & asc_hi |value|:
-    broken_count = broken_count + 1
+    ~broken_count = broken_count + 1
     if value is 2:
         break
     ;
-    broken_count = broken_count + 10
+    ~broken_count = broken_count + 10
 ;
 continued_total ~U32 = 0
 loop asc_lo to & asc_hi |value|:
     if value is 2:
         continue
     ;
-    continued_total = continued_total + value
+    ~continued_total = continued_total + value
 ;
 
 render |asc_total U32, asc_count I32, asc_last_index I32, stepped_total U32, stepped_count I32, desc_total U32, desc_count I32, desc_last U32, desc_first_val U32, desc_step_total U32, desc_step_count I32, empty_count I32, equal_inclusive_count I32, zero_terminal U32, zero_count I32, max_last U32, max_count I32, mixed_total F64, mixed_count I32, bound_total F64, bound_count I32, broken_count I32, continued_total U32| -> String:

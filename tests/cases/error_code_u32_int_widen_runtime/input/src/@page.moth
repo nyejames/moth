@@ -7,13 +7,13 @@ widen_code |value I32| -> U32, Error!:
 
 positive_wide_code ~U32 = 0
 positive_wide = widen_code(41) catch |positive_err|:
-    positive_wide_code = positive_err.code
+    ~positive_wide_code = positive_err.code
     then 0
 ;
 
 negative_code ~U32 = 0
 negative_wide = widen_code(-1) catch |negative_err|:
-    negative_code = negative_err.code
+    ~negative_code = negative_err.code
     then 0
 ;
 

@@ -34,6 +34,27 @@ A function may declare and return more than one success value.
 
 The receiving multi-bind must match the success arity.
 
+Each target independently declares a new binding or updates an existing place.
+An update requires a leading `~` on that target:
+
+[codeblock, $code("moth"):
+    next || -> I32, String:
+        return 1, "ready"
+    ;
+
+    count ~= 0
+    ~count, message = next()
+]
+
+An unmarked target must name a new binding. A prefixed target must name an
+existing mutable binding. New mutable targets retain the explicit-type form,
+such as `count ~I32, message String = next()`.
+
+The producer runs once and all incoming results are read before any existing
+target is written. Updates through mutable aliases write through to their
+referents. These receiving rules also apply to value-producing `if`, match,
+`catch` and propagated multiple-result calls.
+
 Multi-bind targets may continue on a following line only after a comma:
 
 [codeblock, $code("moth"):

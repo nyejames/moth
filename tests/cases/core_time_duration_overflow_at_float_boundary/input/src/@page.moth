@@ -47,7 +47,7 @@ read_absolute_not_a_number || -> F64, Error!:
 opaque = survive_scale()
 overflow_code ~U32 = 0
 overflow_value = read_overflow() catch |err|:
-    overflow_code = err.code
+    ~overflow_code = err.code
     then 0
 ;
 
@@ -58,12 +58,12 @@ recovered = recover_by_clamp() catch |recover_err|:
 not_a_number_negative = clamp_not_a_number()
 clamped_code ~U32 = 0
 clamped_value = read_clamped_not_a_number() catch |clamped_err|:
-    clamped_code = clamped_err.code
+    ~clamped_code = clamped_err.code
     then 0
 ;
 absolute_code ~U32 = 0
 absolute_value = read_absolute_not_a_number() catch |absolute_err|:
-    absolute_code = absolute_err.code
+    ~absolute_code = absolute_err.code
     then 0
 ;
 

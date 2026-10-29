@@ -4,8 +4,8 @@ value ~= true
 result ~= ""
 
 if value is:
-    < false => result = "bad"
-    else => result = "fallback"
+    < false => ~result = "bad"
+    else => ~result = "fallback"
 ;
 
 [:should_not_reach=[result]]

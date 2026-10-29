@@ -361,7 +361,7 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
     // promotes to the genuinely wider I16, so the narrowing conversion stays.
     let source = "Bucket = |\n    level I8,\n|\n\
                   risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
-                  bump |box ~Bucket, extra U8| -> I8, Error!:\n    box.level += risky(extra) catch then extra\n    return box.level\n;\n";
+                  bump |box ~Bucket, extra U8| -> I8, Error!:\n    ~box.level += risky(extra) catch then extra\n    return box.level\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);

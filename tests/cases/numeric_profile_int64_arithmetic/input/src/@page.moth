@@ -35,12 +35,12 @@ float_to_int |value F32| -> I64, Error!:
 ;
 
 assign_divide |target ~I64| -> I64, Error!:
-    target /= 1
+    ~target /= 1
     return target
 ;
 
 assign_integer_divide |target ~I64| -> I64, Error!:
-    target //= 1
+    ~target //= 1
     return target
 ;
 

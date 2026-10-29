@@ -3,7 +3,7 @@ render_loop_mutation || -> String:
     i ~= 0
     loop i < 3:
         ~values.push(i)
-        i = i + 1
+        ~i = i + 1
     ;
     len = values.length()
     return [:collection_mutation_inside_loop len=[len]]

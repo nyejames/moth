@@ -4922,6 +4922,20 @@ contract = "language.functions.multi_bind_immutable_existing_target_rejected"
 role = "primary"
 
 [[case]]
+id = "multi_bind_existing_target_missing_prefix_rejected"
+path = "multi_bind_existing_target_missing_prefix_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.functions.multi_bind_existing_target_missing_prefix_rejected"
+role = "primary"
+
+[[case]]
+id = "multi_bind_unknown_target_prefix_rejected"
+path = "multi_bind_unknown_target_prefix_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.functions.multi_bind_unknown_target_prefix_rejected"
+role = "primary"
+
+[[case]]
 id = "multi_bind_existing_target_mutable_marker_rejected"
 path = "multi_bind_existing_target_mutable_marker_rejected"
 tags = ["integration", "results", "diagnostics"]
@@ -5041,17 +5055,17 @@ contract = "backend.html_wasm.mutable_local_self_update_preserves_scalar"
 role = "backend"
 
 [[case]]
-id = "mutable_marker_on_assignment_target_rejected"
-path = "mutable_marker_on_assignment_target_rejected"
+id = "missing_write_prefix_on_assignment_target_rejected"
+path = "missing_write_prefix_on_assignment_target_rejected"
 tags = ["integration", "language", "diagnostics", "mutability"]
-contract = "language.bindings.mutable_marker_on_assignment_target_rejected"
+contract = "language.bindings.missing_write_prefix_rejected"
 role = "primary"
 
 [[case]]
-id = "mutable_marker_on_field_assignment_target_rejected"
-path = "mutable_marker_on_field_assignment_target_rejected"
+id = "missing_write_prefix_on_field_assignment_target_rejected"
+path = "missing_write_prefix_on_field_assignment_target_rejected"
 tags = ["integration", "language", "diagnostics", "mutability"]
-contract = "language.bindings.mutable_marker_on_assignment_target_rejected"
+contract = "language.bindings.missing_write_prefix_rejected"
 role = "boundary"
 
 [[case]]
@@ -8042,6 +8056,20 @@ path = "receiver_method_mutable_struct_success"
 tags = ["integration", "receiver-methods", "structs"]
 contract = "language.structs.mutable_receiver_method_acceptance"
 role = "primary"
+
+[[case]]
+id = "receiver_mutable_argument_missing_receiver_tilde"
+path = "receiver_mutable_argument_missing_receiver_tilde"
+tags = ["integration", "receiver-methods", "diagnostics"]
+contract = "language.structs.mutable_receiver_requires_explicit_tilde_rejected"
+role = "boundary"
+
+[[case]]
+id = "receiver_mutable_argument_missing_argument_tilde"
+path = "receiver_mutable_argument_missing_argument_tilde"
+tags = ["integration", "receiver-methods", "diagnostics"]
+contract = "language.functions.mutable_parameter_requires_explicit_tilde"
+role = "boundary"
 
 [[case]]
 id = "receiver_method_copy_this_places_independent"

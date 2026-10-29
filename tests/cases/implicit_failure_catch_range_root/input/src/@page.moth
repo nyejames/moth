@@ -4,7 +4,7 @@ double |value I32| -> I32:
 
 span_info ~= ""
 span = double(1) to double(5) catch |span_err|:
-    span_info = [: [span_err.code] [span_err.message]]
+    ~span_info = [: [span_err.code] [span_err.message]]
     then 1 to 2
 ;
 
@@ -13,14 +13,14 @@ span_report = copy span_info
 walk |start I32, end I32| -> I32:
     total ~I32 = 0
     loop start to end |value|:
-        total = total + value
+        ~total = total + value
     ;
     return total
 ;
 
 loop_info ~= ""
 walked = walk(double(0), double(3)) catch |loop_err|:
-    loop_info = [: [loop_err.code] [loop_err.message]]
+    ~loop_info = [: [loop_err.code] [loop_err.message]]
     then -1
 ;
 

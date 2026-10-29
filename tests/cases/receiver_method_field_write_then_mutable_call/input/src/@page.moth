@@ -3,10 +3,17 @@ Accumulator = |
 |
 
 add |this ~Accumulator, amount I32|:
-    this.total = this.total + amount
+    ~this.total = this.total + amount
+;
+
+same_line_boundary |enabled Bool| -> I32:
+    item ~= Accumulator(0)
+    if enabled: ~item.add(1) else ~item.add(2); ~item.total += 3
+    return item.total
 ;
 
 acc ~= Accumulator(0)
-acc.total = 3
+~acc.total = 3
 ~acc.add(4)
 io.line([:receiver_method_field_write_then_mutable_call value=[acc.total]])
+io.line([:same_line_boundaries=[same_line_boundary(true)]/[same_line_boundary(false)]])

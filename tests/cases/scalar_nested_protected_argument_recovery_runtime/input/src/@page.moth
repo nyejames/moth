@@ -22,14 +22,14 @@ Counter = |
 -- actually runs, so a premature nested producer diagnostic or an eager outer
 -- call changes the observed counts.
 count_call |value I32, seen ~Counter| -> I32, Error!:
-    seen.calls = seen.calls + 1
+    ~seen.calls = seen.calls + 1
     return value + 100
 ;
 
 -- The receiver call increments the receiver's own counter, so the same nested
 -- failure must leave counter.calls at zero.
 bump |this ~Counter, value I32| -> I32, Error!:
-    this.calls = this.calls + 1
+    ~this.calls = this.calls + 1
     return value + 10
 ;
 

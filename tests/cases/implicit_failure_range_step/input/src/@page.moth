@@ -1,14 +1,14 @@
 direct_walk |step I32| -> I32, Error!:
     seen ~= 0
     loop 0 to 2 by step:
-        seen = 99
+        ~seen = 99
     ;
     return seen
 ;
 private_walk |step I32| -> I32:
     seen ~= 0
     loop 0 to 2 by step:
-        seen = 99
+        ~seen = 99
     ;
     return seen
 ;

@@ -51,7 +51,7 @@ sub_u64 |value U64| -> U64, Error!:
 capture_i32_add |value I32| -> U32:
     code ~U32 = 0
     ignored = add_i32(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -59,7 +59,7 @@ capture_i32_add |value I32| -> U32:
 capture_i32_sub |value I32| -> U32:
     code ~U32 = 0
     ignored = sub_i32(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -67,7 +67,7 @@ capture_i32_sub |value I32| -> U32:
 capture_i64_add |value I64| -> U32:
     code ~U32 = 0
     ignored = add_i64(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -75,7 +75,7 @@ capture_i64_add |value I64| -> U32:
 capture_i64_sub |value I64| -> U32:
     code ~U32 = 0
     ignored = sub_i64(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -83,7 +83,7 @@ capture_i64_sub |value I64| -> U32:
 capture_u32_add |value U32| -> U32:
     code ~U32 = 0
     ignored = add_u32(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -91,7 +91,7 @@ capture_u32_add |value U32| -> U32:
 capture_u32_sub |value U32| -> U32:
     code ~U32 = 0
     ignored = sub_u32(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -99,7 +99,7 @@ capture_u32_sub |value U32| -> U32:
 capture_u64_add |value U64| -> U32:
     code ~U32 = 0
     ignored = add_u64(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -107,7 +107,7 @@ capture_u64_add |value U64| -> U32:
 capture_u64_sub |value U64| -> U32:
     code ~U32 = 0
     ignored = sub_u64(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -148,7 +148,7 @@ multiply_i32 |left I32, right I32| -> I32, Error!:
 capture_u32_product |left U32, right U32| -> U32:
     code ~U32 = 0
     ignored = multiply_u32(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -156,7 +156,7 @@ capture_u32_product |left U32, right U32| -> U32:
 capture_u64_product |left U64, right U64| -> U32:
     code ~U32 = 0
     ignored = multiply_u64(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -164,7 +164,7 @@ capture_u64_product |left U64, right U64| -> U32:
 capture_i64_product |left I64, right I64| -> U32:
     code ~U32 = 0
     ignored = multiply_i64(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -172,7 +172,7 @@ capture_i64_product |left I64, right I64| -> U32:
 capture_i32_product |left I32, right I32| -> U32:
     code ~U32 = 0
     ignored = multiply_i32(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -193,7 +193,7 @@ remainder_i64 |dividend I64, divisor I64| -> I64, Error!:
 capture_quotient_i32 |dividend I32, divisor I32| -> U32:
     code ~U32 = 0
     ignored = quotient_i32(dividend, divisor) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -201,7 +201,7 @@ capture_quotient_i32 |dividend I32, divisor I32| -> U32:
 capture_remainder_i32 |dividend I32, divisor I32| -> U32:
     code ~U32 = 0
     ignored = remainder_i32(dividend, divisor) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -209,7 +209,7 @@ capture_remainder_i32 |dividend I32, divisor I32| -> U32:
 capture_quotient_i64 |dividend I64, divisor I64| -> U32:
     code ~U32 = 0
     ignored = quotient_i64(dividend, divisor) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -217,7 +217,7 @@ capture_quotient_i64 |dividend I64, divisor I64| -> U32:
 capture_remainder_i64 |dividend I64, divisor I64| -> U32:
     code ~U32 = 0
     ignored = remainder_i64(dividend, divisor) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -240,7 +240,7 @@ power_i32 |base I32, exponent I32| -> I32, Error!:
 capture_power_i32 |base I32, exponent I32| -> U32:
     code ~U32 = 0
     ignored = power_i32(base, exponent) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -344,7 +344,7 @@ real_min_i32 = real_i32(-2147483648, -1)
 real_min_i64 = real_i64(-9223372036854775808, -1)
 i16_quotient_code ~U32 = 0
 i16_quotient = quotient_i16(-32768, -1) catch |quotient_error|:
-    i16_quotient_code = quotient_error.code
+    ~i16_quotient_code = quotient_error.code
     then 0
 ;
 i16_remainder = remainder_i16(-32768, -1)

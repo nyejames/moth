@@ -16,12 +16,15 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidReceiverCallView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticToken};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticToken, InvalidReceiverCallReason,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -387,7 +390,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
 }
 
 #[test]
-fn mutable_receiver_unexpected_operand_reports_full_operand_span() {
+fn mutable_receiver_unexpected_operand_reports_marker_span() {
     let mut string_table = StringTable::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -433,13 +436,20 @@ fn mutable_receiver_unexpected_operand_reports_full_operand_span() {
     };
     let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
     let diagnostic = compact.first().expect("the diagnostic is retained");
-    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0002");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0047");
+    let facts = diagnostic
+        .family_view::<InvalidReceiverCallView>()
+        .expect("the diagnostic is an invalid receiver call");
+    assert_eq!(
+        facts.reason,
+        InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall
+    );
     assert!(
         matches!(
             diagnostic.primary_site(),
             SiteRef::Local(span)
-                if span == SourceSpan::new(SourceId::COMPILATION_ROOT, operand_span)
+                if span == SourceSpan::new(SourceId::COMPILATION_ROOT, marker_span)
         ),
-        "the diagnostic should underline the whole `false` operand, not `~`"
+        "the diagnostic should underline the authored `~` marker"
     );
 }

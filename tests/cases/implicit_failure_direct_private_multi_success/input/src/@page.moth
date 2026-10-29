@@ -4,7 +4,7 @@ pair |left I32, right I32| -> I32, String:
 
 multi_info ~= ""
 number, label = pair(50000, 50000) catch |multi_err|:
-    multi_info = [: [multi_err.code] [multi_err.message]]
+    ~multi_info = [: [multi_err.code] [multi_err.message]]
     then 0, "fallback"
 ;
 

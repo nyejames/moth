@@ -1,8 +1,8 @@
 enabled #Config of Bool = false
 result ~= 0
 if enabled:
-    result = 1
+    ~result = 1
 else
-    result = 2
+    ~result = 2
 ;
 [:source_config_false result=[result]]

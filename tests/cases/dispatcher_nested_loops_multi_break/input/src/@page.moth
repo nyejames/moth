@@ -12,7 +12,7 @@ loop outer |o, oi|:
         if i > 2:
             break
         ;
-        total = total + o + i
+        ~total = total + o + i
     ;
     if oi > 1:
         break

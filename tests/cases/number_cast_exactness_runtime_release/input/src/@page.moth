@@ -75,23 +75,23 @@ narrowed = narrow_to_number2(12.3400) catch:
 ;
 narrow_error_code ~U32 = 0
 inexact_narrowing = narrow_to_number2(12.3456) catch |narrow_error|:
-    narrow_error_code = narrow_error.code
+    ~narrow_error_code = narrow_error.code
     then 0.0
 ;
 
 negative_u64_code ~U32 = 0
 negative_u64 = number_to_u64(-1) catch |negative_error|:
-    negative_u64_code = negative_error.code
+    ~negative_u64_code = negative_error.code
     then 0
 ;
 fractional_i8_code ~U32 = 0
 fractional_i8 = fraction_to_i8(12.5) catch |fractional_error|:
-    fractional_i8_code = fractional_error.code
+    ~fractional_i8_code = fractional_error.code
     then 0
 ;
 fraction_before_range_code ~U32 = 0
 fraction_before_range = fraction_to_i8(1000.5) catch |fraction_range_error|:
-    fraction_before_range_code = fraction_range_error.code
+    ~fraction_before_range_code = fraction_range_error.code
     then 0
 ;
 
@@ -103,12 +103,12 @@ int64_minimum = number_to_int(-9223372036854775808) catch:
 ;
 int64_high_code ~U32 = 0
 int64_high = number_to_int(9223372036854775808) catch |high_error|:
-    int64_high_code = high_error.code
+    ~int64_high_code = high_error.code
     then 0
 ;
 int64_low_code ~U32 = 0
 int64_low = number_to_int(-9223372036854775809) catch |low_error|:
-    int64_low_code = low_error.code
+    ~int64_low_code = low_error.code
     then 0
 ;
 

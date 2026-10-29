@@ -7,8 +7,8 @@ returned ~= values.get(0) catch:
     then Point(0)
 ;
 
-returned = Point(2)
-returned.x = 3
+~returned = Point(2)
+~returned.x = 3
 
 ~values.set(0, Point(4)) catch:
 ;

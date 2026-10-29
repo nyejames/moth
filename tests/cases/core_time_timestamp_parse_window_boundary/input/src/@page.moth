@@ -33,7 +33,7 @@ last_iso = to_iso_string(last) catch |last_render_err|:
 
 past_code ~U32 = 0
 ignored = parse_past_last() catch |past_err|:
-    past_code = past_err.code
+    ~past_code = past_err.code
     then 0
 ;
 

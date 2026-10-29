@@ -27,14 +27,12 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
-    InvalidReceiverCallReason, ValueReceiverContext,
+    DiagnosticToken, InvalidCopyTargetReason, InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -86,40 +84,20 @@ pub(super) fn parse_mutable_receiver_expression(
         token_stream.current_tag(),
         TokenTag::SYMBOL | TokenTag::THIS
     ) {
-        let found = token_stream
-            .current_diagnostic_token(string_table)
-            .map_err(|error| {
-                InfrastructureFailure::malformed_token_projection(
-                    "mutable-receiver symbol diagnostic",
-                    error,
-                )
-            })?
-            .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-        return Err(token_lexical::unexpected_token_from_tag(
-            found,
-            Some(token_stream.current_span()),
+        return Err(calls_data::invalid_receiver_call(
+            InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
+            None,
+            None,
+            None,
+            None,
+            marker_span,
         )
         .into());
     }
     let receiver_declaration = resolve_place_root(token_stream, context, string_table)?;
 
-    // The mutable marker must be followed by a field-access chain; bare `~name` is not valid.
-    // When the author wrote `~name = ...`, the intent was an assignment target, not a receiver
-    // call, so report the assignment-target reason instead of the receiver-call reason.
+    // In expression position the marker still denotes a mutable receiver call.
     if token_stream.peek_next_tag() != Some(TokenTag::DOT) {
-        if token_stream
-            .peek_next_tag()
-            .is_some_and(TokenTag::is_assignment_operator)
-        {
-            return Err(names_declarations::invalid_assignment_target(
-                InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
-                None,
-                None,
-                None,
-                marker_span,
-            )
-            .into());
-        }
         return Err(calls_data::invalid_receiver_call(
             InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
             None,

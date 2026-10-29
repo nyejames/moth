@@ -4,9 +4,9 @@ enabled #= true
 value ~= 0
 
 if enabled:
-    value = 1
+    ~value = 1
 else
-    value = "still type checked"
+    ~value = "still type checked"
 ;
 
 [: [value]]

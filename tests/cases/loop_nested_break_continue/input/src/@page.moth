@@ -12,7 +12,7 @@ loop outer |outer_item, outer_index|:
             break
         ;
 
-        total = total + outer_item + inner_item
+        ~total = total + outer_item + inner_item
     ;
 
     if outer_index > 1:

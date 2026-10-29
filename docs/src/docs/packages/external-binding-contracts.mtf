@@ -59,6 +59,10 @@ The Moth dependency clause uses the annotation names, not the JavaScript export 
 - JavaScript export names are runtime implementation details
 - Moth names come from annotations
 
+Calls to mutable parameters follow ordinary access rules. Pass an existing
+mutable place as `~place` and pass a fresh value or legal `copy` without `~`.
+External binding calls remain positional-only.
+
 #### Exact literal constant subset
 
 `@moth.const` exposes a flat Moth name and the fixed `U32` type. The JavaScript export name may differ:

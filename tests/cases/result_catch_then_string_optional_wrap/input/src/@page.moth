@@ -11,9 +11,9 @@ recover || -> String?:
 value = recover()
 label ~= "unset"
 if value is:
-    none => label = "none"
-    "fallback" => label = "fallback"
-    else => label = "other"
+    none => ~label = "none"
+    "fallback" => ~label = "fallback"
+    else => ~label = "other"
 ;
 
 io.line([: [label]])

@@ -11,7 +11,7 @@ area |width I32, height I32| -> I32, GeometryError!:
 ;
 measure |width I32, height I32, seen ~String| -> I32:
     value = area(width, height) catch |geo|:
-        seen = [: [geo.detail] [geo.cause]]
+        ~seen = [: [geo.detail] [geo.cause]]
         then 0 - 1
     ;
     return value

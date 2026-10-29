@@ -10,11 +10,11 @@ steady #= true
 step U64 = 2
 limit U64 = 10
 count ~= 1
-count += step
+~count += step
 before_text = receive_u64(count)
 if steady:
-    count = copy limit
-    count += step
+    ~count = copy limit
+    ~count += step
 ;
 after_text = receive_u64(count)
 

@@ -2,7 +2,7 @@ Put spaces around symbolic operators:
 
 [codeblock, $code("moth"):
     total = left + right
-    count += 1
+    ~count += 1
 ]
 
 Use words for equality and logic:

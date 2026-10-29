@@ -635,6 +635,8 @@ The closed operation vocabulary contains only registered operations with real co
 
 One shared argument owner parses delimiters, commas, multiline whitespace, positional/named entries, mutable-access markers and expression boundaries. Signatures route values to parameter slots and retain that mapping for default, type and access validation. Anonymous records use named-only field routing instead. No consumer reroutes the source list or manufactures a callee signature merely to parse a record.
 
+AST validates `~` on existing-place writes and on existing mutable places passed to mutable parameters, including named argument values. Each existing multi-bind target carries its own marker, and all incoming results are evaluated before updates. Mutable receivers separately require `~` on an existing mutable place. Fresh values, including `copy place`, enter ordinary mutable parameters unmarked. A mutable alias declaration uses `writer ~= source` without marking the source. These forms express access, not inferred transfer or type identity. Wire and Route retain their own receiving contracts.
+
 Template-specific slot labels, indices and helper categories retain their own meaning over this shared list syntax. Directive signatures require compile-time arguments, reject escaping/mutable evaluation and distinguish standalone invocations from declaration modifiers. Builders cannot turn the shared parser into an arbitrary source-transform API.
 
 `assert` is a reserved statement intrinsic with compiler-owned expectations equivalent to:

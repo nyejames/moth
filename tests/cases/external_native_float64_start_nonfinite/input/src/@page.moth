@@ -9,7 +9,7 @@
 
 code ~U32 = 0
 value = fallible_nan() catch |err|:
-    code = err.code
+    ~code = err.code
     then 0.0
 ;
 io.line([: external_native_float64_start_nonfinite code=[code]])

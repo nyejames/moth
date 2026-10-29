@@ -34,7 +34,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
     let package_source = format!(
         "{default_line}\n@warnpkg value\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n"
     );
-    let warning_package_source = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n";
+    let warning_package_source = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
     let consumer_source = "@broken run\nvalue = run()\n";
 
     for (entry_mode, direct_file) in [("ordinary direct file", true), ("directory", false)] {
@@ -342,7 +342,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     .expect("should write diagnosed source package");
     fs::write(
         warning_package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write successful warning package");
 
@@ -520,7 +520,7 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
 ;
 
 seed_helper type T |value ~I32, marker T| -> I32:
-    value = 2
+    ~value = 2
     return value
 ;
 
@@ -1016,8 +1016,8 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
          identity type T |value T| -> T:\n    return value\n;\n\n\
          read_u64 |value U64| -> U64:\n    return value\n;\n\n\
          result ~U64 = 0\n\
-         if enabled:\n    inactive = identity(1)\n    result = read_u64(inactive)\n\
-         else\n    first = identity(2)\n    second = identity(3)\n    result = read_u64(first)\n    result = read_u64(second)\n;\n\
+         if enabled:\n    inactive = identity(1)\n    ~result = read_u64(inactive)\n\
+         else\n    first = identity(2)\n    second = identity(3)\n    ~result = read_u64(first)\n    ~result = read_u64(second)\n;\n\
          [: result=[result]]\n",
     )
     .expect("should write page");
@@ -1132,8 +1132,8 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
          peek type A |this Packet of A| -> A:\n    return this.value\n;\n\n\
          make_outer type T |value T| -> Outer of T:\n    packet Packet of I32 = Packet(7)\n    return Outer(value, packet)\n;\n\n\
          active ~I32 = 0\n\
-         if enabled:\n    active = make_outer(1).packet.peek()\n\
-         else\n    active = make_outer(2).packet.get()\n;\n\
+         if enabled:\n    ~active = make_outer(1).packet.peek()\n\
+         else\n    ~active = make_outer(2).packet.get()\n;\n\
          [: value=[active]]\n",
     )
     .expect("should write page");
@@ -2862,7 +2862,7 @@ fn source_package_warning_staged_by_frontend_outcome() {
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write warning package root");
 
@@ -2989,7 +2989,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     .expect("should write config");
 
     let project_text = "project_snapshot = 1\n";
-    let package_text = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n";
+    let package_text = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
     fs::write(project_source_root.join("@mod.moth"), project_text)
         .expect("should write project module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
@@ -3040,7 +3040,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     let rendered = render_compilation_result_html(&result, &project_root);
 
     assert!(
-        rendered.contains("&quot;one&quot; =&gt; result = &quot;one&quot;"),
+        rendered.contains("&quot;one&quot; =&gt; ~result = &quot;one&quot;"),
         "the package warning should render the package snapshot: {rendered}"
     );
     assert!(

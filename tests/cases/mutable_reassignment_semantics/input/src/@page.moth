@@ -7,19 +7,19 @@ message ~= [:Start]
 flag ~= false
 
 -- Proper mutations using = operator
-counter = counter + 1
-value = value * 2
-message = [:updated]
-flag = true
+~counter = counter + 1
+~value = value * 2
+~message = [:updated]
+~flag = true
 
 -- More complex mutations
-counter = counter - 5
-value = value // 4
+~counter = counter - 5
+~value = value // 4
 
 Amount as I32
 
 update_amount |amount ~Amount|:
-    amount = amount + 1
+    ~amount = amount + 1
 ;
 
 unchanged Amount = 7

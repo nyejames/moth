@@ -747,7 +747,7 @@ fn accepts_catch_handler_with_mixed_produce_and_return_paths() {
 #[test]
 fn rejects_assignment_target_read_inside_catch_fallback() {
     assert_invalid_assignment_target(
-        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    ~value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -755,7 +755,7 @@ fn rejects_assignment_target_read_inside_catch_fallback() {
 #[test]
 fn rejects_assignment_target_read_inside_inline_catch_fallback() {
     assert_invalid_assignment_target(
-        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch then value\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    ~value = can_error() catch then value\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -763,7 +763,7 @@ fn rejects_assignment_target_read_inside_inline_catch_fallback() {
 #[test]
 fn rejects_assignment_target_mutation_inside_catch_handler() {
     assert_invalid_assignment_target(
-        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch |err|:\n        value = 2\n        then 0\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    ~value = can_error() catch |err|:\n        ~value = 2\n        then 0\n    ;\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -1058,7 +1058,7 @@ fn rejects_catch_inside_if_condition() {
 #[test]
 fn rejects_catch_inside_loop_condition() {
     assert_invalid_fallible_handling(
-        "can_error || -> Bool, Error!:\n    return false\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then false\n    ;:\n        count = count + 1\n    ;\n    return count\n;\n",
+        "can_error || -> Bool, Error!:\n    return false\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then false\n    ;:\n        ~count = count + 1\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -1066,7 +1066,7 @@ fn rejects_catch_inside_loop_condition() {
 #[test]
 fn rejects_catch_inside_range_loop_bound() {
     assert_invalid_fallible_handling(
-        "can_error || -> I32, Error!:\n    return 3\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop 0 to can_error() catch:\n        then 3\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
+        "can_error || -> I32, Error!:\n    return 3\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop 0 to can_error() catch:\n        then 3\n    ; |value|:\n        ~count = count + value\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -1074,7 +1074,7 @@ fn rejects_catch_inside_range_loop_bound() {
 #[test]
 fn rejects_catch_inside_collection_loop_source() {
     assert_invalid_fallible_handling(
-        "can_error || -> {I32}, Error!:\n    return {1, 2}\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then {0}\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
+        "can_error || -> {I32}, Error!:\n    return {1, 2}\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then {0}\n    ; |value|:\n        ~count = count + value\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }

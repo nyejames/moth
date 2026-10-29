@@ -1,12 +1,12 @@
 bump |target ~U8, amount U16| -> U8:
-    target += amount
+    ~target += amount
     return target
 ;
 
 kept ~U8 = 200
 code ~U32 = 0
 recovered = bump(~kept, 100) catch |err|:
-    code = err.code
+    ~code = err.code
     then copy kept
 ;
 

@@ -5,7 +5,7 @@ risky |amount U8| -> U8, Error!:
 export:
     bump |extra U8| -> U8:
         total ~U8 = 250
-        total += risky(extra) catch then extra
+        ~total += risky(extra) catch then extra
         return total
     ;
 ;

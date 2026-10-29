@@ -40,6 +40,14 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 #[test]
+fn assignment_reason_codec_rejects_retired_and_unknown_words() {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::AssignmentTargetReasonFact;
+
+    for word in [0, 9, 19, u32::MAX] {
+        assert_eq!(AssignmentTargetReasonFact::decode(&[word]), None);
+    }
+}
+#[test]
 fn token_fact_round_trips_static_and_string_tokens() {
     let mut words = [0u32; 2];
 

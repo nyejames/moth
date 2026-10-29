@@ -8,25 +8,25 @@ parse_float |value F64| -> I32, Error!:
 
 too_big_string_code ~U32 = 0
 too_big_string_value = parse_string("2147483648") catch |big_string_err|:
-    too_big_string_code = big_string_err.code
+    ~too_big_string_code = big_string_err.code
     then 0
 ;
 
 too_small_string_code ~U32 = 0
 too_small_string_value = parse_string("-2147483649") catch |small_string_err|:
-    too_small_string_code = small_string_err.code
+    ~too_small_string_code = small_string_err.code
     then 0
 ;
 
 too_big_float_code ~U32 = 0
 too_big_float_value = parse_float(2147483648.0) catch |big_float_err|:
-    too_big_float_code = big_float_err.code
+    ~too_big_float_code = big_float_err.code
     then 0
 ;
 
 too_small_float_code ~U32 = 0
 too_small_float_value = parse_float(-2147483649.0) catch |small_float_err|:
-    too_small_float_code = small_float_err.code
+    ~too_small_float_code = small_float_err.code
     then 0
 ;
 

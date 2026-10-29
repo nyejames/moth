@@ -94,9 +94,9 @@ fn registry_finds_sampled_family_codes_and_no_other() {
 #[test]
 fn multi_bind_codes_are_dense_unique_and_well_formed() {
     let mut keys = HashSet::new();
-    for code in 1..=15 {
+    for code in 1..=17 {
         let key = InvalidMultiBindCode::from_code(code)
-            .expect("codes 1 to 15 are assigned")
+            .expect("codes 1 to 17 are assigned")
             .stable_reason_key();
         assert!(is_well_formed_reason_key(key), "{key} is well formed");
         assert!(
@@ -105,9 +105,9 @@ fn multi_bind_codes_are_dense_unique_and_well_formed() {
         );
         keys.insert(key);
     }
-    assert_eq!(keys.len(), 15);
+    assert_eq!(keys.len(), 17);
     assert!(InvalidMultiBindCode::from_code(0).is_none());
-    assert!(InvalidMultiBindCode::from_code(16).is_none());
+    assert!(InvalidMultiBindCode::from_code(18).is_none());
 }
 
 #[test]
@@ -166,6 +166,14 @@ fn multi_bind_reason_keys_remain_stable() {
             "invalid_multi_bind.existing_target_immutable",
         ),
         (
+            InvalidMultiBindReason::ExistingTargetNeedsPrefix,
+            "invalid_multi_bind.existing_target_needs_prefix",
+        ),
+        (
+            InvalidMultiBindReason::UnknownPrefixedTarget,
+            "invalid_multi_bind.unknown_prefixed_target",
+        ),
+        (
             InvalidMultiBindReason::ArityMismatch {
                 expected: 2,
                 found: 1,
@@ -178,12 +186,20 @@ fn multi_bind_reason_keys_remain_stable() {
         ),
     ];
 
-    assert_eq!(cases.len(), 15, "one case per multi-bind reason");
+    assert_eq!(cases.len(), 17, "one case per multi-bind reason");
     for (reason, expected_key) in &cases {
         assert_eq!(reason.stable_reason_key(), *expected_key);
         assert_eq!(
             InvalidMultiBindCode::of(reason).stable_reason_key(),
             *expected_key
+        );
+        let (expected, found) = match reason {
+            InvalidMultiBindReason::ArityMismatch { expected, found } => (*expected, *found),
+            _ => (0, 0),
+        };
+        assert_eq!(
+            InvalidMultiBindCode::of(reason).to_reason(expected, found),
+            *reason
         );
     }
 }

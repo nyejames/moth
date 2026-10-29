@@ -8,7 +8,7 @@ parse || -> I32, Error!:
 -- Surrounding whitespace is rejected
 code ~U32 = 0
 ignored = parse() catch |err|:
-    code = err.code
+    ~code = err.code
     then 0
 ;
 

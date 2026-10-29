@@ -3,7 +3,7 @@ Box = |
 |
 
 shift |this ~Box|:
-    this.x = this.x + 1
+    ~this.x = this.x + 1
 ;
 
 b ~= Box(7)

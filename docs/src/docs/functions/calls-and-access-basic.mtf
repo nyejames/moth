@@ -17,12 +17,15 @@ Mutable parameters need explicit access to an existing mutable value:
 [codeblock, $code("moth"):
     count ~= 1
     increment(~count)
+    increment(value = ~count)
 ]
 
-Fresh values do not use `~`:
+For a named argument, put `~` before the value. Fresh values and independent
+copies don't use `~`:
 
 [codeblock, $code("moth"):
     increment(1)
+    increment(copy count)
 ]
 
 Ordinary function calls keep their usual syntax, including empty `f()`. Directives

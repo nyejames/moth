@@ -1,5 +1,5 @@
 mixed |identity Wire of String, writer ~String| -> String:
-    writer = "changed"
+    ~writer = "changed"
     return identity
 ;
 

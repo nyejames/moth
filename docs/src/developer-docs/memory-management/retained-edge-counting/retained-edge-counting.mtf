@@ -254,7 +254,7 @@ The compiler does not recognise user methods by name. A user abstraction earns a
 [codeblock, $code("moth"):
     clear |this ~UserIndex|:
         ~this.values.clear()
-        this.count = 0
+        ~this.count = 0
     ;
 ]
 

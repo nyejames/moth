@@ -16,9 +16,9 @@ inner_condition = false
 if outer_condition:
     nested_result ~= 3
     if inner_condition:
-        nested_result = 1
+        ~nested_result = 1
     else
-        nested_result = 2
+        ~nested_result = 2
     ;
     final_result = nested_result
 else

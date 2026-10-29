@@ -1619,7 +1619,7 @@ fn u32_decimal_mix_rejects_and_completed_f64_rejects_into_u32() {
 fn u32_grouped_compound_exponent_keeps_u32_rhs() {
     // Grouped `^=` on a U32 target keeps ordinary same-family arithmetic: the
     // grouped right side receives U32 context, while Dec keeps the I32 edge.
-    let source = concat!("powered ~U32 = 2\n", "powered ^= 1 + 2\n");
+    let source = concat!("powered ~U32 = 2\n", "~powered ^= 1 + 2\n");
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let body = start_function_body(&ast, &path_fork, &string_table);
     let NodeKind::Assignment { target, value } = &body[1].kind else {

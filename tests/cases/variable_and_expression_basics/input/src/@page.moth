@@ -19,5 +19,5 @@ is_false ~= not true
 comparison ~= 5 is 5
 
 -- Variable mutation (proper syntax)
-int_var = int_var + 1
-sum = sum * 2
+~int_var = int_var + 1
+~sum = sum * 2

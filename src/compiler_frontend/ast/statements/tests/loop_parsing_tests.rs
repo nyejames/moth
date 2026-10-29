@@ -184,7 +184,7 @@ fn fixed_scalar_constant(ast: &Ast, id: ExprId) -> Option<FixedScalarValue> {
 #[test]
 fn parses_conditional_loop_without_bindings() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("counter ~= 0\nloop counter < 3:\n    counter = counter + 1\n;");
+        parse_loop_fixture("counter ~= 0\nloop counter < 3:\n    ~counter = counter + 1\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
@@ -204,7 +204,7 @@ fn parses_conditional_loop_without_bindings() {
 #[test]
 fn parses_range_loop_with_pipe_binding() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("sum ~= 0\nloop 1 to & 5 by 2 |i|:\n    sum = sum + i\n;");
+        parse_loop_fixture("sum ~= 0\nloop 1 to & 5 by 2 |i|:\n    ~sum = sum + i\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
@@ -246,7 +246,7 @@ fn parses_range_loop_with_pipe_binding() {
 #[test]
 fn parses_range_loop_with_value_and_index_bindings() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    sum = sum + value\n;");
+        parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    ~sum = sum + value\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
@@ -271,7 +271,7 @@ fn parses_range_loop_with_value_and_index_bindings() {
 #[test]
 fn range_index_binding_has_i32_type() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    sum = sum + value\n;");
+        parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    ~sum = sum + value\n;");
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { bindings, .. } = &body[1].kind else {
@@ -713,7 +713,7 @@ fn rejects_string_literal_as_range_binding() {
 #[test]
 fn parses_collection_loop_without_bindings() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("count ~= 0\nitems = {1, 2, 3}\nloop items:\n    count = count + 1\n;");
+        parse_loop_fixture("count ~= 0\nitems = {1, 2, 3}\nloop items:\n    ~count = count + 1\n;");
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::CollectionLoop { bindings, .. } = &body[2].kind else {
@@ -834,7 +834,7 @@ fn rejects_non_boolean_conditional_loop_condition() {
 #[test]
 fn parses_inclusive_range_loop_with_tight_ampersand() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("sum ~= 0\nloop 0 to &5 |i|:\n    sum = sum + i\n;");
+        parse_loop_fixture("sum ~= 0\nloop 0 to &5 |i|:\n    ~sum = sum + i\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
@@ -848,7 +848,7 @@ fn parses_inclusive_range_loop_with_tight_ampersand() {
 #[test]
 fn parses_omitted_start_exclusive_range_loop() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
+        parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    ~sum = sum + i\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
@@ -872,7 +872,7 @@ fn parses_omitted_start_exclusive_range_loop() {
 #[test]
 fn parses_omitted_start_inclusive_range_loop() {
     let (ast, path_fork, string_table) =
-        parse_loop_fixture("sum ~= 0\nloop to & 5 |i|:\n    sum = sum + i\n;");
+        parse_loop_fixture("sum ~= 0\nloop to & 5 |i|:\n    ~sum = sum + i\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
@@ -965,7 +965,7 @@ fn rejects_missing_closing_pipe_in_loop_bindings() {
 #[test]
 fn rejects_range_loop_with_bare_binding_after_complex_step_expression() {
     assert_loop_fixture_diagnostic(
-        "limit = 8\nstep = 2\nsum ~= 0\nloop 0 to limit by step i:\n    sum = sum + i\n;",
+        "limit = 8\nstep = 2\nsum ~= 0\nloop 0 to limit by step i:\n    ~sum = sum + i\n;",
         "MOTH-SYNTAX-0029",
         Some("invalid_loop_header.bare_single_binding"),
     );

@@ -21,7 +21,7 @@ exact = guarded(ok)
 
 fail_code ~U32 = 0
 failed = safe_bump(2) catch |fail_err|:
-    fail_code = fail_err.code
+    ~fail_code = fail_err.code
     then 0 - 1
 ;
 

@@ -874,9 +874,23 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
             return true;
         }
 
+        // A comma in the producer does not turn a single receiver into a target list.
+        if record_pipe_depth == 0 && depth.is_top_level() && tag.is_assignment_operator() {
+            break;
+        }
+
         if record_pipe_depth == 0
             && depth.is_top_level()
-            && matches!(tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF)
+            && matches!(
+                tag,
+                TokenTag::NEWLINE
+                    | TokenTag::END
+                    | TokenTag::EOF
+                    | TokenTag::CATCH
+                    | TokenTag::COLON
+                    | TokenTag::ELSE
+                    | TokenTag::THEN
+            )
         {
             break;
         }

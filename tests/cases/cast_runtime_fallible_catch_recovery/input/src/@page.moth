@@ -5,7 +5,7 @@ try_float |text String| -> F64, Error!:
 code_for_float |text String| -> U32:
     code ~U32 = 0
     ignored F64 = cast text catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -14,7 +14,7 @@ code_for_float |text String| -> U32:
 capture_float_int_code |value F64| -> U32:
     code ~U32 = 0
     ignored I32 = cast value catch |err|:
-        code = err.code
+        ~code = err.code
         then 0
     ;
     return code
@@ -23,7 +23,7 @@ capture_float_int_code |value F64| -> U32:
 code_for_char |text String| -> U32:
     code ~U32 = 0
     ignored Char = cast text catch |err|:
-        code = err.code
+        ~code = err.code
         then ' '
     ;
     return code
@@ -32,7 +32,7 @@ code_for_char |text String| -> U32:
 code_for_int_char |value I32| -> U32:
     code ~U32 = 0
     ignored Char = cast value catch |err|:
-        code = err.code
+        ~code = err.code
         then ' '
     ;
     return code

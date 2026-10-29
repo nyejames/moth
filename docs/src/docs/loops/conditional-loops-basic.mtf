@@ -8,7 +8,7 @@ might not run at all.
 
     loop count < 3:
         io.line([: Count: [count]])
-        count += 1
+        ~count += 1
     ;
 ]
 
@@ -26,7 +26,7 @@ A condition that never becomes `false` keeps the loop running forever.
         do_some_work()
 
         if work_is_finished():
-            running = false
+            ~running = false
         ;
     ;
 ]

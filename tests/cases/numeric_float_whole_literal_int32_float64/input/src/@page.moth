@@ -45,7 +45,7 @@ return_large_float || -> F64:
 ;
 float_add_assign || -> F64:
     value ~F64 = 1.0
-    value += 3_000_000_000
+    ~value += 3_000_000_000
     return value
 ;
 

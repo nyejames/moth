@@ -15,8 +15,8 @@ render_structs_and_collections || -> String:
     person = Person("Alice", 30)
 
     p2 ~= Point(0, 0)
-    p2.x = 5
-    p2.y = 10
+    ~p2.x = 5
+    ~p2.y = 10
 
     empty {I32} = {}
     numbers = {1, 2, 3, 4, 5}

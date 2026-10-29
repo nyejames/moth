@@ -132,7 +132,9 @@ fn failure_message_contains_uses_structured_render_output() {
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
-        message_contains: vec!["Cannot reassign `value`".to_string()],
+        message_contains: vec![
+            "`value` is immutable. Declare it mutable to update it.".to_string(),
+        ],
     };
 
     let result = validate_failure_result(failure, &expectation, Path::new("."));

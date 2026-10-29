@@ -872,7 +872,7 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
     .expect("should write config");
     fs::write(
         source_root.join("@page.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write page source with a frontend warning");
 
@@ -898,7 +898,7 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
             .site_position(warning.primary_site())
             .expect("the warning should resolve through its report context");
         assert!(position.path.ends_with("@page.moth"));
-        assert!(position.line.contains("\"one\" => result = \"one\""));
+        assert!(position.line.contains("\"one\" => ~result = \"one\""));
         Arc::downgrade(&warning_report.shared_context())
     };
     assert!(
@@ -1000,7 +1000,7 @@ fn project_build_executor_separates_warnings_from_output_write_failures() {
     let entry_file = root.join("main.moth");
     fs::write(
         &entry_file,
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write source with a frontend warning");
 

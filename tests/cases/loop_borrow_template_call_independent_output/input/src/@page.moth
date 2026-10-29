@@ -5,7 +5,7 @@ render_card |card String| -> String:
 render_listing |cards {String}| -> String:
     output ~= [: <section>]
     loop cards |card|:
-        output = [: [output][render_card(card)]]
+        ~output = [: [output][render_card(card)]]
     ;
     return [: [output]</section>]
 ;

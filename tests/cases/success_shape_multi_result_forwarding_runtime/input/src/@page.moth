@@ -1,5 +1,5 @@
 pair |calls ~I32| -> String, I32:
-    calls += 1
+    ~calls += 1
     return "first-slot", 42
 ;
 

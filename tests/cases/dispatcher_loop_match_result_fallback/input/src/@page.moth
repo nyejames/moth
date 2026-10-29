@@ -15,14 +15,14 @@ loop i < 4:
         then 5
     ;
     if value is:
-        0 => sum = sum + 1
-        10 => sum = sum + 10
-        20 if i > 0 => sum = sum + 20
-        30 => sum = sum + 30
-        else => sum = sum + 100
+        0 => ~sum = sum + 1
+        10 => ~sum = sum + 10
+        20 if i > 0 => ~sum = sum + 20
+        30 => ~sum = sum + 30
+        else => ~sum = sum + 100
     ;
 
-    i = i + 1
+    ~i = i + 1
 ;
 
 [:dispatcher_loop_match_result_fallback sum=[sum]]

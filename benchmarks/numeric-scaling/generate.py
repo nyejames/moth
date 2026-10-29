@@ -61,7 +61,7 @@ def fixture(shape, size):
     elif shape == "mutable-cycles":
         lines += ["cycles |concrete I64|:"]
         for i in range(size):
-            lines += [f"    left_{i} ~= 1", f"    right_{i} ~= 2", f"    left_{i} = copy right_{i}", f"    right_{i} = copy left_{i}", f"    mixed_{i} I64 = concrete + left_{i}", f"    received_{i} I64 = right_{i}"]
+            lines += [f"    left_{i} ~= 1", f"    right_{i} ~= 2", f"    ~left_{i} = copy right_{i}", f"    ~right_{i} = copy left_{i}", f"    mixed_{i} I64 = concrete + left_{i}", f"    received_{i} I64 = right_{i}"]
         lines += [";"]
     elif shape == "narrow-chains":
         for name, numeric_type in (("signed", "I8"), ("unsigned", "U8"), ("half", "F16")):

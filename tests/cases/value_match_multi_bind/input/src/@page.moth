@@ -1,5 +1,7 @@
 values_for |flag Bool| -> I32, String:
-    numeric_value, label = if flag is:
+    numeric_value ~= 2
+    label ~= "initial"
+    ~numeric_value, ~label = if flag is:
         true => then 1, "yes"
         else => then 0, "no"
     ;

@@ -534,7 +534,7 @@ cargo test <span class='moth-code-operator'>-</span>p moth <span class='moth-cod
         <span class='moth-code-keyword'>if</span> agent.health <span class='moth-code-operator'>&gt;</span> <span class='moth-code-number'>0</span><span class='moth-code-delimiter'>:</span>
             <span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>agent.tile <span class='moth-code-operator'>&gt;=</span> <span class='moth-code-number'>0</span> <span class='moth-code-operator'>and</span> agent.tile <span class='moth-code-operator'>&lt;</span> board_cells<span class='moth-code-delimiter'>)</span>
         <span class='moth-code-delimiter'>;</span>
-        carried <span class='moth-code-operator'>+=</span> agent.cargo
+        <span class='moth-code-operator'>~</span>carried <span class='moth-code-operator'>+=</span> agent.cargo
     <span class='moth-code-delimiter'>;</span>
     mined <span class='moth-code-operator'>=</span> <span class='moth-code-function'>counter_value</span><span class='moth-code-delimiter'>(</span>game.counters, <span class='moth-code-string'>&quot;mined&quot;</span><span class='moth-code-delimiter'>)</span>
     delivered <span class='moth-code-operator'>=</span> <span class='moth-code-function'>counter_value</span><span class='moth-code-delimiter'>(</span>game.counters, <span class='moth-code-string'>&quot;delivered&quot;</span><span class='moth-code-delimiter'>)</span>

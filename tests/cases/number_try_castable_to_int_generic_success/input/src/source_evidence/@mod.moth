@@ -13,7 +13,7 @@ export:
     ;
     mapped_label_to_i32 |label Label, mapped_code ~U32| -> I32, DomainError!:
         result = private_label_to_i32(label) catch |cast_error|:
-            mapped_code = cast_error.code
+            ~mapped_code = cast_error.code
             return! DomainError::Invalid
         ;
         return result

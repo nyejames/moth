@@ -13,9 +13,9 @@ label |s String| -> String:
 
 result ~= "none"
 if is_empty(""):
-    result = "live"
+    ~result = "live"
 else
-    result = label("abc")
+    ~result = label("abc")
 ;
 
 [:defaults_static_if default=[read_len()] branch=[result]]

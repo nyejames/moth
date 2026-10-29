@@ -865,10 +865,10 @@ fn parses_relational_arm_after_single_line_assignment_body() {
         "value = 5\n\
      result ~= \"\"\n\
      if value is:\n\
-         < 0 => result = \"negative\"\n\
-         0 => result = \"zero\"\n\
-         <= 10 => result = \"small\"\n\
-         else => result = \"fallback\"\n\
+         < 0 => ~result = \"negative\"\n\
+         0 => ~result = \"zero\"\n\
+         <= 10 => ~result = \"small\"\n\
+         else => ~result = \"fallback\"\n\
      ;\n",
     );
 
@@ -944,11 +944,11 @@ fn parses_multi_statement_match_arm_body_delimited_by_next_arm() {
      result ~= \"unset\"\n\
      if value is:\n\
          1 =>\n\
-             result = \"one\"\n\
+             ~result = \"one\"\n\
              io.line([: [result]])\n\
          2 =>\n\
-             result = \"two\"\n\
-         else => result = \"other\"\n\
+             ~result = \"two\"\n\
+         else => ~result = \"other\"\n\
      ;\n",
     );
 
@@ -1018,7 +1018,7 @@ fn routes_missing_inline_else_at_assignment_boundary_through_value_if_missing_el
     // The assignment receiver keeps a real newline before the next statement,
     // so the absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    ~result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
         "invalid_control_flow_statement.value_if_missing_else",
     );
 }
@@ -1038,7 +1038,7 @@ fn preserves_inline_multiline_when_newline_precedes_an_authored_else() {
     // A real newline before an authored `else` stays the multiline inline form
     // at both assignment and return receivers, not a missing-`else` diagnostic.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    ~result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
         "invalid_control_flow_statement.inline_value_if_multiline",
     );
     assert_inline_control_flow_reason(
@@ -1065,7 +1065,7 @@ fn multiline_option_literal_predicate_stays_inline_value_if_multiline() {
 #[test]
 fn ignores_else_owned_by_a_later_statement() {
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    ~result = if condition then 10\n    if condition:\n        ~result = 1\n    else\n        ~result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
         "invalid_control_flow_statement.value_if_missing_else",
     );
 }

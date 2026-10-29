@@ -12,7 +12,7 @@ safe_product |left I32, right I32| -> I32, Error!:
 ;
 overflow_code ~U32 = 0
 overflow = safe_product(2147483647, 2) catch |overflow_error|:
-    overflow_code = overflow_error.code
+    ~overflow_code = overflow_error.code
     then 0
 ;
 exact = safe_product(6, 7) catch then 0

@@ -1,5 +1,5 @@
 store_u8 |target ~U8, increment U16|:
-    target += increment
+    ~target += increment
 ;
 
 target ~U8 = 255

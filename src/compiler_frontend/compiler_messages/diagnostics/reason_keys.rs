@@ -678,7 +678,8 @@ define_stable_reason_keys! {
     &InvalidAssignmentTargetReason::MapGetTargetNotWritable => "invalid_assignment_target.map_get_target_not_writable",
     &InvalidAssignmentTargetReason::ReadOnlyMapProperty => "invalid_assignment_target.read_only_map_property",
     &InvalidAssignmentTargetReason::ExpectedAssignmentOperator => "invalid_assignment_target.expected_assignment_operator",
-    &InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget => "invalid_assignment_target.mutable_marker_on_assignment_target",
+    &InvalidAssignmentTargetReason::MissingWritePrefix { .. } => "invalid_assignment_target.missing_write_prefix",
+    &InvalidAssignmentTargetReason::MutableMarkerRequiresExistingPlace => "invalid_assignment_target.mutable_marker_requires_existing_place",
     },
 
     InvalidMultiBindCode => {
@@ -695,6 +696,8 @@ define_stable_reason_keys! {
     &InvalidMultiBindCode::UnsupportedRhs => "invalid_multi_bind.unsupported_rhs",
     &InvalidMultiBindCode::ExistingTargetMutableMarker => "invalid_multi_bind.existing_target_mutable_marker",
     &InvalidMultiBindCode::ExistingTargetImmutable => "invalid_multi_bind.existing_target_immutable",
+    &InvalidMultiBindCode::ExistingTargetNeedsPrefix => "invalid_multi_bind.existing_target_needs_prefix",
+    &InvalidMultiBindCode::UnknownPrefixedTarget => "invalid_multi_bind.unknown_prefixed_target",
     &InvalidMultiBindCode::ArityMismatch => "invalid_multi_bind.arity_mismatch",
     &InvalidMultiBindCode::RhsNotMultiValue => "invalid_multi_bind.rhs_not_multi_value",
     },

@@ -31,8 +31,9 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, first_ast_error_view,
-    parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+    ast_first_error_rendered_message, first_ast_error_view, parse_single_file_ast,
+    parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -173,8 +174,8 @@ fn ordinary_mutable_parameters_keep_single_and_multi_bind_updates() {
     let (ast, paths, strings) = parse_single_file_ast(
         "pair || -> I32, I32:\n    return 1, 2\n;\n\
          rebind |first ~I32, second ~I32| -> I32, I32:\n\
-             first = 3\n\
-             first, second = pair()\n\
+             ~first = 3\n\
+             ~first, ~second = pair()\n\
              return first, second\n;\n",
     );
     let body = function_body_by_name(&ast, &paths, &strings, "rebind");
@@ -197,6 +198,127 @@ fn ordinary_mutable_parameters_keep_single_and_multi_bind_updates() {
     }
     assert!(matches!(body[2].kind, NodeKind::Return(_)));
     assert_eq!(body.len(), 3);
+}
+
+#[test]
+fn multi_bind_prefix_selects_update_independently_of_declaration() {
+    let (ast, paths, strings) = parse_single_file_ast(
+        "pair || -> I32, I32:\n    return 1, 2\n;\n\
+         rebind |first ~I32| -> I32, I32:\n\
+             ~first I32, second ~I32 = pair()\n\
+             return first, second\n;\n",
+    );
+    let body = function_body_by_name(&ast, &paths, &strings, "rebind");
+    let NodeKind::MultiBind { targets, .. } = &body[0].kind else {
+        panic!("expected mixed multi-bind");
+    };
+    assert!(matches!(targets[0].kind, MultiBindTargetKind::Assignment));
+    assert!(matches!(targets[1].kind, MultiBindTargetKind::Declaration));
+    assert_eq!(targets[1].value_mode, ValueMode::MutableOwned);
+}
+
+#[test]
+fn multi_bind_prefix_diagnostics_identify_the_authored_name() {
+    for (targets, parameter, reason, name) in [
+        (
+            "first, second",
+            "first ~I32",
+            "invalid_multi_bind.existing_target_needs_prefix",
+            "first",
+        ),
+        (
+            "first, second",
+            "first I32",
+            "invalid_multi_bind.existing_target_immutable",
+            "first",
+        ),
+        (
+            "~missing, second",
+            "first ~I32",
+            "invalid_multi_bind.unknown_prefixed_target",
+            "missing",
+        ),
+    ] {
+        let source = format!(
+            "pair || -> I32, I32:\n    return 1, 2\n;\nrebind |{parameter}|:\n    {targets} = pair()\n;\n"
+        );
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0045", Some(reason));
+        let start = source.find(targets).expect("target list is present")
+            + targets.find(name).expect("target name is present");
+        let mut builder = ExtendedSpanBuilder::new();
+        let span = LocalSpan::exact(start as u32, name.len() as u32, &mut builder)
+            .expect("target name span fits");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            "{source}",
+        );
+    }
+}
+
+#[test]
+fn multi_bind_immutable_update_precedes_producer_errors_and_labels_declaration() {
+    for (declaration, prefix) in [
+        ("rebind |first I32|:\n", "~"),
+        ("rebind |first I32|:\n", ""),
+        ("rebind ||:\n    first = 0\n", ""),
+        ("rebind ||:\n    first = 0\n", "~"),
+    ] {
+        let source = format!("{declaration}    {prefix}first, second = missing()\n;\n");
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0045",
+            Some("invalid_multi_bind.existing_target_immutable"),
+        );
+        assert_eq!(
+            ast_first_error_rendered_message(&failure),
+            "Existing multi-bind target 'first' is immutable. Declare it mutable to update it.",
+        );
+        let mut spans = ExtendedSpanBuilder::new();
+        let declaration =
+            LocalSpan::exact(source.find("first").unwrap() as u32, 5, &mut spans).unwrap();
+        let target =
+            LocalSpan::exact(source.rfind("first").unwrap() as u32, 5, &mut spans).unwrap();
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, target)),
+        );
+        assert_eq!(
+            ast_error_label_spans(diagnostic),
+            vec![Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                declaration
+            ))],
+        );
+    }
+}
+
+#[test]
+fn multi_bind_pending_mutability_and_malformed_declaration_precedence() {
+    for (declaration, target, reason) in [
+        (
+            "first ~= 0",
+            "first",
+            "invalid_multi_bind.existing_target_needs_prefix",
+        ),
+        (
+            "first = 0",
+            "first ~I32",
+            "invalid_multi_bind.existing_target_mutable_marker",
+        ),
+        (
+            "first I32 = 0",
+            "first ~I32",
+            "invalid_multi_bind.existing_target_mutable_marker",
+        ),
+    ] {
+        let source =
+            format!("rebind ||:\n    {declaration}\n    {target}, second = missing()\n;\n");
+        let failure = parse_single_file_ast_diagnostic(&source);
+        assert_ast_diagnostic(&failure, "MOTH-RULE-0045", Some(reason));
+    }
 }
 
 #[test]
@@ -711,7 +833,7 @@ fn dynamic_assertion_retains_generic_message_requests() {
 #[test]
 fn static_if_discards_inactive_generic_requests() {
     let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(
-        "enabled #= true\nidentity type T |value T| -> T:\n    return value\n;\n\nactive ~= 0\ninactive ~= \"\"\nif enabled:\n    active = 1\nelse\n    inactive = identity(\"inactive\")\n;\n",
+        "enabled #= true\nidentity type T |value T| -> T:\n    return value\n;\n\nactive ~= 0\ninactive ~= \"\"\nif enabled:\n    ~active = 1\nelse\n    ~inactive = identity(\"inactive\")\n;\n",
     )
     .expect("both static-if branches should remain frontend-valid");
 
@@ -724,7 +846,7 @@ fn static_if_discards_inactive_generic_requests() {
 #[test]
 fn static_if_keeps_active_duplicate_after_inactive_first_request() {
     let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(
-        "enabled #= false\nidentity type T |value T| -> T:\n    return value\n;\n\nvalue ~= 0\nif enabled:\n    value = identity(1)\nelse\n    value = identity(2)\n;\n",
+        "enabled #= false\nidentity type T |value T| -> T:\n    return value\n;\n\nvalue ~= 0\nif enabled:\n    ~value = identity(1)\nelse\n    ~value = identity(2)\n;\n",
     )
     .expect("both duplicate generic calls should remain frontend-valid");
 
@@ -929,7 +1051,7 @@ fn rejects_const_record_method_calls() {
 #[test]
 fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n",
+        "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    ~this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n",
     );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -949,6 +1071,41 @@ fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
 }
 
 #[test]
+fn mutable_receiver_can_write_fields_but_cannot_replace_this() {
+    let source = "Point = |\n    x I32 = 0,\n|\nreset |this ~Point|:\n    ~this = Point()\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0040",
+        Some("invalid_this_usage.reassignment"),
+    );
+    let mut spans = ExtendedSpanBuilder::new();
+    let span = LocalSpan::exact(source.rfind("this").unwrap() as u32, 4, &mut spans).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span))
+    );
+}
+
+#[test]
+fn prefixed_write_keeps_value_if_receiving_context() {
+    let (ast, paths, strings) = parse_single_file_ast(
+        "choose |flag Bool| -> I32:\n    value ~I32 = 0\n    ~value = if flag then 1 else 2\n    return value\n;\n",
+    );
+    let body = function_body_by_name(&ast, &paths, &strings, "choose");
+    assert!(matches!(&body[1].kind, NodeKind::Assignment { .. }));
+}
+
+#[test]
+fn prefixed_write_preserves_catch_target_unavailability() {
+    assert_function_diagnostic(
+        "can_error || -> I32, Error!:\n    return 1\n;\nrecover || -> I32:\n    value ~= 0\n    ~value = can_error() catch:\n        ~value = 2\n        then 0\n    ;\n    return value\n;\n",
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.unavailable_in_catch_recovery"),
+    );
+}
+
+#[test]
 fn parses_result_propagation_for_receiver_method_call() {
     parse_single_file_ast(
         "Point = |\n    x I32 = 1,\n|\n\nread |this Point| -> I32, Error!:\n    return this.x\n;\n\nforward |point Point| -> I32, Error!:\n    return point.read()!\n;\n",
@@ -958,7 +1115,7 @@ fn parses_result_propagation_for_receiver_method_call() {
 #[test]
 fn rejects_mutable_receiver_methods_on_immutable_bindings_without_marker() {
     assert_invalid_receiver_call(
-        "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint = Point()\npoint.reset()\n",
+        "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    ~this.x = 0\n;\n\npoint = Point()\npoint.reset()\n",
         "invalid_receiver_call.immutable_receiver_mutable_method",
     );
 }
@@ -1735,7 +1892,7 @@ as_float |value F64 = LARGE, required F64| -> F64:\n\
 fn mutable_f64_operator_default_keeps_parameter_access_mode() {
     let source = "\
 adjust |value ~F64 = 1 + 1|:\n\
-    value = value + 1.0\n\
+    ~value = value + 1.0\n\
 ;\n\
 \n\
 caller |input ~F64|:\n\

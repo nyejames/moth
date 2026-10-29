@@ -18,8 +18,8 @@ return_boundary |value F16, half_ulp F16| -> F16, Error!:
 -- Each same-type compound update completes before the next update reads value.
 compound_subnormal |smallest F16, half F16| -> F16, Error!:
     value ~= copy smallest
-    value *= half
-    value += smallest
+    ~value *= half
+    ~value += smallest
     return value
 ;
 

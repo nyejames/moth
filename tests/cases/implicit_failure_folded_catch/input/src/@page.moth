@@ -5,11 +5,11 @@ DomainError ::
 handler_runs ~= 0
 inline_value = 1 + 2 catch then 0
 block_value = 1 + 2 catch:
-    handler_runs = 1
+    ~handler_runs = 1
     then 0
 ;
 bound_value = 1 + 2 catch |err|:
-    handler_runs = 2
+    ~handler_runs = 2
     then 0
 ;
 identity_int |value I32| -> I32:
@@ -21,7 +21,7 @@ identity_text |value String| -> String:
 ;
 fallback_once |runs ~I32| -> I32:
     value = identity_int(cast identity_text("not an integer")) catch:
-        runs = runs + 1
+        ~runs = runs + 1
         then cast identity_text("still not an integer")
     ;
     return value
@@ -33,11 +33,11 @@ negate |value I32| -> I32:
 ;
 
 argument_sum = identity_int(1 + 2) catch:
-    handler_runs = 3
+    ~handler_runs = 3
     then 0
 ;
 argument_text = identity_text(cast 'Q') catch:
-    handler_runs = 4
+    ~handler_runs = 4
     then ""
 ;
 argument_parse = identity_int(cast identity_text("42")) catch then -1
@@ -45,7 +45,7 @@ assert(argument_parse is 42)
 inner_runs ~= 0
 outer_runs ~= 0
 fallback_value = fallback_once(~inner_runs) catch:
-    outer_runs = outer_runs + 1
+    ~outer_runs = outer_runs + 1
     then -7
 ;
 assert(fallback_value is -7)

@@ -152,27 +152,27 @@ safe_mixed |left I8, right U8| -> I16:
 ;
 add_code ~U32 = 0
 failed_add = narrow_add(200, 100) catch |error|:
-    add_code = error.code
+    ~add_code = error.code
     then 0
 ;
 sub_code ~U32 = 0
 failed_sub = narrow_sub(-128, 127) catch |error|:
-    sub_code = error.code
+    ~sub_code = error.code
     then 0
 ;
 mul_code ~U32 = 0
 failed_mul = narrow_mul(65535, 65535) catch |error|:
-    mul_code = error.code
+    ~mul_code = error.code
     then 0
 ;
 neg_code ~U32 = 0
 failed_neg = narrow_neg(-128) catch |error|:
-    neg_code = error.code
+    ~neg_code = error.code
     then 0
 ;
 power_code ~U32 = 0
 failed_power = narrow_power(2, 31) catch |error|:
-    power_code = error.code
+    ~power_code = error.code
     then 0
 ;
 safe_add = narrow_add(200, 55) catch:

@@ -7,8 +7,8 @@ A mutable receiver method declares `this ~Type`.
     |
 
     reset |this ~Vector2|:
-        this.x = 0.0
-        this.y = 0.0
+        ~this.x = 0.0
+        ~this.y = 0.0
     ;
 
     vector ~= Vector2(3.0, 4.0)
@@ -22,7 +22,7 @@ A mutable receiver method declares `this ~Type`.
 - Omitting `~` for a mutable receiver method is invalid.
 - Adding `~` to a shared receiver method is invalid.
 - A temporary or computed rvalue cannot receive a mutable receiver call.
-- Field writes inside the method are permitted through mutable `this`.
+- Field writes inside the method prefix the whole target, as in `~this.x = 0.0`. Replacing `this` itself with `~this =` is invalid.
 - `~` requests exclusive access for the call. It is not move syntax and is not part of type identity.
 
 This differs from a fresh rvalue passed to a mutable free-function parameter.

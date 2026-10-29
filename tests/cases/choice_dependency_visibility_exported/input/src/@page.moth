@@ -10,8 +10,8 @@ echoed = identity_status(selected)
 
 label ~= "unset"
 if echoed is:
-    Ready => label = "ready"
-    Busy => label = "busy"
+    Ready => ~label = "ready"
+    Busy => ~label = "busy"
 ;
 
 [:choice_dependency_visibility_exported label=[label]]

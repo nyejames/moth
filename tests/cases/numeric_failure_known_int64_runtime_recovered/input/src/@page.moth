@@ -11,7 +11,7 @@ copied_sum = copy valid_top + 0
 wide_top ~I64 = max_value
 overflow_code ~U32 = 0
 ignored = increment(wide_top) catch |overflow_error|:
-    overflow_code = overflow_error.code
+    ~overflow_code = overflow_error.code
     then 0
 ;
 

@@ -9,12 +9,12 @@ Item = |
 |
 
 mutate_computed_int |value ~I32| -> I32:
-    value = value + 1
+    ~value = value + 1
     return value
 ;
 
 mutate_template_string |value ~String| -> String:
-    value = "after"
+    ~value = "after"
     return value
 ;
 
@@ -24,7 +24,7 @@ mutate_collection |values ~{I32}| -> I32:
 ;
 
 mutate_struct |value ~Item| -> String:
-    value.label = "after"
+    ~value.label = "after"
     return value.label
 ;
 

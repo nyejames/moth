@@ -5,11 +5,11 @@ DomainError ::
 handler_runs ~= 0
 inline_value = 1 + 2 catch then 0
 block_value = 1 + 2 catch:
-    handler_runs = 1
+    ~handler_runs = 1
     then 0
 ;
 bound_value = 1 + 2 catch |err|:
-    handler_runs = 2
+    ~handler_runs = 2
     then 0
 ;
 

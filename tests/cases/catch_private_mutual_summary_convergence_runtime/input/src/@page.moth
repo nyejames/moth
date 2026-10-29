@@ -3,7 +3,7 @@
 recover |text String| -> String:
     code ~U32 = 0
     value = first(text, true) catch |parse_error|:
-        code = parse_error.code
+        ~code = parse_error.code
         then -7
     ;
     return [:[value]/[code]]
@@ -38,7 +38,7 @@ export:
 
 builtin_code ~U32 = 0
 builtin_value = builtin_forward("bad") catch |builtin_error|:
-    builtin_code = builtin_error.code
+    ~builtin_code = builtin_error.code
     then -8
 ;
 custom_value = custom_map("bad") catch |domain_error|:

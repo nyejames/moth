@@ -72,14 +72,14 @@ describe |count I32| -> String, I32:
 -- No success results.
 add_bonus |total ~I32, count I32|:
     bonus = if count > 2 then 10 else 1
-    total += bonus
+    ~total += bonus
 ;
 
 count_large |limit I32| -> Summary:
     total ~= 0
     loop 0 to limit |value|:
         step = if value > 2 then 1 else 0
-        total += step
+        ~total += step
     ;
     return Summary("loop", Role::Worker, total)
 ;

@@ -68,7 +68,7 @@ hide_call ||:
 
 hide_reassign ||:
     slot ~U8 = 0
-    slot = 200
+    ~slot = 200
 ;
 
 hide_return_u8 || -> U8:

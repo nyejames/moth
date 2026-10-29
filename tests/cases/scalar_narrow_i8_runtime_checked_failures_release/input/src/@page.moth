@@ -33,35 +33,35 @@ ok_sum_text String = cast ok_sum
 
 add_code ~U32 = 0
 add_value = add_i8(127, 1) catch |add_error|:
-    add_code = add_error.code
+    ~add_code = add_error.code
     then 0
 ;
 add_text String = cast add_value
 
 subtract_code ~U32 = 0
 subtract_value = subtract_i8(-128, 1) catch |subtract_error|:
-    subtract_code = subtract_error.code
+    ~subtract_code = subtract_error.code
     then 0
 ;
 subtract_text String = cast subtract_value
 
 multiply_code ~U32 = 0
 multiply_value = multiply_i8(16, 8) catch |multiply_error|:
-    multiply_code = multiply_error.code
+    ~multiply_code = multiply_error.code
     then 0
 ;
 multiply_text String = cast multiply_value
 
 negate_code ~U32 = 0
 negate_value = negate_i8(-128) catch |negate_error|:
-    negate_code = negate_error.code
+    ~negate_code = negate_error.code
     then 0
 ;
 negate_text String = cast negate_value
 
 divide_code ~U32 = 0
 divide_value = divide_i8(-128, -1) catch |divide_error|:
-    divide_code = divide_error.code
+    ~divide_code = divide_error.code
     then 0
 ;
 divide_text String = cast divide_value

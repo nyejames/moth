@@ -35,11 +35,11 @@ const DUPLICATE_LITERAL_PAGE_SOURCE: &str = r#"value ~= "hello"
 result ~= "unset"
 
 if value is:
-    "hello" => result = "one"
-    "hello" => result = "two"
-    "hello" => result = "three"
-    "hello" => result = "four"
-    else => result = "other"
+    "hello" => ~result = "one"
+    "hello" => ~result = "two"
+    "hello" => ~result = "three"
+    "hello" => ~result = "four"
+    else => ~result = "other"
 ;
 
 [:pattern_unreachable_after_duplicate_literal_warning result=[result]]

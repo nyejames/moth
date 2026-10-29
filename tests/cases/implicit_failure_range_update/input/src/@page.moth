@@ -1,7 +1,7 @@
 walk |start I32, end I32, step I32| -> I32:
     seen ~I32 = 0
     loop start to end by step |value|:
-        seen = copy value
+        ~seen = copy value
     ;
     return seen
 ;
@@ -11,7 +11,7 @@ safe_walk |start I32, end I32, step I32| -> I32, Error!:
 endpoint || -> I32:
     visited ~I32 = 0
     loop 2147483645 to & 2147483647 |value|:
-        visited = visited + 1
+        ~visited = visited + 1
     ;
     return visited
 ;
@@ -20,7 +20,7 @@ safe_endpoint || -> I32, Error!:
 ;
 code ~U32 = 0
 failed = safe_walk(10, 0, -2147483648) catch |overflow_error|:
-    code = overflow_error.code
+    ~code = overflow_error.code
     then 0
 ;
 visited = safe_endpoint() catch then -1

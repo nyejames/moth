@@ -9,6 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CountFact, OptCountFact, OptStringFact, OptTypeFact, OptUnitFact, TypeFact, UnitFact, unit_code,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
@@ -375,6 +376,8 @@ unit_code! {
         ExistingTargetImmutable = 13,
         ArityMismatch = 14,
         RhsNotMultiValue = 15,
+        ExistingTargetNeedsPrefix = 16,
+        UnknownPrefixedTarget = 17,
     }
 }
 
@@ -401,6 +404,8 @@ impl InvalidMultiBindCode {
                 Self::ExistingTargetMutableMarker
             }
             InvalidMultiBindReason::ExistingTargetImmutable => Self::ExistingTargetImmutable,
+            InvalidMultiBindReason::ExistingTargetNeedsPrefix => Self::ExistingTargetNeedsPrefix,
+            InvalidMultiBindReason::UnknownPrefixedTarget => Self::UnknownPrefixedTarget,
             InvalidMultiBindReason::ArityMismatch { .. } => Self::ArityMismatch,
             InvalidMultiBindReason::RhsNotMultiValue => Self::RhsNotMultiValue,
         }
@@ -428,6 +433,8 @@ impl InvalidMultiBindCode {
                 InvalidMultiBindReason::ExistingTargetMutableMarker
             }
             Self::ExistingTargetImmutable => InvalidMultiBindReason::ExistingTargetImmutable,
+            Self::ExistingTargetNeedsPrefix => InvalidMultiBindReason::ExistingTargetNeedsPrefix,
+            Self::UnknownPrefixedTarget => InvalidMultiBindReason::UnknownPrefixedTarget,
             Self::ArityMismatch => InvalidMultiBindReason::ArityMismatch { expected, found },
             Self::RhsNotMultiValue => InvalidMultiBindReason::RhsNotMultiValue,
         }
@@ -447,7 +454,7 @@ diagnostic_family! {
             expected: CountFact,
             found: CountFact,
         ],
-        labels: [],
+        labels: [LabelMessageCode::PREVIOUS_DECLARATION],
         extra: None,
         ctor: manual,
         reason_key: reason,

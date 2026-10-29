@@ -10,7 +10,7 @@ loop counter < 3:
         io.line([: adversarial_borrow_nested_loop_aliases copied-path=[copied]])
     ;
 
-    counter = counter + 1
+    ~counter = counter + 1
 ;
 
 final = data

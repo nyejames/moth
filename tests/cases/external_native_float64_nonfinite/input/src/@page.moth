@@ -16,7 +16,7 @@ load_code || -> I32, Error!:
 
 code ~U32 = 0
 ignored = load_code() catch |err|:
-    code = err.code
+    ~code = err.code
     then 0
 ;
 
@@ -52,7 +52,7 @@ payload_class |selector U32| -> U32:
 payload_failure |selector U32| -> U32:
     failure ~U32 = 0
     ignored = payload_code(selector) catch |err|:
-        failure = err.code
+        ~failure = err.code
         then 0
     ;
     return failure
@@ -114,7 +114,7 @@ observation_code |selector U32, consumer I32| -> U32:
         if selector is 9:
             assert(err.message is "Priya's host failure")
         ;
-        code = err.code
+        ~code = err.code
         then 0
     ;
     if selector is 1:

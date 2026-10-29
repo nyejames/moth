@@ -198,11 +198,11 @@ These forms are invalid:
 Compound forms follow the same rule:
 
 [codeblock, $code("moth"):
-    count += 1
-    count //= 2
+    ~count += 1
+    ~count //= 2
 ]
 
-`count+=1`, `count +=1` and `count+= 1` are invalid.
+`~count+=1`, `~count +=1` and `~count+= 1` are invalid.
 
 The mutable declaration spelling `~=` stays adjacent. It needs whitespace
 before `~` and after `=`:

@@ -16,12 +16,12 @@ render_optional_slots || -> String:
 
     name_state ~= "present"
     if echoed_name is none:
-        name_state = "absent"
+        ~name_state = "absent"
     ;
 
     count_state ~= "present"
     if echoed_count is none:
-        count_state = "absent"
+        ~count_state = "absent"
     ;
 
     return [:multi_bind_optional_slots name=[name_state] count=[count_state]]

@@ -154,13 +154,13 @@ mixed_exponent #= 7.5e+12
 largest_exponent #= 1.0e+21
 
 -- compound assignment and declaration forms
-total //= 1
-total += 2
-total -= 1
-total *= 3
-total /= 2
-total %= 5
-total ^= 2
+~total //= 1
+~total += 2
+~total -= 1
+~total *= 3
+~total /= 2
+~total %= 5
+~total ^= 2
 mask #= 0
 value ~= 2
 budget ~= 100
@@ -532,9 +532,9 @@ list_item #= [: <li>[name]</li> ]
 
 -- ordinary binding and exclusive mutation
 count ~= 0
-count += 1
+~count += 1
 name ~= "Priya"
-name = "Rob"
+~name = "Rob"
 
 -- imports with paths and resources
 @core/io print
@@ -916,9 +916,9 @@ load_config |path String| -> config:
 
 -- mutable state
 counter ~= 0
-counter += 1
-counter = counter * 2
-counter -= 1
+~counter += 1
+~counter = counter * 2
+~counter -= 1
 
 -- shared access
 copy first = label
@@ -1319,7 +1319,7 @@ validate_all |value String| -> Bool:
 
 -- Example: ordinary exclusive mutation
 counter_state ~= 0
-counter_state += 1
+~counter_state += 1
 
 -- Example: template components
 component_button #= [$children(:<button class="btn">[$slot]</button>):

@@ -9,9 +9,11 @@
 //! hold `ExpressionParseError::Diagnostic` preserve that draft through the direct conversion.
 
 use super::ReceiverAccessMode;
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::place_access::{
     ReceiverSourceState, classify_receiver_source_state,
 };
@@ -91,13 +93,22 @@ pub(super) fn validate_receiver_access(
         classify_receiver_source_state(receiver_node, expression_builder, path_fork)?;
 
     let result = match (access_mode, source_state) {
-        // An existing mutable place needs the explicit `~` marker. The method boundary is the
-        // call site the author must prefix; the authored marker is absent here. The binding name
-        // lets the renderer show a concrete `~name.method(...)` example when it is known.
+        // Only a bare reference authenticates the binding as the entire receiver in an example.
         (ReceiverAccessMode::Shared, ReceiverSourceState::MutablePlace { binding_name }) => {
+            let bare_binding = match &receiver_node.kind {
+                NodeKind::ExpressionStatement(expression)
+                    if matches!(
+                        expression_builder.view(*expression)?.operation(),
+                        ExpressionOperationView::Reference(_)
+                    ) =>
+                {
+                    binding_name
+                }
+                _ => None,
+            };
             reject_mutable_receiver_missing_marker(
                 &access_requirement.diagnostic,
-                binding_name,
+                bare_binding,
                 method_boundary_span,
             )
         }

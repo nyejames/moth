@@ -67,7 +67,7 @@ explicit_eq Bool = explicit_big is comparison_float
 
 -- Compound failure stores nothing and reports through catch and Error!.
 accumulate |target ~U32, delta U32| -> U32, Error!:
-    target += delta
+    ~target += delta
     return target
 ;
 

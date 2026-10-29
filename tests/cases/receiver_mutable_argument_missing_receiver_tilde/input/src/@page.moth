@@ -1,0 +1,12 @@
+Counter = |
+    count I32,
+|
+
+transfer |this ~Counter, other ~Counter|:
+    ~this.count = this.count + 1
+    ~other.count = other.count - 1
+;
+
+receiver ~= Counter(5)
+other ~= Counter(10)
+receiver.transfer(~other)

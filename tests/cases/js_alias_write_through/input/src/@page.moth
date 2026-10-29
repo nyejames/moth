@@ -7,7 +7,7 @@ Counter = |
 
 render_write_through || -> String:
     c ~= Counter(10)
-    c.value = c.value + 5  -- triggers __moth_write on the computed field place
+    ~c.value = c.value + 5  -- triggers __moth_write on the computed field place
     alias = c              -- triggers __moth_alias_binding
     -- Both reads route through __moth_read
     return [:write_through value=[c.value] alias_value=[alias.value]]

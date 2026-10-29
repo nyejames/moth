@@ -6,47 +6,47 @@ CastReport = |
 
 capture_i8 |value I64, report ~CastReport|:
     recovered I8 = cast value catch |i8_error|:
-        report.code = i8_error.code
-        report.message = i8_error.message
+        ~report.code = i8_error.code
+        ~report.message = i8_error.message
         then 0
     ;
-    report.recovered = cast recovered
+    ~report.recovered = cast recovered
 ;
 
 capture_f16_range |value F64, report ~CastReport|:
     recovered F16 = cast value catch |f16_range_error|:
-        report.code = f16_range_error.code
-        report.message = f16_range_error.message
+        ~report.code = f16_range_error.code
+        ~report.message = f16_range_error.message
         then 0.0
     ;
-    report.recovered = cast recovered
+    ~report.recovered = cast recovered
 ;
 
 capture_i64_range |value F64, report ~CastReport|:
     recovered I64 = cast value catch |i64_range_error|:
-        report.code = i64_range_error.code
-        report.message = i64_range_error.message
+        ~report.code = i64_range_error.code
+        ~report.message = i64_range_error.message
         then 0
     ;
-    report.recovered = cast recovered
+    ~report.recovered = cast recovered
 ;
 
 capture_u64_parse |text String, report ~CastReport|:
     recovered U64 = cast text catch |u64_parse_error|:
-        report.code = u64_parse_error.code
-        report.message = u64_parse_error.message
+        ~report.code = u64_parse_error.code
+        ~report.message = u64_parse_error.message
         then 0
     ;
-    report.recovered = cast recovered
+    ~report.recovered = cast recovered
 ;
 
 capture_f16_parse |text String, report ~CastReport|:
     recovered F16 = cast text catch |f16_parse_error|:
-        report.code = f16_parse_error.code
-        report.message = f16_parse_error.message
+        ~report.code = f16_parse_error.code
+        ~report.message = f16_parse_error.message
         then 0.0
     ;
-    report.recovered = cast recovered
+    ~report.recovered = cast recovered
 ;
 
 propagate_i8 |value I64| -> I8, Error!:
@@ -88,13 +88,13 @@ f16_parse_recovered String = copy report.recovered
 
 bang_report ~= ""
 bang_recovered = propagate_i8(128) catch |bang_error|:
-    bang_report = [:i64-to-i8 bang code=[bang_error.code] message=[bang_error.message]]
+    ~bang_report = [:i64-to-i8 bang code=[bang_error.code] message=[bang_error.message]]
     then 0
 ;
 
 overflow_report ~= ""
 recovered_overflow = overflow_i64(9223372036854775807) catch |overflow_error|:
-    overflow_report = [:i64-overflow code=[overflow_error.code] message=[overflow_error.message]]
+    ~overflow_report = [:i64-overflow code=[overflow_error.code] message=[overflow_error.message]]
     then 0
 ;
 

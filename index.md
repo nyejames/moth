@@ -164,6 +164,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [expression_freeze.rs](src/compiler_frontend/ast/expressions/expression_freeze.rs): consuming last-reader remapping from surviving completed roots into exact typed owners.
 - [field_access](src/compiler_frontend/ast/field_access/): fields, receiver calls, collection/map builtins.
 - [statements](src/compiler_frontend/ast/statements/): bodies, declarations, returns, loops, matches, catch, value production.
+    - [body_symbol.rs](src/compiler_frontend/ast/statements/body_symbol.rs): declaration/update routing, explicit whole-place write prefixes and existing-place assignment diagnostics.
     - [fallible_handling/catch_handler.rs](src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs): shared `catch:` and `catch |err|:` handler parsing with `then` value-production bodies.
 - [templates](src/compiler_frontend/ast/templates/): template parse/compose/fold/format/render plans/slots/control flow.
     - [template_head_parser](src/compiler_frontend/ast/templates/template_head_parser/): directives, expression heads, suffix control flow.

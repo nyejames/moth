@@ -43,8 +43,8 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
-    parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_primary_span, ast_first_error_rendered_message,
+    first_ast_error_view, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
@@ -785,59 +785,137 @@ fn rejects_tilde_on_left_side_of_named_arg() {
 
 #[test]
 fn mutable_marker_on_immutable_argument_uses_authored_marker_span() {
-    let failure = parse_single_file_ast_diagnostic(
-        r#"
+    let source = r#"
 mutate |value ~I32|:
-    value = 5
+    ~value = 5
 ;
 
 x = 1
 mutate(~x)
-"#,
-    );
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
     let diagnostic = assert_ast_diagnostic(
         &failure,
         "MOTH-RULE-0054",
         Some("invalid_call_shape.mutable_access_on_immutable_place"),
     );
-    assert!(ast_error_primary_span(diagnostic).is_some());
+    let marker_start = source.rfind("~x").unwrap() as u32;
+    let marker_span = LocalSpan::exact(marker_start, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, marker_span))
+    );
 }
 
 #[test]
 fn mutable_marker_on_fresh_value_uses_authored_marker_span() {
-    let failure = parse_single_file_ast_diagnostic(
-        r#"
-mutate |value ~I32|:
-    value = 5
-;
-
-mutate(~12)
-"#,
-    );
-    let diagnostic = assert_ast_diagnostic(
-        &failure,
-        "MOTH-RULE-0054",
-        Some("invalid_call_shape.mutable_access_on_non_place"),
-    );
-    assert!(ast_error_primary_span(diagnostic).is_some());
+    for argument in ["~12", "~copy source"] {
+        let source =
+            format!("mutate |value ~I32|:\n    ~value = 5\n;\nsource ~= 1\nmutate({argument})\n");
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0054",
+            Some("invalid_call_shape.mutable_access_on_non_place"),
+        );
+        let marker_start = source.rfind(argument).unwrap() as u32;
+        let marker_span =
+            LocalSpan::exact(marker_start, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, marker_span))
+        );
+    }
 }
 
 #[test]
 fn unmarked_immutable_argument_uses_value_expression_span() {
-    let failure = parse_single_file_ast_diagnostic(
-        r#"
+    let source = r#"
 mutate |value ~I32|:
-    value = 5
+    ~value = 5
 ;
 
 x = 1
 mutate(x)
-"#,
-    );
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
     let diagnostic = assert_ast_diagnostic(
         &failure,
         "MOTH-RULE-0054",
         Some("invalid_call_shape.immutable_place_mutable_access_required"),
     );
-    assert!(ast_error_primary_span(diagnostic).is_some());
+    let value_start = source.rfind("mutate(x)").unwrap() as u32 + "mutate(".len() as u32;
+    let value_span = LocalSpan::exact(value_start, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, value_span))
+    );
+}
+
+#[test]
+fn projected_immutable_argument_keeps_root_and_generic_repair() {
+    for (argument, reason) in [
+        (
+            "box.value",
+            "invalid_call_shape.immutable_place_mutable_access_required",
+        ),
+        (
+            "~box.value",
+            "invalid_call_shape.mutable_access_on_immutable_place",
+        ),
+    ] {
+        let source = format!(
+            "Box = |\n    value I32,\n|\n\nmutate |value ~I32|:\n    ~value = 5\n;\n\nbox = Box(1)\nmutate({argument})\n"
+        );
+        let failure = parse_single_file_ast_diagnostic(&source);
+        assert_ast_diagnostic(&failure, "MOTH-RULE-0054", Some(reason));
+        let message = ast_first_error_rendered_message(&failure);
+        assert!(message.contains("`box` is immutable"), "{message}");
+        assert!(
+            message.contains("pass the existing argument with `~`"),
+            "{message}"
+        );
+        assert!(!message.contains("`~box`"), "{message}");
+    }
+}
+
+#[test]
+fn projected_mutable_receiver_missing_marker_uses_generic_repair() {
+    let source = "Counter = |\n    value I32,\n|\n\nHolder = |\n    counter Counter,\n|\n\nreset |this ~Counter|:\n    ~this.value = 0\n;\n\nholder ~= Holder(Counter(1))\nholder.counter.reset()\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.mutable_receiver_missing_marker"),
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("Prefix the receiver with `~`."),
+        "{message}"
+    );
+    assert!(!message.contains("`~holder.reset(...)`"), "{message}");
+    assert!(!message.contains("for example"), "{message}");
+}
+
+#[test]
+fn mutable_marker_on_shared_parameter_is_rejected_at_authored_marker() {
+    let source = r#"
+inspect |value I32|:
+;
+
+x ~= 1
+inspect(~x)
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.mutable_access_not_allowed"),
+    );
+    let marker_start = source.rfind("~x").unwrap() as u32;
+    let marker_span = LocalSpan::exact(marker_start, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, marker_span))
+    );
 }

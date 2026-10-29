@@ -24,9 +24,9 @@ validation and lifetime validation.
             ),
         )
 
-        window.bounds.size.width = 1440
+        ~window.bounds.size.width = 1440
         independent ~= copy window
-        independent.title = "Overview"
+        ~independent.title = "Overview"
     ;
 ]
 

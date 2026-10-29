@@ -592,11 +592,11 @@ value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    else => result = \"other\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    else => ~result = \"other\"
 ;
 ",
     )

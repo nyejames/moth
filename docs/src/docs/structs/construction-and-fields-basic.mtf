@@ -30,5 +30,5 @@ To change a field, the struct binding must be mutable:
 
 [codeblock, $code("moth"):
     player ~= Player("Priya")
-    player.score = 10
+    ~player.score = 10
 ]

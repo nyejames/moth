@@ -1,5 +1,5 @@
 bump type T |marker T, target ~U8, amount U8| -> U8:
-    target += amount
+    ~target += amount
     return target
 ;
 safe_bump |target ~U8, amount U8| -> U8, Error!:
@@ -8,13 +8,13 @@ safe_bump |target ~U8, amount U8| -> U8, Error!:
 kept ~U8 = 200
 code ~U32 = 0
 recovered = safe_bump(~kept, 100) catch |err|:
-    code = err.code
+    ~code = err.code
     then copy kept
 ;
 exact_target ~U8 = 200
 exact = safe_bump(~exact_target, 50) catch then 0
 mixed_bump type T |marker T, target ~U8, amount U16| -> U8:
-    target += amount
+    ~target += amount
     return target
 ;
 safe_mixed_bump |target ~U8, amount U16| -> U8, Error!:
@@ -23,7 +23,7 @@ safe_mixed_bump |target ~U8, amount U16| -> U8, Error!:
 mixed_target ~U8 = 200
 mixed_code ~U32 = 0
 mixed_recovered = safe_mixed_bump(~mixed_target, 100) catch |mixed_err|:
-    mixed_code = mixed_err.code
+    ~mixed_code = mixed_err.code
     then copy mixed_target
 ;
 mixed_exact_target ~U8 = 200

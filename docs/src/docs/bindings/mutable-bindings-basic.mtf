@@ -2,12 +2,11 @@ Most bindings should stay immutable. Add `~` when the value needs to change.
 
 [codeblock, $code("moth"):
     count ~= 0
-    count = 1
-    count += 1
+    ~count = 1
+    ~count += 1
 ]
 
-The `~` appears only when the binding is declared. Later assignments use normal
-`=`.
+Prefix the whole target with `~` when writing to an existing mutable place.
 
 Collections also need a mutable binding before they can change:
 

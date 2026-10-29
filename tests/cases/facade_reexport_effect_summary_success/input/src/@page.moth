@@ -10,11 +10,11 @@ a = alias_of(c)
 summary_prefix = describe(a)
 
 -- After the alias reaches final use, the caller may mutate the original place.
-c.step = 9
+~c.step = 9
 
 -- A re-exported fresh return permits independent caller mutation.
 fresh ~= fresh_counter()
-fresh.step = 7
+~fresh.step = 7
 
 -- A re-exported mutable parameter succeeds with authored `~` and the mutation is observed.
 bump(~c)

@@ -99,7 +99,7 @@ above_to_int I64 = uint_to_int(above) catch:
 
 -- Compound failure stores nothing and recovery keeps the entry value.
 accumulate |target ~U64, delta U64| -> U64, Error!:
-    target += delta
+    ~target += delta
     return target
 ;
 

@@ -5,7 +5,7 @@
 probe || -> String:
     fallback U64 = 0
     value ~= 1 + 2 catch then fallback + 0
-    value = 4294967300
+    ~value = 4294967300
     return [:[value]]
 ;
 

@@ -3,5 +3,5 @@ Resettable = |
 |
 
 reset |this ~Resettable|:
-    this.value = 0
+    ~this.value = 0
 ;

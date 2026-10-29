@@ -6,4 +6,5 @@ warnings = "forbid"
 rendered_output_contains = [
     "borrow_conflict_resolved_by_reordering shared-alias=42",
     "borrow_conflict_resolved_by_reordering mutable-alias=7",
+    "borrow_conflict_resolved_by_reordering source=7",
 ]

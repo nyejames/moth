@@ -697,10 +697,10 @@ render |this BenchmarkBlock, index I32| -> String:
     tone ~= "even"
     residue = this.compute_score(index) % 3
     if residue is 1:
-        tone = "odd"
+        ~tone = "odd"
     ;
     if residue is 2:
-        tone = "alt"
+        ~tone = "alt"
     ;
 
     composite = this.compute_score(index)
@@ -720,8 +720,8 @@ render |this BenchmarkBlock, index I32| -> String:
 ;
 
 bump |this ~RuntimeMetric, amount I32|:
-    this.base = this.base + amount
-    this.stride = this.stride + 1
+    ~this.base = this.base + amount
+    ~this.stride = this.stride + 1
 ;
 
 value_at |this RuntimeMetric, index I32| -> I32:
@@ -731,10 +731,10 @@ value_at |this RuntimeMetric, index I32| -> I32:
 render_row |this RuntimeMetric, index I32| -> String:
     row_class ~= "even"
     if index % 2 is not 0:
-        row_class = "odd"
+        ~row_class = "odd"
     ;
     if index % 5 is 0:
-        row_class = "alt"
+        ~row_class = "alt"
     ;
 
     value = this.value_at(index)
@@ -765,27 +765,27 @@ render_matrix |this MatrixSpec| -> String:
 
             cell_class ~= "cell cool"
             if value % 4 is 0:
-                cell_class = "cell hot"
+                ~cell_class = "cell hot"
             ;
 
-            row_template = [:
+            ~row_template = [:
                 [row_template]
                 <span class="[cell_class]">[value]</span>
             ]
         ;
 
-        row_template = [:
+        ~row_template = [:
             [row_template]
             </div>
         ]
 
-        matrix = [:
+        ~matrix = [:
             [matrix]
             [row_template]
         ]
     ;
 
-    matrix = [:
+    ~matrix = [:
         [matrix]
         </div>
     ]
@@ -820,13 +820,13 @@ build_runtime_grid || -> String:
     ]
 
     loop items |item, index|:
-        grid = [:
+        ~grid = [:
             [grid]
             [item.render(index)]
         ]
     ;
 
-    grid = [:
+    ~grid = [:
         [grid]
         </div>
     ]
@@ -861,13 +861,13 @@ build_runtime_rows || -> String:
     ]
 
     loop metrics |metric, index|:
-        rows = [:
+        ~rows = [:
             [rows]
             [metric.render_row(index)]
         ]
     ;
 
-    rows = [:
+    ~rows = [:
         [rows]
         </div>
     ]
@@ -889,7 +889,7 @@ build_runtime_summary || -> String:
         metric = ((index + 5) * (index + 9)) + (index * 3) + 41
         residue = metric % 37
 
-        summary = [:
+        ~summary = [:
             [summary]
             <div class="summary-item">
                 <div>summary [index]</div>
@@ -899,7 +899,7 @@ build_runtime_summary || -> String:
         ]
     ;
 
-    summary = [:
+    ~summary = [:
         [summary]
         </div>
     ]
@@ -946,10 +946,10 @@ build_mutation_probe || -> String:
     loop numbers |value, index|:
         class_name ~= "even"
         if index % 2 is not 0:
-            class_name = "odd"
+            ~class_name = "odd"
         ;
 
-        probe = [:
+        ~probe = [:
             [probe]
             <div class="runtime-row [class_name]">
                 <span>index [index]</span>
@@ -960,7 +960,7 @@ build_mutation_probe || -> String:
         ]
     ;
 
-    probe = [:
+    ~probe = [:
         [probe]
         </div>
     ]
@@ -979,10 +979,10 @@ build_descending_series || -> String:
 
         class_name ~= "even"
         if value % 2 is not 0:
-            class_name = "odd"
+            ~class_name = "odd"
         ;
 
-        series = [:
+        ~series = [:
             [series]
             <div class="runtime-row [class_name]">
                 <span>descending [value]</span>
@@ -993,7 +993,7 @@ build_descending_series || -> String:
         ]
     ;
 
-    series = [:
+    ~series = [:
         [series]
         </div>
     ]
@@ -1009,7 +1009,7 @@ build_pair_panels || -> String:
     loop 4 to 13 |seed|:
         left, right = pair_values(seed)
 
-        pairs = [:
+        ~pairs = [:
             [pairs]
             <div class="pair-card">
                 <div>seed [seed]</div>
@@ -1020,7 +1020,7 @@ build_pair_panels || -> String:
         ]
     ;
 
-    pairs = [:
+    ~pairs = [:
         [pairs]
         </div>
     ]

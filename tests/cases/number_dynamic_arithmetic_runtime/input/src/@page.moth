@@ -88,7 +88,7 @@ int32_maximum = number_to_int(2147483647) catch:
 ;
 int32_overflow_code ~U32 = 0
 int32_overflow = number_to_int(2147483648) catch |int32_error|:
-    int32_overflow_code = int32_error.code
+    ~int32_overflow_code = int32_error.code
     then 0
 ;
 

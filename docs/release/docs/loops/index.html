@@ -757,14 +757,14 @@ td {
 
 <span class='moth-code-keyword'>loop</span> count <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Count: <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
-    count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+    <span class='moth-code-operator'>~</span>count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>This prints three lines. Once <code>count &lt; 3</code> becomes <code>false</code>, the loop ends and the program continues after it.</p><h3 id="make-sure-the-condition-can-change">Make sure the condition can change</h3><p>A condition that never becomes <code>false</code> keeps the loop running forever.</p><pre style=""><code class='codeblock'>running <span class='moth-code-operator'>~=</span> <span class='moth-code-literal'>true</span>
 
 <span class='moth-code-keyword'>loop</span> running<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-function'>do_some_work</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
 
     <span class='moth-code-keyword'>if</span> <span class='moth-code-function'>work_is_finished</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>:</span>
-        running <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>false</span>
+        <span class='moth-code-operator'>~</span>running <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>false</span>
     <span class='moth-code-delimiter'>;</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>Use a conditional loop when repetition depends on a changing state rather than a collection or a known numeric range.</p>
 </div>
@@ -774,7 +774,7 @@ td {
 
 <span class='moth-code-keyword'>loop</span> count <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
-    count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+    <span class='moth-code-operator'>~</span>count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
 <span class='moth-code-delimiter'>;</span></code></pre><h3 id="conditional-loop-contract">Conditional loop contract</h3><ul><li>The form is <code>loop condition: ... ;</code>.</li><li>The condition must resolve to <code>Bool</code>.</li><li>The condition is checked before the first iteration, so the body may run zero times.</li><li>It is checked again after each completed iteration.</li><li>Conditional loops do not declare item or index bindings.</li><li>There is no separate <code>while</code> keyword.</li><li><code>break</code> exits the nearest active loop.</li><li><code>continue</code> skips the rest of the current body and starts the next condition check.</li></ul><h3 id="header-classification">Header classification</h3><p>A top-level <code>to</code> marker makes the header a range loop.</p><p>Without a range marker, an explicit <code>|...|</code> suffix makes the header a collection loop. Without bindings, a collection-typed header is still a collection loop. Every other header must type-check as a <code>Bool</code> condition.</p><h3 id="scope">Scope</h3><p>The body is a child scope. Names declared inside it are not visible after the loop.</p>
 </div>
 </fieldset></section>
@@ -839,7 +839,7 @@ td {
 count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span>
 
 <span class='moth-code-keyword'>loop</span> items<span class='moth-code-delimiter'>:</span>
-    count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+    <span class='moth-code-operator'>~</span>count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>After this loop, <code>count</code> is <code>3</code>.</p>
 </div>
 
@@ -849,7 +849,7 @@ count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-delimiter'>|</span>name, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span>: <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><h3 id="forms-of-collection-loops">Forms of collection loops</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>loop</span> items<span class='moth-code-delimiter'>:</span>
-    count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
+    <span class='moth-code-operator'>~</span>count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-keyword'>loop</span> items <span class='moth-code-delimiter'>|</span>item<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>

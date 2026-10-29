@@ -10,7 +10,7 @@ render_assignment_leaf_constraints || -> String:
     before_text String = cast before
 
     replacement {U64} = {18_446_744_073_709_551_615, 7}
-    items = copy replacement
+    ~items = copy replacement
 
     first = items.get(0) catch:
         then 0
@@ -32,7 +32,7 @@ render_assignment_leaf_constraints || -> String:
     old_text String = cast old
 
     map_replacement {U32 = U64} = {4_294_967_295 = 18_446_744_073_709_551_615}
-    scores = copy map_replacement
+    ~scores = copy map_replacement
 
     top = scores.get(4_294_967_295) catch:
         then 0

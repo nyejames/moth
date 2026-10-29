@@ -4,5 +4,5 @@
 value = 100
 
 -- INVALID: Trying to reassign an immutable binding.
--- Make the original binding mutable with ~=, then reassign with ordinary =.
-value = 200
+-- Make the original binding mutable with ~= before updating it.
+~value = 200

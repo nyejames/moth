@@ -135,11 +135,11 @@ loop_scope_churn || -> I32:
         local_c = local_a + local_b
         if local_c > 10:
             local_d = local_c - a2
-            accumulator = accumulator + local_d
+            ~accumulator = accumulator + local_d
         ;
         if local_c <= 10:
             local_e = local_c + a3
-            accumulator = accumulator + local_e
+            ~accumulator = accumulator + local_e
         ;
     ;
     return accumulator

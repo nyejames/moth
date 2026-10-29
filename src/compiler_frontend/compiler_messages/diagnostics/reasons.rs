@@ -1068,7 +1068,10 @@ pub enum InvalidAssignmentTargetReason {
     MapGetTargetNotWritable,
     ReadOnlyMapProperty,
     ExpectedAssignmentOperator,
-    MutableMarkerOnAssignmentTarget,
+    MissingWritePrefix {
+        operator: Option<DiagnosticCompoundAssignmentOperator>,
+    },
+    MutableMarkerRequiresExistingPlace,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1086,6 +1089,8 @@ pub enum InvalidMultiBindReason {
     UnsupportedRhs,
     ExistingTargetMutableMarker,
     ExistingTargetImmutable,
+    ExistingTargetNeedsPrefix,
+    UnknownPrefixedTarget,
     ArityMismatch { expected: usize, found: usize },
     RhsNotMultiValue,
 }

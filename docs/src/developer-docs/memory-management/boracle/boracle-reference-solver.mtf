@@ -344,11 +344,11 @@ Consider:
 [codeblock, $code("moth"):
     value ~= make_first()
     old = value
+    inspect(old)
 
-    value = make_second()
+    ~value = make_second()
     current = value
 
-    inspect(old)
     inspect(current)
 ]
 
@@ -358,7 +358,7 @@ The reference model should show:
     first definition of value  -> origin O0
     old                        -> origin O0
 
-    second definition of value -> origin O1
+    update of value            -> origin O1
     current                    -> origin O1
 ]
 
@@ -589,7 +589,7 @@ Loops make this harder because one definition site can execute many times:
 
     loop condition:
         previous = value
-        value = next()
+        ~value = next()
     ;
 ]
 

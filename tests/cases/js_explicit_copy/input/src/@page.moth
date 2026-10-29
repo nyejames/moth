@@ -2,5 +2,5 @@
 
 original ~= {1, 2, 3}
 cloned ~= copy(original)
-original = cloned
+~original = cloned
 io.line([: [1]])

@@ -2,6 +2,6 @@ value I32 = 1
 match_result ~= "unset"
 
 if value is:
-    1.5 => match_result = "decimal"
-    else => match_result = "other"
+    1.5 => ~match_result = "decimal"
+    else => ~match_result = "other"
 ;

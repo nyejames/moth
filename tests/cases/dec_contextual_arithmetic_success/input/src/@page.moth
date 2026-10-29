@@ -105,7 +105,7 @@ maximum_exact_text |value Dec256| -> String:
 ;
 mutable_assign_text || -> String:
     target ~Dec4 = 0
-    target = 0.1 + 0.2
+    ~target = 0.1 + 0.2
     return [target]
 ;
 
@@ -181,13 +181,13 @@ received_overflow |value Dec4, integer I32| -> Dec4, Error!:
 
 compound_overflow |integer I32| -> Dec4, Error!:
     total ~Dec4 = 1
-    total += integer + 1
+    ~total += integer + 1
     return total
 ;
 
 mutation_barrier |value Dec4, integer I32| -> Dec4, Error!:
     result ~= value + (integer + 1)
-    result = copy value
+    ~result = copy value
     return result
 ;
 
@@ -200,27 +200,27 @@ generic_barrier |value Dec4, integer I32| -> Dec4, Error!:
 copy_barrier |value Dec4, integer I32| -> Dec4, Error!:
     result = value + (integer + 1)
     duplicate ~= copy result
-    duplicate = copy value
+    ~duplicate = copy value
     return duplicate
 ;
 
 bump_dec |calls ~I32| -> Dec4:
-    calls += 1
+    ~calls += 1
     return 0.1 + 0.2
 ;
 
 zero_dec |calls ~I32| -> Dec4:
-    calls += 1
+    ~calls += 1
     return 0
 ;
 
 order_text |calls ~I32, seen Dec4| -> Dec4:
-    calls += 1
+    ~calls += 1
     return seen + calls
 ;
 
 divide_dec |target ~Dec4, rhs_calls ~I32| -> Dec4, Error!:
-    target /= zero_dec(~rhs_calls)
+    ~target /= zero_dec(~rhs_calls)
     return target
 ;
 
@@ -327,8 +327,8 @@ holder_value = take_holder(holder)
 choice_value Amount = Amount::Present(0.1 + 0.2)
 choice_text ~= ""
 if choice_value is:
-    Present(value) => choice_text = render_dec_text(value)
-    Empty => choice_text = "empty"
+    Present(value) => ~choice_text = render_dec_text(value)
+    Empty => ~choice_text = "empty"
 ;
 struct_default StructDefault = StructDefault()
 local_peer_text = local_peer(1)
@@ -336,34 +336,34 @@ call_peer = call_peer_text()
 float_outer Dec4 = float_outer_flag(0.1 + 0.2)
 overflow_code ~U32 = 0
 overflow_value = overflow_inner_text(2147483647, 1) catch |overflow_error|:
-    overflow_code = overflow_error.code
+    ~overflow_code = overflow_error.code
     then 0
 ;
 peer_overflow_code ~U32 = 0
 peer_overflow_value = peer_overflow(1, 2147483647) catch |peer_error|:
-    peer_overflow_code = peer_error.code
+    ~peer_overflow_code = peer_error.code
     then 0
 ;
 received_overflow_code ~U32 = 0
 received_overflow_value = received_overflow(1, 2147483647) catch |received_error|:
-    received_overflow_code = received_error.code
+    ~received_overflow_code = received_error.code
     then 0
 ;
 compound_overflow_code ~U32 = 0
 compound_overflow_value = compound_overflow(2147483647) catch |compound_error|:
-    compound_overflow_code = compound_error.code
+    ~compound_overflow_code = compound_error.code
     then 0
 ;
 order_calls ~I32 = 0
 order_value = order_text(~order_calls, 0.1 + 0.2) - order_text(~order_calls, 0.1 + 0.2)
 accumulate ~Dec4 = 2
-accumulate += 0.1 + 0.2
+~accumulate += 0.1 + 0.2
 reduced ~Dec4 = 2
-reduced -= 0.1 + 0.2
+~reduced -= 0.1 + 0.2
 scaled ~Dec4 = 2
-scaled *= 0.1 + 0.2
+~scaled *= 0.1 + 0.2
 power_accum ~Dec4 = 2
-power_accum ^= (1 + 2)
+~power_accum ^= (1 + 2)
 dec_bump_calls ~I32 = 0
 dec_first = bump_dec(~dec_bump_calls)
 dec_second = bump_dec(~dec_bump_calls)
@@ -371,7 +371,7 @@ divide_target ~Dec4 = 5
 divide_calls ~I32 = 0
 divide_code ~U32 = 0
 divide_result = divide_dec(~divide_target, ~divide_calls) catch |divide_error|:
-    divide_code = divide_error.code
+    ~divide_code = divide_error.code
     then 0
 ;
 zero_divisor Dec4 = 0
@@ -382,17 +382,17 @@ protected_literal Dec4 = read_int() + (0.1 + 0.2) catch then 0
 generic_identity = generic_identity_text()
 mutation_code ~U32 = 0
 mutation_value Dec4 = mutation_barrier(1, 2147483647) catch |mutation_error|:
-    mutation_code = mutation_error.code
+    ~mutation_code = mutation_error.code
     then 0
 ;
 generic_code ~U32 = 0
 received_value Dec4 = generic_barrier(1, 2147483647) catch |generic_error|:
-    generic_code = generic_error.code
+    ~generic_code = generic_error.code
     then 0
 ;
 copy_code ~U32 = 0
 copy_value Dec4 = copy_barrier(1, 2147483647) catch |copy_error|:
-    copy_code = copy_error.code
+    ~copy_code = copy_error.code
     then 0
 ;
 

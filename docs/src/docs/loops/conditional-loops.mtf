@@ -9,7 +9,7 @@ its body while that condition remains `true`.
 
     loop count < 3:
         io.line([: [count]])
-        count += 1
+        ~count += 1
     ;
 ]
 

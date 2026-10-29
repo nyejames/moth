@@ -10,7 +10,7 @@ body = [:
     current score [score]
 ]
 
-score = score + 1
+~score = score + 1
 footer = [:
     done [name] [score]
 ]

@@ -1,5 +1,5 @@
 hidden ||:
     x ~U8 = 250
-    x += 300
+    ~x += 300
 ;
 [:unreachable]

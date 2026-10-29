@@ -33,8 +33,8 @@ tagged_text = read_u64(tagged.value)
 label_text = tagged.label
 
 box ~= Packet(1)
-box.value = 4294967301
-box.value += 1
+~box.value = 4294967301
+~box.value += 1
 box_text = read_u64(box.value)
 
 origin = Outcome::Some(4294967298)

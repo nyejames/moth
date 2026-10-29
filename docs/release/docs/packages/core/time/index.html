@@ -759,7 +759,7 @@ previous <span class='moth-code-operator'>~=</span> <span class='moth-code-funct
 
 current <span class='moth-code-operator'>=</span> <span class='moth-code-function'>mark_now</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
 delta <span class='moth-code-operator'>=</span> <span class='moth-code-function'>duration_between</span><span class='moth-code-delimiter'>(</span>previous, current<span class='moth-code-delimiter'>)</span>
-previous <span class='moth-code-operator'>=</span> current
+<span class='moth-code-operator'>~</span>previous <span class='moth-code-operator'>=</span> current
 
 seconds <span class='moth-code-operator'>=</span> <span class='moth-code-function'>as_seconds</span><span class='moth-code-delimiter'>(</span>delta<span class='moth-code-delimiter'>)</span></code></pre><p>This shape works for frame-delta style code without requiring a scheduler or animation package. Durations also compose directly: <code>duration_add</code>, <code>duration_subtract</code> and <code>duration_scale</code> combine elapsed amounts without converting through seconds.</p><h3 id="utc-timestamps">UTC timestamps</h3><p>Use <code>Timestamp</code> for real-world UTC instants that may be logged, stored or exchanged with external systems.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/time</span> <span class='moth-code-nominal'>Timestamp</span>, <span class='moth-code-nominal'>timestamp_from_iso_string</span>, <span class='moth-code-nominal'>timestamp_from_unix_milliseconds</span>, <span class='moth-code-nominal'>to_iso_string</span>
 

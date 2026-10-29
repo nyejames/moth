@@ -3,7 +3,7 @@ triple || -> I32, String, F64:
 ;
 
 a, b String, c ~F64 = triple()
-c = c + 1.0
+~c = c + 1.0
 io.line([: multi-bind-int=[a]])
 io.line([: multi-bind-string=[b]])
 io.line([: multi-bind-mutated-float=[c]])

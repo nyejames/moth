@@ -95,9 +95,9 @@ Every returned value enters a fresh caller binding slot. Binding-slot freshness 
     original ~= Point(1)
     returned ~= identity(original) -- fresh caller slot, aliased allocation
 
-    returned = Point(2)             -- clears returned's old allocation provenance
-    returned.x = 3
-    original.x = 4                  -- the original allocation remains independent
+    ~returned = Point(2)            -- clears returned's old allocation provenance
+    ~returned.x = 3
+    ~original.x = 4                 -- the original allocation remains independent
 ]
 
 A call result owns a separate binding even when its value aliases an argument.

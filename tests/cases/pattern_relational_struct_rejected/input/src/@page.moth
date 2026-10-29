@@ -9,8 +9,8 @@ value ~= Person("Alice", 30)
 result ~= ""
 
 if value is:
-    < Person("Bob", 25) => result = "bad"
-    else => result = "fallback"
+    < Person("Bob", 25) => ~result = "bad"
+    else => ~result = "fallback"
 ;
 
 [:should_not_reach=[result]]

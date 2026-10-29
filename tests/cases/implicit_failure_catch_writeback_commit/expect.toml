@@ -15,4 +15,4 @@ code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.checked_numeric_operations"
 path = "input/@page.moth"
 line = 3
-column = 5
+column = 6

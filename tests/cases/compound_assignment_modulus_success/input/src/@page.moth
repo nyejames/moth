@@ -1,4 +1,4 @@
 count ~I32 = 10
-count %= 4
+~count %= 4
 
 [: count=[count] ]

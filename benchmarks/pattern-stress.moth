@@ -341,7 +341,7 @@ match_sequence || -> String:
 
     loop statuses |s|:
         str = handle_status(s)
-        result = [: [result][str]; ]
+        ~result = [: [result][str]; ]
     ;
 
     return result

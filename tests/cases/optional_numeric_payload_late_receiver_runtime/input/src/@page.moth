@@ -20,7 +20,7 @@ full_text String = if full_origin is:
 statement_origin = wrap(4294967315)
 statement_text ~= "none"
 if statement_origin is |payload|:
-    statement_text = read_u64(payload)
+    ~statement_text = read_u64(payload)
 ;
 template_origin = wrap(4294967316)
 template_text = [:

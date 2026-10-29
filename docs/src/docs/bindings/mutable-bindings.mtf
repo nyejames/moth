@@ -9,12 +9,12 @@
 
 [codeblock, $code("moth"):
     count ~= 0
-    count = 1
+    ~count = 1
 ]
 
 - `name ~= value` declares a mutable binding with an inferred type.
 - `name ~Type = value` declares a mutable binding with an explicit type.
-- Reassignment still uses ordinary `=`.
+- A direct or compound write to an existing mutable place prefixes the whole target with `~`, as in `~count = 1` or `~point.x += 1`.
 - `~=` is an adjacent mutable-declaration marker. Write whitespace before `~` and after `=`, but never between them.
 - Mutability belongs to the binding, not the semantic type.
 
@@ -38,8 +38,9 @@ Declaration mutability and call-site exclusive access are separate operations.
 A mutable parameter accepts:
 
 - `~place` for an existing mutable place
-- a plain fresh rvalue such as a literal, template, constructor call or computed value
+- a plain fresh rvalue such as a literal, template, constructor call, computed value or legal `copy` expression
 
+For named arguments, write the marker before the value, as in `add_name(names = ~names, name = "Priya")`.
 `~` is place-only syntax. It is invalid on immutable bindings and is not
 written on fresh rvalues.
 

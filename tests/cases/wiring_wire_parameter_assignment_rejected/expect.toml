@@ -10,4 +10,4 @@ code = "MOTH-RULE-0044"
 reason = "invalid_assignment_target.immutable_binding"
 path = "input/@page.moth"
 line = 2
-column = 11
+column = 12

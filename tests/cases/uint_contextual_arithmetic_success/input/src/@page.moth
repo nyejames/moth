@@ -93,7 +93,7 @@ call_peer_text || -> String:
 
 mutable_assign_text || -> String:
     target ~U32 = 0
-    target = 1 + 2
+    ~target = 1 + 2
     return [target]
 ;
 
@@ -123,11 +123,11 @@ mixed_left = 1.5 + floating_peer
 mixed_right = floating_peer + 1.5
 real_div = peer / 4
 accumulate ~U32 = 10
-accumulate += 1 + 2
+~accumulate += 1 + 2
 scaled ~U32 = 10
-scaled *= 1 + 2
+~scaled *= 1 + 2
 powered ~U32 = 2
-powered ^= 1 + 2
+~powered ^= 1 + 2
 peer_left = peer_left_text(10)
 peer_right = peer_right_text(10)
 peer_group_right = peer_group_right_text(10)
@@ -167,8 +167,8 @@ rendered = render_uint_text(peer)
 matched_text ~= ""
 m U32 = 5
 if m is:
-    5 => matched_text = "five"
-    else => matched_text = "other"
+    5 => ~matched_text = "five"
+    else => ~matched_text = "other"
 ;
 
 [:uint context count=[count] large=[large] grouped=[grouped] right=[from_right] left=[from_left] power-group=[power_group] power-right=[power_right] power-left=[power_left] intdiv=[int_div] rem=[remainder] mixed-left=[mixed_left] mixed-right=[mixed_right] div=[real_div] acc=[accumulate] scaled=[scaled] powered=[powered] peer-left=[peer_left] peer-right=[peer_right] peer-group-right=[peer_group_right] peer-product=[peer_product] peer-typed-inner=[peer_typed_inner] received-typed-inner=[received_typed_inner] typed-inner=[typed_inner] received-inner=[received_inner] same=[comparison] ordered=[ordered] power-typed=[power_typed] concrete=[concrete_argument] explicit=[explicit_return] default=[omitted_default] branch=[branch_true]/[branch_false] split=[split_first]/[split_second] mutable=[mutable_assign] optional=[optional_text] point=[point.x] element=[element_value] keyed=[keyed_value] missing=[missing] call-peer=[call_peer] dec-power=[dec_uint_power] decmix=[decmix] float=[float_from_uint] rendered=[rendered] match=[matched_text]]

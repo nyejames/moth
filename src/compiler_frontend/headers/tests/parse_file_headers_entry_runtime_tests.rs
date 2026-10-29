@@ -44,7 +44,7 @@ fn entry_runtime_fragment_count_accumulates_across_multiple_runtime_templates() 
 #[test]
 fn entry_runtime_fragment_count_ignores_assigned_templates() {
     let headers = parse_single_file_headers(
-        "buffer ~= [:initial content]\nbuffer = [:updated content]\nvalues = {\n[:nested collection]\n}\ngrouped = (\n[:nested group]\n)\n[:fragment]\n",
+        "buffer ~= [:initial content]\n~buffer = [:updated content]\nvalues = {\n[:nested collection]\n}\ngrouped = (\n[:nested group]\n)\n[:fragment]\n",
     );
 
     assert_eq!(

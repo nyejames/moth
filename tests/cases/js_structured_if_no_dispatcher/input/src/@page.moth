@@ -9,15 +9,15 @@ result ~= "default"
 label ~= "default"
 
 if x > 5:
-    result = "x is big"
+    ~result = "x is big"
 else
-    result = "x is small"
+    ~result = "x is small"
 ;
 
 if y > 15:
-    label = "y is big"
+    ~label = "y is big"
 else
-    label = "y is small"
+    ~label = "y is small"
 ;
 
 io.line([: [result]])

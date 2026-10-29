@@ -12,15 +12,15 @@ value ~= ""
 
 if selector is:
     1 =>
-        value = get_value(1) catch:
+        ~value = get_value(1) catch:
             then "arm1_fallback"
         ;
     2 =>
-        value = get_value(2) catch:
+        ~value = get_value(2) catch:
             then "arm2_fallback"
         ;
     else =>
-        value = get_value(3) catch:
+        ~value = get_value(3) catch:
             then "else_fallback"
         ;
 ;

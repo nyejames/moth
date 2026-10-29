@@ -1026,8 +1026,7 @@ fn rejects_duplicate_plain_config_bindings_before_config_validation() {
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
     let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
-    // The frontend catches duplicate start-body declarations as assignments to immutable variables
-    // before config validation runs.
+    // The frontend rejects the unmarked update before config validation runs.
     let _ = assert_project_config_identity(
         failure,
         "MOTH-RULE-0044",

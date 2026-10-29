@@ -9,7 +9,7 @@ value = Code::Value(code = cast "1")
 
 code_value ~= 0
 if value is:
-    Value(code) => code_value = copy code
+    Value(code) => ~code_value = copy code
 ;
 
 assert(code_value is 1)

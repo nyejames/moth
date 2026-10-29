@@ -5,7 +5,7 @@
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
-Existing values use shared, read-only access by default. Independent copies require explicit `copy`. Mutation requires explicit exclusive access to an existing mutable place.
+Existing values use shared, read-only access by default. Independent copies require explicit `copy`. Writes to existing places and mutable access to existing arguments and receivers require explicit `~`.
 
 Reference relationships are real source semantics. Moth does not expose reference type constructors or lifetime syntax.
 
@@ -111,7 +111,7 @@ Shared access is a source-semantic relationship. It does not require every scala
 
 `second` doesn't imply a clone. It's a shared read-only alias of the same source value.
 
-For `x = y`:
+For a new shared binding `x = y`:
 
 - the source semantics is a shared alias by default
 - it is not an implicit copy
@@ -165,20 +165,22 @@ Borrow-checker slot and alias states are analysis concepts, not source-visible r
     alias ~= source
 ]
 
-`alias ~= source`, or an equivalent typed mutable declaration from an existing place, creates an exclusive mutable alias.
+`alias ~= source`, or an equivalent typed mutable declaration from an existing place, creates an exclusive mutable alias. The source stays unmarked: `alias ~= ~source` is invalid.
 
 - The source place must permit mutation and no conflicting live access may exist.
-- Assignment through a mutable alias writes through to the referent.
+- Assignment through a mutable alias, such as `~alias = value`, writes through to the referent.
 - Assignment must not silently detach or rebind the alias.
 
 A mutable declaration initialized from a fresh value creates an independent mutable slot:
 
 [codeblock, $code("moth"):
     count ~= 0
-    count = 1
+    ~count = 1
 ]
 
-`~` on the declaration marks the binding as mutation-capable. Reassignment still uses `=`. Mutable binding syntax is different from call-site exclusive access. Mutability is an access property, not separate semantic type identity.
+`~` on the declaration marks the binding as mutation-capable. A direct or compound write prefixes the whole existing place with `~`, as in `~count = 1` or `~count += 1`. In a multi-bind, each existing target carries its own marker, as in `~count, message = next()`. Unmarked targets define new bindings. The incoming results are evaluated once before existing targets are written.
+
+Mutable binding syntax differs from call-site exclusive access. Mutability is an access property, not separate semantic type identity.
 
 ## Explicit copies
 
@@ -214,7 +216,7 @@ Expressions can construct new values from shared inputs: constructing a result d
     ~items.push("Rob")
 ]
 
-The source form is `~place`. The place must already exist, and the underlying binding must permit mutation. Exactly one exclusive access may be active at a time. Shared access conflicts with active exclusive mutation where their roots overlap. `~` isn't an explicit move. The compiler may later realise an eligible operation as ownership transfer.
+The source form `~place` requests access to an existing mutable place for a write or for a mutable call argument or receiver. Shared access conflicts with active exclusive mutation where their roots overlap. `~` isn't an explicit move. The compiler may later realise an eligible operation as ownership transfer.
 
 ## Fresh values and hidden locals
 
@@ -231,15 +233,16 @@ These forms are valid for ordinary mutable parameters. Source `~` on a fresh val
     update(~Vector2(x = 1.0, y = 2.0))   -- invalid
 ]
 
-Fresh values don't need source `~`. A mutable parameter may accept them. HIR materialises a hidden local when borrow analysis needs a place. The hidden local isn't source-visible lifetime syntax. There is no special temporary-reference node category after materialisation.
+Fresh values, including `copy place`, don't need source `~`. A mutable parameter may accept them. HIR materialises a hidden local when borrow analysis needs a place. The hidden local isn't source-visible lifetime syntax. There is no special temporary-reference node category after materialisation.
 
 Fresh-rvalue materialisation applies only to ordinary mutable parameters. It does not make temporaries valid mutable receivers.
 
 ## Calls and receiver methods
 
 - A shared parameter from an existing place needs no `~`.
-- A mutable parameter from an existing place requires `~place`.
-- A mutable parameter from a fresh value uses the plain value.
+- A mutable parameter from an existing place requires `~place`, including in a named argument such as `update(items = ~items)`.
+- A mutable parameter from a fresh value or `copy place` uses the plain value.
+- A shared parameter rejects an authored `~`. An immutable place cannot provide mutable access.
 - A mutable receiver uses `~value.method(...)`.
 - An immutable receiver uses `value.method(...)`.
 - Mutable receivers require an existing mutable place.

@@ -54,9 +54,9 @@ log_ok = abs(log_value - 1.098612) < 0.000001
 
 adjusted ~= abs(-6.0)
 if adjusted > 5.0:
-    adjusted = adjusted - 2.0
+    ~adjusted = adjusted - 2.0
 else
-    adjusted = adjusted + 2.0
+    ~adjusted = adjusted + 2.0
 ;
 bounded = clamp(adjusted, 0.0, 10.0)
 control_report = [:control adjusted=[adjusted] bounded=[bounded]]

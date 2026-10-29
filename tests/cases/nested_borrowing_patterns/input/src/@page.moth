@@ -17,7 +17,7 @@ render_nested_borrowing || -> String:
 
     sum = shared_ref + nested_shared1 + nested_shared2
 
-    mutable_data = mutable_data + 10
+    ~mutable_data = mutable_data + 10
 
     return [:nested_borrowing_patterns first=[first_ref] second=[second_ref] third=[third_ref] sum=[sum] rebound=[mutable_data]]
 ;

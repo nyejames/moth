@@ -1,5 +1,5 @@
 mutate |value ~I32|:
-    value = 5
+    ~value = 5
 ;
 
 mutate(~12)

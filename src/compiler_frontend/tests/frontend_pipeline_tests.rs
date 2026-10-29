@@ -911,7 +911,7 @@ fn runtime_bool_condition_lowers_one_branch_diamond() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
-            "threshold ~= 4\nresult ~= 0\nif threshold > 1:\n    result = 1\nelse\n    result = 2\n;\nio.line([: [result]])\n",
+            "threshold ~= 4\nresult ~= 0\nif threshold > 1:\n    ~result = 1\nelse\n    ~result = 2\n;\nio.line([: [result]])\n",
         )],
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -931,7 +931,7 @@ fn compile_time_true_condition_reaches_hir_without_a_branch() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
-            "enabled #= true\nresult ~= 0\nif enabled:\n    result = 1\nelse\n    result = 2\n;\nio.line([: [result]])\n",
+            "enabled #= true\nresult ~= 0\nif enabled:\n    ~result = 1\nelse\n    ~result = 2\n;\nio.line([: [result]])\n",
         )],
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -951,7 +951,7 @@ fn compile_time_false_condition_without_else_lowers_no_branch_body() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
-            "disabled #= false\nresult ~= 0\nif disabled:\n    result = 1\n;\nio.line([: [result]])\n",
+            "disabled #= false\nresult ~= 0\nif disabled:\n    ~result = 1\n;\nio.line([: [result]])\n",
         )],
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -1661,18 +1661,18 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
 #[test]
 fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     let mut project = failure_project(
-        // The RHS is deliberately a wider U16 so `total += amount` stays a mixed-domain
+        // The RHS is deliberately a wider U16 so `~total += amount` stays a mixed-domain
         // write-back: only that genuinely wider RHS keeps the checked store conversion.
         "bump |amount U16| -> U8:\n\
              total ~U8 = 200\n\
-             total += amount\n\
+             ~total += amount\n\
              return total\n;\n\
          safe_bump |amount U16| -> U8, Error!:\n\
              return bump(amount)\n;\n\
          walk |start I32, end I32| -> I32:\n\
              seen ~I32 = 0\n\
              loop start to & end |value|:\n\
-                 seen = copy value\n\
+                 ~seen = copy value\n\
              ;\n\
              return seen\n;\n\
          safe_walk |start I32, end I32| -> I32, Error!:\n\
@@ -1743,7 +1743,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
 fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutable_arguments() {
     let mut project = failure_project(
         "increment |value ~I32| -> I32:\n\
-             value += 1\n\
+             ~value += 1\n\
              return value\n;\n\
          fresh |value I32| -> I32:\n\
              return increment(value + 1)\n;\n",
@@ -1860,8 +1860,8 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         // their own checked conversion traps.
         "bump |amount U16| -> U8:\n\
              total ~U8 = 200\n\
-             total += amount\n\
-             total += amount\n\
+             ~total += amount\n\
+             ~total += amount\n\
              return total\n;\n",
     );
     let ast = project.ast();
@@ -3106,7 +3106,7 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
 
     let mut project = failure_project(
         "recover |left I32, right I32| -> I32:\n\
-             value ~= 0\n    value = left * right catch then value\n    return value\n;\n",
+             value ~= 0\n    ~value = left * right catch then value\n    return value\n;\n",
     );
     let failure = project
         .ast_result()
@@ -3483,7 +3483,7 @@ fn implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing(
         // fallback literal materialises at the callee's U16 success slot.
         "load |amount U8| -> U16, Error!:\n    return cast amount\n;\n\
          update |amount U8| -> U8:\n\
-             value ~U8 = 200\n    value += load(amount) catch then 0\n    return value\n;\n",
+             value ~U8 = 200\n    ~value += load(amount) catch then 0\n    return value\n;\n",
     );
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "update");
@@ -4567,9 +4567,9 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
 fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     const ESCAPING_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          export:\n    bump type T |marker T, extra U16| -> U8:\n\
-                 total ~U8 = 250\n        total += risky(extra) catch then extra\n        return total\n    ;\n;\n";
+                 total ~U8 = 250\n        ~total += risky(extra) catch then extra\n        return total\n    ;\n;\n";
     const AST_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
-         bump |extra U16| -> U8:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n";
+         bump |extra U16| -> U8:\n    total ~U8 = 250\n    ~total += risky(extra) catch then extra\n    return total\n;\n";
     let mut project = failure_project(ESCAPING_SOURCE);
     let failure = project
         .ast_result()
@@ -4640,7 +4640,7 @@ fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
         // `y` is a genuinely wider U16 so the uncaught write-back stays a mixed-domain
         // conversion with its own compound write-back producer.
         "export:\n    bump type T |marker T, x U8, y U16| -> U8:\n\
-                 total ~U8 = x\n        total += y\n        return total\n    ;\n;\n",
+                 total ~U8 = x\n        ~total += y\n        return total\n    ;\n;\n",
     );
     let failure = project
         .ast_result()
@@ -4679,7 +4679,7 @@ fn implicit_failure_custom_slot_keeps_writeback_origin() {
         // producer must still name the custom-slot witness.
         "Failure = | message String |\n\
          risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
-         bump |extra U16| -> U8, Failure!:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
+         bump |extra U16| -> U8, Failure!:\n    total ~U8 = 250\n    ~total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let messages = project
         .failure_contract_boundary_result()
@@ -4718,7 +4718,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
         // conversion that stays separate from the RHS catch.
         "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          adjust |extra U16| -> U8:\n\
-             total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
+             total ~U8 = 250\n    ~total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "adjust");

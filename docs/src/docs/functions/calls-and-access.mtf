@@ -70,20 +70,18 @@ An existing mutable place needs explicit `~` at the call site.
 
 [codeblock, $code("moth"):
     increment |value ~I32|:
-        value += 1
+        ~value += 1
     ;
 
     count ~= 1
     increment(~count)
+    increment(value = ~count)
+    increment(copy count)
 ]
 
-Passing an existing place without `~` to a mutable parameter is invalid.
-
-For `increment(~count)`, HTML-JS keeps normal write-through to `count`.
-HTML-Wasm currently rejects reachable mutable function parameters at their
-declaration because its call-argument ABI has no writable argument slot. This
-restriction is specific to mutable parameters, not ordinary mutable locals or
-immutable parameters.
+Passing an existing place without `~` to a mutable parameter is invalid. An
+immutable place can't grant mutable access. For named arguments, put `~` before
+the value, not the parameter name.
 
 A fresh rvalue can satisfy a mutable parameter without source `~`:
 
@@ -91,8 +89,9 @@ A fresh rvalue can satisfy a mutable parameter without source `~`:
     increment(1)
 ]
 
-Literals, templates, constructor calls and computed values are fresh. Writing
-`~` on them is invalid because `~` is place-only access syntax.
+Literals, templates, constructor calls, computed values and legal `copy`
+expressions are fresh. Writing `~` on them is invalid because `~` is place-only
+access syntax. See @../progress (Progress) for target support.
 
 Binding mutability and call-site access are separate. See
 @../bindings/#mutable-bindings (Mutable bindings).

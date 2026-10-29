@@ -3,10 +3,10 @@
 classify |n I32| -> String:
     label ~= ""
     if n is:
-        0 => label = "zero"
-        1 => label = "one"
-        2 => label = "two"
-        else => label = "many"
+        0 => ~label = "zero"
+        1 => ~label = "one"
+        2 => ~label = "two"
+        else => ~label = "many"
     ;
     return label
 ;

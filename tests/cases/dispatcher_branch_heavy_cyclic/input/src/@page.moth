@@ -5,28 +5,28 @@ label ~= "start"
 
 loop i < 6:
     if i is 1:
-        label = "one"
+        ~label = "one"
     else
         if i is 2:
-            label = "two"
+            ~label = "two"
         else
-            label = "other"
+            ~label = "other"
         ;
     ;
 
     if i is 3:
         if label is:
-            "two" => label = "matched_two"
-            else => label = "matched_other"
+            "two" => ~label = "matched_two"
+            else => ~label = "matched_other"
         ;
     ;
 
     if i is 5:
-        label = "done"
+        ~label = "done"
         break
     ;
 
-    i = i + 1
+    ~i = i + 1
 ;
 
 io.line([: [label]])

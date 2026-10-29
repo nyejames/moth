@@ -2,8 +2,8 @@ A method that changes its receiver uses `this ~Type`.
 
 [codeblock, $code("moth"):
     reset |this ~Vector2|:
-        this.x = 0.0
-        this.y = 0.0
+        ~this.x = 0.0
+        ~this.y = 0.0
     ;
 ]
 

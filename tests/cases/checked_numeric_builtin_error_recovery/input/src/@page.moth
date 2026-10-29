@@ -10,13 +10,13 @@ nonfinite_float || -> F64, Error!:
 
 int_code ~U32 = 0
 overflow_value = overflow_int() catch |int_err|:
-    int_code = int_err.code
+    ~int_code = int_err.code
     then 0
 ;
 
 float_code ~U32 = 0
 nonfinite_value = nonfinite_float() catch |float_err|:
-    float_code = float_err.code
+    ~float_code = float_err.code
     then 0.0
 ;
 

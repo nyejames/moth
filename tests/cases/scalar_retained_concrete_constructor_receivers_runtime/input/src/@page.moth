@@ -43,7 +43,7 @@ describe_code |chosen CodeChoice| -> String:
 step_count ~U32 = 0
 
 mark_step |seen ~U32| -> U32:
-    seen += 1
+    ~seen += 1
     return 7
 ;
 

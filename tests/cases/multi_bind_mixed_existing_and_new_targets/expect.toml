@@ -1,4 +1,10 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["reassigned-existing=fresh", "created-target=9"]
+rendered_output_exact = """
+mixed existing=9 created=3 calls=1
+all-existing first=7 second=9 calls=2
+failure first=7 second=9 recovered=0
+heterogeneous label=fresh index=9
+catch-boundaries=1/2:3/4:9
+alias original=20 result=1 calls=3"""

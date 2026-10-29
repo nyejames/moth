@@ -10,7 +10,7 @@ An anonymous record groups local values without declaring a named type:
             size = (width = 1280, height = 720),
         )
 
-        window.size.width = 1440
+        ~window.size.width = 1440
     ;
 ]
 

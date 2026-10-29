@@ -26,7 +26,7 @@ handled U8 = cast HandledCount(200) catch then 99
 generic_handled U16 = cast GenericCount(40000, true) catch then 99
 code ~U32 = 0
 recovered U8 = cast FallibleCount(200) catch |err|:
-    code = err.code
+    ~code = err.code
     then 0
 ;
 

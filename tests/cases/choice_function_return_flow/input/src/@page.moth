@@ -7,8 +7,8 @@ get_status || -> Status:
 current Status = get_status()
 label ~= "unset"
 if current is:
-    Ready => label = "ready"
-    Busy => label = "busy"
-    Offline => label = "offline"
+    Ready => ~label = "ready"
+    Busy => ~label = "busy"
+    Offline => ~label = "offline"
 ;
 [:choice_function_return_flow result=[label]]

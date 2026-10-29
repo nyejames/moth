@@ -8,27 +8,27 @@ rhs_u64 |increment U64| -> U64:
 
 compound_i32 |initial I32, increment I32| -> I32:
     value ~I32 = copy initial
-    value += rhs_i32(increment)
+    ~value += rhs_i32(increment)
     return value
 ;
 
 compound_u64 |initial U64, increment U64| -> U64:
     value ~U64 = copy initial
-    value += rhs_u64(increment)
+    ~value += rhs_u64(increment)
     return value
 ;
 
 compound_i8_widen |initial I32, increment I8| -> I32:
     value ~I32 = copy initial
     widened I32 = cast increment
-    value += widened
+    ~value += widened
     return value
 ;
 
 compound_u16_widen |initial I32, increment U16| -> I32:
     value ~I32 = copy initial
     widened I32 = cast increment
-    value += widened
+    ~value += widened
     return value
 ;
 

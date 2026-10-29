@@ -45,7 +45,7 @@ return_large_float || -> F32:
 ;
 float_add_assign || -> F32:
     value ~F32 = 1.0
-    value += 18_446_744_073_709_551_615
+    ~value += 18_446_744_073_709_551_615
     return value
 ;
 

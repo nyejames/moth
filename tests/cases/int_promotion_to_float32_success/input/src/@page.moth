@@ -21,6 +21,6 @@ explicit_eq Bool = small_explicit is 16777216.0
 
 counter ~I32 = 5
 snapshot F32 = cast counter
-counter = 7
+~counter = 7
 
 [:coerced small=[small]/[small_explicit]/[folded_eq]/[dynamic_eq]/[explicit_eq] snapshot=[snapshot]/[counter]]

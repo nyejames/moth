@@ -18,6 +18,14 @@ alias write-through. A produced rvalue can retain shared allocation provenance w
 creating a separate slot. Solver modes describe possible states and never select the
 source operation. Operation results and CFG edge destinations preserve the same contract.
 
+AST validates the source markers for existing-place writes, mutable arguments and
+mutable receivers before HIR. Each existing multi-bind target requires its own
+marker. An existing mutable argument uses `~place`, including in a named call,
+while a fresh value or `copy place` uses no marker. A mutable alias declaration
+uses `writer ~= source` without marking its source. Borrow validation consumes
+the resolved operations and access modes rather than reconstructing these forms.
+Neither a marker nor hidden-local materialisation proves an inferred transfer.
+
 A direct place self-update of one unprojected binding performs the ordinary read
 and write checks while preserving its role and provenance. It introduces no new
 alias relationship. Projected writes and updates from a different binding retain

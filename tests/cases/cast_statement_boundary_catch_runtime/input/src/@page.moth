@@ -1,6 +1,6 @@
 octet U8 = 7
 value ~U64 = 0
-value = cast octet
+~value = cast octet
 parse_int |text String| -> I32, Error!:
     return cast text
 ;

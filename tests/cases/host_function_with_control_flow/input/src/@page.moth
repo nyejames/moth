@@ -6,7 +6,7 @@ io.line("Starting control flow test")
 
 if condition:
     io.line("Condition is true")
-    counter = counter + 1
+    ~counter = counter + 1
     io.line([: Counter incremented: [counter]])
 else
     io.line("Condition is false")

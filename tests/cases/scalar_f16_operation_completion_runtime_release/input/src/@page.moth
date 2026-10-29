@@ -20,7 +20,7 @@ rounded_text String = cast rounded_value
 
 overflow_code ~U32 = 0
 overflow_value = add_f16(65504, 65504) catch |overflow_error|:
-    overflow_code = overflow_error.code
+    ~overflow_code = overflow_error.code
     then 0
 ;
 overflow_text String = cast overflow_value

@@ -33,7 +33,7 @@ real_div |a U32, b U32| -> F64, Error!:
 
 under_code ~U32 = 0
 underflow U32 = sub(0, 1) catch |under_err|:
-    under_code = under_err.code
+    ~under_code = under_err.code
     then 99
 ;
 div_failure U32 = floor_div(7, 0) catch:
@@ -53,17 +53,17 @@ neg_less |value U32, neg I32| -> Bool, Bool, Bool:
 neg_before Bool, neg_after Bool, neg_equal Bool = neg_less(0, -1)
 
 add_checked |target ~U32, delta U32| -> U32, Error!:
-    target += delta
+    ~target += delta
     return target
 ;
 
 next |calls ~I32, value U32| -> U32:
-    calls += 1
+    ~calls += 1
     return value
 ;
 
 add_next |target ~U32, calls ~I32, value U32| -> U32, Error!:
-    target += next(~calls, value)
+    ~target += next(~calls, value)
     return target
 ;
 
@@ -71,12 +71,12 @@ atomic_target ~U32 = 100
 atomic_calls ~I32 = 0
 atomic_code ~U32 = 0
 atomic_result U32 = add_next(~atomic_target, ~atomic_calls, 4294967295) catch |atomic_err|:
-    atomic_code = atomic_err.code
+    ~atomic_code = atomic_err.code
     then 0
 ;
 
 overwrite |target ~U32, a U32, b U32| -> U32, Error!:
-    target += floor_div(a, b) catch:
+    ~target += floor_div(a, b) catch:
         then 1
     ;
     return target
@@ -85,12 +85,12 @@ overwrite |target ~U32, a U32, b U32| -> U32, Error!:
 wback ~U32 = 4294967295
 wback_code ~U32 = 0
 wback_result U32 = overwrite(~wback, 1, 0) catch |wback_err|:
-    wback_code = wback_err.code
+    ~wback_code = wback_err.code
     then 0
 ;
 
 halve |target ~U32, divisor U32| -> U32, Error!:
-    target /= divisor
+    ~target /= divisor
     return target
 ;
 
@@ -104,11 +104,11 @@ tiny_result = halve(~tiny, 2) catch:
 ;
 
 floored ~U32 = 7
-floored //= 2
+~floored //= 2
 remained ~U32 = 7
-remained %= 3
+~remained %= 3
 reduced ~U32 = 10
-reduced -= 1 + 2
+~reduced -= 1 + 2
 
 -- Task 3: U32 values above the I32 maximum execute through the shared
 -- Number-carrier helpers with unsigned bounds.

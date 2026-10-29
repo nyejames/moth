@@ -21,7 +21,8 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    calls_data::InvalidValueReceiverView, choices_control_flow::InvalidControlFlowStatementView,
+    calls_data::{InvalidReturnShapeView, InvalidValueReceiverView},
+    choices_control_flow::InvalidControlFlowStatementView,
     types_borrows_targets::TypeMismatchView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
@@ -453,6 +454,50 @@ fn mixed_multi_bind_value_block_preserves_ordered_success_shape() {
             builtin_type_ids::fixed_scalar(FixedScalar::I32)
         ],
     );
+}
+
+#[test]
+fn mixed_multi_bind_value_block_uses_existing_slot_receiver() {
+    let (ast, paths, strings) = parse_single_file_ast(
+        "choose |ready Bool, first ~I32| -> I32, I32:\n\
+             ~first, second = if ready:\n\
+                 then 1, 2\n\
+             else\n\
+                 then 3, 4\n\
+             ;\n\
+             return first, second\n;\n",
+    );
+    let body = function_body_by_name(&ast, &paths, &strings, "choose");
+    let NodeKind::MultiBind { targets, .. } = &body[0].kind else {
+        panic!("expected mixed value-block multi-bind");
+    };
+    assert!(matches!(
+        targets[0].kind,
+        crate::compiler_frontend::ast::ast_nodes::MultiBindTargetKind::Assignment
+    ));
+    assert!(matches!(
+        targets[1].kind,
+        crate::compiler_frontend::ast::ast_nodes::MultiBindTargetKind::Declaration
+    ));
+}
+
+#[test]
+fn single_prefixed_receiver_does_not_parse_rhs_comma_as_a_target() {
+    let failure = parse_single_file_ast_diagnostic(
+        "choose |ready Bool, target ~I32|:\n\
+             ~target = if ready: then 1, 2\n\
+             else then 3, 4\n\
+             ;\n;\n",
+    );
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0055",
+        Some("invalid_return_shape.too_many_return_values"),
+    );
+    let facts = diagnostic
+        .family_view::<InvalidReturnShapeView>()
+        .expect("the single receiver owns the arity diagnostic");
+    assert_eq!(facts.expected_count, Some(1));
 }
 
 #[test]

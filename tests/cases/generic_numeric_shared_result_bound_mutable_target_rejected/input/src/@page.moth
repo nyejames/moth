@@ -2,5 +2,5 @@ pair type T |value T| -> T, T:
     return value, value
 ;
 items ~= {1}
-first {F32}, items = pair({1})
+first {F32}, ~items = pair({1})
 [:length=[items.length()]]

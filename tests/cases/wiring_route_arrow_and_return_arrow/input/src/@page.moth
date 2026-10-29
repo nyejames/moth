@@ -46,12 +46,12 @@ on_named_delete |route Route of TodoMessage| -> String:
 
 capture_log ~= ""
 capture_id |log ~String| -> I32:
-    log = [:[log]"x"]
+    ~log = [:[log]"x"]
     return 42
 ;
 
 record_order |label String, log ~String| -> I32:
-    log = [:[log][label]]
+    ~log = [:[log][label]]
     return 1
 ;
 
@@ -96,6 +96,6 @@ order_result = on_ordered(
 
 borrow_source ~= "before"
 borrow_result = accept_borrow(BorrowMessage::Store(borrow_source))
-borrow_source = "after"
+~borrow_source = "after"
 
 [:routes unit=[unit_result] input=[input_result] rename=[rename_result] delete=[delete_result] named=[named_result] forward=[forward_result] capture=[capture_result] effect=[capture_log] order=[order_result] order_effect=[order_log] borrow=[borrow_result] source=[borrow_source]]

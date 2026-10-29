@@ -4,7 +4,7 @@ risky |amount U8| -> U8, Error!:
 ;
 bump |amount U8| -> U8:
     total ~U8 = 200
-    total += amount
+    ~total += amount
     return total
 ;
 safe_bump |amount U8| -> U8, Error!:
@@ -12,7 +12,7 @@ safe_bump |amount U8| -> U8, Error!:
 ;
 adjust |extra U8| -> U8:
     total ~U8 = 250
-    total += risky(extra) catch then extra
+    ~total += risky(extra) catch then extra
     return total
 ;
 safe_adjust |extra U8| -> U8, Error!:
@@ -21,13 +21,13 @@ safe_adjust |extra U8| -> U8, Error!:
 kept U8 = 100
 code ~U32 = 0
 recovered = safe_bump(kept) catch |overflow_error|:
-    code = overflow_error.code
+    ~code = overflow_error.code
     then kept
 ;
 exact = safe_bump(20) catch then 0
 rhs_code ~U32 = 0
 adjusted = safe_adjust(10) catch |writeback_error|:
-    rhs_code = writeback_error.code
+    ~rhs_code = writeback_error.code
     then 250
 ;
 

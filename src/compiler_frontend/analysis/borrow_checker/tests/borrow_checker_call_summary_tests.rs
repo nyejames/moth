@@ -578,7 +578,7 @@ fn local_mutation_summary_keeps_unwritten_mutable_callee_order_independent() {
 fn local_mutation_summary_propagates_writes_order_independently() {
     for callee_declared_first in [true, false] {
         let (mutator_mutation, wrapper_mutation) =
-            local_call_mutation_summary_in_order("    input = 1", callee_declared_first);
+            local_call_mutation_summary_in_order("    ~input = 1", callee_declared_first);
         assert_eq!(mutator_mutation, PublicCallMutationEffect::Writes);
         assert_eq!(wrapper_mutation, PublicCallMutationEffect::Writes);
     }
@@ -1027,8 +1027,8 @@ returned ~= identity(original)
 other ~= Point(2)
 other_returned ~= identity(other)
 
-returned = other_returned
-original.x = 4
+~returned = other_returned
+~original.x = 4
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let external_package_registry = default_external_package_registry(&mut string_table);
@@ -2039,7 +2039,7 @@ return 1.00 / divisor
 ;
 
 replace |value ~Dec2|:
-value = 4.00
+~value = 4.00
 ;
 
 replace(produce(2.00))

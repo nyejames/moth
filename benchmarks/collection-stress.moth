@@ -116,9 +116,9 @@ index_binding ||:
     output ~= ""
     loop items |item, index|:
         if index is not 0:
-            output = [: [output], ]
+            ~output = [: [output], ]
         ;
-        output = [: [output][index]:[item]]
+        ~output = [: [output][index]:[item]]
     ;
     
     io.line([: Items: [output]])
@@ -130,19 +130,19 @@ ascending_ranges ||:
     
     result_1 ~= ""
     loop 0 to 5 |i|:
-        result_1 = [: [result_1][i] ]
+        ~result_1 = [: [result_1][i] ]
     ;
     io.line([: 0 to 5: [result_1]])
     
     result_2 ~= ""
     loop 0 to & 5 |i|:
-        result_2 = [: [result_2][i] ]
+        ~result_2 = [: [result_2][i] ]
     ;
     io.line([: 0 to & 5: [result_2]])
     
     result_3 ~= ""
     loop 10 to 20 by 2 |i|:
-        result_3 = [: [result_3][i] ]
+        ~result_3 = [: [result_3][i] ]
     ;
     io.line([: 10 to 20 by 2: [result_3]])
 ;
@@ -153,19 +153,19 @@ descending_ranges ||:
     
     result_1 ~= ""
     loop 10 to 0 |i|:
-        result_1 = [: [result_1][i] ]
+        ~result_1 = [: [result_1][i] ]
     ;
     io.line([: 10 to 0: [result_1]])
     
     result_2 ~= ""
     loop 10 to & 0 by 2 |i|:
-        result_2 = [: [result_2][i] ]
+        ~result_2 = [: [result_2][i] ]
     ;
     io.line([: 10 to & 0 by 2: [result_2]])
     
     result_3 ~= ""
     loop 50 to 10 by 5 |i|:
-        result_3 = [: [result_3][i] ]
+        ~result_3 = [: [result_3][i] ]
     ;
     io.line([: 50 to 10 by 5: [result_3]])
 ;
@@ -176,7 +176,7 @@ float_ranges ||:
     
     result ~= ""
     loop 0.0 to 1.0 by 0.25 |f|:
-        result = [: [result][f] ]
+        ~result = [: [result][f] ]
     ;
     io.line([: 0.0 to 1.0 by 0.25: [result]])
 ;
@@ -200,7 +200,7 @@ mixed_nesting ||:
     sum ~= 0
     loop matrix |row, ri|:
         loop row |val, ci|:
-            sum = sum + val
+            ~sum = sum + val
         ;
     ;
     
@@ -237,7 +237,7 @@ struct_collection ||:
     -- Process remaining
     total_id ~= 0
     loop items |item|:
-        total_id = total_id + item.id
+        ~total_id = total_id + item.id
     ;
     
     io.line([: Total id: [total_id], Count: [items.length()]])
@@ -266,7 +266,7 @@ deep_nesting ||:
     loop outer |o|:
         loop middle |m|:
             loop inner |i|:
-                combinations = combinations + 1
+                ~combinations = combinations + 1
             ;
         ;
     ;
@@ -366,12 +366,12 @@ transformation ||:
     
     sum_doubled ~= 0
     loop doubled |d|:
-        sum_doubled = sum_doubled + d
+        ~sum_doubled = sum_doubled + d
     ;
     
     sum_squared ~= 0
     loop squared |s|:
-        sum_squared = sum_squared + s
+        ~sum_squared = sum_squared + s
     ;
     
     io.line([: Sum doubled: [sum_doubled], Sum squared: [sum_squared]])
@@ -395,8 +395,8 @@ record_collection ||:
     total_score ~= 0.0
     
     loop records |rec|:
-        total_count = total_count + rec.count
-        total_score = total_score + rec.score
+        ~total_count = total_count + rec.count
+        ~total_score = total_score + rec.score
     ;
     
     io.line([: Total count: [total_count], Total score: [total_score]])
@@ -429,7 +429,7 @@ complex_workflow ||:
     -- Stage 4: Final aggregation
     result ~= ""
     loop stage3 |s|:
-        result = [: [result][s]; ]
+        ~result = [: [result][s]; ]
     ;
     
     io.line([: Pipeline result: [stage3.length()] items])

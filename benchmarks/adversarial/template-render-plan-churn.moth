@@ -71,9 +71,9 @@ replay_content #= [$insert("body"): repeated]
 build_lines |count I32| -> String:
     output ~= [: <div class="lines">]
     loop 0 to count |i|:
-        output = [: [output]<div class="line">line [i]</div>]
+        ~output = [: [output]<div class="line">line [i]</div>]
     ;
-    output = [: [output]</div>]
+    ~output = [: [output]</div>]
     return output
 ;
 
@@ -81,7 +81,7 @@ build_rows |count I32| -> String:
     output ~= ""
     loop 0 to count |i|:
         row = [row_template, i, i * 2, i * 3: fallback]
-        output = [: [output][row]]
+        ~output = [: [output][row]]
     ;
     return output
 ;

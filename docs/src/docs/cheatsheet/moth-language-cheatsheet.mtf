@@ -29,10 +29,10 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
 
 [codeblock, $code("moth"):
     count ~= 0
-    count = left + right
-    count += 1
-    count //= 2
-    -- Invalid: count=1, left+right, count+=1, count ~ = 0
+    ~count = left + right
+    ~count += 1
+    ~count //= 2
+    -- Invalid spacing: ~count=1, left+right, ~count+=1, count ~ = 0
 ]
 
 ## Values, bindings and constants
@@ -45,7 +45,7 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
 
     count ~= 0            -- mutable
     names ~{String} = {}  -- mutable collection
-    count = 1             -- reassignment, not a new binding
+    ~count = 1            -- reassignment, not a new binding
 
     site_name #= "Moth"  -- compile-time constant
     version #I32 = 1
@@ -110,10 +110,10 @@ A value returned from a function gets a separate caller binding, even if it shar
 
     original ~= {1}
     writer ~= original
-    writer = {2}  -- also changes original
+    ~writer = {2}  -- also changes original
 
     returned ~= same_items(original)
-    returned = {3}  -- original still holds {2}
+    ~returned = {3}  -- original still holds {2}
 ]
 
 `copy` deep-copies a binding, field or parenthesised place. It preserves internal sharing but shares no storage with the source.
@@ -270,19 +270,21 @@ Parameters use `|...|`, or `||` when empty. Call with parentheses. Positional ar
 A named argument may skip a default, which must be compile-time evaluable and can't refer to other parameters.
 Builtin and host calls use positional arguments. Omit `->` for no success or error results. A function with only a failure slot writes `-> Error!`.
 
-Mutable parameters accept `~place` for existing mutable storage or a fresh value:
+Mutable parameters require `~place` for existing mutable storage, including named arguments. Fresh values and explicit copies stay unmarked:
 
 [codeblock, $code("moth"):
     increment |value ~I32|:
-        value += 1
+        ~value += 1
     ;
 
     count ~= 1
     increment(~count)
+    increment(value = ~count)
+    increment(copy count)
     increment(1)
 ]
 
-Shared parameters read without mutation authority. Mutable receiver calls similarly require `~` on an existing mutable place.
+Shared parameters reject `~`. Mutable receiver calls require `~` on an existing mutable place and can't use a fresh value as the receiver.
 
 Multiple return slots remain **separate results, not a tuple**:
 
@@ -295,7 +297,8 @@ Multiple return slots remain **separate results, not a tuple**:
 ]
 
 Receive every result through a matching multi-bind, return or value-producing block.
-All right-hand results evaluate before writes to existing targets. Every reachable success path must return the declared values or terminate.
+Prefix each existing target with `~`, as in `~count, message = next()`. Unmarked targets define new bindings, while prefixed targets update existing mutable bindings.
+All right-hand results evaluate once before writes to existing targets. Every reachable success path must return the declared values or terminate.
 There is no `Void` type and a no-success function may fall through.
 
 ### Never-returning calls: `-> !`
@@ -502,7 +505,7 @@ A compile-time-known `if` selects its branch only after both sides have been che
     names = {"Priya", "Rob"}
 
     loop count < 3:  -- condition checked before each iteration
-        count += 1
+        ~count += 1
     ;
 
     loop names |name, index|:  -- read-only element and optional I32 index
@@ -555,7 +558,7 @@ A nested ordinary loop blocks the outer production target. A nested producing lo
     Person = | name String, age I32 = 0 |
 
     birthday |this ~Person|:
-        this.age += 1
+        ~this.age += 1
     ;
 
     display_name |this Person| -> String:
@@ -563,7 +566,7 @@ A nested ordinary loop blocks the outer production target. A nested producing lo
     ;
 
     person ~= Person(name = "Priya", age = 30)
-    person.age += 1
+    ~person.age += 1
     ~person.birthday()  -- mutating receiver needs ~
     person_name = person.display_name()
 ]
@@ -585,7 +588,7 @@ Mutable methods need `~place.method(...)`.
             saved = child,
             fresh = (enabled = true),
         )
-        state.fresh.enabled = false
+        ~state.fresh.enabled = false
         independent = copy state
         count = independent.saved.count
     ;
@@ -968,7 +971,7 @@ The `text_input` and `button` functions below stand in for UI components. They s
 
     -- When the text input supplies "Revised", the route produces this message:
     changed = TodoMessage::Rename(42, "Revised")
-    title = update_title(title, changed)
+    ~title = update_title(title, changed)
 ]
 
 `Route of String -> TodoMessage` captures `todo_id` once. The future `String` fills the remaining `text` field.

@@ -19,8 +19,8 @@ fulfil_request |stock ~Stock, requested I32| -> I32, Error!:
 
     available = copy stock.available
     delivered = if requested <= available then requested else available
-    stock.available -= delivered
-    stock.shipped += delivered
+    ~stock.available -= delivered
+    ~stock.shipped += delivered
     return delivered
 ;
 
@@ -44,24 +44,24 @@ loop orders |order|:
     if order is:
         Request(amount) =>
             delivered = fulfil_request(~stock, amount) catch |failure|:
-                rejected += 1
-                event = [:request[amount]=[failure.code]:[failure.message]]
+                ~rejected += 1
+                ~event = [:request[amount]=[failure.code]:[failure.message]]
                 then 0
             ;
             if delivered > 0:
-                accepted += 1
+                ~accepted += 1
                 status = if delivered < amount:
-                    partial += 1
+                    ~partial += 1
                     then "partial"
                 else
                     then "full"
                 ;
-                event = [:request[amount]=[delivered]/[status]]
+                ~event = [:request[amount]=[delivered]/[status]]
             ;
         Restock(amount) =>
-            stock.available += amount
-            stock.returned += amount
-            event = [:return[amount]]
+            ~stock.available += amount
+            ~stock.returned += amount
+            ~event = [:return[amount]]
     ;
 
     observed_stock = stock

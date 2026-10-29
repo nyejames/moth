@@ -3,7 +3,7 @@ Point = |
 |
 
 set_x |this ~Point, new_x I32|:
-    this.x = new_x
+    ~this.x = new_x
 ;
 
 p ~= Point(0)

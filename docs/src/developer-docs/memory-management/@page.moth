@@ -55,7 +55,7 @@ page_head #= theme_head
 #[section, $md:
     ## Exclusive access
 
-    `~place` requests temporary mutation-capable access to an existing mutable place. It isn't a move marker or a type identity. Fresh rvalues satisfy ordinary mutable parameters without source `~`. Mutable receivers still require an existing mutable place.
+    Prefix an existing-place write with `~`, as in `~count = 1`. An existing mutable place passed to a mutable parameter also needs `~`, including in a named argument. Mutable receivers use `~items.push(value)` and require an existing mutable place. Fresh values and `copy place` satisfy ordinary mutable parameters without `~`. A mutable alias uses `writer ~= original` with an unmarked source. `~` isn't a move marker or a type identity.
 
     [codeblock, $code("moth"):
         change({"fresh"})

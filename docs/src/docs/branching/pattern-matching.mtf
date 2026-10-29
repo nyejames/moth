@@ -60,7 +60,7 @@ arms.
 [codeblock, $code("moth"):
     label = if maybe_name is |name| then name else "guest"
 
-    label = if maybe_name is |name|:
+    block_label = if maybe_name is |name|:
         then name
     else
         then "guest"
@@ -68,7 +68,7 @@ arms.
 
     score = if status is Ready then 1 else 0
 
-    score = if status is Ready:
+    block_score = if status is Ready:
         then 1
     else
         then 0

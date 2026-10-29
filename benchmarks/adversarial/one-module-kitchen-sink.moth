@@ -119,7 +119,7 @@ score_total |scores ~{String = I32}| -> I32:
 
 -- Borrow-aware helpers
 increment |this ~Counter|:
-    this.value = this.value + 1
+    ~this.value = this.value + 1
 ;
 
 Counter = |
@@ -178,9 +178,9 @@ run_kitchen_sink ||:
     -- Render plan churn via repeated composition
     output ~= [: <div>]
     loop 0 to 5 |i|:
-        output = [: [output]<p>line [i]</p>]
+        ~output = [: [output]<p>line [i]</p>]
     ;
-    output = [: [output]</div>]
+    ~output = [: [output]</div>]
     io.line([: [output] ])
 
     io.line("kitchen sink complete")

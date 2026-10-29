@@ -3,12 +3,12 @@ receive_u64 |value U64| -> String:
 ;
 
 count ~= 1
-count = 2
+~count = 2
 if true:
-    count = 3
+    ~count = 3
 else
     invalid I32 = 4
-    count = invalid
+    ~count = invalid
 ;
 received = receive_u64(count)
 [:unreachable]

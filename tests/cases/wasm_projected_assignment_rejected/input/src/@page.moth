@@ -4,7 +4,7 @@ Label = |
 
 rename_label |source Label| -> String:
     label ~= copy source
-    label.text = "changed"
+    ~label.text = "changed"
     return label.text
 ;
 

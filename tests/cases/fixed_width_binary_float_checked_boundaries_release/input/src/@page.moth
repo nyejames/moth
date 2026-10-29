@@ -77,7 +77,7 @@ multiply_profile_float |left F64, right F64| -> F64, Error!:
 capture_f64_to_f16 |value F64| -> U32:
     code ~U32 = 0
     ignored = round_f64_to_f16(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -85,7 +85,7 @@ capture_f64_to_f16 |value F64| -> U32:
 capture_f64_to_f32 |value F64| -> U32:
     code ~U32 = 0
     ignored = round_f64_to_f32(value) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -93,7 +93,7 @@ capture_f64_to_f32 |value F64| -> U32:
 capture_f32_multiply |left F32, right F32| -> U32:
     code ~U32 = 0
     ignored = multiply_f32(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -101,7 +101,7 @@ capture_f32_multiply |left F32, right F32| -> U32:
 capture_divide_f16 |left F16, right F16| -> U32:
     code ~U32 = 0
     ignored = divide_f16(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -109,7 +109,7 @@ capture_divide_f16 |left F16, right F16| -> U32:
 capture_divide_f32 |left F32, right F32| -> U32:
     code ~U32 = 0
     ignored = divide_f32(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -117,7 +117,7 @@ capture_divide_f32 |left F32, right F32| -> U32:
 capture_divide_f64 |left F64, right F64| -> U32:
     code ~U32 = 0
     ignored = divide_f64(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -125,7 +125,7 @@ capture_divide_f64 |left F64, right F64| -> U32:
 capture_divide_float |left F64, right F64| -> U32:
     code ~U32 = 0
     ignored = divide_float(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code

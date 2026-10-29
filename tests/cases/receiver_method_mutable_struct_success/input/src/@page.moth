@@ -3,9 +3,17 @@ Counter = |
 |
 
 increment |this ~Counter|:
-    this.count = this.count + 1
+    ~this.count = this.count + 1
+;
+
+transfer |this ~Counter, other ~Counter|:
+    ~this.count = this.count + 1
+    ~other.count = other.count - 1
 ;
 
 c ~= Counter(5)
 ~c.increment()
-io.line([:receiver_method_mutable_struct_success value=[c.count]])
+other ~= Counter(10)
+~c.transfer(~other)
+~c.transfer(other = ~other)
+io.line([:receiver_method_mutable_struct_success value=[c.count] other=[other.count]])

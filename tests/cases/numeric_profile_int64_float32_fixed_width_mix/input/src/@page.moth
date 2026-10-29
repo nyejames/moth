@@ -1,7 +1,7 @@
 profile_integer I64 = 2147483648
 narrow_code ~U32 = 0
 narrowed I32 = cast profile_integer catch |err|:
-    narrow_code = err.code
+    ~narrow_code = err.code
     then 0
 ;
 

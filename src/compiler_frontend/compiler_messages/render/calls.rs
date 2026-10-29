@@ -191,7 +191,7 @@ fn immutable_place_mutable_access_message(
         Some(binding) => {
             let binding_text = string_table.resolve(binding);
             format!(
-                "{prefix} requires mutable access for {parameter_label}, but `{binding_text}` is immutable. Declare the binding as mutable, then pass `~{binding_text}`."
+                "{prefix} requires mutable access for {parameter_label}, but `{binding_text}` is immutable. Declare the binding as mutable, then pass the existing argument with `~`."
             )
         }
         None => {
@@ -269,7 +269,7 @@ pub(crate) fn invalid_assignment_target_message(
         }
         InvalidAssignmentTargetReason::ImmutableBinding => {
             let binding_text = backtick_name(target_name, "this binding");
-            format!("Cannot reassign {binding_text} because its binding is immutable. Make the original binding mutable, then reassign it with ordinary `=`.")
+            format!("{binding_text} is immutable. Declare it mutable to update it.")
         }
         InvalidAssignmentTargetReason::ImmutableFieldRoot => match root_binding_name {
             Some(_) => {
@@ -298,8 +298,18 @@ pub(crate) fn invalid_assignment_target_message(
         InvalidAssignmentTargetReason::ExpectedAssignmentOperator => {
             format!("Expected assignment operator after binding {target_text}.")
         }
-        InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget => {
-            "`~` is not written on assignment targets. Reassignment uses ordinary `=` and requires an already-mutable binding.".to_string()
+        InvalidAssignmentTargetReason::MissingWritePrefix { operator } => {
+            let operator = operator.map_or("=", |operator| operator.source_spelling());
+            match target_name {
+                Some(name) => {
+                    let target = string_table.resolve(name);
+                    format!("Updating `{target}` requires `~{target} {operator} ...`.")
+                }
+                None => format!("Updating an existing place requires a leading `~`: `~place {operator} ...`."),
+            }
+        }
+        InvalidAssignmentTargetReason::MutableMarkerRequiresExistingPlace => {
+            "`~` must prefix an existing writable place.".to_string()
         }
     }
 }
@@ -362,13 +372,25 @@ pub(crate) fn invalid_multi_bind_message(
             format!("Duplicate multi-bind target {target_text} in the same target list.")
         }
         InvalidMultiBindReason::UnsupportedRhs => {
-            "Multi-bind is only supported for explicit multi-value surfaces. For now, that means multi-return function calls.".to_string()
+            "Multi-bind requires a multi-value producer, such as a multi-return call or a value-producing block.".to_string()
         }
         InvalidMultiBindReason::ExistingTargetMutableMarker => {
-            format!("Existing multi-bind target {target_text} cannot use a mutable marker.")
+            format!("Existing multi-bind target {target_text} cannot use a declaration mutability marker. Remove that marker; updating a mutable binding requires a leading `~`.")
         }
         InvalidMultiBindReason::ExistingTargetImmutable => {
-            format!("Existing multi-bind target {target_text} is immutable and cannot be reassigned.")
+            format!("Existing multi-bind target {target_text} is immutable. Declare it mutable to update it.")
+        }
+        InvalidMultiBindReason::ExistingTargetNeedsPrefix => {
+            match target_name {
+                Some(name) => {
+                    let name = string_table.resolve(name);
+                    format!("Multi-bind target `{name}` updates an existing binding; write `~{name}`.")
+                }
+                None => "This multi-bind target updates an existing binding; prefix it with `~`.".to_string(),
+            }
+        }
+        InvalidMultiBindReason::UnknownPrefixedTarget => {
+            format!("A leading '~' updates an existing multi-bind target; declare {target_text} without it.")
         }
         InvalidMultiBindReason::ArityMismatch { expected, found } => {
             format!("Multi-bind arity mismatch: {expected} target(s) but {found} value slot(s). Target count must match returned slot count exactly.")
@@ -622,7 +644,7 @@ pub(crate) fn invalid_receiver_call_message(
             format!("{method} does not accept an explicit mutable access marker `~`. Remove the `~` from this call.")
         }
         InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall => {
-            "Mutable receiver marker `~` is only valid for receiver calls like `~value.method(...)` or `~values.push(...)`."
+            "`~` is not an ordinary value operator. Use it for writes to existing places, mutable receivers or existing-place arguments to mutable parameters."
                 .to_string()
         }
         InvalidReceiverCallReason::AmbiguousGenericBoundMethod => {

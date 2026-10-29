@@ -1,6 +1,6 @@
 narrow |seen ~String, left U32, right U32| -> U8:
     value U8 = cast left + right catch |err|:
-        seen = [: [err.code] [err.message]]
+        ~seen = [: [err.code] [err.message]]
         then 0
     ;
     return value

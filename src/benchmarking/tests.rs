@@ -96,7 +96,7 @@ fn frontend_benchmark_threads_typed_build_config_inputs() {
     let file_path = temp_dir.path().join("config_input.moth");
     std::fs::write(
         &file_path,
-        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    result = 1\n;\n",
+        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("should write config-input source");
 
@@ -174,11 +174,11 @@ value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    else => result = \"other\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    else => ~result = \"other\"
 ;
 ";
 
@@ -218,11 +218,11 @@ value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    \"one\" => result = \"one\"
-    else => result = \"other\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    \"one\" => ~result = \"one\"
+    else => ~result = \"other\"
 ;
 ";
     std::fs::write(&file_path, warning_source).expect("should write warning source");
@@ -268,7 +268,7 @@ fn frontend_benchmark_retains_source_package_warning() {
     std::fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     std::fs::write(
         package.join("+package.moth"),
-        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
     std::fs::write(

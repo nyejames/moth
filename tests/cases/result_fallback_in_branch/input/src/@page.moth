@@ -11,14 +11,14 @@ i ~= 0
 loop i < 4:
     value ~= ""
     if i is 2:
-        value = get_value(i) catch:
+        ~value = get_value(i) catch:
             then "branch_fallback"
         ;
     else
-        value = get_value(i) catch:
+        ~value = get_value(i) catch:
             then "else_fallback"
         ;
     ;
     io.line([: [value]])
-    i = i + 1
+    ~i = i + 1
 ;

@@ -147,7 +147,7 @@ fn build_output_owner_preserves_frontend_warnings_in_success_outcome() {
     let entry_file = root.join("main.moth");
     fs::write(
         &entry_file,
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write source with a frontend warning");
 
@@ -419,7 +419,7 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write warning package root");
 
@@ -2478,9 +2478,9 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
          result ~= \"unset\"\n\
          \n\
          if value is:\n\
-             \"one\" => result = \"one\"\n\
-             \"one\" => result = \"one\"\n\
-             else => result = \"other\"\n\
+             \"one\" => ~result = \"one\"\n\
+             \"one\" => ~result = \"one\"\n\
+             else => ~result = \"other\"\n\
          ;\n\
          #[:<h1>Home</h1>]\n",
     )

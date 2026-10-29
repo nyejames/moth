@@ -1,5 +1,5 @@
 positive ~I32 = 10
-positive /= 4
+~positive /= 4
 negative ~I32 = -7
-negative /= 2
+~negative /= 2
 [: compound integer division: [positive] / [negative] ]

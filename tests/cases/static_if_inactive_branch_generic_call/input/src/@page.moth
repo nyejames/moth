@@ -21,9 +21,9 @@ inactive ~= ""
 labels ~{String} = {}
 
 if enabled:
-    active = identity(41) + 1
+    ~active = identity(41) + 1
 else
-    inactive = identity("never-generated")
+    ~inactive = identity("never-generated")
     append_label(~labels)
 ;
 

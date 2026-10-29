@@ -1,5 +1,0 @@
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0044"]
-message_contains = ["not written on assignment targets", "ordinary `=`", "already-mutable binding"]

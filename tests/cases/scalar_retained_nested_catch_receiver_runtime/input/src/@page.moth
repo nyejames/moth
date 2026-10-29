@@ -29,7 +29,7 @@ u64_return_handler_if |fail Bool, zero Bool| -> U64:
 u64_assignment_handler_if |fail Bool, zero Bool| -> U64:
     pending = 1
     total ~U64 = 0
-    total = choose_u64(fail, pending) + 1 catch:
+    ~total = choose_u64(fail, pending) + 1 catch:
         if zero:
             then 0
         else

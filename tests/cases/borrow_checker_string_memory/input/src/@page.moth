@@ -9,6 +9,6 @@ ref1 = message
 ref2 = message
 
 buffer ~= [:initial content]
-buffer = [:updated content]
+~buffer = [:updated content]
 
 [:borrow_checker_string_memory greeting=[greeting] ref1=[ref1] ref2=[ref2] buffer=[buffer]]

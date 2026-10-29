@@ -17,7 +17,7 @@ A binding gives a value a visible name.
 - An explicit annotation supplies an exact receiving type. Raw literals can materialise directly in it, while already typed values need exact compatibility.
 - Ordinary bindings are immutable by default.
 - `=` creates a binding when the name is new.
-- `=` reassigns an existing binding only when that binding is mutable.
+- An existing mutable place requires `~` before the whole target for a direct or compound write, as in `~count = 1` or `~point.x += 1`.
 
 ### Numeric inference in a runtime body
 

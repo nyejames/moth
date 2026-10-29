@@ -23,11 +23,11 @@ increment |value I32| -> I32, Error!:
     return value + 1
 ;
 assign_divide_int |target ~I32| -> I32, Error!:
-    target /= 1
+    ~target /= 1
     return target
 ;
 assign_integer_divide_int |target ~I32| -> I32, Error!:
-    target //= 1
+    ~target //= 1
     return target
 ;
 parse_profile_float |text String| -> F32, Error!:
@@ -39,7 +39,7 @@ divide_profile_float |left F32, right F32| -> F32, Error!:
 capture_profile_divide |left F32, right F32| -> U32:
     code ~U32 = 0
     ignored = divide_profile_float(left, right) catch |err|:
-        code = err.code
+        ~code = err.code
         then 0.0
     ;
     return code
@@ -63,7 +63,7 @@ float_to_int_value = float_to_int(rounded_value) catch:
 ;
 range_error_code ~U32 = 0
 ignored = increment(2147483647) catch |overflow_error|:
-    range_error_code = overflow_error.code
+    ~range_error_code = overflow_error.code
     then 0
 ;
 profile_divide_target ~= 16777217

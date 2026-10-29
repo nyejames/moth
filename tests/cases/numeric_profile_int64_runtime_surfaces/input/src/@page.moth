@@ -18,7 +18,7 @@ format_u32_checked_offset |code U32| -> String, Error!:
 sum_collection_with_index |items {I64}| -> I64:
     total ~I64 = 0
     loop items |value, index|:
-        total = total + value + index
+        ~total = total + value + index
     ;
     return total
 ;
@@ -57,7 +57,7 @@ range_total ~I64 = 0
 range_start I64 = 0
 range_end I64 = 4
 loop range_start to range_end |value, index|:
-    range_total = range_total + value + index
+    ~range_total = range_total + value + index
 ;
 
 iteration_total = sum_collection_with_index(values)
@@ -73,7 +73,7 @@ divide |numerator I64, denominator I64| -> I64, Error!:
 ;
 division_code ~U32 = 0
 ignored = divide(7, 0) catch |division_error|:
-    division_code = division_error.code
+    ~division_code = division_error.code
     then 0
 ;
 division_code_checked = format_u32_checked_offset(division_code) catch:
@@ -97,7 +97,7 @@ default_code_plus_one = default_code + 1
 bounded ~{2 I64} = {7, 8}
 fixed_push_code ~U32 = 0
 ~bounded.push(9) catch |fixed_error|:
-    fixed_push_code = fixed_error.code
+    ~fixed_push_code = fixed_error.code
 ;
 fixed_length = bounded.length()
 fixed_push_code_checked = format_u32_checked_offset(fixed_push_code) catch:

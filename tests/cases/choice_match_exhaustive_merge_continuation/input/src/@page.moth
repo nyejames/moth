@@ -4,8 +4,8 @@ status Status = Status::Ready
 label ~= "unset"
 
 if status is:
-    Ready => label = "ready"
-    Busy => label = "busy"
+    Ready => ~label = "ready"
+    Busy => ~label = "busy"
 ;
 
 suffix ~= "-done"

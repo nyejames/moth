@@ -3,7 +3,7 @@ read_u64 |value U64| -> String:
     return cast value
 ;
 record ~= Record(1, 2)
-record.fixed = cast "4294967308" catch then 0
+~record.fixed = cast "4294967308" catch then 0
 pending_text = read_u64(record.pending)
 fixed_text = read_u64(record.fixed)
 [:pending-root-concrete-field-cast pending=[pending_text] fixed=[fixed_text]]

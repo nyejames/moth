@@ -14,7 +14,7 @@ checked_float || -> I32, Error!:
 
 code ~U32 = 0
 ignored = checked_float() catch |err|:
-    code = err.code
+    ~code = err.code
     then 0
 ;
 io.line([: external_native_float32 overflow-code=[code]])
@@ -52,7 +52,7 @@ raw_class |selector U32| -> U32:
 raw_failure |selector U32| -> U32:
     failure ~U32 = 0
     ignored = raw_code(selector) catch |err|:
-        failure = err.code
+        ~failure = err.code
         then 0
     ;
     return failure
@@ -68,7 +68,7 @@ forward_raw |selector U32| -> F32, Error!:
 -- when the guard rejects the result. The host counter observes one host call per source call.
 selector_calls ~U32 = 0
 next_selector |seen ~U32, value U32| -> U32:
-    seen = seen + 1
+    ~seen = seen + 1
     return value
 ;
 
@@ -93,11 +93,11 @@ fallible_probe |selector U32| -> F32, Error!:
 fallible_nan_code ~U32 = 0
 fallible_ok_code ~U32 = 0
 fallible_nan_value = fallible_probe(6) catch |err|:
-    fallible_nan_code = err.code
+    ~fallible_nan_code = err.code
     then 0.0
 ;
 fallible_ok_value = fallible_probe(1) catch |err|:
-    fallible_ok_code = err.code
+    ~fallible_ok_code = err.code
     then 0.0
 ;
 fallible_ok_positive = fallible_ok_value > 0.0
@@ -105,20 +105,20 @@ fallible_ok_positive = fallible_ok_value > 0.0
 error_code ~U32 = 0
 error_message ~= ""
 error_value = fallible_probe(9) catch |err|:
-    error_code = copy err.code
-    error_message = copy err.message
+    ~error_code = copy err.code
+    ~error_message = copy err.message
     then 0.0
 ;
 
 forwarded_code ~U32 = 0
 forwarded_value = forward_raw(1) catch |err|:
-    forwarded_code = err.code
+    ~forwarded_code = err.code
     then 0.0
 ;
 forwarded_positive = forwarded_value > 0.0
 forwarded_overflow_code ~U32 = 0
 forwarded_overflow_value = forward_raw(4) catch |err|:
-    forwarded_overflow_code = err.code
+    ~forwarded_overflow_code = err.code
     then 0.0
 ;
 

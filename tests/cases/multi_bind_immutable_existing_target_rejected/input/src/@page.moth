@@ -3,6 +3,6 @@ pair || -> String, I32:
 ;
 
 existing = "old"
-existing I32, created = pair()
+~existing I32, created = pair()
 io.line([: [existing]])
 io.line([: [created]])

@@ -6,5 +6,5 @@ if true:
 ;
 
 -- Reassignment after the branch — alias is gone, this must succeed
-value = 20
+~value = 20
 io.line([: after-scope=[value]])

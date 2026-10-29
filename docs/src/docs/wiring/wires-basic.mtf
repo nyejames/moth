@@ -11,12 +11,12 @@ binding. No special marker is written on the declaration or argument.
     ;
 
     replace_name |value ~String, replacement String|:
-        value = copy replacement
+        ~value = copy replacement
     ;
 
     current_name ~= "Priya"
     label = read_name(current_name)
-    current_name = "Rob"
+    ~current_name = "Rob"
     replace_name(~current_name, "Emmy")
 ]
 
@@ -25,7 +25,7 @@ ordinary `String` parameter reads its current value. Passing it to another
 compatible Wire parameter forwards the same binding identity. A Wire grants no
 mutation permission: `replace_name` has an ordinary exclusive parameter, so
 the call supplies `~current_name`. By contrast, `current_name ~= "Priya"`
-declares a mutable binding and later `current_name = "Rob"` reassigns it. The
+declares a mutable binding and later `~current_name = "Rob"` reassigns it. The
 binding declaration and exclusive call argument have different jobs.
 
 The identity belongs to this binding instance, not its current text. Reassigning

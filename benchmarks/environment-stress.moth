@@ -223,27 +223,27 @@ get_theme_name |this Theme| -> String:
 
 -- Mutable receiver methods
 shift_x |this ~Point, delta Px|:
-    this.x = this.x + delta
+    ~this.x = this.x + delta
 ;
 
 set_width |this ~Size, new_width Px|:
-    this.width = new_width
+    ~this.width = new_width
 ;
 
 set_visible |this ~NodeConfig, visible Bool|:
-    this.visible = visible
+    ~this.visible = visible
 ;
 
 set_name |this ~Theme, name String|:
-    this.name = name
+    ~this.name = name
 ;
 
 set_font_size |this ~Font, size Px|:
-    this.size = size
+    ~this.size = size
 ;
 
 set_layer_index |this ~Layer, index I32|:
-    this.index = index
+    ~this.index = index
 ;
 
 -- Generic free functions
@@ -272,7 +272,7 @@ identity type T |value T| -> T:
 ;
 
 bump_int_wrapper |wrapper ~Wrap of I32|:
-    wrapper.count = wrapper.count + 1
+    ~wrapper.count = wrapper.count + 1
 ;
 
 -- Choice helper functions

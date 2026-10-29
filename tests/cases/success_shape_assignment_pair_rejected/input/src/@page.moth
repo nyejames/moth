@@ -5,4 +5,4 @@ pair || -> I32, I32:
 
 
 value ~= 0
-value = pair()
+~value = pair()

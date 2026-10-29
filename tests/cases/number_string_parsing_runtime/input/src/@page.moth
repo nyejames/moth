@@ -34,27 +34,27 @@ huge_zero_matches = parsed_signed_huge_zero is 0
 
 uppercase_error_code ~U32 = 0
 uppercase = parse_number2("1E3") catch |uppercase_error|:
-    uppercase_error_code = uppercase_error.code
+    ~uppercase_error_code = uppercase_error.code
     then 0.0
 ;
 plus_error_code ~U32 = 0
 leading_plus = parse_number2("+1") catch |plus_error|:
-    plus_error_code = plus_error.code
+    ~plus_error_code = plus_error.code
     then 0.0
 ;
 inexact_error_code ~U32 = 0
 inexact_scale = parse_number2("1.234") catch |inexact_error|:
-    inexact_error_code = inexact_error.code
+    ~inexact_error_code = inexact_error.code
     then 0.0
 ;
 negative_huge_error_code ~U32 = 0
 negative_huge_nonzero = parse_number256("1e-99999999999999999999999999999999999999999999999999") catch |negative_huge_error|:
-    negative_huge_error_code = negative_huge_error.code
+    ~negative_huge_error_code = negative_huge_error.code
     then 0.0
 ;
 capacity_error_code ~U32 = 0
 positive_huge_capacity = parse_number256("1e9000000000") catch |capacity_error|:
-    capacity_error_code = capacity_error.code
+    ~capacity_error_code = capacity_error.code
     then 0.0
 ;
 

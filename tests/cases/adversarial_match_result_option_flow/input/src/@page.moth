@@ -22,16 +22,16 @@ loop i < 4:
 
     ;
     if value is:
-        0 => sum = sum + 50
-        2 if i < 2 => sum = sum + 20
-        4 => sum = sum + 4
-        else => sum = sum + 1
+        0 => ~sum = sum + 50
+        2 if i < 2 => ~sum = sum + 20
+        4 => ~sum = sum + 4
+        else => ~sum = sum + 1
     ;
 
     if i is 3:
-        i = i + 1
+        ~i = i + 1
     else
-        i = i + 1
+        ~i = i + 1
     ;
 ;
 

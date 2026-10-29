@@ -9,5 +9,5 @@ name_ref = person.name
 age_ref = person.age
 
 io.line([: borrowed-person=[name_ref] age=[age_ref]])
-person.age = person.age + 1
+~person.age = person.age + 1
 io.line([: mutated-age=[person.age]])

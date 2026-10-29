@@ -43,12 +43,63 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
+use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+#[test]
+fn prefixed_statement_probe_respects_nested_syntax_and_boundaries() {
+    for (statement, code, reason) in [
+        (
+            "~make().field = 1",
+            "MOTH-RULE-0044",
+            "invalid_assignment_target.mutable_marker_requires_existing_place",
+        ),
+        (
+            "~(value) = 1",
+            "MOTH-RULE-0044",
+            "invalid_assignment_target.mutable_marker_requires_existing_place",
+        ),
+        (
+            "~[label = 1]",
+            "MOTH-RULE-0047",
+            "invalid_receiver_call.mutable_marker_on_non_receiver_call",
+        ),
+        (
+            "~true\nnext = 1",
+            "MOTH-RULE-0047",
+            "invalid_receiver_call.mutable_marker_on_non_receiver_call",
+        ),
+    ] {
+        let source = format!("value ~= 0\n{statement}\n");
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, code, Some(reason));
+        let mut spans = ExtendedSpanBuilder::new();
+        let marker = LocalSpan::exact(source.find(statement).unwrap() as u32, 1, &mut spans)
+            .expect("marker span fits");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, marker)),
+            "{statement}",
+        );
+    }
+}
+
+#[test]
+fn prefixed_receiver_calls_keep_nested_named_arguments_out_of_write_dispatch() {
+    let source = "Point = |\n    x I32 = 0,\n|\n\
+        combine |left I32, right I32| -> I32:\n    return left + right\n;\n\
+        update |this ~Point, amount I32|:\n    ~this.x = amount\n;\n\
+        point ~= Point()\n\
+        ~point.update(amount = combine(left = 1, right = 2))\n\
+        ~point.x = 3\n";
+    let (ast, paths, strings) = parse_single_file_ast(source);
+    let body = start_function_body(&ast, &paths, &strings);
+    assert!(matches!(body[1].kind, NodeKind::ExpressionStatement(_)));
+    assert!(matches!(body[2].kind, NodeKind::Assignment { .. }));
+}
 
 // --------------------------
 //  Basic declarations
@@ -811,7 +862,7 @@ fn assignments_reject_zero_and_multiple_success_slots() {
         ("produce ||:\n    return\n;\n", 0),
         ("produce || -> I32, String:\n    return 1, \"one\"\n;\n", 2),
     ] {
-        let source = format!("{producer}\nvalue ~= 0\nvalue = produce()\n");
+        let source = format!("{producer}\nvalue ~= 0\n~value = produce()\n");
         let failure = parse_single_file_ast_diagnostic(&source);
         let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
         let facts = diagnostic

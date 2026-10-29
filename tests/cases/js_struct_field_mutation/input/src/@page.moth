@@ -7,6 +7,6 @@ Point = |
 |
 
 p ~= Point(1, 2)
-p.x = 10
-p.y = 20
+~p.x = 10
+~p.y = 20
 io.line([: Point: ([p.x], [p.y])])

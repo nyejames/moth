@@ -3,8 +3,8 @@
 original ~= Point(1)
 returned ~= identity(original)
 
-returned = Point(2)
-returned.x = 3
-original.x = 4
+~returned = Point(2)
+~returned.x = 3
+~original.x = 4
 
 io.line([:original=[original.x] returned=[returned.x]])

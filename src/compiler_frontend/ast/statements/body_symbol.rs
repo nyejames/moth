@@ -68,9 +68,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidAssignmentTargetReason, InvalidDeclarationReason, InvalidFieldAccessReason,
-    InvalidMultiBindReason, InvalidStandaloneStatementReason, InvalidThisUsageReason,
-    ReservedNameOwner, ValueReceiverContext,
+    DiagnosticCompoundAssignmentOperator, InvalidAssignmentTargetReason, InvalidDeclarationReason,
+    InvalidFieldAccessReason, InvalidMultiBindReason, InvalidStandaloneStatementReason,
+    InvalidThisUsageReason, ReservedNameOwner, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -82,6 +82,67 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+
+/// Reconstruct the authored place only on the diagnostic path; the successful write
+/// continues to use the existing typed place and mutation owners.
+fn missing_write_prefix(
+    cursor: &AstCursor,
+    root: StringId,
+    strings: &mut StringTable,
+) -> Result<DiagnosticDraft, ExpressionParseError> {
+    let mut start = cursor.position().saturating_sub(1);
+    while start >= 2
+        && cursor
+            .token_ref_at(start - 1)
+            .is_some_and(|token| token.tag() == TokenTag::DOT)
+        && cursor
+            .token_ref_at(start - 2)
+            .is_some_and(|token| matches!(token.tag(), TokenTag::SYMBOL | TokenTag::THIS))
+    {
+        start -= 2;
+    }
+    let mut target = strings.resolve(root).to_owned();
+    let mut index = start + 2;
+    while index < cursor.position() {
+        if let Some(field) = cursor.token_string_id_at_in(index, strings)? {
+            target.push('.');
+            target.push_str(strings.resolve(field));
+        }
+        index += 2;
+    }
+    let target = strings.intern(&target);
+    let operator = match cursor.current_tag() {
+        TokenTag::ADD_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::Add),
+        TokenTag::SUBTRACT_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::Subtract),
+        TokenTag::MULTIPLY_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::Multiply),
+        TokenTag::DIVIDE_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::Divide),
+        TokenTag::INT_DIVIDE_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::IntDivide),
+        TokenTag::MODULUS_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::Modulus),
+        TokenTag::EXPONENT_ASSIGN => Some(DiagnosticCompoundAssignmentOperator::Exponent),
+        _ => None,
+    };
+    Ok(names_declarations::invalid_assignment_target(
+        InvalidAssignmentTargetReason::MissingWritePrefix { operator },
+        Some(target),
+        None,
+        None,
+        cursor.span_at(start),
+    ))
+}
+
+fn label_immutable_declaration(
+    diagnostic: DiagnosticDraft,
+    declaration_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    if let Some(span) = declaration_span {
+        diagnostic.with_label(
+            Some(span),
+            Some(LabelDraftMessage::ImmutableBindingDeclaration),
+        )
+    } else {
+        diagnostic
+    }
+}
 
 // --------------------------
 //  Statement routing helpers
@@ -199,6 +260,9 @@ pub(crate) fn parse_this_statement(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    let prefixed = token_stream
+        .previous()
+        .is_some_and(|token| token.tag() == TokenTag::MUTABLE);
     let this_id = string_table.intern("this");
     let this_reference = context.resolve_this_reference(this_id, token_stream.current_span())?;
     // `this` is a receiver declaration, never a body-owned numeric origin.
@@ -265,6 +329,9 @@ pub(crate) fn parse_this_statement(
                     )
                     .into());
                 };
+                if !prefixed && this_declaration.value_mode.is_mutable() {
+                    return Err(missing_write_prefix(token_stream, this_id, string_table)?.into());
+                }
 
                 let mutation = handle_mutation_target(
                     token_stream,
@@ -565,13 +632,7 @@ fn retain_pending_mutation(
             None,
             span,
         );
-        let diagnostic = match declaration_span {
-            Some(span) => diagnostic.with_label(
-                Some(span),
-                Some(LabelDraftMessage::ImmutableBindingDeclaration),
-            ),
-            None => diagnostic,
-        };
+        let diagnostic = label_immutable_declaration(diagnostic, declaration_span);
         return Err(diagnostic.into());
     }
     let target = DeferredAssignmentTarget::Pending(PendingPlaceTarget {
@@ -744,13 +805,7 @@ fn retain_pending_member_mutation(
             Some(root_name),
             span,
         );
-        let diagnostic = match root_span {
-            Some(span) => diagnostic.with_label(
-                Some(span),
-                Some(LabelDraftMessage::ImmutableBindingDeclaration),
-            ),
-            None => diagnostic,
-        };
+        let diagnostic = label_immutable_declaration(diagnostic, root_span);
         return Err(diagnostic.into());
     }
 
@@ -908,7 +963,9 @@ fn register_member_mutation_witness(
 ///       preserving the authored RHS span for both whole and nested fragments.
 /// WHY: deferral shape is construction detail, not a user-facing failure; only the explicitly
 ///      supported calls and value blocks have body-root resumption routes.
-fn reject_numeric_dependency_in_multi_bind(error: ExpressionParseError) -> ExpressionParseError {
+pub(crate) fn reject_numeric_dependency_in_multi_bind(
+    error: ExpressionParseError,
+) -> ExpressionParseError {
     match error {
         ExpressionParseError::NumericDeferral(deferral) => {
             let span = deferral.span.or_else(|| {
@@ -938,6 +995,9 @@ pub(crate) fn parse_symbol_statement(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    let prefixed = token_stream
+        .previous()
+        .is_some_and(|token| token.tag() == TokenTag::MUTABLE);
     let Some(symbol_id) = token_stream.current_string_id_in(string_table)? else {
         return Err(
             token_lexical::expected_symbol_statement(Some(token_stream.current_span())).into(),
@@ -992,16 +1052,17 @@ pub(crate) fn parse_symbol_statement(
         .into());
     }
 
-    if let Some(multi_bind) = parse_multi_bind_statement(
-        token_stream,
-        context,
-        type_interner,
-        expression_builder,
-        const_values,
-        string_table,
-        path_fork,
-    )
-    .map_err(reject_numeric_dependency_in_multi_bind)?
+    if !prefixed
+        && let Some(multi_bind) = parse_multi_bind_statement(
+            token_stream,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            string_table,
+            path_fork,
+        )
+        .map_err(reject_numeric_dependency_in_multi_bind)?
     {
         match multi_bind {
             MultiBindStatement::Completed(node) => draft.push_node(node),
@@ -1019,6 +1080,42 @@ pub(crate) fn parse_symbol_statement(
         match token_stream.peek_next_tag() {
             // Direct reassignment of an existing local variable.
             Some(next_tag) if next_tag.is_assignment_operator() => {
+                if !prefixed {
+                    let mutable = if let Some(declaration) = existing_reference.ready_declaration()
+                    {
+                        declaration.value_mode.is_mutable()
+                    } else if let Some(binding) = existing_reference.pending_binding() {
+                        context.pending_numeric_is_mutable(binding).ok_or_else(|| {
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
+                                "a mutation target named a stale pending numeric binding",
+                            )
+                        })?
+                    } else {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "a mutation target reference had neither a declaration nor a pending binding",
+                        )
+                        .into());
+                    };
+                    if !mutable {
+                        token_stream.advance();
+                        let diagnostic = names_declarations::invalid_assignment_target(
+                            InvalidAssignmentTargetReason::ImmutableBinding,
+                            Some(symbol_id),
+                            None,
+                            None,
+                            Some(token_stream.current_span()),
+                        );
+                        let diagnostic = label_immutable_declaration(
+                            diagnostic,
+                            existing_reference.binding_span(),
+                        );
+                        return Err(diagnostic.into());
+                    }
+                    token_stream.advance();
+                    return Err(missing_write_prefix(token_stream, symbol_id, string_table)?.into());
+                }
                 token_stream.advance();
                 if let Some(binding) = existing_reference.pending_binding() {
                     return retain_pending_mutation(
@@ -1096,6 +1193,24 @@ pub(crate) fn parse_symbol_statement(
                     if token_stream.current_tag().is_assignment_operator()
                         && let Some(member) = retained_member_target(&item)
                     {
+                        let immutable_field_root = if member.field_name.is_some() {
+                            !context.pending_numeric_is_mutable(binding).ok_or_else(|| {
+                                InfrastructureFailure::internal(
+                                    CompilerStage::AstConstruction,
+                                    "a member mutation named a stale pending numeric root",
+                                )
+                            })?
+                        } else {
+                            false
+                        };
+                        if !prefixed && !immutable_field_root {
+                            return Err(missing_write_prefix(
+                                token_stream,
+                                symbol_id,
+                                string_table,
+                            )?
+                            .into());
+                        }
                         return retain_pending_member_mutation(
                             token_stream,
                             draft,
@@ -1171,6 +1286,11 @@ pub(crate) fn parse_symbol_statement(
                         )
                         .into());
                     };
+                    if !prefixed && declaration.value_mode.is_mutable() {
+                        return Err(
+                            missing_write_prefix(token_stream, symbol_id, string_table)?.into()
+                        );
+                    }
 
                     let mutation = handle_mutation_target(
                         token_stream,
@@ -1229,6 +1349,17 @@ pub(crate) fn parse_symbol_statement(
                 return Ok(());
             }
         }
+    }
+
+    if prefixed {
+        return Err(names_declarations::invalid_assignment_target(
+            InvalidAssignmentTargetReason::MutableMarkerRequiresExistingPlace,
+            Some(symbol_id),
+            None,
+            None,
+            token_stream.previous_span(),
+        )
+        .into());
     }
 
     // Declaration shapes must reach the binding owner, which diagnoses a collision at the name

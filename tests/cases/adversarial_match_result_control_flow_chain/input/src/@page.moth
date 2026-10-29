@@ -15,19 +15,19 @@ loop i < 5:
         then -10
     ;
     if current is:
-        1 => sum = sum + 100
-        3 => sum = sum + 30
-        5 if i > 2 => sum = sum + 5
-        else => sum = sum + current
+        1 => ~sum = sum + 100
+        3 => ~sum = sum + 30
+        5 if i > 2 => ~sum = sum + 5
+        else => ~sum = sum + current
     ;
 
     if sum > 50:
-        label = "high"
+        ~label = "high"
     else
-        label = "low"
+        ~label = "low"
     ;
 
-    i = i + 1
+    ~i = i + 1
 ;
 
 [:adversarial_match_result_control_flow_chain sum=[sum] label=[label]]

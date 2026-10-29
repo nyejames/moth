@@ -211,7 +211,7 @@ mutating functions rather than merely checking that each function compiles:
             if agent.health > 0:
                 assert(agent.tile >= 0 and agent.tile < board_cells)
             ;
-            carried += agent.cargo
+            ~carried += agent.cargo
         ;
         mined = counter_value(game.counters, "mined")
         delivered = counter_value(game.counters, "delivered")

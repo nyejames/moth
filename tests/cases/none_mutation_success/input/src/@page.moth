@@ -3,7 +3,7 @@
 -- literal can resolve its inner type.
 
 name ~String? = none
-name = none
+~name = none
 
 if name is none:
     io.line("none-mutation=absent")

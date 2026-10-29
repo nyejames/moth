@@ -3,7 +3,9 @@ load_user || -> String, F64, Error!:
 ;
 
 recover || -> String, F64:
-    name, score = load_user() catch:
+    name ~= "initial"
+    score ~F64 = 1.0
+    ~name, ~score = load_user() catch:
         then "guest", 0.0
     ;
     return name, score

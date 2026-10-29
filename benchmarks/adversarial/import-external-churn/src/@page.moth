@@ -42,13 +42,13 @@ render_items |items {String}| -> String:
     output ~= [: <ul>]
     loop items |item|:
         if has_marker(item):
-            output = [: [output]<li class="marked">[item]</li>]
+            ~output = [: [output]<li class="marked">[item]</li>]
         ;
         if not has_marker(item):
-            output = [: [output]<li>[item]</li>]
+            ~output = [: [output]<li>[item]</li>]
         ;
     ;
-    output = [: [output]</ul>]
+    ~output = [: [output]</ul>]
     return output
 ;
 
@@ -58,9 +58,9 @@ render_metrics |metrics {Metric}| -> String:
         status = status_for(metric.value)
         status_text = format_status(status)
         formatted = format_metric(metric)
-        output = [: [output]<p>[formatted] [status_text]</p>]
+        ~output = [: [output]<p>[formatted] [status_text]</p>]
     ;
-    output = [: [output]</div>]
+    ~output = [: [output]</div>]
     return output
 ;
 

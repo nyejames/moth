@@ -74,14 +74,14 @@ u64_return_block_success || -> U64:
 u64_assignment_inline_failure || -> U64:
     pending = 1
     total ~U64 = 0
-    total = fail_u64(pending) + 1 catch then 0
+    ~total = fail_u64(pending) + 1 catch then 0
     return total
 ;
 
 u64_assignment_block_failure || -> U64:
     pending = 1
     total ~U64 = 0
-    total = fail_u64(pending) + 1 catch:
+    ~total = fail_u64(pending) + 1 catch:
         then 0
     ;
     return total
@@ -90,14 +90,14 @@ u64_assignment_block_failure || -> U64:
 u64_assignment_inline_success || -> U64:
     pending = 1
     total ~U64 = 0
-    total = succeed_u64(pending) + 4 catch then 0
+    ~total = succeed_u64(pending) + 4 catch then 0
     return total
 ;
 
 u64_assignment_block_success || -> U64:
     pending = 1
     total ~U64 = 0
-    total = succeed_u64(pending) + 5 catch:
+    ~total = succeed_u64(pending) + 5 catch:
         then 0
     ;
     return total
@@ -117,7 +117,7 @@ u64_catch_nested_assignment |flag Bool| -> I32:
     pending_two = 4
     total U64 = fail_u64(pending_one) catch:
         chosen ~I32 = 0
-        chosen = if flag:
+        ~chosen = if flag:
             then pending_one
         else
             then pending_two
@@ -153,7 +153,7 @@ u64_catch_match_assignment |fail Bool, state Status| -> I32:
     pending_two = 4
     total U64 = maybe_u64(fail, pending_one) catch:
         chosen ~I32 = 0
-        chosen = if state is:
+        ~chosen = if state is:
             Ready => then pending_one
             Waiting => then pending_two
         ;

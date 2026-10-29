@@ -100,11 +100,11 @@ value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    \"hello\" => result = \"one\"
-    \"hello\" => result = \"two\"
-    \"hello\" => result = \"three\"
-    \"hello\" => result = \"four\"
-    else => result = \"other\"
+    \"hello\" => ~result = \"one\"
+    \"hello\" => ~result = \"two\"
+    \"hello\" => ~result = \"three\"
+    \"hello\" => ~result = \"four\"
+    else => ~result = \"other\"
 ;
 
 [:pattern_unreachable_after_duplicate_literal_warning result=[result]]
@@ -376,7 +376,7 @@ fn check_retains_source_package_warning() {
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("+package.moth"),
-        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
 
@@ -614,11 +614,11 @@ value ~= \"hello\"
 result ~= \"unset\"
 
 if value is:
-    \"hello\" => result = \"one\"
-    \"hello\" => result = \"two\"
-    \"hello\" => result = \"three\"
-    \"hello\" => result = \"four\"
-    else => result = \"other\"
+    \"hello\" => ~result = \"one\"
+    \"hello\" => ~result = \"two\"
+    \"hello\" => ~result = \"three\"
+    \"hello\" => ~result = \"four\"
+    else => ~result = \"other\"
 ;
 
 [:pattern_unreachable_after_duplicate_literal_warning result=[result]]
@@ -707,7 +707,7 @@ if value is:
     // frontend before backend lowering.
     let error_source = "\
 increment |value ~I32|:
-    value += 1
+    ~value += 1
 ;
 
 count ~= 0

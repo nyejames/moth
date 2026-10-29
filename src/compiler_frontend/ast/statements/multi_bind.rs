@@ -54,6 +54,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data, choices_control_flow, names_declarations, token_lexical, types_borrows_targets,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidControlFlowStatementReason, InvalidMultiBindReason,
     TypeMismatchContext,
@@ -119,6 +120,7 @@ struct ResolvedMultiBindTargets {
 struct ParsedMultiBindTarget {
     name: StringId,
     name_span: Option<SourceSpan>,
+    update: bool,
     binding_mode: BindingMode,
     type_annotation: ParsedTypeRef,
     span: Option<SourceSpan>,
@@ -170,7 +172,7 @@ pub(crate) fn parse_multi_bind_statement(
         return Ok(None);
     };
 
-    validate_unique_target_names(&parsed_targets, string_table)?;
+    validate_unique_target_names(&parsed_targets)?;
     validate_multi_bind_target_identifiers(&parsed_targets, context, string_table, path_fork)?;
     let first_target = parsed_targets
         .first()
@@ -341,10 +343,62 @@ fn validate_multi_bind_target_identifiers(
             .into());
         }
 
-        if context
-            .get_value_reference(&target.name, target.span)?
-            .is_none()
-        {
+        let existing = context.get_value_reference(&target.name, target.name_span)?;
+        if let Some(existing) = existing {
+            if target.binding_mode.is_mutable() {
+                return Err(calls_data::invalid_multi_bind(
+                    InvalidMultiBindReason::ExistingTargetMutableMarker,
+                    Some(target.name),
+                    target.span,
+                )
+                .into());
+            }
+            let mutable = if let Some(declaration) = existing.ready_declaration() {
+                declaration.value_mode.is_mutable()
+            } else if let Some(binding) = existing.pending_binding() {
+                context.pending_numeric_is_mutable(binding).ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "multi-bind target has a stale pending numeric binding",
+                    )
+                })?
+            } else {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "multi-bind target has neither a declaration nor a pending binding",
+                )
+                .into());
+            };
+            if !mutable {
+                return Err(calls_data::invalid_multi_bind(
+                    InvalidMultiBindReason::ExistingTargetImmutable,
+                    Some(target.name),
+                    target.name_span,
+                )
+                .with_label(
+                    existing.binding_span(),
+                    Some(LabelDraftMessage::PreviousDeclaration),
+                )
+                .into());
+            }
+            if !target.update {
+                return Err(calls_data::invalid_multi_bind(
+                    InvalidMultiBindReason::ExistingTargetNeedsPrefix,
+                    Some(target.name),
+                    target.name_span,
+                )
+                .into());
+            }
+        } else {
+            if target.update {
+                return Err(calls_data::invalid_multi_bind(
+                    InvalidMultiBindReason::UnknownPrefixedTarget,
+                    Some(target.name),
+                    target.name_span,
+                )
+                .into());
+            }
+            validate_target_mutability(target)?;
             if let Some(diagnostic) =
                 context.check_body_binding_visibility(target.name, target.name_span, string_table)
             {
@@ -378,6 +432,10 @@ fn parse_target_list(
     let mut continuation_comma = None;
 
     loop {
+        let update = token_stream.current_tag() == TokenTag::MUTABLE;
+        if update {
+            token_stream.advance();
+        }
         if token_stream.current_tag() == TokenTag::THIS {
             return Err(token_lexical::invalid_multi_bind_syntax(
                 InvalidMultiBindReason::ThisTargetReserved,
@@ -431,11 +489,11 @@ fn parse_target_list(
         let target = ParsedMultiBindTarget {
             name: target_syntax.name,
             name_span,
+            update,
             binding_mode: target_syntax.binding_mode,
             type_annotation: target_syntax.type_annotation,
             span: target_syntax.span,
         };
-        validate_target_mutability(&target)?;
         parsed_targets.push(target);
 
         match token_stream.current_tag() {
@@ -508,10 +566,7 @@ fn parse_target_list(
     Ok(Some(parsed_targets))
 }
 
-/// Reject mutable multi-bind targets that lack an explicit type annotation.
-///
-/// WHY: an untyped `~` target is invalid whether or not the statement turns out to be a
-/// multi-bind, so it is rejected while the targets are scanned.
+/// Reject mutable declarations without the required explicit type annotation.
 fn validate_target_mutability(target_syntax: &ParsedMultiBindTarget) -> MultiBindResult<()> {
     if target_syntax.binding_mode.is_mutable()
         && target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred)
@@ -527,10 +582,7 @@ fn validate_target_mutability(target_syntax: &ParsedMultiBindTarget) -> MultiBin
 }
 
 /// Ensure no two targets in the same multi-bind share the same name.
-fn validate_unique_target_names(
-    parsed_targets: &[ParsedMultiBindTarget],
-    _string_table: &StringTable,
-) -> MultiBindResult<()> {
+fn validate_unique_target_names(parsed_targets: &[ParsedMultiBindTarget]) -> MultiBindResult<()> {
     let mut seen_target_names = HashSet::new();
     for target in parsed_targets {
         if !seen_target_names.insert(target.name) {
@@ -905,6 +957,7 @@ fn resolve_known_slot_types(
             .and_then(|reference| reference.ready_declaration().cloned())
         {
             known.push(Some(existing.type_id));
+            continue;
         }
 
         known.push(None);
@@ -1208,9 +1261,6 @@ fn resolve_multi_bind_targets(
                 slot_type,
                 explicit_type_id.as_ref(),
                 declaration,
-                slot_index,
-                string_table,
-                type_interner.environment(),
             )?;
             register_direct_producer_witnesses(
                 context,
@@ -1225,29 +1275,6 @@ fn resolve_multi_bind_targets(
         let binding = existing_reference
             .pending_binding()
             .expect("a non-ready reference is a pending numeric binding");
-        let Some(mutable) = context.pending_numeric_is_mutable(binding) else {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::AstConstruction,
-                "multi-bind target has a stale pending numeric binding",
-            )
-            .into());
-        };
-        if target_syntax.binding_mode.is_mutable() {
-            return Err(calls_data::invalid_multi_bind(
-                InvalidMultiBindReason::ExistingTargetMutableMarker,
-                Some(target_syntax.name),
-                target_syntax.span,
-            )
-            .into());
-        }
-        if !mutable {
-            return Err(calls_data::invalid_multi_bind(
-                InvalidMultiBindReason::ExistingTargetImmutable,
-                Some(target_syntax.name),
-                target_syntax.span,
-            )
-            .into());
-        }
         if let (Some(explicit_type_id), Some(slot_type)) = (explicit_type_id, slot_type)
             && explicit_type_id != slot_type
         {
@@ -1456,28 +1483,7 @@ fn resolve_existing_target(
     slot_type: TypeId,
     explicit_type_id: Option<&TypeId>,
     existing_declaration: &Declaration,
-    _slot_index: usize,
-    _string_table: &StringTable,
-    _type_environment: &TypeEnvironment,
 ) -> MultiBindResult<MultiBindTarget> {
-    if target_syntax.binding_mode.is_mutable() {
-        return Err(calls_data::invalid_multi_bind(
-            InvalidMultiBindReason::ExistingTargetMutableMarker,
-            Some(target_syntax.name),
-            target_syntax.span,
-        )
-        .into());
-    }
-
-    if !existing_declaration.value_mode.is_mutable() {
-        return Err(calls_data::invalid_multi_bind(
-            InvalidMultiBindReason::ExistingTargetImmutable,
-            Some(target_syntax.name),
-            target_syntax.span,
-        )
-        .into());
-    }
-
     if let Some(explicit_type_id) = explicit_type_id
         && *explicit_type_id != existing_declaration.type_id
     {

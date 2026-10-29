@@ -8,7 +8,7 @@ render_u64 |value U64| -> String:
 wide ~= 1
 wide_seed = copy wide
 wide_next = wide + wide
-wide = copy wide_next
+~wide = copy wide_next
 wide_seed_text = render_u64(wide_seed)
 wide_next_text = render_u64(wide_next)
 wide_current_text = render_u64(wide)
@@ -19,14 +19,14 @@ wide_current_text = render_u64(wide)
 defaulted ~= 3
 defaulted_seed = copy defaulted
 defaulted_next = defaulted + defaulted
-defaulted = copy defaulted_next
+~defaulted = copy defaulted_next
 
 -- Direct self updates form the smallest dependency cycle. Neither may hang:
 -- the independent receiver selects U64, while the other falls back to I32.
 self_wide ~= 4
-self_wide = self_wide + self_wide
+~self_wide = self_wide + self_wide
 self_wide_text = render_u64(self_wide)
 self_default ~= 5
-self_default = self_default + self_default
+~self_default = self_default + self_default
 
 [:scalar numeric mutation u64=[wide_seed_text]/[wide_next_text]/[wide_current_text] default=[defaulted_seed]/[defaulted_next]/[defaulted] self=[self_wide_text]/[self_default]]

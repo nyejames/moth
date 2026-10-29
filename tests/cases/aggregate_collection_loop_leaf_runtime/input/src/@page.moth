@@ -41,8 +41,8 @@ statement_receiver || -> String:
     last ~= ""
     last_index ~= 0
     loop values |item, index|:
-        last = read_u64(item)
-        last_index = copy index
+        ~last = read_u64(item)
+        ~last_index = copy index
     ;
     return [:statement last=[last] last_index=[last_index]]
 ;

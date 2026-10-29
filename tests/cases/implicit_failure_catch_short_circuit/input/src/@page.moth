@@ -4,7 +4,7 @@ check |value Bool| -> Bool:
 ;
 
 risky |seen ~U32, value I32| -> I32:
-    seen = seen + 100
+    ~seen = seen + 100
     return value + 2147483647
 ;
 

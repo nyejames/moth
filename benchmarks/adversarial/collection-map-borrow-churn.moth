@@ -7,11 +7,11 @@ Counter = |
 |
 
 increment |this ~Counter|:
-    this.value = this.value + 1
+    ~this.value = this.value + 1
 ;
 
 add |this ~Counter, amount I32|:
-    this.value = this.value + amount
+    ~this.value = this.value + amount
 ;
 
 Item = |
@@ -45,7 +45,7 @@ run_collection_churn || -> I32:
     -- Sum remaining items.
     total ~= 0
     loop items |value|:
-        total = total + value
+        ~total = total + value
     ;
     return total
 ;
@@ -110,7 +110,7 @@ run_struct_collection_churn || -> I32:
         fresh ~= Counter(counter.value)
         ~fresh.increment()
         ~fresh.add(1)
-        total = total + fresh.value
+        ~total = total + fresh.value
     ;
     return total
 ;

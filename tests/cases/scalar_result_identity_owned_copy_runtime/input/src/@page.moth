@@ -41,6 +41,6 @@ raw_number U8 = cast raw
 
 source = 1
 target ~= copy source
-target = 2
+~target = 2
 
 [:scalar result identity same=[same_value] ratio=[ratio_value] whole=[whole] money=[money] raw=[raw_number] source=[i32_echo(source)] target=[i32_echo(target)]]

@@ -8,17 +8,17 @@ asc_total ~U64 = 0
 asc_count ~= 0
 asc_last_index ~= 0
 loop asc_lo to & asc_hi |value, index|:
-    asc_total = asc_total + value
-    asc_count = asc_count + 1
-    asc_last_index = copy index
+    ~asc_total = asc_total + value
+    ~asc_count = asc_count + 1
+    ~asc_last_index = copy index
 ;
 
 step_two U64 = 2
 stepped_total ~U64 = 0
 stepped_count ~= 0
 loop asc_lo to & asc_hi by step_two |value|:
-    stepped_total = stepped_total + value
-    stepped_count = stepped_count + 1
+    ~stepped_total = stepped_total + value
+    ~stepped_count = stepped_count + 1
 ;
 
 desc_total ~U64 = 0
@@ -26,18 +26,18 @@ desc_count ~= 0
 desc_last ~U64 = 99
 desc_first_val ~U64 = 99
 loop asc_hi to & asc_lo |item, idx|:
-    desc_total = desc_total + item
-    desc_count = desc_count + 1
+    ~desc_total = desc_total + item
+    ~desc_count = desc_count + 1
     if desc_count is 0 + 1:
-        desc_first_val = copy item
+        ~desc_first_val = copy item
     ;
-    desc_last = copy item
+    ~desc_last = copy item
 ;
 desc_step_total ~U64 = 0
 desc_step_count ~= 0
 loop asc_hi to & asc_lo by step_two |value|:
-    desc_step_total = desc_step_total + value
-    desc_step_count = desc_step_count + 1
+    ~desc_step_total = desc_step_total + value
+    ~desc_step_count = desc_step_count + 1
 ;
 
 above U64 = 9223372036854775808
@@ -45,22 +45,22 @@ huge U64 = 18446744073709551615
 above_count ~= 0
 above_last ~U64 = 0
 loop above to & huge by huge |value|:
-    above_count = above_count + 1
-    above_last = copy value
+    ~above_count = above_count + 1
+    ~above_last = copy value
 ;
 max_lo U64 = 18446744073709551613
 max_last ~U64 = 0
 max_count ~= 0
 loop max_lo to & huge |value|:
-    max_last = copy value
-    max_count = max_count + 1
+    ~max_last = copy value
+    ~max_count = max_count + 1
 ;
 
 zero_terminal ~U64 = 99
 zero_count ~= 0
 loop step_two to & asc_lo by step_two |value|:
-    zero_terminal = copy value
-    zero_count = zero_count + 1
+    ~zero_terminal = copy value
+    ~zero_count = zero_count + 1
 ;
 
 render |asc_total U64, asc_count I32, asc_last_index I32, stepped_total U64, stepped_count I32, desc_total U64, desc_count I32, desc_last U64, desc_first_val U64, desc_step_total U64, desc_step_count I32, above_count I32, above_last U64, max_last U64, max_count I32, zero_terminal U64, zero_count I32| -> String:

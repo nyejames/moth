@@ -4,8 +4,8 @@ Vector2 = |
 |
 
 reset |this ~Vector2|:
-    this.x = 0.0
-    this.y = 0.0
+    ~this.x = 0.0
+    ~this.y = 0.0
 ;
 
 vec ~= Vector2(12.0, 87.0)

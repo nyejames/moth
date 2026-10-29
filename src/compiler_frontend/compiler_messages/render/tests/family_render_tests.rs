@@ -39,16 +39,17 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompileTimeEvaluationErrorReason,
-    DeferredFeatureReason, DependencyClauseKind, DiagnosticBag, DiagnosticOperator,
-    DiagnosticSeverity, GenericApplicationErrorReason, InvalidAssignmentTargetReason,
-    InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
-    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
-    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, TypeAnnotationContext,
+    DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
+    DiagnosticCompoundAssignmentOperator, DiagnosticOperator, DiagnosticSeverity,
+    GenericApplicationErrorReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
+    InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
+    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDependencyClauseReason,
+    InvalidExpressionReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidReceiverCallReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, TypeAnnotationContext,
     TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
@@ -287,32 +288,86 @@ fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_b
 }
 
 #[test]
-fn rule_renderers_use_user_facing_messages_not_reason_debug_names() {
+fn assignment_guidance_preserves_target_operator_and_binding_problem() {
     let mut string_table = StringTable::new();
-    let value_name = string_table.intern("value");
-    let compact = compact_bag_for_test(
-        DiagnosticBag::from(names_declarations::invalid_assignment_target(
-            InvalidAssignmentTargetReason::ImmutableBinding,
-            Some(value_name),
-            None,
-            None,
-            None,
-        )),
+    let target = string_table.intern("point.x");
+    let cases = [
+        (None, "Updating `point.x` requires `~point.x = ...`."),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::Add),
+            "Updating `point.x` requires `~point.x += ...`.",
+        ),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::Subtract),
+            "Updating `point.x` requires `~point.x -= ...`.",
+        ),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::Multiply),
+            "Updating `point.x` requires `~point.x *= ...`.",
+        ),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::Divide),
+            "Updating `point.x` requires `~point.x /= ...`.",
+        ),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::IntDivide),
+            "Updating `point.x` requires `~point.x //= ...`.",
+        ),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::Modulus),
+            "Updating `point.x` requires `~point.x %= ...`.",
+        ),
+        (
+            Some(DiagnosticCompoundAssignmentOperator::Exponent),
+            "Updating `point.x` requires `~point.x ^= ...`.",
+        ),
+    ];
+    let mut reasons = cases
+        .into_iter()
+        .map(|(operator, message)| {
+            (
+                InvalidAssignmentTargetReason::MissingWritePrefix { operator },
+                Some(target),
+                message,
+            )
+        })
+        .collect::<Vec<_>>();
+    reasons.push((
+        InvalidAssignmentTargetReason::ImmutableBinding,
+        Some(target),
+        "`point.x` is immutable. Declare it mutable to update it.",
+    ));
+    reasons.push((
+        InvalidAssignmentTargetReason::MutableMarkerRequiresExistingPlace,
         None,
-    );
-    let view = compact.first().expect("assignment-target draft compacts");
-    assert!(view.family_view::<InvalidAssignmentTargetView>().is_some());
+        "`~` must prefix an existing writable place.",
+    ));
     let context = DiagnosticRenderContext::new(&string_table);
-    let guidance = terminal::format_guidance_view(view, context);
-    let terse_line = terse::format_terse_diagnostic_view(view, context);
-    assert!(guidance.iter().any(|line| line == "Cannot reassign `value` because its binding is immutable. Make the original binding mutable, then reassign it with ordinary `=`."));
-    assert!(terse_line.contains("Cannot reassign `value`"));
-    assert!(
-        !guidance
-            .iter()
-            .any(|line| line.contains("ImmutableBinding"))
-    );
-    assert!(!terse_line.contains("ImmutableBinding"));
+    for (reason, target, message) in reasons {
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(names_declarations::invalid_assignment_target(
+                reason, target, None, None, None,
+            )),
+            None,
+        );
+        let view = compact
+            .first()
+            .expect("assignment diagnostic survives compaction");
+        let facts = view
+            .family_view::<InvalidAssignmentTargetView>()
+            .expect("assignment facts");
+        assert_eq!(facts.reason, reason);
+        assert_eq!(facts.target_name, target);
+        assert_eq!(view.descriptor().code, "MOTH-RULE-0044");
+        assert_eq!(
+            terminal::format_guidance_view(view, context),
+            vec![message.to_owned()]
+        );
+        assert_eq!(
+            terse::format_terse_diagnostic_view(view, context),
+            format!("E|MOTH-RULE-0044|||{message}")
+        );
+    }
 }
 
 #[test]
@@ -1456,7 +1511,8 @@ fn immutable_place_mutable_access_renders_binding_name_for_missing_marker() {
         "{message}"
     );
     assert!(
-        message.contains("Declare the binding as mutable, then pass `~values`."),
+        message
+            .contains("Declare the binding as mutable, then pass the existing argument with `~`."),
         "{message}"
     );
 }
@@ -1479,7 +1535,37 @@ fn immutable_place_mutable_access_renders_authored_marker_with_binding_name() {
         message.contains("requires mutable access for parameter 'value', but `x` is immutable."),
         "{message}"
     );
-    assert!(message.contains("then pass `~x`."), "{message}");
+    assert!(
+        message.contains("then pass the existing argument with `~`."),
+        "{message}"
+    );
+}
+
+#[test]
+fn projected_immutable_argument_guidance_does_not_replace_projection_with_root() {
+    let mut string_table = StringTable::new();
+    let parameter = string_table.intern("value");
+    let binding = string_table.intern("box");
+    for reason in [
+        InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
+            parameter_name: Some(parameter),
+            parameter_index: 0,
+            binding_name: Some(binding),
+        },
+        InvalidCallShapeReason::MutableAccessOnImmutablePlace {
+            parameter_name: Some(parameter),
+            parameter_index: 0,
+            binding_name: Some(binding),
+        },
+    ] {
+        let message = render_invalid_call_shape(&mut string_table, reason, "mutate");
+        assert!(message.contains("`box` is immutable"), "{message}");
+        assert!(
+            message.contains("pass the existing argument with `~`"),
+            "{message}"
+        );
+        assert!(!message.contains("`~box`"), "{message}");
+    }
 }
 
 #[test]

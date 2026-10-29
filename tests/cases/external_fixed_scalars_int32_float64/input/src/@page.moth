@@ -31,7 +31,7 @@ overflow_boundary || -> F32, Error!:
 
 boundary_code ~U32 = 0
 recovered F32 = overflow_boundary() catch |boundary_error|:
-    boundary_code = boundary_error.code
+    ~boundary_code = boundary_error.code
     then 0.0
 ;
 maximum_matches = is_max_u32(maximum)
@@ -80,7 +80,7 @@ f32_class |selector U32| -> U32:
 f32_failure |selector U32| -> U32:
     failure ~U32 = 0
     value F32 = raw_f32_boundary(selector) catch |err|:
-        failure = err.code
+        ~failure = err.code
         then 0.0
     ;
     return failure

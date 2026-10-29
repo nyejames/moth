@@ -35,7 +35,7 @@ slice contents mutable.
 
 [codeblock, $code("moth"):
     name ~= "Priya"
-    name = "Rob"  -- reassigns the mutable binding, doesn't mutate the slice
+    ~name = "Rob"  -- reassigns the mutable binding, doesn't mutate the slice
 ]
 
 ### Characters
@@ -120,7 +120,7 @@ surface does not yet expose in-place string mutation operations.
 
 [codeblock, $code("moth"):
     text ~= "initial"
-    text = "replacement"  -- valid: reassigns the binding
+    ~text = "replacement"  -- valid: reassigns the binding
 
     -- No mutation API exists:
     -- text.append("more")  -- invalid

@@ -1,7 +1,7 @@
 -- Prove short-circuit behavior by surfacing RHS invocation count.
 
 rhs_and |calls ~I32| -> Bool:
-    calls = calls + 1
+    ~calls = calls + 1
     return true
 ;
 

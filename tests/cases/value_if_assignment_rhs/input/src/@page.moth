@@ -1,6 +1,6 @@
 choose |condition Bool| -> I32:
     result ~= 0
-    result = if condition then 10 else 20
+    ~result = if condition then 10 else 20
     return result
 ;
 

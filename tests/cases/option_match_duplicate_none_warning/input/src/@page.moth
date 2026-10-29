@@ -2,9 +2,9 @@ value I32? = none
 result ~= "unset"
 
 if value is:
-    none => result = "missing"
-    none => result = "missing again"
-    else => result = "present"
+    none => ~result = "missing"
+    none => ~result = "missing again"
+    else => ~result = "present"
 ;
 
 io.line([:option_match_duplicate_none_warning result=[result]])

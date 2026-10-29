@@ -2,8 +2,8 @@ value = 1
 match_result ~= "unset"
 
 if value is:
-    1 => match_result = "one"
-    else => match_result = "other"
+    1 => ~match_result = "one"
+    else => ~match_result = "other"
 ;
 
 make_text |value String| -> String:
@@ -14,8 +14,8 @@ template_text = make_text("one")
 template_match_result ~= "unset"
 
 if template_text is:
-    "one" => template_match_result = "content"
-    else => template_match_result = "other"
+    "one" => ~template_match_result = "content"
+    else => ~template_match_result = "other"
 ;
 
 [:literal_match_with_else_success result=[match_result] template=[template_match_result]]

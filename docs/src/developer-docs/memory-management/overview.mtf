@@ -110,7 +110,7 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
 
 **2. Copies are explicit.** `copy` creates an independent value graph. Ordinary assignment and argument passing do not clone existing values. Fresh aggregates built from shared inputs do not implicitly copy those inputs.
 
-**3. `~` requests exclusive access.** `~place` applies to an existing mutable place. It requests temporary mutation-capable access and excludes conflicting access. It is not a move marker or a type identity. Fresh rvalues satisfy ordinary mutable parameters without source `~`. Mutable receivers always require an existing mutable place.
+**3. `~` requests exclusive access.** Prefix existing-place writes with `~`, including each existing target in a multi-bind. Existing mutable places passed to mutable parameters also require `~`, including named arguments. Mutable receivers use `~receiver.method()` and require an existing mutable place. Fresh values and `copy place` satisfy ordinary mutable parameters without `~`. Mutable alias declarations use `writer ~= original` with an unmarked source. None of these markers denotes a move or changes type identity.
 
 **4. Last-use analysis is central.** There is no explicit move syntax. Alias activity is path-sensitive and non-lexical for shared aliases and observed exclusive aliases; whether an issued but never-used exclusive capability may be elided remains an explicit experiment until canonical semantics adopt it. Branches are analysed independently and loops use fixed-point future-use reasoning. The compiler may transfer affine cleanup responsibility only where every relevant path proves no later source use. When transfer is not proven, the operation remains a borrow and the program stays valid.
 

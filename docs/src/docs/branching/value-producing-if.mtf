@@ -60,6 +60,12 @@ Value-producing control flow is accepted only at these closed receiving sites:
 - multi-bind
 - returns
 
+An assignment receiving a branch result prefixes its existing target with `~`.
+In a multi-bind, prefix each existing target and leave each new binding
+unmarked, as in `~count, message = if ready: ...`. The results are read before
+existing targets are written. See @../functions/#returns-and-multiple-values
+(Returns and multiple values) for the receiving rules.
+
 It is not a general expression form. Nested `then` receivers are deferred.
 
 A value-producing block is invalid directly inside:

@@ -84,7 +84,7 @@ grouped_sum || -> U64:
     pending = 1
     total ~= 0
     loop (group_amounts(pending)) |amount|:
-        total = total + amount
+        ~total = total + amount
     ;
     return total
 ;
@@ -98,7 +98,7 @@ projected_sum || -> U64:
     pending = 1
     total ~= 0
     loop (make_batch(pending)).values |amount|:
-        total = total + amount
+        ~total = total + amount
     ;
     return total
 ;
@@ -120,7 +120,7 @@ optional_sum || -> {U64}?:
     pending = 1
     total ~= 0
     loop maybe_amounts(pending)? |amount|:
-        total = total + amount
+        ~total = total + amount
     ;
     return totals_of(total)
 ;
@@ -129,7 +129,7 @@ optional_absent || -> {U64}?:
     pending = 0
     total ~= 0
     loop maybe_amounts(pending)? |amount|:
-        total = total + amount
+        ~total = total + amount
     ;
     return totals_of(total)
 ;
@@ -149,7 +149,7 @@ projected_text = receive_u64(projected_sum())
 optional_total ~= 0
 if optional_sum() is |found_totals|:
     loop found_totals |optional_value|:
-        optional_total = optional_total + optional_value
+        ~optional_total = optional_total + optional_value
     ;
 ;
 optional_text = receive_u64(optional_total)

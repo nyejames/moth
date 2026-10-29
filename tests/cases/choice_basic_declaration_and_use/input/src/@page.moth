@@ -13,9 +13,9 @@ echoed = pass_status(selected)
 
 label ~= "unset"
 if echoed is:
-    Ready => label = "ready"
-    Busy => label = "busy"
-    Offline => label = "offline"
+    Ready => ~label = "ready"
+    Busy => ~label = "busy"
+    Offline => ~label = "offline"
 ;
 
 [:choice_basic_declaration_and_use label=[label]]

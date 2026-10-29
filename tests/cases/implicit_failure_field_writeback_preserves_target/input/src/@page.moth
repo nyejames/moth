@@ -3,7 +3,7 @@ Bucket = |
 |
 
 nudge |box ~Bucket, step U8| -> U8:
-    box.level += step
+    ~box.level += step
     return box.level
 ;
 safe_nudge |box ~Bucket, step U8| -> U8, Error!:
@@ -13,7 +13,7 @@ failed ~= Bucket(level = 200)
 failed_step U8 = 100
 failed_code ~U32 = 0
 failed_result = safe_nudge(~failed, failed_step) catch |field_err|:
-    failed_code = field_err.code
+    ~failed_code = field_err.code
     then copy failed.level
 ;
 failed_level U8 = copy failed.level
@@ -21,7 +21,7 @@ ok_box ~= Bucket(level = 200)
 ok_result = safe_nudge(~ok_box, 50) catch then 0
 ok_level U8 = copy ok_box.level
 mixed_nudge |box ~Bucket, step U16| -> U8:
-    box.level += step
+    ~box.level += step
     return box.level
 ;
 safe_mixed_nudge |box ~Bucket, step U16| -> U8, Error!:
@@ -30,7 +30,7 @@ safe_mixed_nudge |box ~Bucket, step U16| -> U8, Error!:
 mixed_box ~= Bucket(level = 200)
 mixed_code ~U32 = 0
 mixed_result = safe_mixed_nudge(~mixed_box, 100) catch |mixed_err|:
-    mixed_code = mixed_err.code
+    ~mixed_code = mixed_err.code
     then copy mixed_box.level
 ;
 mixed_level U8 = copy mixed_box.level

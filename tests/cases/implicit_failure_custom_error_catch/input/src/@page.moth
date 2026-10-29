@@ -10,7 +10,7 @@ check |value Bool| -> Bool, Failure!:
 saved_message ~= ""
 recovered = check(false) catch |err|:
     saved Failure = err
-    saved_message = saved.message
+    ~saved_message = saved.message
     then true
 ;
 

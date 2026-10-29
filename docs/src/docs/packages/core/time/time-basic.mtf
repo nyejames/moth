@@ -19,7 +19,7 @@ Use `TimeMark` for a monotonic measurement point. Use `Duration` for the elapsed
 
     current = mark_now()
     delta = duration_between(previous, current)
-    previous = current
+    ~previous = current
 
     seconds = as_seconds(delta)
 ]

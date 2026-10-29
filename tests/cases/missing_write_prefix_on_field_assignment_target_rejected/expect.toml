@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0044"]
+message_contains = ["~p.x = ..."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0044"
+reason = "invalid_assignment_target.missing_write_prefix"
+path = "input/@page.moth"
+line = 7
+column = 1
+count = 1

@@ -15,7 +15,7 @@ Meter = |
 |
 
 set_amount |this ~Meter, value I32|:
-    this.amount = value
+    ~this.amount = value
 ;
 
 make_meter |seed I32| -> Meter:
