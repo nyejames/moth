@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>HIR linearises evaluation order, records link facts and becomes the first backend-facing semantic IR.</p></section>
 <section class="container"><h1 id="lowering-meaning-into-explicit-control-flow">Lowering meaning into explicit control flow</h1><p>Nested expressions are friendly to humans and slightly rude to machines. Evaluation order hides in tree shape. Early exits hide in nesting. A borrow checker that must rediscover all of that from sugar will rediscover it wrong.</p><p><strong>HIR</strong> (a high-level intermediate representation in Moth&#39;s pipeline) lowers fully typed AST into the first <strong>backend-facing semantic IR</strong>. Meaning stays. Shape changes. Nested source sugar becomes an explicit branching structure analyses can walk.</p><h2 id="lowering-without-changing-meaning">Lowering without changing meaning</h2><p>An <strong>intermediate representation</strong> is a program form meant for the compiler&#39;s internal work rather than the author&#39;s eyes.</p><p><strong>Lowering</strong> transforms one representation into another while preserving the semantic contract the language already fixed.</p><p>Compare a nested call in AST spirit:</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>return</span> <span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>visitor<span class='moth-code-delimiter'>)</span></code></pre><p>with ordered runtime work in HIR spirit:</p><pre style=""><code class='codeblock'>tmp0 <span class='moth-code-operator'>=</span> load visitor
 tmp1 <span class='moth-code-operator'>=</span> call <span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>tmp0<span class='moth-code-delimiter'>)</span>

@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
  <h1 style="font-size: 2em;text-align: center;"> PACKAGES AND BUILDERS PROGRESS</h1>
 <section class="container"><p>This page tracks current implementation status for Moth packages and project builders. It also records the important accepted gaps and next extensions for partial package surfaces so later work does not need to rediscover them from implementation details.</p><p>The exact-numeric migration is delivered. Package signatures and constants use exact numeric types, Core Math uses F64 and ordinary numeric defaults use I32/F64. These changes add no HTML-Wasm package capabilities. The rows below distinguish delivered support from accepted extensions.</p><p>The <a href="../">compiler progress matrix</a> tracks the core language, compiler, memory work and backend implementation. Backend implementation progress belongs there even when a project builder consumes that backend. This page tracks builder-owned project behaviour and the packages supplied by Core or a project builder.</p><p>Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do not. Package acquisition, resolver and package-manager sequencing remains roadmap work rather than something this matrix designs.</p><h2 id="how-to-read-and-edit-this-page">How to read and edit this page</h2><ul><li>Keep package rows focused on the implemented v1 surface and the most useful accepted next gaps.</li><li>Update a package row while working on that package so deferred extensions do not need to be rediscovered later.</li><li>Keep project-builder rows separate from backend implementation rows.</li><li>Put user-facing package and builder explanations in <code>docs/src/docs/packages/**</code> and the relevant project documentation.</li><li>Put implementation sequencing and unaccepted proposals in <code>docs/roadmap/roadmap.md</code>.</li><li>Use the status labels from this page&#39;s legend. Put backend-specific or deliberately deferred nuance in the notes column instead of inventing new status labels.</li></ul></section>
 <section class="container"><h2 id="status-legend">Status legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">

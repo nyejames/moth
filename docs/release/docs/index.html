@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../styles/sidebar.js" defer></script>
 <section class="container"><h1 id="documentation">Documentation</h1><p>Welcome to Moth. Start with the project tool, learn the core language in order and drop into the focused pages when you need a precise rule.</p><p>The <a href="./progress">compiler progress matrix</a> tracks current language, compiler and backend coverage. The <a href="./progress/packages-and-builders">packages and builders progress matrix</a> tracks first-party packages and project-builder capabilities.</p><h2 id="start-here">Start here</h2><ol><li><a href="./getting-started">Getting Started</a></li><li><a href="./language-overview">Language basics</a></li><li><a href="./bindings">Values and bindings</a></li><li><a href="./numbers">Numbers</a></li><li><a href="./casts">Casts</a></li><li><a href="./functions">Functions</a></li><li><a href="./branching">Branching</a></li><li><a href="./loops">Loops</a></li><li><a href="./structs">Structs</a></li><li><a href="./choices">Choices</a></li><li><a href="./errors">Errors, options and assertions</a></li><li><a href="./collections">Collections and maps</a></li><li><a href="./templates">Templates</a></li><li><a href="./constants">Constants and compile-time behaviour</a></li><li><a href="./aliases">Aliases</a></li><li><a href="./generics">Generics</a></li><li><a href="./traits">Traits</a></li><li><a href="./wiring">Wiring</a></li><li><a href="./memory">Memory and lifetimes</a></li></ol><h2 id="projects-and-content">Projects and content</h2><ul><li><a href="./directives">Directives</a></li><li><a href="./project-structure">Project structure</a></li><li><a href="./packages">Packages and dependencies</a></li><li><a href="./packages/core">Core packages</a></li><li><a href="./resources">Resources and file values</a></li><li><a href="./moth-templates">Moth template files</a></li><li><a href="./markdown">Plain Markdown</a></li><li><a href="./mon">MON format</a></li><li><a href="./design-scope">Design scope</a></li></ul><h2 id="quick-reference">Quick reference</h2><ul><li><a href="./cheatsheet">Language cheatsheet</a>: the whole language surface on one page</li></ul><h2 id="compiler-internals">Compiler internals</h2><p>The <a href="../developer-docs">Developers</a> section covers the compiler and build system for contributors and anyone reading the internals.</p><ul><li><a href="../developer-docs/compiler-design">Compiler design</a></li><li><a href="../developer-docs/memory-management">Memory management</a></li><li><a href="../developer-docs/style-guide">Development standards</a></li></ul><h2 id="future-design-drafts">Future design drafts</h2><ul><li><a href="./async">Async</a></li><li><a href="./lappet">Lappet native runtime and package infrastructure</a></li></ul></section>
 <script type="module">
 import { __moth_glue_fn213 } from "../_moth/js/glue/module-623782c4280f5989.js";

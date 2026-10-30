@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Different targets and build profiles may receive different allocation and GC representations. The compiler-owned memory planner selects them per physical variant, and no backend chooses different language semantics.</p></section>
 <section class="container"><h1 id="runtime-and-backend-memory-lowering">Runtime and backend memory lowering</h1><h2 id="design-contract">Design contract</h2><p>Different targets and build profiles may receive different allocation, region, counted, handle and ownership representations. The compiler-owned memory planner selects them per physical variant, backend lowering encodes the result, and no target may receive different language semantics.</p><p>Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, affine transfer safety, lifetime-topology legality, retained-value liveness and identical observable results.</p><p><strong>Collector-free release guarantee.</strong> Backends declare whether they support collector-free release lowering. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing or reachability collector, and must not silently fall back to one. There is no source-visible or project-visible no-GC mode: this is a backend capability, not a language mode.</p><p>GC is a permitted runtime representation for a statically legal lifetime topology on debug profiles and GC-native backends. It is not a mechanism for accepting invalid retained edges, lateral lifetime promotion, unowned escapes or cross-region cycles.</p><h2 id="main-backend-paths">Main backend paths</h2><ul><li><code>src/backends/js/</code></li><li><code>src/backends/wasm/</code></li><li><code>src/backends/wasm/hir_to_lir/ownership.rs</code></li><li><code>src/backends/wasm/lir/</code></li><li><code>src/backends/wasm/runtime/</code></li></ul><h2 id="backend-neutral-semantics">Backend-neutral semantics</h2><ul><li>Borrow validation and lifetime-region validation precede target lowering.</li><li>Invalid source access or topology is rejected before backend codegen.</li><li>Backend doesn&#39;t infer access or topology from source syntax.</li><li>Backend consumes HIR plus borrow facts and validated lifetime facts as validation context and assertion material only.</li><li>Binding definition, assignment and write-through semantics are explicit in validated HIR. A re-entered definition establishes a new dynamic binding occurrence. Lowerers consume its operation and place/rvalue classification, including explicit operation and CFG destinations, without inspecting borrow solver local modes or entry-state snapshots. A result binding can share an allocation while remaining independent of the producing binding cell.</li><li><code>ValidatedMemoryPlan</code> is the single final physical authority for ownership decisions and count transitions. Backend consumes it rather than rediscovering or selecting strategy.</li><li>Backend representation can&#39;t affect <code>copy</code>, alias or <code>~</code> semantics.</li><li>Imprecise planning results in conservative retention, never in rejecting legal source.</li><li>Missing topology proof is not a backend fallback.</li><li>A missing physical strategy after successful topology validation is <code>InfrastructureFailure</code>.</li><li>Numeric semantics are language-defined and target-independent. The eleven fixed-width identities and <code>I32</code>/<code>F64</code> defaults are fixed before backend lowering. Lowerers consume canonical types and operation/failure facts from HIR; physical carriers never choose a different width or precision.</li><li>Scalar storage size, alignment and computation carriers are separate from semantic type (<code>Scalar storage and carriers</code>) and move no memory-plan ownership. Scalar width may change concrete layout values inside a <code>ValidatedMemoryPlan</code>, but it does not change lifetime-topology legality or let a backend select its own memory strategy.</li></ul><h2 id="scalar-storage-and-carriers">Scalar storage and carriers</h2><p>Semantic type, ordinary linear-memory storage and computation carrier are three separate facts. For the ordinary Wasm scalar layout:</p><pre style=""><code class='codeblock'>I8/U8/Byte   1 byte   i32
 I16/U16      2 bytes  i32

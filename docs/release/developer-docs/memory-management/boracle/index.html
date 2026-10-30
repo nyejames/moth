@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Boracle is a developer-facing reference model of borrow legality, not a language feature and not a production fallback. It exists so borrow reasoning can be inspected, compared and extended outside the production checker.</p><p>This page carries two documents: the reference solver, and the operational contract for the bounded oracle that executes normalized problems.</p><p><a href="https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/production-borrow-checker.md">Production borrow checker and Boracle development</a> tracks the live alpha implementation, performance findings and actionable research-to-production follow-ups.</p><p><a href="../checked-proof-budget-research">Checked proof-budget research</a> records how current experiments should preserve room for a future opt-in deep analysis tier without turning Boracle into a public fallback checker.</p></section>
 <section class="container"><h1 id="boracle-reference-solver">Boracle reference solver</h1><p>Boracle is Moth&#39;s permanent slow reference borrow solver and borrow-analysis laboratory.</p><p>It exists for compiler developers. It is not a public language feature, a production fallback or a source-visible solver choice.</p><p>The Cargo feature and validation command use the joke name directly:</p><pre style=""><code class='codeblock'>cargo feature: boracle
 validation:    just boracle</code></pre><p>The role is serious even when the name is not. Boracle provides an executable, inspectable model of Moth borrow legality, value provenance, loan liveness and last-use reasoning. It also provides a controlled place to investigate stronger safe analyses before those rules are accepted as reference semantics or implemented in the future production checker.</p><h2 id="status-and-authority">Status and authority</h2><p>This document is the permanent design authority for Boracle. Live production implementation status, performance work and Boracle-to-production follow-ups are owned by <code>docs/roadmap/plans/production-borrow-checker.md</code>.</p><p>Canonical language and memory documents still define Moth semantics. Boracle does not override them. Within compiler testing, Boracle reference mode is the executable reference model against which a future production solver can be compared.</p><p>Boracle is compiled and run only through explicit developer and test paths, independently from the production compiler. Consult the living production tracker for the current alpha checker, its replacement gates and the shared development branch.</p><p>The semantic integration and adversarial-hardening baseline is now complete for the reference borrow-analysis boundary. The source service feeds one normalized problem into parameter-aware origin flow, typed <code>OriginRelations</code> overlap queries, alias-derived loans, use-driven liveness and origin/event-aware last-use queries. This makes Boracle suitable for reference investigations and differential tests; it does not make it the production checker or a lifetime-topology authority.</p><p>The relation owner is now explicit: solved origin flow constructs <code>OriginRelations</code>, and loan conflict checking consumes its <code>query_overlap</code> result.</p><p>Boracle has no final research endpoint. It may accumulate new cases, investigations, traces and analysis queries throughout the compiler&#39;s life.</p><h2 id="core-contract">Core contract</h2><table style="">

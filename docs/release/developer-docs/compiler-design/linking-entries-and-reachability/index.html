@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Compilation and activation stay separate. Entry assembly selects roots and builds a reachable function union.</p></section>
 <section class="container"><h1 id="choosing-what-runs">Choosing what runs</h1><p>Compilation and activation are different verbs.</p><p>A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an <strong>entry</strong> selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.</p><p>Current Alpha HTML selection still uses root runtime activity or fragments with reserved page metadata. The accepted queued design makes the root-only <code>$page</code> directive the HTML entry declaration: a metadata-only page is valid, while runtime work or fragments alone do not select an entry. The dormant <code>start</code> and non-activating dependency rules below remain part of both paths.</p><h2 id="compile-versus-activate">Compile versus activate</h2><p>Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered and borrow-validated <strong>before</strong> any entry activates it. Local lifetime-region and escape analysis belongs to the same accepted sequence, but its implementation is still deferred.</p><p>Under the accepted root-purpose policy, authored executable work or direct output requires a recognised purpose; <code>$page</code> is the only initial purpose. An unmarked root must not disappear merely because HTML entry filtering now selects explicit pages.</p><p>The compiler synthesises an implicit <strong><code>start</code></strong> for a normal root. Properties that matter:</p><ul><li>non-exported</li><li>non-bindable</li><li>built-in <code>Error!</code> alongside the existing fragment-collection success slots, including for a synthetic single-file root</li><li>owner of dormant top-level runtime work and runtime fragment string production in source order</li></ul><p>Compilation never activates <code>start</code>. Entry assembly may activate it once after the module already compiled.</p><p>Implicit checked failure materialises as <code>Error</code> in <code>start</code>. Typed <code>Error!</code> propagates with <code>!</code>; custom errors need explicit recovery. Builders consume that typed outcome without adding an error-fragment channel. The <a href="../../../docs/progress">Progress matrix</a> records current support.</p><p>Support roots and the project package facade have no implicit <code>start</code>.</p><p>In the walkthrough, <code>@page.moth</code> owns dormant root work and a page fragment. <code>greeting.moth</code> is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding <code>greet</code> runs no page-level statements, because only an activated entry root runs root work.</p><figure class="moth-flow" aria-label=" Compiling is not activating">
         <div class="moth-flow__pipeline">

@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Cleanup responsibility is affine: it may move or be discharged, but it never duplicates. The compiler transfers it only where static analysis proves no later source use exists, and lowering consumes a validated memory plan rather than advisory drop sites.</p></section>
 <section class="container"><h1 id="affine-ownership-and-drops">Affine ownership and drops</h1><h2 id="design-contract">Design contract</h2><p>Moth ownership is a runtime cleanup discipline over statically validated topology. It isn&#39;t a separate source type system.</p><p>Cleanup responsibility is <strong>affine</strong>: it may move or be discharged, but it never duplicates. That single property is what makes deterministic cleanup safe without counting ordinary aliases.</p><p>Borrow and lifetime analysis prove transfer eligibility and topology legality. Ownership lowering only realises already-validated facts. The compiler-owned memory planner produces concrete responsibility and retained-edge obligation transitions plus cleanup and destruction plans. Backend lowering consumes the <code>ValidatedMemoryPlan</code> and encodes its planned transitions and cleanup decisions rather than reconstructing them from borrow-checker advisory cleanup sites.</p><p>The compiler may transfer cleanup responsibility only where static analysis proves that doing so can&#39;t invalidate a later source use. If that proof is unavailable, the operation remains a borrow and the allocation stays under its region owner.</p><h2 id="ownership-is-a-runtime-state-not-a-source-type">Ownership is a runtime state, not a source type</h2><ul><li>Ownership metadata is separate from semantic <code>TypeId</code>.</li><li>Shared/mutable parameter syntax doesn&#39;t create owned/borrowed source types.</li><li>Cleanup responsibility never decides whether a program compiles.</li><li>A garbage-collected representation is permitted for a statically legal topology on debug profiles and GC-native backends.</li><li>Collector-free, GC-native and debug paths must preserve identical observable behaviour.</li></ul><h2 id="bit-0-affine-cleanup-responsibility">Bit 0: affine cleanup responsibility</h2><p>Bit 0 of a full-control allocation-family handle records affine cleanup responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.</p><pre style=""><code class='codeblock'>borrowed
     The runtime path must not destroy the value.

@@ -1,5 +1,5 @@
 -- Shared documentation navigation. Add #[sidebar] after #[navbar] and call init_docs_sidebar()
--- once on each docs page.
+-- once on each docs page. sidebar.js reads the navbar for desktop geometry.
 -- Only rules needing selectors or media queries use an embedded stylesheet.
 
 @web/page
@@ -24,7 +24,7 @@ sidebar_style #= [$css("inline"):
 
 sidebar_header_style #= [$css("inline"):
     display: flex;
-    justify-content: var(--docs-sidebar-header-justify, space-between);
+    justify-content: space-between;
     align-items: center;
     gap: 0.25rem;
 ]
@@ -45,8 +45,8 @@ sidebar_button_style #= [$css("inline"):
     display: inline-grid;
     place-items: center;
     flex: none;
-    width: 2.25rem;
-    height: 2.25rem;
+    width: var(--docs-sidebar-button-size, 2.25rem);
+    height: var(--docs-sidebar-button-size, 2.25rem);
     border-radius: 0.5rem;
     color: light-dark(#385579, #c0d3f5);
     background: var(--docs-sidebar-button-background, transparent);
@@ -127,11 +127,24 @@ sidebar_rules #= [$css:
     @media (min-width: 961px) {
         .docs-sidebar {
             position: fixed;
-            top: 4.5rem;
+            top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
             bottom: 1rem;
             left: clamp(0.75rem, 2vw, 2rem);
+            display: flex;
+            flex-direction: column;
             width: 15.5rem;
+            overflow: hidden;
+        }
+
+        .docs-sidebar__nav {
+            flex: 1;
+            min-height: 0;
             overflow-y: auto;
+        }
+
+        /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+        .docs-sidebar__link:focus-visible {
+            outline-offset: -2px;
         }
 
         body:has(> .docs-sidebar) > .container {
@@ -145,13 +158,19 @@ sidebar_rules #= [$css:
             width: 3.75rem;
         }
 
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+            --docs-sidebar-button-size: auto;
+            position: absolute;
+            inset: 0;
+        }
+
+        .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+            outline-offset: -4px;
+        }
+
         .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
         .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
             display: none;
-        }
-
-        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-            --docs-sidebar-header-justify: center;
         }
 
         body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -196,6 +215,9 @@ sidebar_rules #= [$css:
         }
     }
 ]
+
+-- A plain template, because $html warns on every script tag and this one is a trusted local asset.
+sidebar_script #= [:<script src="[@sidebar.js]" defer></script>]
 
 sidebar #= [$html:
     <style>[sidebar_rules]</style>
@@ -281,6 +303,7 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/lappet/">Lappet</a>
         </nav>
     </aside>
+    [sidebar_script]
 ]
 
 -- Marks the current link and fills the breadcrumb after the static sidebar exists.

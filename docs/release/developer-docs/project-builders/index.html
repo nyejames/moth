@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../styles/sidebar.js" defer></script>
 <section class="container"><h1 id="create-a-project-builder-in-rust">Create a project builder in Rust</h1><p>A project builder connects Moth to an application environment. This guide presents the accepted target design through a small Wasm package builder, then explains source packages, Rust bindings, configuration, directives and runtime output. See <a href="../../docs/progress/packages-and-builders">current SDK coverage</a> for the delivered prototype.</p><p>The compiler owns language semantics. Your builder owns its application contract and uses the public SDK to request validated compilation and output services.</p><p>Read alongside <a href="../../docs/project-structure">Project structure</a>, <a href="../../docs/packages">Packages</a> and <a href="../memory-management">Memory management</a> for their source and lifetime contracts.</p></section>
 <section class="container"><h2 id="create-a-builder">Create a builder</h2><p>A project builder defines what a Moth project can use and turns its compiled assemblies into application artefacts. A game builder can provide engine packages and emit Wasm. A web builder can provide HTML helpers and assemble browser output. Both use the same compiler and build services.</p><p>Use the public <code>moth::builder</code> API for this work. The four main values are <code>BuilderDefinition</code>, <code>CompiledProject</code>, <code>BuildContext</code> and <code>BuildArtifacts</code>. <code>ProjectBuilder</code> connects them through two methods:</p><ul><li><code>definition</code> describes the packages, configuration and capabilities available to the project&#39;s source.</li><li><code>build</code> consumes a successfully compiled project and requests the artefacts that implement the builder&#39;s application model.</li></ul><p>The build driver calls <code>definition</code> before configuration or source compilation. It retains the resulting immutable definition for the build. It calls <code>build</code> only after the required semantic compilation succeeds. A builder doesn&#39;t sequence parsing, type checking or borrow analysis itself.</p><p><strong>Current SDK status throughout this guide and its linked sections:</strong> The prototype registers source and host packages, selects a profile and exposes an opaque project-facade handle. It discards its empty artefact set and publishes no files. The <code>.config(...)</code> helper, settings and entry accessors, custom directive registration, Wasm compilation, artefact/output APIs, macros and executable Rust host adapters describe accepted target design, not current SDK APIs. See <a href="../../docs/progress/packages-and-builders">Packages and Builders Progress</a> and <a href="https://github.com/nyejames/moth/blob/lappet-and-packages-work/docs/roadmap/plans/lappet-native-binding-handoff-plan.md">native-binding handoff plan</a>.</p><h3 id="a-wasm-package-builder">A Wasm package builder</h3><p>This builder compiles the application&#39;s explicit project package facade to Wasm. It also makes a Moth source package and a Rust host package available. The example package has no output-relative resource strings.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>use</span> std<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span>path<span class='moth-code-operator'>:</span><span class='moth-code-operator'>:</span><span class='moth-code-nominal'>PathBuf</span>;
 

@@ -482,11 +482,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -500,13 +513,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -572,7 +591,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -588,8 +607,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -994,6 +1013,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../styles/sidebar.js" defer></script>
  <h1 style="font-size: 2em;text-align: center;"> COROUTINES AND ASYNC IN MOTH</h1>
 <section class="container"><p><strong>Design draft:</strong> This page is a future-facing design document for language and compiler planning. It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented. <code>$async:</code> is the agreed future spelling for a compiler-owned directive block, not builder metadata. Its block semantics remain deferred, and this page delivers no implementation.</p><p>Moth approaches async and concurrency by making <strong>control flow explicit</strong> and <strong>communication safe by default</strong>.</p><p>Instead of hiding async behind keywords like <code>async</code> / <code>await</code> or complex runtime abstractions, Moth uses a small set of primitives that make data flow, suspension and concurrency visible in the syntax.</p><p>At a high level:</p><ul><li>Coroutines are lightweight, cooperative tasks</li><li>Coroutines communicate using typed channels</li><li>Concurrency is structured and scoped</li><li>Suspension points are visible in code</li><li>The compiler can enforce safety rules around shared data, references and task lifetimes</li></ul><p>The goal is async code that remains readable, predictable and analysable.</p></section>
 <section class="container"><h2 id="core-idea">Core idea</h2><p>The draft uses these primitives:</p><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">

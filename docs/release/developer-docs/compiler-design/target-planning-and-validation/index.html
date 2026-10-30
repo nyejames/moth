@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Per-function target assignment and validation catch capability mismatches before any backend emits code.</p></section>
 <section class="container"><h1 id="deciding-where-code-can-run">Deciding where code can run</h1><p>Target planning receives an already-validated lifetime topology. It assigns targets and checks capabilities. It never changes region ownership or source legality.</p><p>Semantically valid Moth can still be unhostable on a chosen target. A function that touches the DOM does not belong in a pure Wasm partition that has no DOM. A backend should learn that <strong>before</strong> it emits half a module.</p><p><strong>Target planning</strong> is build-owned and assigns each reachable function to a target. <strong>Target validation</strong> is compiler-owned and checks that finished assignment against capabilities.</p><h2 id="roots-and-capabilities">Roots and capabilities</h2><p>The build system supplies <strong>validation roots</strong> and the completed per-function target assignment from entry or package link planning. The compiler owns validation semantics over that assignment. It judges the partition rather than choosing it.</p><p>Distinguish two ideas people conflate:</p><ul><li><strong>package provenance</strong> records where a fact came from. <code>PackageOrigin</code> says which kind of package it belongs to and <code>PackageBacking</code> says whether real Moth source or an external binding implements it.</li><li><strong>target capability</strong> is builder and backend metadata describing which semantic features, bindings and helpers a target supports, plus what each function requires.</li></ul><p>Neither one is source-visible target identity. Moth source cannot ask which physical target it is being compiled for.</p><p>A function can be perfectly typed and still require a capability its assigned target lacks.</p><p>For the greeting walkthrough, <code>start</code>, <code>greet</code> and any template runtime work arrive with link facts and capability requirements. Even a humble string page exercises the machinery that larger apps need for the DOM and everything around it.</p><h2 id="affinity-and-propagation">Affinity and propagation</h2><p>Some functions are born with <strong>affinity</strong>. A JavaScript-owned <code>start</code> that must orchestrate page lifecycle wants the JS side. A DOM-touching helper wants JS. Neutral pure computation may default toward Wasm where the design supports it.</p><p>Requirements <strong>propagate backwards</strong> along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.</p><figure class="moth-flow" aria-label=" A capability requirement travels backwards along call edges">
         <div class="moth-flow__pipeline">

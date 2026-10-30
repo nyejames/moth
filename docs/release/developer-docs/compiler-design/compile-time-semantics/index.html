@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.</p></section>
 <section class="container"><h1 id="constants-generics-traits-and-casts-before-hir">Constants, generics, traits and casts before HIR</h1><p>HIR and backends should not re-solve the same compile-time questions on every function body. Work that can finish early should finish early.</p><p>If a declaration is marked compile-time and its value fully folds, fold it. If a generic call needs a concrete function, request one. If a trait bound needs evidence, resolve it. If a conversion needs a cast, emit an explicit operation.</p><p>The marker does the deciding, not the value. <code>#</code> is what makes a declaration compile-time. A top-level runtime binding stays runtime even when its value never actually changes.</p><p>AST owns that static work.</p><h2 id="folding-constants">Folding constants</h2><p><code>greeting_prefix</code> begins as source:</p><pre style=""><code class='codeblock'>greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Hello&quot;</span></code></pre><p>After checking and folding, it becomes a <strong>backend-neutral compile-time value</strong>. Exported folded facts copy into the immutable module interface. Consumers never re-parse or re-fold the provider&#39;s template or literal.</p><p>Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.</p><p>Current typed build configuration values and source <code>#Config</code> primitives (the Alpha spelling) enter as ordinary folded constants. Accepted <code>$config</code> contracts resolve into the same backend-neutral constant lane; they create no runtime wrapper type and no special HIR node category.</p><h2 id="static-bool-control-flow">Static Bool control flow</h2><p>Stage 4 owns the boundary:</p><pre style=""><code class='codeblock'>fully checked authored AST
 -&gt; constant evaluation

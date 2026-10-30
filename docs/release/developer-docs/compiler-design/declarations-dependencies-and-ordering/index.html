@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Prepared shells, bound dependencies and local declaration order give each module its top-level silhouette before bodies type-check.</p></section>
 <section class="container"><h1 id="finding-the-programs-shape">Finding the program&#39;s shape</h1><p>Bodies can wait. Before the compiler checks whether <code>greet(visitor)</code> type-checks, it needs the module&#39;s top-level shape: which declarations exist, which dependencies wait on providers and which local names depend on which other local names.</p><p>Header work finds that shape <strong>once</strong>. Later stages bind and consume retained syntax. They do not reparse the file from characters whenever a provider finishes.</p><h2 id="prepared-shells">Prepared shells</h2><p>From located tokens, syntax preparation extracts <strong>shells</strong>:</p><ul><li>declaration shells for constants, functions, structs, choices, aliases, traits and conformances</li><li>dependency shells, direct selections and aliases</li><li>const-template, active-root start-body and trait-incompatibility shells</li><li>root-activity and fragment-placement metadata for normal roots</li><li>structural provider references and structural file references for the graph</li><li>source configuration-contract shells and retained directive-prefix metadata (<code>#Config</code> is the current spelling; <code>$config</code> is the accepted queued prefix)</li><li>local declaration-ordering hints</li><li>source locations and remap information</li></ul><p>For the greeting source, shells include something like &quot;constant <code>greeting_prefix</code>&quot; and &quot;function <code>greet</code> with these parameter and return type shells.&quot; For the page, preparation keeps the <code>@greeting</code> dependency selection shell, the start-body token stream that contains <code>visitor</code> and the fragment-placement metadata around the HTML template.</p><p>Note what has <em>not</em> happened yet. <code>greet</code> is not bound to anything, and <code>visitor</code> is not a declaration the header stage understands. Binding resolves the first later, and AST parses the second out of the start body.</p><p>Preparation does not type-check executable bodies. It does not open source provider interfaces. It records what source syntax already makes knowable without them.</p><h2 id="four-relationship-classes">Four relationship classes</h2><p>Header processing keeps four edge families distinct. Mixing them is a reliable way to build a confusing compiler. Each authored path row has exactly one role.</p><p><strong>Structural provider references</strong> belong to Stage 0 graph construction. They answer &quot;which module or package must exist before this consumer can bind?&quot;</p><p><strong>Structural file references</strong> also belong to Stage 0, plus physical-input resolution. They answer &quot;which file on disk does this path point at?&quot;</p><p><strong>Dependency-bound symbol bindings</strong> belong to visibility and AST. They answer &quot;which public names from a provider become usable here, under which local spellings?&quot;</p><p><strong>Local declaration-ordering edges</strong> belong to Stage 3 inside one module. They answer &quot;which top-level declarations must be processed before which others in this module?&quot;</p><p>A dependency-bound declaration is never a node in the consumer&#39;s local declaration graph. Copying provider declarations into each consumer would destroy identity and explode work.</p><figure class="moth-flow" aria-label=" Four kinds of edge, four owners">
         <div class="moth-flow__pipeline">

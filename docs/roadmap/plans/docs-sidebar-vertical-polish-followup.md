@@ -1,6 +1,6 @@
 # Documentation sidebar vertical layout polish
 
-Status: queued follow-up on `web-site-and-page-v1`
+Status: implemented on `web-site-and-page-v1`, awaiting the user's review
 Prerequisite: complete and validate the HTML JavaScript glue-sharing and web package hardening work through final audit and handoff.
 Scope: documentation-site sidebar UI only. Do not change the public `@web/page` or `@web/site` APIs, HTML builder JavaScript deduplication, general DOM bindings or mobile navigation semantics.
 
@@ -83,3 +83,10 @@ On desktop, position the sidebar's independent scroll so that the preceding cate
 - Expanded content scrolls independently and aligns the active page's category heading at the top when possible, with natural clamping otherwise. It does not fight subsequent manual scrolling. Mobile, print, breadcrumb and existing checkbox interactions retain their behaviour.
 - Changes are confined to docs-site source/assets and associated focused tests. Public web package APIs, compiler-generated glue and builder output semantics are unchanged.
 - All applicable checks pass. Record any browser-specific limitation rather than introducing a broad compatibility subsystem.
+
+## Implementation decisions
+
+- On desktop the link list (`.docs-sidebar__nav`) is the scroll container, not the whole aside. Aligning a later category inside a scrolling aside pushed the breadcrumb and collapse button out of view. The aside is now a fixed flex column with the header pinned and the list taking the remaining height.
+- `docs/src/styles/sidebar.js` is linked from a plain `[:...]` template inside `#[sidebar]`. `$html` warns on every `<script` tag, and this is a trusted local asset. It is emitted once as `styles/sidebar.js` and linked relatively from every docs route.
+- The no-JavaScript fallback keeps the old `4.5rem` top through `var(--docs-navbar-bottom, 3.5rem) + 1rem`.
+- Verified in headless Chromium only.

@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>The HTML builder assembles records into a document and owned output set, ending at the greeting fragment.</p></section>
 <section class="container"><h1 id="building-and-writing-the-final-page">Building and writing the final page</h1><p>Every earlier stage produced records. The HTML builder&#39;s job is to turn the right records into one working document and a safe output set without rediscovering source structure or letting each backend spray files into the tree. This is harvest time, not another season of growth from seed.</p><p>The Alpha builder currently receives grouped <code>html</code> settings and reserved <code>page_*</code> metadata. The resolved <code>$html_builder</code> settings and root-only <code>$page</code> metadata described here are accepted queued handoff facts; output ownership, fragment order and resource rules remain shared.</p><p>This is the last primary stop on the chronological route. The fragment at the end is still:</p><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>&lt;</span><span class='moth-code-type'>p</span><span class='moth-code-delimiter'>&gt;</span>Hello, Priya!<span class='moth-code-delimiter'>&lt;/</span><span class='moth-code-type'>p</span><span class='moth-code-delimiter'>&gt;</span></code></pre><h2 id="assembly-inputs">Assembly inputs</h2><p>The builder consumes explicit inputs such as:</p><ul><li>entry assembly and activated root metadata</li><li>folded compile-time fragments and insertion indexes</li><li>runtime fragment slots and <code>start</code> invocation plan</li><li>selected functions and their target labels</li><li>JavaScript and Wasm outputs plus physical variants</li><li>runtime helpers and shared runtime modules</li><li>external glue and import maps</li><li>reachable resource uses and the stable origins behind them</li><li>resolved <code>$page</code> metadata and <code>$html_builder</code> settings</li></ul><p>If a fact is missing, an upstream owner failed. The builder should not open <code>greeting.moth</code> to peek at source again.</p><figure class="moth-flow" aria-label=" Everything converges, nothing is rediscovered">
         <div class="moth-flow__pipeline">

@@ -833,11 +833,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -851,13 +864,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
+    }
+
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
-    }
-
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -923,7 +942,7 @@ border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
         <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
@@ -939,8 +958,8 @@ text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -1345,6 +1364,7 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
+<script src="../../../styles/sidebar.js" defer></script>
 <section class="container"><p>Lowerers translate validated HIR into target code without reopening source or rewriting language meaning.</p></section>
 <section class="container"><h1 id="turning-hir-into-javascript-and-wasm">Turning HIR into JavaScript and Wasm</h1><p>One HIR operation may become a JavaScript expression in one partition and a Wasm instruction sequence in another. The meaning stays Moth. The spelling becomes target-native. Same source meaning, different host climates.</p><p><strong>Lowerers</strong> translate validated inputs. They are not second language frontends.</p><h2 id="lowerer-inputs">Lowerer inputs</h2><p>A lowerer receives explicit records:</p><ul><li>selected HIR for module and generated functions</li><li>paired local or generated-local type environments</li><li>stable call targets</li><li>borrow facts as validation context</li><li>validated lifetime facts and summaries as validation context</li><li>the <code>ValidatedMemoryPlan</code> for this target/profile physical variant, including its already-settled planned affine-responsibility transitions, retained-edge obligation transitions and discharge operations</li><li>external boundary classifications</li><li>builder lifecycle/runtime plan</li><li>per-function link facts</li><li>paired numeric-proof facts for check elision only; they do not change source legality or mutate HIR</li><li>selected-function, import, export and capability plans, plus the semantic layout identities the target needs</li></ul><p>A lowerer does <strong>not</strong>:</p><ul><li>load or parse source</li><li>rebuild imports or visibility</li><li>infer generics or reconstruct traits</li><li>fold constants or interpret TIR</li><li>rediscover project topology</li><li>reconsider lifetime topology or source legality</li><li>choose command or route policy</li><li>write final project files directly</li></ul><p>If a lowerer needs a fact, an earlier owner should have recorded it.</p><p>The <code>ValidatedMemoryPlan</code> is the memory half of that rule. It arrives with every physical decision already settled:</p><ul><li>selected memory layout per allocation family</li><li>region and declared-region placement</li><li>planned affine-responsibility transitions</li><li>retained-edge obligation transitions and discharge operations</li><li>cleanup and destruction plans</li><li>REC representation decisions</li></ul><p>The lowerer encodes those decisions and nothing more. It doesn&#39;t infer them from borrow facts, recompute a count delta or pick a cleanup site of its own. Borrow facts and validated lifetime topology stay in the room purely as validation context and assertion material.</p><p>Because the plan is built after target partition and target validation, it is scoped to <strong>one physical variant</strong>. The same source function can lower GC-native in a variant targeting a host collector, and collector-free with REC-capable handles in a variant targeting full memory control.</p><p>Those two variants share validated topology and source semantics. Their target, build profile, ABI identity, layout identity and runtime capability requirements can all differ, which is exactly why each one gets its own physical plan.</p><p>For the walkthrough, target-labelled <code>start</code>, <code>greet</code> and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.</p><figure class="moth-flow" aria-label=" One validated input, two target paths">
         <div class="moth-flow__pipeline">
