@@ -88,9 +88,7 @@ pub(crate) fn validate_package_path(
         .split('/')
         .next()
         .unwrap_or_default();
-    if root.eq_ignore_ascii_case(
-        crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME,
-    ) {
+    if crate::compiler_frontend::project_globals::claims_project_globals_name(root) {
         return Err("is reserved for the @project project-globals interface");
     }
     if root.eq_ignore_ascii_case("core") && origin != PackageOrigin::Core {

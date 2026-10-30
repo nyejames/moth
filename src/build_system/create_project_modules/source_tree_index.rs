@@ -28,7 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
-use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
+use crate::compiler_frontend::project_globals::claims_project_globals_name;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
     portable_relative_logical_path_from,
@@ -623,7 +623,7 @@ impl SourceTreeIndex {
                 if let SourceTreeBoundaryKind::Project { .. } = kind
                     && directory == entry_root
                     && (source_stem_from_file_name(file_name)
-                        == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+                        .is_some_and(claims_project_globals_name)
                         || file_name_claims_project_globals_root(file_name))
                 {
                     let diagnostic = project_structure_diagnostic(
@@ -784,7 +784,9 @@ impl SourceTreeIndex {
             }
             if let SourceTreeBoundaryKind::Project { .. } = kind
                 && directory == entry_root
-                && dependency_folder_names.contains(PROJECT_GLOBALS_DEPENDENCY_NAME)
+                && dependency_folder_names
+                    .iter()
+                    .any(|name| claims_project_globals_name(name))
             {
                 let diagnostic =
                     project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
@@ -1392,7 +1394,7 @@ fn file_name_claims_project_globals_root(file_name: &str) -> bool {
         file_name
             .strip_prefix(marker)
             .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
-            == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+            .is_some_and(claims_project_globals_name)
     })
 }
 
@@ -1401,7 +1403,7 @@ fn file_name_claims_project_globals_facade(file_name: &str) -> bool {
     file_name
         .strip_prefix('+')
         .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
-        == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+        .is_some_and(claims_project_globals_name)
 }
 
 /// Extract the dependency-name stem from a compiler-recognized source file name.

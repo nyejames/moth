@@ -39,6 +39,13 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 /// canonical one-component path is `project` while source authors write `@project`.
 pub(crate) const PROJECT_GLOBALS_DEPENDENCY_NAME: &str = "project";
 
+/// Whether a module, folder or package root name claims the reserved `@project` root.
+///
+/// Visible identities reject ASCII case-only overlaps, so `Project` claims it as `project` does.
+pub(crate) fn claims_project_globals_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(PROJECT_GLOBALS_DEPENDENCY_NAME)
+}
+
 /// One owned project-global field entering [`ProjectGlobalsInterface`].
 ///
 /// The field name is used as both the public binding name and the defining name in its stable
