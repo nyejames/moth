@@ -1325,7 +1325,7 @@ guide <span class='moth-code-operator'>#=</span> <span class='moth-code-delimite
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@web/site</code> belongs to the Builder origin family with MothSource backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for the package model. It requires an explicit <code>@web/site</code> dependency and isn&#39;t in the implicit scope of <code>.mtf</code> files.</p><h3 id="static-urls">Static URLs</h3><p><code>site.root</code> is a compile-time <code>String</code> containing the structural site root. <code>site.url</code> joins that root to a site-relative suffix. The suffix must not start with <code>/</code>. The root follows the consuming project&#39;s configured <code>origin</code> when the builder renders the page.</p><p>The helper composes strings without validating routes, encoding or normalising paths. It doesn&#39;t inspect the current page or browser. Use <a href="../page">@web/page</a> for live browser state. In particular, <code>site.url</code> builds links at compile time while <code>page.url()</code> reads the current browser address at runtime.</p>
+    <p><code>@web/site</code> belongs to the Builder origin family with MothSource backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for the package model. It requires an explicit <code>@web/site</code> dependency and isn&#39;t in the implicit scope of <code>.mtf</code> files.</p><h3 id="static-urls">Static URLs</h3><p><code>site.root</code> is a compile-time <code>String</code> containing the structural site root. It always ends with <code>/</code> and follows the consuming project&#39;s configured <code>origin</code> when the builder renders the page. <code>site.url</code> appends its slot to that root.</p><p>Pass a site-relative suffix without a leading <code>/</code>. This is a caller convention, not a checked rule. <code>url</code> concatenates the two strings, so a leading <code>/</code> produces <code>/moth//docs/</code> under <code>origin = &quot;/moth&quot;</code>. Under the default origin it produces <code>//docs/</code>, which browsers read as a link to a host named <code>docs</code>.</p><p>The helper composes strings without validating routes, encoding or normalising paths. It doesn&#39;t inspect the current page or browser. Use <a href="../page">@web/page</a> for live browser state. In particular, <code>site.url</code> builds links at compile time while <code>page.url()</code> reads the current browser address at runtime.</p>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1353,7 +1353,7 @@ guide <span class='moth-code-operator'>#=</span> <span class='moth-code-delimite
 
 </nav></section>
 <script type="module">
-import { __moth_glue_fn213 } from "../../../../_moth/js/glue/module-21af8880c5b0cf84.js";
+import { __moth_glue_fn213 } from "../../../../_moth/js/glue/module-623782c4280f5989.js";
 let __moth_error_code, __moth_error_message, __moth_src_fn_0, __moth_src_fn_1, __moth_src_fn_2, __moth_src_fn_3, __moth_src_fn_4, __moth_src_fn_5, __moth_src_fn_6, b_fn0;
 ({ __moth_src_fn_6 } = (() => {
 function __moth_is_ref(value) {

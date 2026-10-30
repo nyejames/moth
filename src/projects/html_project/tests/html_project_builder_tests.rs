@@ -14,6 +14,7 @@ use crate::build_system::output::{
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
+    InfrastructureFailureKind,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -658,6 +659,50 @@ fn duplicate_output_paths_are_rejected() {
         panic!("expected duplicate HTML output-path config reason");
     };
     assert_eq!(context.string_table.resolve(output_path), "index.html");
+}
+
+#[test]
+fn repeated_glue_path_shares_identical_source_and_rejects_different_bytes() {
+    let glue_path = PathBuf::from("_moth/js/glue/module-0123456789abcdef.js");
+    let glue = |source: &str| OutputFile::new(glue_path.clone(), FileKind::Js(source.to_owned()));
+    let first = glue("export function __moth_glue_fn1() {}\n");
+    let home = Path::new("src/@page.moth");
+    let about = Path::new("src/about/@page.moth");
+
+    let shared = is_shared_glue_output(
+        &first,
+        home,
+        &glue("export function __moth_glue_fn1() {}\n"),
+        about,
+    );
+    assert!(shared.expect("identical glue should share"));
+
+    // A natural digest collision is impractical to find, so this pins the policy directly.
+    let failure = is_shared_glue_output(
+        &first,
+        home,
+        &glue("export function __moth_glue_fn2() {}\n"),
+        about,
+    )
+    .expect_err("different bytes under one glue path must fail");
+    assert_eq!(failure.kind, InfrastructureFailureKind::Internal);
+    for detail in [
+        "_moth/js/glue/module-0123456789abcdef.js",
+        "src/@page.moth",
+        "src/about/@page.moth",
+    ] {
+        assert!(failure.message.contains(detail), "{}", failure.message);
+    }
+    assert!(!failure.message.contains("__moth_glue_fn"));
+
+    // Other repeated outputs fall back to the strict duplicate-path diagnostic, even when they
+    // are byte-identical JavaScript.
+    let page_js = OutputFile::new(
+        PathBuf::from("_moth/js/page.js"),
+        FileKind::Js("export function __moth_glue_fn1() {}\n".to_owned()),
+    );
+    let shared = is_shared_glue_output(&page_js, home, &page_js.clone(), about);
+    assert!(!shared.expect("non-glue repeats are not glue failures"));
 }
 
 #[test]

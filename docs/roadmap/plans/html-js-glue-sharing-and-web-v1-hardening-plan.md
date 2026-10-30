@@ -1,9 +1,9 @@
 # HTML JS glue sharing and web package V1 hardening
 
 Status: active follow-up on `web-site-and-page-v1`
-Current slice: Phase 2 - regression coverage and generated outputs
+Current slice: Phase 3 - final audit and handoff
 Blockers: none known
-Next action: add glue sharing, collision and cleanup regression tests, then regenerate `docs/release`
+Next action: run the final review lanes, then hand off for the user's independent review
 
 ## Goal
 
