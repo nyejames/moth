@@ -391,7 +391,7 @@ pub(crate) fn common_syntax_mistake_message(
             "Use `is` for comparison. `=` is for declarations and assignments.".to_string()
         }
         CommonSyntaxMistakeReason::RustBorrowPrefix => {
-            "`&` marks inclusive ranges in Moth. Borrowing is implicit; use `~` at call sites for mutation.".to_string()
+            "Moth has no `&` borrow prefix. Shared access is automatic. `&` after `to` marks an inclusive range bound.".to_string()
         }
         CommonSyntaxMistakeReason::InvalidAsOperator => {
             "`as` is not a cast operator. It is only valid in type aliases, dependency clauses, and choice payload patterns.".to_string()
@@ -503,7 +503,7 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
             "Replace `=` with `is` for equality, or move the assignment to statement position".to_owned()
         }
         CommonSyntaxMistakeReason::RustBorrowPrefix => {
-            "Remove `&`; shared borrows are automatic. For mutation, prefix the place with `~` at the call site.".to_owned()
+            "Remove `&`. Use `~` on an existing mutable place for a write, a mutable call argument or a mutable receiver, not on a fresh value or an immutable place.".to_owned()
         }
         CommonSyntaxMistakeReason::InvalidAsOperator => {
             "Use `cast` at an explicitly typed boundary for supported conversions, or use `as` only in a supported renaming context".to_owned()

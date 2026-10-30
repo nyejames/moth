@@ -218,6 +218,19 @@ pub(super) fn parse_copy_place_expression(
             )?;
 
             if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
+                // `copy (a + b)` continues on the same line, so the operand is a computed
+                // expression rather than an unclosed parenthesis. `copy (a` at newline, `;` or
+                // EOF still expects `)`.
+                if !matches!(
+                    token_stream.current_tag(),
+                    TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF
+                ) {
+                    return Err(calls_data::invalid_copy_target(
+                        InvalidCopyTargetReason::NonPlace,
+                        open_span,
+                    )
+                    .into());
+                }
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {

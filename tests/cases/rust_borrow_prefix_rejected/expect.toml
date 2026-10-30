@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0031"]
+message_contains = ["has no `&` borrow prefix", "`&` after `to` marks an inclusive range bound", "existing mutable place", "not on a fresh value or an immutable place"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0031"
+reason = "common_syntax_mistake.rust_borrow_prefix"
+path = "input/@page.moth"
+line = 2
+count = 1

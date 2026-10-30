@@ -195,6 +195,13 @@ contract = "language.bindings.copy_resolves_shared_mutable_conflict"
 role = "primary"
 
 [[case]]
+id = "borrow_conflict_resolved_by_reusing_alias"
+path = "borrow_conflict_resolved_by_reusing_alias"
+tags = ["integration","borrows","diagnostics"]
+contract = "language.bindings.reusing_alias_resolves_mutable_conflict"
+role = "primary"
+
+[[case]]
 id = "borrow_conflict_resolved_by_reordering"
 path = "borrow_conflict_resolved_by_reordering"
 tags = ["integration", "borrows"]
@@ -612,6 +619,13 @@ id = "as_in_expression_rejected"
 path = "as_in_expression_rejected"
 tags = ["integration","diagnostics"]
 contract = "language.syntax.as_in_expression_rejected"
+role = "primary"
+
+[[case]]
+id = "rust_borrow_prefix_rejected"
+path = "rust_borrow_prefix_rejected"
+tags = ["integration", "diagnostics", "syntax"]
+contract = "language.syntax.rust_borrow_prefix_rejected"
 role = "primary"
 
 [[case]]
@@ -13571,6 +13585,13 @@ id = "copy_non_place_literal"
 path = "copy_non_place_literal"
 tags = ["integration", "diagnostics", "copy"]
 contract = "language.copy.non_place_literal_rejected"
+role = "primary"
+
+[[case]]
+id = "copy_non_place_computed_expression_rejected"
+path = "copy_non_place_computed_expression_rejected"
+tags = ["integration", "diagnostics", "copy"]
+contract = "language.copy.non_place_computed_expression_rejected"
 role = "primary"
 
 [[case]]

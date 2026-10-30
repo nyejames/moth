@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0056"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0056"
+reason = "invalid_copy_target.non_place"
+path = "input/@page.moth"
+line = 3
+column = 15
+count = 1

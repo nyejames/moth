@@ -1,0 +1,10 @@
+-- After a mutable alias is created, later reads and writes go through that alias
+-- instead of the source. Once the alias is finished, the source can be read again.
+
+data ~= 42
+first ~= data
+~first = 7
+io.line([:borrow_conflict_resolved_by_reusing_alias seen=[first]])
+~first = 8
+io.line([:borrow_conflict_resolved_by_reusing_alias alias=[first]])
+io.line([:borrow_conflict_resolved_by_reusing_alias source=[data]])

@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 3 remainders: 3.1 `RustBorrowPrefix` wording, 3.4 computed copy coverage, 3.5 alias-reuse coverage
+NEXT_SLICE: Phase 4.1 remaining catch presentation scope
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: implement the Phase 3 remainders, then continue Phase 4 in section order from 4.1's remaining catch presentation scope
+RESUME_ACTION: refine catch eligibility and optional-value rejection guidance, then continue Phase 4 in section order
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -373,9 +373,9 @@ Mutable access diagnostics must distinguish these source states:
 
 State 5 is valid and must not be diagnosed.
 
-**Status: Call-access classification is delivered; `RustBorrowPrefix` wording remains.** The shared-argument path classifies place mutability before choosing its repair. Fresh values, including `copy` results, satisfy mutable parameters without `~`; an authored marker on a fresh value remains invalid. Unnamed parameter messages use one-based positions. The `function_call_mutable_param_copy_arg` integration case covers an explicit copy passed to a mutable parameter.
+**Status: Delivered.** The shared-argument path classifies place mutability before choosing its repair. Fresh values, including `copy` results, satisfy mutable parameters without `~`; an authored marker on a fresh value remains invalid. Unnamed parameter messages use one-based positions. The `function_call_mutable_param_copy_arg` integration case covers an explicit copy passed to a mutable parameter.
 
-The remaining wording item is the `CommonSyntaxMistakeReason::RustBorrowPrefix` renderer in `src/compiler_frontend/compiler_messages/render/syntax.rs`: explain that `~` applies to existing mutable places for writes, mutable call arguments and mutable receivers, not to fresh values or immutable places.
+`CommonSyntaxMistakeReason::RustBorrowPrefix` now explains that Moth has no `&` borrow prefix and that `~` applies to existing mutable places for writes, mutable call arguments and mutable receivers, not to fresh values or immutable places. `rust_borrow_prefix_rejected` owns the wording.
 
 #### Delivered diagnostic facts
 
@@ -454,11 +454,11 @@ For an immutable `x`, `~x = 2` reports the immutable binding rather than suggest
 
 `copy` accepts an existing place and creates independent value semantics. It does not take mutable-access syntax.
 
-**Status: The reason model and rendering are delivered; computed-expression coverage remains.** Current reasons distinguish a function name, a function call, a non-place expression and a mutable marker on an otherwise valid copy target.
+**Status: Delivered.** Current reasons distinguish a function name, a function call, a non-place expression and a mutable marker on an otherwise valid copy target.
 
 The `MutableMarkerNotAllowed` reason applies only when removing `~` leaves a valid binding or field-projection copy target. A marked literal, call or computed expression uses `NonPlace`, because removing the marker does not make it copyable.
 
-Current messages distinguish function names and calls and direct authors to existing bindings or field projections. Integration cases cover a literal, function name, function call and `copy ~binding`. Add a computed-expression non-place case to complete the focused coverage.
+Current messages distinguish function names and calls and direct authors to existing bindings or field projections. Integration cases cover a literal, function name, function call and `copy ~binding`. A parenthesised computed operand such as `copy (a + b)` reports `NonPlace` at the opening parenthesis rather than a missing `)`, owned by `copy_non_place_computed_expression_rejected`.
 
 ### 3.5 Improve borrow-conflict explanations without inventing lifetimes
 
@@ -487,7 +487,7 @@ When source-place or location facts are unavailable, renderers use generic fallb
 
 #### Tests
 
-Passing coverage includes reordering (`borrow_conflict_resolved_by_reordering`), a narrowed scope (`borrow_checker_alias_not_live_after_scope`) and explicit `copy` (`borrow_conflict_resolved_by_copy`). Add a positive case that reuses the active alias.
+Passing coverage includes reordering (`borrow_conflict_resolved_by_reordering`), a narrowed scope (`borrow_checker_alias_not_live_after_scope`), explicit `copy` (`borrow_conflict_resolved_by_copy`) and reuse of the active alias (`borrow_conflict_resolved_by_reusing_alias`).
 
 ### 3.6 Remove migration state from collection and map assignment diagnostics
 
