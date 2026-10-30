@@ -1,9 +1,9 @@
 # HTML builder `@web/site` and `@web/page` V1
 
-Status: ready for implementation
-Current slice: Phase 0 - baseline and contract verification
+Status: in progress
+Current slice: Phase 1a - nested builder source package prefixes
 Blockers: none known
-Next action: establish the live repository baseline, then implement the bounded package APIs
+Next action: allow the existing source package registry and path resolver to own nested builder prefixes such as `web/site`
 
 ## Goal
 
@@ -116,6 +116,21 @@ The HTML remains navigable if JavaScript is unavailable: only the enhanced bread
 - Verify package export syntax for a structural site-root constant and slot-bearing const wrapper, annotated `Bool, Error!` returns and normal Moth function calls from a page root.
 - Check exactly which docs roots already contain `#[sidebar]` and which do not. Include `docs/src/docs/**` and `docs/src/developer-docs/**`, including nonstandard root names such as `@cheatsheet.moth`. Exclude the main site homepage `docs/src/@page.moth` unless the existing site design calls for the documentation sidebar there.
 - Check representative nested breadcrumbs, especially `docs/packages/core/time/`, `docs/packages/builder/`, `docs/progress/packages-and-builders/` and `developer-docs/compiler-design/...`. Record existing pages lacking an `<h1>` or a navigable ancestor in the sidebar before choosing final link additions.
+
+Phase 0 findings:
+
+- `@web/site` doesn't overlap `@web/canvas`, `@web/graphics` or `@web/page`, and no package claims `@web` itself. Stage 0 discovery, stable identity, import-surface matching and output prefixes already accept a multi-component prefix. `SourcePackageRegistry::register_filesystem_root` still rejects `/`. `ProjectPathResolver` matches and strips only the first dependency component. The project-entry collision check compares single folder names. Phase 1a generalises those three owners and doesn't add a second registry or resolver.
+- `root #String = @/`, slot-wrapper const templates, namespace-qualified template heads, `|root_id String| -> Bool, Error!` annotations and `@moth/runtime` typed errors all use existing syntax. No current test proves that `SiteRoot` survives a package export and cross-module composition, so Phase 2 owns that proof.
+- The external-binding glue validates I32 range and F64 finiteness. It passes Bool and String returns through without checking them. Phase 2 tests numeric validation only and makes no claim about Bool or String validation.
+- The sidebar has 37 navigation links plus the Documentation home link. 35 `docs/src/docs/**` roots insert it, including `@cheatsheet.moth`. `progress/packages-and-builders/` doesn't, and neither does any `docs/src/developer-docs/**` root. `docs/src/docs/@page.moth` and the site homepage stay without it.
+- `#[title]` renders an `<h1>`. The language-docs roots render a heading. Developer-docs topic headings come from imported content. Package leaves under `packages/core/` and `packages/builder/` have no exact sidebar link, and nothing links `packages/builder/` itself. Developer-docs topic pages fall under linked `compiler-design/`, `memory-management/` or `developer-docs/` ancestors.
+
+### Phase 1a - Nested builder source package prefixes
+
+- Allow slash-separated builder source prefixes in `SourcePackageRegistry` while keeping shared package-path validation.
+- Make `ProjectPathResolver` match the longest whole-component registered prefix and join only the remaining suffix.
+- Make the project-entry collision check compare whole-component overlap instead of a single folder name.
+- Add focused coverage for nested prefix resolution, compile-time paths under a nested package and collisions.
 
 ### Phase 1 - Register and implement both packages
 
