@@ -243,6 +243,13 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
                 .host_package(HostPackage::new("@ui/native")),
         ),
         (
+            "source package nested in a source package",
+            "@ui/widgets",
+            BuilderDefinition::new("game")
+                .source_package(source("@ui"))
+                .source_package(source("@ui/widgets")),
+        ),
+        (
             "source and host differing only by case",
             "@UI",
             BuilderDefinition::new("game")
@@ -261,6 +268,19 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
         .host_package(HostPackage::new("@uikit"))
         .finish()
         .expect("sibling paths sharing a prefix do not overlap");
+
+    let definition = BuilderDefinition::new("game")
+        .source_package(source("@web/site"))
+        .host_package(HostPackage::new("@web/page"))
+        .finish()
+        .expect("nested sibling source and host packages do not overlap");
+    assert!(
+        definition
+            .surface()
+            .source_packages
+            .get_root("web/site")
+            .is_some()
+    );
 }
 
 #[test]
@@ -282,14 +302,6 @@ fn finish_rejects_reserved_and_malformed_package_paths() {
         );
         assert!(message.contains(path), "{message}");
     }
-
-    let message = invalid_definition_message(
-        "nested source package path",
-        BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@game/ui").from_dir(dir.path()))
-            .finish(),
-    );
-    assert!(message.contains("@game/ui"), "{message}");
 }
 
 #[test]

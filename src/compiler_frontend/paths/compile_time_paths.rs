@@ -9,7 +9,7 @@
 pub enum CompileTimePathBase {
     /// Resolved relative to the declaring file (`./` or `../`).
     RelativeToFile,
-    /// First segment matched a source-backed package prefix.
+    /// Leading components matched a source-backed package prefix.
     SourcePackageRoot,
     /// Fell through to the configured `entry_root`.
     EntryRoot,

@@ -1,9 +1,9 @@
 # HTML builder `@web/site` and `@web/page` V1
 
 Status: in progress
-Current slice: Phase 1a - nested builder source package prefixes
+Current slice: Phase 1 - register and implement both packages
 Blockers: none known
-Next action: allow the existing source package registry and path resolver to own nested builder prefixes such as `web/site`
+Next action: register `@web/site` at nested prefix `web/site` and `@web/page` in `WEB_BINDING_PACKAGES`, then implement both package APIs
 
 ## Goal
 
@@ -127,9 +127,9 @@ Phase 0 findings:
 
 ### Phase 1a - Nested builder source package prefixes
 
-- Allow slash-separated builder source prefixes in `SourcePackageRegistry` while keeping shared package-path validation.
-- Make `ProjectPathResolver` match the longest whole-component registered prefix and join only the remaining suffix.
-- Make the project-entry collision check compare whole-component overlap instead of a single folder name.
+- Allow slash-separated builder source prefixes in `SourcePackageRegistry` while keeping shared package-path validation. Reject a prefix that equals, contains or nests inside another registration, using the same overlap rule as source/binding validation.
+- Make `ProjectPathResolver` match the registered prefix by whole leading components and join only the remaining suffix.
+- Make the project-entry collision check reject an entry-root-relative folder path equal to a registered prefix instead of comparing a single folder name. Ancestor-only folders stay allowed.
 - Add focused coverage for nested prefix resolution, compile-time paths under a nested package and collisions.
 
 ### Phase 1 - Register and implement both packages

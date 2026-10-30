@@ -75,6 +75,40 @@ fn register_filesystem_root_rejects_case_only_duplicate_prefix() {
 }
 
 #[test]
+fn register_filesystem_root_accepts_nested_prefix_and_rejects_overlaps() {
+    let mut registry = SourcePackageRegistry::new();
+    register(
+        &mut registry,
+        "web/site",
+        "/builder/site",
+        PackageOrigin::Builder,
+    );
+    for overlapping in ["Web/SITE", "web", "WEB", "web/site/extra"] {
+        registry
+            .register_filesystem_root(
+                overlapping,
+                std::path::PathBuf::from("/other/site"),
+                PackageOrigin::Builder,
+            )
+            .expect_err(&format!(
+                "{overlapping:?} overlaps registered web/site and must be rejected"
+            ));
+    }
+    register(
+        &mut registry,
+        "web/sites",
+        "/builder/sites",
+        PackageOrigin::Builder,
+    );
+
+    let prefixes: Vec<&str> = registry
+        .iter()
+        .map(|root| root.package_prefix.as_str())
+        .collect();
+    assert_eq!(prefixes, vec!["web/site", "web/sites"]);
+}
+
+#[test]
 fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
     let mut registry = SourcePackageRegistry::new();
     for prefix in [
@@ -84,7 +118,6 @@ fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
         "core",
         "CORE",
         "core/ui",
-        "ui/x",
         "",
         "ui//x",
         "ui#x",

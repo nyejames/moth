@@ -799,20 +799,29 @@ impl SourceTreeIndex {
                 ));
             }
 
-            // On the project root pass, reject entry-root folders whose names collide with
-            // registered source-backed package prefixes. Package boundaries carry no
+            // A project folder whose entry-root-relative path equals a registered source package
+            // prefix would claim that package's identity, whichever module owns the folder.
+            // Ancestor folders alone may coexist with nested prefixes. The canonical directory
+            // path keeps this independent of traversal order. Package boundaries carry no
             // prefix-collision packages, so this check is skipped for them.
             if let SourceTreeBoundaryKind::Project {
                 source_packages, ..
             } = kind
-                && directory == entry_root
             {
                 for folder_name in &dependency_folder_names {
-                    if source_packages.has_prefix(folder_name) {
-                        let colliding_folder = directory.join(folder_name);
+                    let colliding_folder = directory.join(folder_name);
+                    // Traversal skips canonical directories outside the entry root before this
+                    // point, so every visited project directory has an entry-relative path.
+                    let relative = colliding_folder
+                        .strip_prefix(&entry_root)
+                        .expect("visited project directories stay inside the entry root");
+                    if let Some(package) = source_packages
+                        .iter()
+                        .find(|package| Path::new(&package.package_prefix) == relative)
+                    {
                         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
                         let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
-                            prefix: diagnostic_strings.intern(folder_name),
+                            prefix: diagnostic_strings.intern(&package.package_prefix),
                             entry_folder: path_id(&colliding_folder, &mut diagnostic_strings),
                         };
                         let diagnostic = project_structure_diagnostic(reason);

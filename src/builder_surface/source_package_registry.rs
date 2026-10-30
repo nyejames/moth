@@ -9,7 +9,7 @@
 //! downstream consumers to re-sort.
 
 use crate::builder_surface::package_metadata::{
-    PackageMetadata, PackageOrigin, validate_package_path,
+    PackageMetadata, PackageOrigin, package_paths_overlap, validate_package_path,
 };
 
 use std::collections::BTreeMap;
@@ -54,10 +54,10 @@ impl SourcePackageRegistry {
 
     /// Register a filesystem source-backed package root.
     ///
-    /// Each prefix has one root. A second registration, including an ASCII case-only variant,
-    /// is rejected rather than replacing the first. The prefix follows the shared package-path
-    /// rule and is one component, because source resolution matches only the first component of
-    /// a dependency path.
+    /// Each prefix has one root. A prefix equal to or nested inside another registration,
+    /// including ASCII case-only variants, is rejected rather than replacing the first, so a
+    /// dependency path never has two source package owners. Prefixes follow the shared
+    /// package-path rule and may contain several slash-separated components.
     pub fn register_filesystem_root(
         &mut self,
         package_prefix: impl Into<String>,
@@ -70,18 +70,13 @@ impl SourcePackageRegistry {
                 "Source package '@{prefix}' {reason}."
             )));
         }
-        if prefix.contains('/') {
-            return Err(SourcePackageRegistryError::new(format!(
-                "Source package '@{prefix}' must have exactly one component."
-            )));
-        }
-        if self
+        if let Some(existing) = self
             .roots
             .keys()
-            .any(|existing| existing.eq_ignore_ascii_case(&prefix))
+            .find(|existing| package_paths_overlap(existing, &prefix))
         {
             return Err(SourcePackageRegistryError::new(format!(
-                "Source package '@{prefix}' is already registered."
+                "Source package '@{prefix}' overlaps registered source package '@{existing}'."
             )));
         }
         self.roots.insert(

@@ -241,6 +241,56 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
 }
 
 #[test]
+fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let entry = root.join("src");
+    fs::create_dir_all(entry.join("web")).unwrap();
+    fs::write(entry.join("@home.moth"), "").unwrap();
+    let mut config = Config::new(root.clone());
+    config.entry_root = PathBuf::from("src");
+    let mut packages = crate::builder_surface::SourcePackageRegistry::default();
+    packages
+        .register_filesystem_root("web/site", root.join("package"), PackageOrigin::Builder)
+        .unwrap();
+    let discover = |strings: &mut StringTable| {
+        super::source_tree_index::SourceTreeIndex::discover(
+            fs::canonicalize(&entry).unwrap(),
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &root,
+                validated_output_settings: None,
+            },
+            &config,
+            &packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+            strings,
+        )
+    };
+    let assert_collision = |reason: &str| {
+        let failure = discover(&mut StringTable::new()).expect_err(reason);
+        let reports = diagnosed_reports(failure);
+        let (_, diagnostic) = first_invalid_config(&reports);
+        assert_eq!(
+            diagnostic
+                .family_view::<InvalidConfigView>()
+                .unwrap()
+                .reason,
+            InvalidConfigCode::EntryRootPackagePrefixCollision,
+            "{reason}"
+        );
+    };
+
+    discover(&mut StringTable::new()).expect("ancestor folder alone must be allowed");
+    fs::create_dir(entry.join("web/site")).unwrap();
+    assert_collision("exact nested path must collide");
+
+    // Module ownership of the folder doesn't change its entry-root-relative identity.
+    fs::write(entry.join("web/@mod.moth"), "").unwrap();
+    assert_collision("exact nested path inside a nested module must still collide");
+}
+
+#[test]
 fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();

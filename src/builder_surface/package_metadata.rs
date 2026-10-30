@@ -98,3 +98,23 @@ pub(crate) fn validate_package_path(
     }
     Ok(())
 }
+
+/// Whether one `@`-stripped package path equals the other or nests inside it at a `/` boundary,
+/// ignoring ASCII case like the namespace collision policy.
+///
+/// WHY: an import path below an overlapping registration would have two package owners, so
+/// source/source and source/binding registrations share this one overlap rule.
+pub(crate) fn package_paths_overlap(left: &str, right: &str) -> bool {
+    let (shorter, longer) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    longer
+        .get(..shorter.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(shorter))
+        && longer[shorter.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| next == '/')
+}

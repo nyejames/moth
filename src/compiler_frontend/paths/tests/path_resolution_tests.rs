@@ -17,7 +17,9 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terse::format_terse_diagnostic_view,
 };
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
-use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
+use crate::compiler_frontend::paths::dependency_resolution::{
+    DependencyPathBase, DependencyPathResolutionError,
+};
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
@@ -196,6 +198,65 @@ fn source_package_dependency_resolves_to_package_root() {
         result.1,
         fs::canonicalize(package_root.join("utils.moth")).unwrap(),
         "should resolve to source-backed package root file"
+    );
+}
+
+#[test]
+fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
+    let temp = tempfile::tempdir().unwrap();
+    let entry = temp.path().join("src");
+    let nested = temp.path().join("nested");
+    fs::create_dir_all(&entry).unwrap();
+    fs::create_dir_all(nested.join("assets")).unwrap();
+    fs::write(nested.join("assets/logo.moth"), "").unwrap();
+    let resolver = ProjectPathResolver::new_with_module_roots(
+        temp.path().to_path_buf(),
+        entry.clone(),
+        PreparedSourcePackageRoots::from_entries(vec![(
+            "web/site".into(),
+            nested.clone(),
+            nested.join("@mod.moth"),
+        )]),
+        &SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
+    );
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerFork::empty();
+    let nested_base = DependencyPathBase {
+        kind: CompileTimePathBase::SourcePackageRoot,
+        root: nested.clone(),
+        matched_components: 2,
+    };
+    for (name, expected) in [
+        ("web/site", Some(&nested_base)),
+        ("web/site/assets/logo", Some(&nested_base)),
+        ("web/sites", None),
+        ("web", None),
+    ] {
+        let path = paths.try_intern_portable_path(name, &mut strings).unwrap();
+        assert_eq!(
+            resolver
+                .source_package_root_for_dependency(path, &paths, &strings)
+                .as_ref(),
+            expected,
+            "{name}"
+        );
+    }
+    let path = paths
+        .try_intern_portable_path("web/site/assets/logo", &mut strings)
+        .unwrap();
+    let (base, resolved) = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &paths,
+            &entry.join("index.moth"),
+            &mut DiagnosticStringBuilder::new(&mut strings),
+        )
+        .expect("nested package dependency should resolve");
+    assert_eq!(base, CompileTimePathBase::SourcePackageRoot);
+    assert_eq!(
+        resolved,
+        fs::canonicalize(nested.join("assets/logo.moth")).unwrap()
     );
 }
 

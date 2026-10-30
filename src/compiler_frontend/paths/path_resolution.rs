@@ -15,7 +15,7 @@ use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 
 use crate::compiler_frontend::paths::dependency_resolution::{
-    DependencyPathResolutionError, validate_dependency_boundary,
+    DependencyPathBase, DependencyPathResolutionError, validate_dependency_boundary,
     validate_dependency_case_sensitivity,
 };
 use crate::compiler_frontend::paths::path_normalization::{
@@ -137,8 +137,8 @@ impl ProjectPathResolver {
 
     /// Return the prepared source-package root selected by an authored dependency prefix.
     ///
-    /// WHAT: exposes the same longest-prefix package classification used by ordinary dependency
-    ///       resolution to Stage 0's synthetic module-root precedence check.
+    /// WHAT: exposes the same whole-component package classification used by ordinary
+    ///       dependency resolution to Stage 0's synthetic module-root precedence check.
     /// WHY: registered package paths must retain package-root semantics and must not be mistaken
     ///      for bare module-root-relative source paths.
     pub(crate) fn source_package_root_for_dependency(
@@ -146,7 +146,7 @@ impl ProjectPathResolver {
         dependency_path: PathId,
         path_fork: &PathInternerFork,
         string_table: &StringTable,
-    ) -> Option<PathBuf> {
+    ) -> Option<DependencyPathBase> {
         self.matches_source_package_prefix(dependency_path, path_fork, string_table)
     }
 
@@ -288,30 +288,28 @@ impl ProjectPathResolver {
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
         }
 
-        let (base_kind, filesystem_base) = self.resolve_path_base(
+        let base = self.resolve_path_base(
             dependency_path,
             path_fork,
             declaring_file,
             strings.strings(),
         )?;
 
-        // Source-backed package roots already include the prefix directory, so skip the first
-        // component when joining to avoid double-prefixing (e.g. `lib/helper/helper/...`).
+        // A package root already represents its complete registered prefix.
         let mut components = Vec::new();
         let components = path_fork.resolve_components(dependency_path, &mut components);
-        let normalized = if matches!(base_kind, CompileTimePathBase::SourcePackageRoot) {
-            join_and_normalize_components(
-                &filesystem_base,
-                components.get(1..).unwrap_or_default(),
-                strings.strings(),
-            )
-        } else {
-            join_and_normalize_components(&filesystem_base, components, strings.strings())
-        };
+        let normalized = join_and_normalize_components(
+            &base.root,
+            &components[base.matched_components..],
+            strings.strings(),
+        );
 
+        // The matched package prefix counts as one logical component, so nested and single
+        // component prefixes share the same parent-file fallback.
+        let dependency_component_len = components.len() - base.matched_components.saturating_sub(1);
         let candidates = candidate_dependency_files_for_source_kinds(
             &normalized,
-            path_fork.depth(dependency_path) as usize,
+            dependency_component_len,
             self.source_file_kinds(),
         );
         let existing_candidates = existing_dependency_candidates(&candidates);
@@ -351,39 +349,50 @@ impl ProjectPathResolver {
 
         validate_dependency_boundary(
             &canonical,
-            &base_kind,
-            &filesystem_base,
+            &base.kind,
+            &base.root,
             dependency_path,
             path_fork,
         )?;
         validate_dependency_case_sensitivity(
             dependency_path,
             path_fork,
-            &base_kind,
-            &filesystem_base,
+            &base,
             &canonical,
             candidate.is_parent_fallback,
             strings,
         )?;
 
-        Ok((base_kind, canonical))
+        Ok((base.kind, canonical))
     }
 
-    /// WHAT: returns whether the dependency path starts with a registered source-backed package prefix.
-    /// WHY: source-backed package dependencies should resolve to the package root, not fall through to entry root.
+    /// Select the registered prefix that matches whole leading dependency components as a
+    /// package-root base. Registration rejects overlapping prefixes, so at most one candidate
+    /// matches.
     fn matches_source_package_prefix(
         &self,
         dependency_path: PathId,
         path_fork: &PathInternerFork,
         string_table: &StringTable,
-    ) -> Option<PathBuf> {
-        let mut first_component_path = dependency_path;
-        while path_fork.depth(first_component_path) > 1 {
-            first_component_path = path_fork.parent(first_component_path)?;
+    ) -> Option<DependencyPathBase> {
+        let mut scratch = Vec::new();
+        let mut prefix = path_fork.render_portable(dependency_path, string_table, &mut scratch);
+        let mut depth = path_fork.depth(dependency_path) as usize;
+        while depth > 0 {
+            if let Some(root) = self.source_package_roots.roots().get(&prefix) {
+                return Some(DependencyPathBase {
+                    kind: CompileTimePathBase::SourcePackageRoot,
+                    root: root.clone(),
+                    matched_components: depth,
+                });
+            }
+            let Some(separator) = prefix.rfind('/') else {
+                break;
+            };
+            prefix.truncate(separator);
+            depth -= 1;
         }
-        let first_component = path_fork.component(first_component_path)?;
-        let segment = string_table.resolve(first_component);
-        self.source_package_roots.roots().get(segment).cloned()
+        None
     }
     // -----------------------------------------------------------------------
     // Shared resolution helpers
@@ -395,7 +404,7 @@ impl ProjectPathResolver {
         path_fork: &PathInternerFork,
         declaring_file: &Path,
         string_table: &StringTable,
-    ) -> Result<(CompileTimePathBase, PathBuf), InfrastructureFailure> {
+    ) -> Result<DependencyPathBase, InfrastructureFailure> {
         let declaring_dir = declaring_file.parent().ok_or_else(|| {
             InfrastructureFailure::filesystem(
                 CompilerStage::DependencyResolution,
@@ -404,17 +413,22 @@ impl ProjectPathResolver {
             )
         })?;
         if is_relative_dependency_path(path, path_fork, string_table) {
-            Ok((
-                CompileTimePathBase::RelativeToFile,
-                declaring_dir.to_path_buf(),
-            ))
-        } else if let Some(package_root) =
+            return Ok(DependencyPathBase {
+                kind: CompileTimePathBase::RelativeToFile,
+                root: declaring_dir.to_path_buf(),
+                matched_components: 0,
+            });
+        }
+        if let Some(package_base) =
             self.matches_source_package_prefix(path, path_fork, string_table)
         {
-            Ok((CompileTimePathBase::SourcePackageRoot, package_root))
-        } else {
-            Ok((CompileTimePathBase::EntryRoot, self.entry_root.clone()))
+            return Ok(package_base);
         }
+        Ok(DependencyPathBase {
+            kind: CompileTimePathBase::EntryRoot,
+            root: self.entry_root.clone(),
+            matched_components: 0,
+        })
     }
 
     fn source_kind_for_canonical_path(&self, path: &Path) -> Option<SourceFileKind> {

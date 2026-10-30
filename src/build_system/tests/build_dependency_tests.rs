@@ -691,7 +691,7 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
         let mut surface = HtmlProjectBuilder::new().frontend_surface();
         let mut packages = [
             ("campaign", self.package_root.clone()),
-            ("marker", self.marker_root.clone()),
+            ("x/y", self.marker_root.clone()),
         ];
         if self.reverse_registration {
             packages.reverse();
@@ -863,7 +863,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 ),
                 (
                     project_root.join("src/@page.moth"),
-                    "@binding.js provider_value as project_value\n@campaign package_value\n@marker marker\n[:project=[project_value()]|package=[package_value()]|[marker]]\n",
+                    "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
                     project_root.join("src/binding.js"),
