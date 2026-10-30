@@ -808,33 +808,34 @@ impl SourceTreeIndex {
                 source_packages, ..
             } = kind
             {
-                for folder_name in &dependency_folder_names {
+                // Traversal skips canonical directories outside the entry root before this
+                // point, so every visited project directory has an entry-relative path.
+                let relative_directory = directory
+                    .strip_prefix(&entry_root)
+                    .expect("visited project directories stay inside the entry root");
+                if let Some((package, folder_name)) = source_packages.iter().find_map(|package| {
+                    let prefix = Path::new(&package.package_prefix);
+                    let folder_name = prefix.file_name()?.to_str()?;
+                    (prefix.parent() == Some(relative_directory)
+                        && dependency_folder_names.contains(folder_name))
+                    .then_some((package, folder_name))
+                }) {
                     let colliding_folder = directory.join(folder_name);
-                    // Traversal skips canonical directories outside the entry root before this
-                    // point, so every visited project directory has an entry-relative path.
-                    let relative = colliding_folder
-                        .strip_prefix(&entry_root)
-                        .expect("visited project directories stay inside the entry root");
-                    if let Some(package) = source_packages
-                        .iter()
-                        .find(|package| Path::new(&package.package_prefix) == relative)
-                    {
-                        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                        let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
-                            prefix: diagnostic_strings.intern(&package.package_prefix),
-                            entry_folder: path_id(&colliding_folder, &mut diagnostic_strings),
-                        };
-                        let diagnostic = project_structure_diagnostic(reason);
-                        let table = string_table.take_for_handoff();
-                        return Err(PreparedFailure::Diagnosed(
-                            PreparedDiagnosticBatch::capture_from_bag(
-                                DiagnosticBag::from(diagnostic),
-                                table,
-                                None,
-                                None,
-                            ),
-                        ));
-                    }
+                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                    let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
+                        prefix: diagnostic_strings.intern(&package.package_prefix),
+                        entry_folder: path_id(&colliding_folder, &mut diagnostic_strings),
+                    };
+                    let diagnostic = project_structure_diagnostic(reason);
+                    let table = string_table.take_for_handoff();
+                    return Err(PreparedFailure::Diagnosed(
+                        PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(diagnostic),
+                            table,
+                            None,
+                            None,
+                        ),
+                    ));
                 }
             }
 

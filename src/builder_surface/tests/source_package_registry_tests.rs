@@ -71,7 +71,7 @@ fn register_filesystem_root_rejects_case_only_duplicate_prefix() {
             PackageOrigin::Builder,
         )
         .expect_err("case-only variants of a registered prefix must be rejected");
-    assert!(!registry.has_prefix("UI"));
+    assert!(registry.get_root("UI").is_none());
 }
 
 #[test]
@@ -152,8 +152,7 @@ fn get_root_and_has_prefix_locate_registered_root() {
         PackageOrigin::Builder,
     );
 
-    assert!(registry.has_prefix("html"));
-    assert!(!registry.has_prefix("missing"));
+    assert!(registry.get_root("missing").is_none());
 
     let root = registry.get_root("html").expect("html root should exist");
     assert!(

@@ -16,6 +16,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, PublicExportEntry, PublicExportTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -106,28 +107,28 @@ fn try_resolve_package_public_export(
         return None;
     }
 
-    let first = input.string_table.resolve(components[0]);
-    let package_prefix = input
-        .source_package_public_exports
-        .keys()
-        .find(|p| *p == first)?;
+    let (package_prefix, prefix_len) = match_package_prefix(
+        input.source_package_public_exports.keys(),
+        components,
+        input.string_table,
+    )?;
 
     // Internal dependencies within the same package use normal file-based resolution.
     let consumer_package = input.file_package_membership.get(input.consumer_file);
-    if consumer_package.map(|s| s.as_str()) == Some(package_prefix) {
+    if consumer_package == Some(package_prefix) {
         return Some(PublicExportLookupResult::NotAPublicExportBoundary);
     }
 
     // Dependencies from outside the source-backed package must request exactly one public symbol from the
     // public root. Extra path components are implementation details, not part of the public API.
-    if components.len() != 2 {
+    if components.len() != prefix_len + 1 {
         return Some(PublicExportLookupResult::NotExported {
             public_surface_name: package_prefix.clone(),
             public_surface_type: PublicExportSurfaceType::SourcePackage,
         });
     }
 
-    let symbol_name = components[1];
+    let symbol_name = components[prefix_len];
     let exports = input.source_package_public_exports.get(package_prefix)?;
     for entry in exports {
         if entry.export_name == symbol_name {

@@ -33,7 +33,8 @@ impl From<InfrastructureFailure> for DependencyPathResolutionError {
 ///
 /// `matched_components` counts the leading authored components the base already represents: a
 /// source package's complete registered prefix, or zero for entry-root and file-relative bases.
-/// Joining, candidate selection and case validation all skip exactly these components.
+/// Joining and case validation skip exactly these components. Candidate selection counts a
+/// matched prefix as one logical component.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DependencyPathBase {
     pub(crate) kind: CompileTimePathBase,
@@ -45,16 +46,14 @@ pub(crate) struct DependencyPathBase {
 /// WHY: dependencies must stay within the project root (relative/entry) or package root.
 pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
-    base_kind: &CompileTimePathBase,
-    filesystem_base: &Path,
+    base: &DependencyPathBase,
     dependency_path: PathId,
     path_fork: &PathInternerFork,
 ) -> Result<(), DependencyPathResolutionError> {
-    let canonical_base =
-        fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
+    let canonical_base = fs::canonicalize(&base.root).unwrap_or_else(|_| base.root.clone());
     validate_dependency_boundary_against_base(
         canonical_file,
-        base_kind,
+        &base.kind,
         &canonical_base,
         dependency_path,
         path_fork,

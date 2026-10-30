@@ -258,6 +258,32 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
         resolved,
         fs::canonicalize(nested.join("assets/logo.moth")).unwrap()
     );
+
+    // Case validation must skip every matched prefix component, not only the first.
+    let path = paths
+        .try_intern_portable_path("web/site/Assets/logo", &mut strings)
+        .unwrap();
+    let result = resolver.resolve_dependency_as_compile_time_path(
+        path,
+        &paths,
+        &entry.join("index.moth"),
+        &mut DiagnosticStringBuilder::new(&mut strings),
+    );
+    #[cfg(target_os = "macos")]
+    {
+        let diagnostics = typed_dependency_diagnostic(
+            result.expect_err("nested package case mismatch should be rejected on macOS"),
+        );
+        let facts = dependency_view(&diagnostics)
+            .family_view::<InvalidImportPathView>()
+            .expect("the diagnostic is an invalid import path");
+        assert_eq!(facts.reason, InvalidImportPathCode::CaseMismatch);
+    }
+    #[cfg(not(target_os = "macos"))]
+    assert!(
+        result.is_err(),
+        "case-sensitive filesystems can't find the file"
+    );
 }
 
 #[test]

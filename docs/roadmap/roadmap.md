@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [HTML builder `@web/site` and `@web/page` V1](./plans/web-site-and-page-v1-plan.md) - **ACTIVE**: add builder-provided static site helpers and browser page APIs, then complete the documentation sidebar and breadcrumb migration.
-
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.
 
 - [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compiler diagnostics improvements: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.

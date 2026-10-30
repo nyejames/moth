@@ -342,3 +342,59 @@ fn consumer_without_module_membership_uses_empty_prefix() {
         "unknown consumer targeting a child module should see NotExported for a missing symbol"
     );
 }
+
+/// A multi-component builder prefix such as `web/site` owns exactly its public symbols. A
+/// first-component-only lookup would miss the package or treat `site` as the symbol.
+#[test]
+fn nested_source_package_prefix_resolves_only_direct_public_symbols() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+
+    let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
+    let root_name = string_table.intern("root");
+    let root_source = intern_path(
+        &["web", "site", "@mod.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let mut package_exports = FxHashMap::default();
+    package_exports.insert(
+        "web/site".to_owned(),
+        FxHashSet::from_iter([PublicExportEntry {
+            export_name: root_name,
+            target: PublicExportTarget::SourceDeclaration { path: root_source },
+        }]),
+    );
+
+    for (components, exported) in [
+        (&["web", "site", "root"][..], true),
+        (&["web", "site", "private", "root"][..], false),
+    ] {
+        let header_path = intern_path(components, &mut string_table, &mut path_fork);
+        let mut input = PublicExportResolutionInput {
+            consumer_file: &page_file,
+            header_path: &header_path,
+            source_package_public_exports: &package_exports,
+            file_package_membership: &FxHashMap::default(),
+            module_root_public_exports: &FxHashMap::default(),
+            file_module_membership: &FxHashMap::default(),
+            module_root_boundaries: &[],
+            string_table: &string_table,
+            path_fork: &mut path_fork,
+        };
+
+        let result = resolve_public_export_boundary(&mut input)
+            .expect("test boundary path interns within the test path table");
+        if exported {
+            assert!(
+                matches!(result, Some(PublicExportLookupResult::ExportedSource { ref path, .. }) if path == &root_source),
+                "{components:?}"
+            );
+        } else {
+            assert!(
+                matches!(result, Some(PublicExportLookupResult::NotExported { .. })),
+                "{components:?}"
+            );
+        }
+    }
+}

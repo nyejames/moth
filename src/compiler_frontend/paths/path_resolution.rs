@@ -135,19 +135,43 @@ impl ProjectPathResolver {
         nearest_package
     }
 
-    /// Return the prepared source-package root selected by an authored dependency prefix.
+    /// Return the prepared source-package root whose registered prefix matches the dependency's
+    /// leading components.
     ///
-    /// WHAT: exposes the same whole-component package classification used by ordinary
-    ///       dependency resolution to Stage 0's synthetic module-root precedence check.
-    /// WHY: registered package paths must retain package-root semantics and must not be mistaken
-    ///      for bare module-root-relative source paths.
+    /// WHY: ordinary resolution and Stage 0's synthetic module-root precedence check share this
+    ///      whole-component classification, so registered package paths keep package-root
+    ///      semantics and are never mistaken for module-root-relative source paths.
     pub(crate) fn source_package_root_for_dependency(
         &self,
         dependency_path: PathId,
         path_fork: &PathInternerFork,
         string_table: &StringTable,
     ) -> Option<DependencyPathBase> {
-        self.matches_source_package_prefix(dependency_path, path_fork, string_table)
+        // Registration rejects overlapping prefixes, so at most one registered prefix matches
+        // the leading components. Walking interned components avoids rendering every path.
+        let depth = path_fork.depth(dependency_path) as usize;
+        self.source_package_roots
+            .roots()
+            .iter()
+            .find_map(|(prefix, root)| {
+                let matched_components = prefix.split('/').count();
+                let mut component_path = dependency_path;
+                for _ in matched_components..depth {
+                    component_path = path_fork.parent(component_path)?;
+                }
+                for expected in prefix.rsplit('/') {
+                    let actual = path_fork.component(component_path)?;
+                    if string_table.resolve(actual) != expected {
+                        return None;
+                    }
+                    component_path = path_fork.parent(component_path)?;
+                }
+                Some(DependencyPathBase {
+                    kind: CompileTimePathBase::SourcePackageRoot,
+                    root: root.clone(),
+                    matched_components,
+                })
+            })
     }
 
     /// Returns each source-backed package's unique normal-root file as its public surface.
@@ -347,13 +371,7 @@ impl ProjectPathResolver {
             )
         })?;
 
-        validate_dependency_boundary(
-            &canonical,
-            &base.kind,
-            &base.root,
-            dependency_path,
-            path_fork,
-        )?;
+        validate_dependency_boundary(&canonical, &base, dependency_path, path_fork)?;
         validate_dependency_case_sensitivity(
             dependency_path,
             path_fork,
@@ -366,34 +384,6 @@ impl ProjectPathResolver {
         Ok((base.kind, canonical))
     }
 
-    /// Select the registered prefix that matches whole leading dependency components as a
-    /// package-root base. Registration rejects overlapping prefixes, so at most one candidate
-    /// matches.
-    fn matches_source_package_prefix(
-        &self,
-        dependency_path: PathId,
-        path_fork: &PathInternerFork,
-        string_table: &StringTable,
-    ) -> Option<DependencyPathBase> {
-        let mut scratch = Vec::new();
-        let mut prefix = path_fork.render_portable(dependency_path, string_table, &mut scratch);
-        let mut depth = path_fork.depth(dependency_path) as usize;
-        while depth > 0 {
-            if let Some(root) = self.source_package_roots.roots().get(&prefix) {
-                return Some(DependencyPathBase {
-                    kind: CompileTimePathBase::SourcePackageRoot,
-                    root: root.clone(),
-                    matched_components: depth,
-                });
-            }
-            let Some(separator) = prefix.rfind('/') else {
-                break;
-            };
-            prefix.truncate(separator);
-            depth -= 1;
-        }
-        None
-    }
     // -----------------------------------------------------------------------
     // Shared resolution helpers
     // -----------------------------------------------------------------------
@@ -420,7 +410,7 @@ impl ProjectPathResolver {
             });
         }
         if let Some(package_base) =
-            self.matches_source_package_prefix(path, path_fork, string_table)
+            self.source_package_root_for_dependency(path, path_fork, string_table)
         {
             return Ok(package_base);
         }

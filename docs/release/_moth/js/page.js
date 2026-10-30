@@ -7,8 +7,9 @@ import {
 
 // This file is the Moth-facing `@web/page` facade over live browser state.
 // Every getter reads the browser on each call. Nothing caches import-time values or subscribes
-// to changes. The external binding glue validates I32 and F64 results, so getters return the
-// browser values unchanged. `sync_navigation` is an opt-in helper for one static navigation tree.
+// to changes. The external binding glue checks I32 results and the HIR float boundary checks F64
+// finiteness, so getters return the browser values unchanged. `sync_navigation` is an opt-in
+// helper for one static navigation tree.
 
 /**
  * @moth.sig url || -> String

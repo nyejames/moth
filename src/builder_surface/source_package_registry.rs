@@ -95,11 +95,6 @@ impl SourcePackageRegistry {
         self.roots.get(prefix)
     }
 
-    /// Returns true if the registry contains a root with the given prefix.
-    pub fn has_prefix(&self, prefix: &str) -> bool {
-        self.roots.contains_key(prefix)
-    }
-
     /// Iterate over all registered roots.
     pub fn iter(&self) -> impl Iterator<Item = &SourcePackageRoot> {
         self.roots.values()

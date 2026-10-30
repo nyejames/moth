@@ -235,7 +235,7 @@ fn resolve_provider_prefix_to_canonical_path(
         }
     })?;
 
-    validate_dependency_boundary(&canonical, &base.kind, &base.root, prefix_path, path_fork)
+    validate_dependency_boundary(&canonical, &base, prefix_path, path_fork)
         .map_err(SourceDiscoveryError::from)?;
 
     Ok(canonical)

@@ -28,6 +28,7 @@ use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyCla
 use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -385,28 +386,25 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         components: &[StringId],
         source_file: &PathId,
     ) -> Option<ResolvedNamespaceTarget> {
-        if components.len() != 1 {
-            return None;
-        }
-
-        let package_prefix = self.string_table.resolve(components[0]).to_owned();
-        if !self
-            .module_symbols
-            .source_package_public_exports
-            .contains_key(&package_prefix)
-        {
+        // A namespace binding names the whole package, so the path must be exactly its prefix.
+        let (package_prefix, prefix_len) = match_package_prefix(
+            self.module_symbols.source_package_public_exports.keys(),
+            components,
+            self.string_table,
+        )?;
+        if prefix_len != components.len() {
             return None;
         }
 
         let consumer_package = self.module_symbols.file_package_membership.get(source_file);
-        if consumer_package.map(String::as_str) == Some(package_prefix.as_str()) {
+        if consumer_package == Some(package_prefix) {
             return None;
         }
 
         let root_file = self
             .module_symbols
             .source_package_root_files
-            .get(&package_prefix)?;
+            .get(package_prefix)?;
 
         self.module_symbols
             .module_file_paths
