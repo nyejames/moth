@@ -1,7 +1,8 @@
-//! Shared build-system helpers used across output writing, cleanup, and HTML project assembly.
+//! Shared build-system helpers used across output writing, cleanup, resource hashing and HTML
+//! project assembly.
 //!
 //! WHAT: small one-liner wrappers that appear in multiple build-system modules.
-//! WHY: avoids duplicating the same helper in every file that touches filesystem paths.
+//! WHY: avoids duplicating the same helper in every file that touches filesystem paths or bytes.
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
@@ -32,6 +33,23 @@ pub(crate) fn should_skip_unchanged_write(
         Ok(existing_bytes) => existing_bytes == next_bytes,
         Err(_) => false,
     }
+}
+
+// -------------------------
+//  Content Hashing
+// -------------------------
+
+/// Stable 64-bit FNV-1a hash of `bytes`.
+///
+/// WHY: build facts keyed by content must match across processes and machines, which rules out
+/// `DefaultHasher`'s random seed, and FNV-1a needs no extra dependency.
+pub(crate) fn stable_content_hash(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 14_695_981_039_346_656_037;
+    const FNV_PRIME: u64 = 1_099_511_628_211;
+
+    bytes.iter().fold(FNV_OFFSET_BASIS, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
+    })
 }
 
 // -------------------------

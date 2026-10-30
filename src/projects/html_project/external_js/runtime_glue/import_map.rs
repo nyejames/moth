@@ -20,14 +20,14 @@ use std::path::Path;
 ///      the import map lets the browser resolve those without rewriting user files.
 pub(super) fn build_import_map_html(
     external_imports: &[ModuleExternalImport],
-    html_output_path: &Path,
+    html_output_directory: &Path,
 ) -> Option<String> {
     let mut entries: Vec<(String, String)> = Vec::new();
 
     for external_import in external_imports {
         for runtime_import in &external_import.required_runtime_imports {
             let runtime_path = runtime_module_output_path(&runtime_import.module_name);
-            let relative = relative_url_path(html_output_path, &runtime_path);
+            let relative = relative_url_path(html_output_directory, &runtime_path);
             entries.push((runtime_import.module_name.clone(), relative));
         }
     }

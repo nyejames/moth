@@ -718,6 +718,8 @@ A standalone JavaScript request may explicitly select all HIR functions. The sta
 
 Build-wide provider emission deduplicates runtime assets, module specifiers and shared provider files. Entry-level glue contains only wrappers, import preambles and import-map entries required by the selected JavaScript bundle.
 
+Each glue module is named by a stable hash of its final source and emitted under `_moth/js/glue/`. Entries whose glue is byte-identical share that one file, and each page imports it through its own relative URL. Different bytes under one hash-derived path are an internal failure, never a silent choice. Only generated glue shares paths this way. Other repeated builder outputs keep the strict duplicate-path diagnostic.
+
 Direct builder bindings and provider-created bindings share stable binding identity and runtime asset policy. No per-entry scan recreates source dependencies.
 
 Imported JavaScript parser failures remain typed source diagnostics. They retain the Moth import request's source span and the JavaScript module path in their payload. Parser-local JavaScript byte ranges do not replace the importer's compiler source identity.

@@ -5,6 +5,7 @@
 //! WHY: graph activity and output liveness are separate. A referenced resource must be known and
 //! watchable even when no reachable output ultimately emits it, while the compiler-facing table
 //! remains free of filesystem and byte-source policy.
+use crate::build_system::utils::stable_content_hash;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -252,7 +253,9 @@ impl ResourceInputRegistry {
                         canonical_source_path.display()
                     ))
                 })?;
-                let content_hash = resource_content_hash(&bytes);
+                // An invalidation fact only. Resource identity and output placement stay keyed
+                // by stable semantic origins and planned paths.
+                let content_hash = stable_content_hash(&bytes);
                 let record = self.records.get_mut(source_index).ok_or_else(|| {
                     InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "resource source ID {} disappeared while hashing",
@@ -351,19 +354,6 @@ impl ResourceInputRegistry {
 
         Ok(())
     }
-}
-
-/// Compute a stable per-build content hash without adding another dependency to the build system.
-///
-/// The hash is an invalidation fact only. Resource identity and output placement remain keyed by
-/// their stable semantic origins and planned paths.
-fn resource_content_hash(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 14_695_981_039_346_656_037;
-    const FNV_PRIME: u64 = 1_099_511_628_211;
-
-    bytes.iter().fold(FNV_OFFSET_BASIS, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
-    })
 }
 
 #[cfg(test)]

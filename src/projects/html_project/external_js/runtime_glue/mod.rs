@@ -11,7 +11,7 @@ mod paths;
 mod runtime_modules;
 mod source;
 
-pub(crate) use paths::planned_runtime_module_output_paths;
+pub(crate) use paths::{is_glue_module_output_path, planned_runtime_module_output_paths};
 pub(crate) use runtime_modules::emit_build_runtime_modules;
 
 use crate::backends::js::external_module_export_glue_function_name;
@@ -71,7 +71,7 @@ pub(crate) fn generate_module_glue(
     // Build a map from package ID to its emitted asset path so glue can import it.
     // WHY: paths must be relative to the glue module, not the HTML document, because
     //      the browser resolves ES module imports relative to the importing module's URL.
-    let package_asset_paths = build_package_asset_path_map(module, external_imports);
+    let package_asset_paths = build_package_asset_path_map(external_imports);
 
     let glue_source = source::generate_glue_module_source(
         &referenced_exports,
@@ -79,11 +79,12 @@ pub(crate) fn generate_module_glue(
         release_build,
     )?;
 
-    let glue_output_path = paths::glue_module_output_path(module);
+    let glue_output_path = paths::glue_module_output_path(&glue_source);
 
     let glue_output_file = OutputFile::new(glue_output_path.clone(), FileKind::Js(glue_source));
 
-    let glue_import_path = paths::relative_url_path(html_output_path, &glue_output_path);
+    let html_output_directory = html_output_path.parent().unwrap_or(Path::new(""));
+    let glue_import_path = paths::relative_url_path(html_output_directory, &glue_output_path);
     let glue_names: Vec<String> = referenced_exports
         .iter()
         .map(|exp| external_module_export_glue_function_name(exp.function_id))
@@ -95,7 +96,8 @@ pub(crate) fn generate_module_glue(
         glue_import_path
     );
 
-    let import_map_html = import_map::build_import_map_html(external_imports, html_output_path);
+    let import_map_html =
+        import_map::build_import_map_html(external_imports, html_output_directory);
 
     Ok(ModuleGlueResult {
         glue_output_files: vec![glue_output_file],
@@ -106,14 +108,13 @@ pub(crate) fn generate_module_glue(
 
 /// Build a map from package ID to the relative URL path of its emitted JS asset.
 ///
-/// WHAT: computes paths relative to the glue module so ES module imports resolve correctly
-///       when the glue module imports from emitted JS runtime assets.
+/// WHAT: computes paths relative to the shared glue directory so ES module imports resolve
+///       correctly when any glue module imports from emitted JS runtime assets.
 fn build_package_asset_path_map(
-    module: &Module,
     external_imports: &[ModuleExternalImport],
 ) -> HashMap<ExternalPackageId, String> {
     let mut map = HashMap::new();
-    let glue_output_path = paths::glue_module_output_path(module);
+    let glue_directory = Path::new(paths::GLUE_OUTPUT_DIR);
 
     for external_import in external_imports {
         let Some(asset) = &external_import.runtime_asset else {
@@ -123,7 +124,7 @@ fn build_package_asset_path_map(
             continue;
         }
         let output_path = Path::new(asset.origin.logical_path().as_str());
-        let relative = paths::relative_url_path(&glue_output_path, output_path);
+        let relative = paths::relative_url_path(glue_directory, output_path);
         map.insert(external_import.package_id, relative);
     }
 

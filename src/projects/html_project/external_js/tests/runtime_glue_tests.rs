@@ -27,40 +27,39 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
-fn relative_url_path_same_directory() {
-    let html = PathBuf::from("index.html");
+fn relative_url_path_from_site_root() {
     let asset = PathBuf::from("_moth/js/glue/module.js");
     assert_eq!(
-        relative_url_path(&html, &asset),
+        relative_url_path(Path::new(""), &asset),
         "./_moth/js/glue/module.js"
     );
 }
 
 #[test]
 fn relative_url_path_one_level_deep() {
-    let html = PathBuf::from("about/index.html");
     let asset = PathBuf::from("_moth/js/glue/module.js");
     assert_eq!(
-        relative_url_path(&html, &asset),
+        relative_url_path(Path::new("about"), &asset),
         "../_moth/js/glue/module.js"
     );
 }
 
 #[test]
 fn relative_url_path_two_levels_deep() {
-    let html = PathBuf::from("a/b/index.html");
     let asset = PathBuf::from("_moth/js/runtime/moth-runtime.js");
     assert_eq!(
-        relative_url_path(&html, &asset),
+        relative_url_path(Path::new("a/b"), &asset),
         "../../_moth/js/runtime/moth-runtime.js"
     );
 }
 
 #[test]
 fn relative_url_path_shared_prefix() {
-    let html = PathBuf::from("docs/index.html");
     let asset = PathBuf::from("docs/assets/file.js");
-    assert_eq!(relative_url_path(&html, &asset), "./assets/file.js");
+    assert_eq!(
+        relative_url_path(Path::new("docs"), &asset),
+        "./assets/file.js"
+    );
 }
 
 #[test]
@@ -1358,10 +1357,7 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
 #[test]
 fn build_import_map_html_includes_moth_runtime() {
     let module = create_module_with_runtime_requirement();
-    let html = build_import_map_html(
-        &module.link_facts.external_import_candidates,
-        &PathBuf::from("index.html"),
-    );
+    let html = build_import_map_html(&module.link_facts.external_import_candidates, Path::new(""));
 
     assert!(html.is_some());
     let map = html.unwrap();
@@ -1386,10 +1382,7 @@ fn build_import_map_html_deduplicates_by_specifier() {
         },
     );
 
-    let html = build_import_map_html(
-        &module.link_facts.external_import_candidates,
-        &PathBuf::from("index.html"),
-    );
+    let html = build_import_map_html(&module.link_facts.external_import_candidates, Path::new(""));
     assert!(html.is_some());
     let map = html.unwrap();
 

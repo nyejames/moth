@@ -1,9 +1,9 @@
 # HTML JS glue sharing and web package V1 hardening
 
 Status: active follow-up on `web-site-and-page-v1`
-Current slice: Phase 1 - content-addressed glue output
+Current slice: Phase 2 - regression coverage and generated outputs
 Blockers: none known
-Next action: hash final glue source and share identical glue at the HTML builder output boundary
+Next action: add glue sharing, collision and cleanup regression tests, then regenerate `docs/release`
 
 ## Goal
 

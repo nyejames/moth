@@ -35,6 +35,7 @@ use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::html_project::binding_packages::web::register_web_binding_packages;
 use crate::projects::html_project::compile_input::{
     HtmlModuleCompileContext, HtmlModuleCompileInput,
@@ -48,7 +49,7 @@ use crate::projects::html_project::external_js::js_import_provider::JsExternalIm
 use crate::projects::html_project::external_js::runtime_assets::register_js_runtime_asset_sources;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::external_js::runtime_glue::{
-    emit_build_runtime_modules, planned_runtime_module_output_paths,
+    emit_build_runtime_modules, is_glue_module_output_path, planned_runtime_module_output_paths,
 };
 use crate::projects::html_project::js_path::{HtmlJsCompileInput, compile_html_module_js};
 use crate::projects::html_project::output_plan::{
@@ -190,7 +191,8 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         let mut output_files = Vec::new();
         let mut output_paths = HashSet::new();
-        let mut output_path_owners: HashMap<PathBuf, PathBuf> = HashMap::new();
+        // Each emitted path maps to its first owning entry and its index in `output_files`.
+        let mut output_path_owners: HashMap<PathBuf, (PathBuf, usize)> = HashMap::new();
         let mut resource_output_plan = HtmlResourceOutputPlan::new(config.project_name.as_str());
         let mut entry_page_rel = None;
         let mut has_directory_homepage = false;
@@ -331,7 +333,17 @@ impl BackendBuilder for HtmlProjectBuilder {
             let html_output_path = compiled_artifacts.html_output_path.clone();
             for output_file in compiled_artifacts.output_files {
                 let output_path = output_file.relative_output_path().to_path_buf();
-                if let Some(existing_entry_point) = output_path_owners.get(&output_path) {
+                if let Some((existing_entry_point, existing_index)) =
+                    output_path_owners.get(&output_path)
+                {
+                    if is_shared_glue_output(
+                        &output_files[*existing_index],
+                        existing_entry_point,
+                        &output_file,
+                        &module.metadata.entry_point,
+                    )? {
+                        continue;
+                    }
                     let mut diagnostic_strings = backend_context.diagnostic_strings();
                     return Err(duplicate_output_path_error(
                         &module.metadata.entry_point,
@@ -342,7 +354,10 @@ impl BackendBuilder for HtmlProjectBuilder {
                     .into());
                 }
                 output_paths.insert(output_path.clone());
-                output_path_owners.insert(output_path.clone(), module.metadata.entry_point.clone());
+                output_path_owners.insert(
+                    output_path,
+                    (module.metadata.entry_point.clone(), output_files.len()),
+                );
                 output_files.push(output_file);
             }
 
@@ -843,6 +858,38 @@ fn duplicate_output_path_error(
         None,
         || None,
     )
+}
+
+/// Whether a repeated page output is generated glue the build already holds.
+///
+/// WHY: glue files are named by a digest of their source, so pages selecting the same wrappers
+///      claim one path and share one file. Different bytes under that path mean the digest
+///      collided, and picking either file would break the other page's imports.
+fn is_shared_glue_output(
+    existing: &OutputFile,
+    existing_entry_point: &Path,
+    repeated: &OutputFile,
+    repeated_entry_point: &Path,
+) -> Result<bool, InfrastructureFailure> {
+    if !is_glue_module_output_path(repeated.relative_output_path()) {
+        return Ok(false);
+    }
+    match (existing.file_kind(), repeated.file_kind()) {
+        (FileKind::Js(existing_source), FileKind::Js(repeated_source))
+            if existing_source == repeated_source =>
+        {
+            Ok(true)
+        }
+        _ => Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "Generated JS glue path '{}' has different contents for entries '{}' and '{}'.",
+                portable_path_text(repeated.relative_output_path()),
+                portable_path_text(existing_entry_point),
+                portable_path_text(repeated_entry_point),
+            ),
+        )),
+    }
 }
 
 struct CompiledHtmlModuleArtifacts {
