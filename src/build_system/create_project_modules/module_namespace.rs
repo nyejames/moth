@@ -658,6 +658,23 @@ impl ModuleNamespaceSet {
             ));
         }
 
+        // Package identities reject ASCII case-only overlaps, so a case variant of a registered
+        // package path can't fall through to a local target with the same spelling.
+        let names_package_case_variant = self
+            .package_boundary_indexes
+            .iter()
+            .map(|(prefix, _)| prefix)
+            .chain(self.binding_package_paths.iter().map(String::as_str))
+            .any(|prefix| key.len() >= prefix.len() && package_paths_overlap(prefix, key));
+        if names_package_case_variant
+            && local_dependency_keys.any(|entry_key| package_paths_overlap(entry_key, key))
+        {
+            return Err(imports::ambiguous_import_target(
+                dependency_path,
+                dependency_span,
+            ));
+        }
+
         Ok(None)
     }
 

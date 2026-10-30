@@ -801,9 +801,11 @@ impl SourceTreeIndex {
 
             // A project folder whose entry-root-relative path equals a registered source package
             // prefix would claim that package's identity, whichever module owns the folder.
-            // Ancestor folders alone may coexist with nested prefixes. The canonical directory
-            // path keeps this independent of traversal order. Package boundaries carry no
-            // prefix-collision packages, so this check is skipped for them.
+            // Ancestor folders alone may coexist with nested prefixes. Components compare
+            // ASCII-case-insensitively, as package identities do, so the result doesn't depend on
+            // the host filesystem. The canonical directory path keeps this independent of
+            // traversal order. Package boundaries carry no prefix-collision packages, so this
+            // check is skipped for them.
             if let SourceTreeBoundaryKind::Project {
                 source_packages, ..
             } = kind
@@ -814,11 +816,17 @@ impl SourceTreeIndex {
                     .strip_prefix(&entry_root)
                     .expect("visited project directories stay inside the entry root");
                 if let Some((package, folder_name)) = source_packages.iter().find_map(|package| {
-                    let prefix = Path::new(&package.package_prefix);
-                    let folder_name = prefix.file_name()?.to_str()?;
-                    (prefix.parent() == Some(relative_directory)
-                        && dependency_folder_names.contains(folder_name))
-                    .then_some((package, folder_name))
+                    let (parent, name) = package
+                        .package_prefix
+                        .rsplit_once('/')
+                        .unwrap_or(("", &package.package_prefix));
+                    if !package_parent_matches(parent, relative_directory) {
+                        return None;
+                    }
+                    dependency_folder_names
+                        .iter()
+                        .find(|folder_name| folder_name.eq_ignore_ascii_case(name))
+                        .map(|folder_name| (package, folder_name))
                 }) {
                     let colliding_folder = directory.join(folder_name);
                     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
@@ -1360,6 +1368,22 @@ fn logical_module_path_from(
                 ),
             )
         })
+}
+
+/// Whether an entry-root-relative directory is a registered package prefix's parent, comparing
+/// components ASCII-case-insensitively like package identities. An empty parent is the entry root.
+fn package_parent_matches(parent: &str, relative_directory: &Path) -> bool {
+    let mut components = relative_directory.components();
+    parent
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .all(|segment| {
+            components
+                .next()
+                .and_then(|component| component.as_os_str().to_str())
+                .is_some_and(|component| component.eq_ignore_ascii_case(segment))
+        })
+        && components.next().is_none()
 }
 
 /// Whether a canonical module-root filename uses the reserved project-globals dependency name.

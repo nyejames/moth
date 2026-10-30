@@ -102,6 +102,11 @@ Phase 3 outcome:
   - Collision handling inside the builder loop is unit-tested through `is_shared_glue_output`, not through a build. A real digest collision can't be constructed.
   - The pre-existing empty-path fallback in `relative_url_path` is unreachable for real assets and was left alone.
 
+Independent audit follow-up:
+
+- Folder collisions with nested source package prefixes now compare path components ignoring ASCII case. `src/Web/site` and `src/web/Site` claim `web/site` like `src/web/site` does, and the diagnostic names the folder as spelled on disk. An ancestor folder such as `src/web` alone is still accepted.
+- Import resolution rejects a case variant of a registered source or binding package path as ambiguous when a local target would otherwise answer it. `@web/Site` beside `src/web/Site.moth` previously resolved to the local file. Unimported local files at a package path are still accepted, as on `main`.
+
 ## Acceptance criteria
 
 - The docs root and homepage have consistent sidebar initialisation. Every static sidebar remains usable without requiring contextual-constant semantics.

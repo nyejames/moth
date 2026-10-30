@@ -18258,6 +18258,13 @@ contract = "language.dependencies.web_site_template_scope_rejected"
 role = "primary"
 
 [[case]]
+id = "web_site_case_variant_import_rejected"
+path = "web_site_case_variant_import_rejected"
+tags = ["integration", "source-packages", "dependencies", "diagnostics", "html", "html-wasm"]
+contract = "language.dependencies.package_case_variant_import_rejected"
+role = "boundary"
+
+[[case]]
 id = "web_page_reachable"
 path = "web_page_reachable"
 tags = ["integration", "external-imports", "html", "html-wasm", "reachability"]

@@ -1397,6 +1397,42 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
 }
 
 #[test]
+fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let local_core = src.join("core");
+    fs::create_dir_all(&local_core).expect("should create local core folder");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@core/IO\n#[:[IO.value]]\n").expect("should write root");
+    // Package identities reject case-only overlaps, so `@core/IO` can't select this local file
+    // just because the registered `@core/io` lookup is exact.
+    fs::write(local_core.join("IO.moth"), "value #= 1\n").expect("should write local file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    assert_eq!(
+        first_error_diagnostic(&failure).descriptor().code,
+        "MOTH-IMPORT-0006"
+    );
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@core/IO");
+}
+
+#[test]
 fn directory_source_dependency_rejects_obsolete_relative_form() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
