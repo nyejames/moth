@@ -1,0 +1,7 @@
+@web/page
+@nav sync_nav
+
+location = page.path()
+address = page.url()
+matched = sync_nav("nav") catch then false
+io.line([: [location] [address] [matched]])

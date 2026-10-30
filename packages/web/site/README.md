@@ -15,6 +15,7 @@
 
 - `@mod.moth` is the whole package. `root` aliases the structural site root `@/`. `url` is a const-template wrapper that joins the root and its default slot.
 - `src/projects/html_project/html_project_builder.rs` registers it at the nested prefix `web/site`. It needs an explicit `@web/site` dependency and isn't in `.mtf` implicit scope.
+- `tests/cases/web_site_static_urls` proves origin-aware rendering through package export and cross-module composition with no browser assets. `tests/cases/web_site_template_scope_rejected` proves `.mtf` files can't see it implicitly. The HTML builder's `frontend_surface_registers_core_packages_with_core_binding_metadata` test owns its registration identity.
 - The root follows the consuming project's configured `origin`, so `[site.url:docs/]` renders `/moth/docs/` under `origin = "/moth"`.
 - The suffix must not start with `/`. `url` composes strings only. It doesn't validate routes, encode, normalise or look up the current page.
 

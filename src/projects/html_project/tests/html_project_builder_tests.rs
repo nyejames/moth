@@ -261,6 +261,33 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
         )
     );
 
+    let site_package = frontend_surface
+        .source_packages
+        .get_root("web/site")
+        .expect("HTML frontend surface should register @web/site");
+    assert_eq!(
+        site_package.metadata,
+        crate::builder_surface::PackageMetadata::source(
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+    );
+    assert!(
+        !frontend_surface
+            .implicit_template_scope_source_packages
+            .contains("web/site")
+    );
+
+    let page_package = frontend_surface
+        .binding_packages
+        .get_package("@web/page")
+        .expect("HTML frontend surface should register @web/page");
+    assert_eq!(
+        page_package.metadata,
+        crate::builder_surface::PackageMetadata::binding(
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+    );
+
     let canvas_package = frontend_surface
         .binding_packages
         .get_package("@web/canvas")

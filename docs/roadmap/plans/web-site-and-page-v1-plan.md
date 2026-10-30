@@ -1,9 +1,9 @@
 # HTML builder `@web/site` and `@web/page` V1
 
 Status: in progress
-Current slice: Phase 2 - focused package validation
+Current slice: Phase 3 - finalise the committed sidebar
 Blockers: none known
-Next action: add compiler, registration, asset and Node execution coverage for both packages and finalise README test owners
+Next action: add the sidebar hooks and `init_docs_sidebar`, migrate docs page roots and remove the old introductory breadcrumbs
 
 ## Goal
 
@@ -121,7 +121,7 @@ Phase 0 findings:
 
 - `@web/site` doesn't overlap `@web/canvas`, `@web/graphics` or `@web/page`, and no package claims `@web` itself. Stage 0 discovery, stable identity, import-surface matching and output prefixes already accept a multi-component prefix. `SourcePackageRegistry::register_filesystem_root` still rejects `/`. `ProjectPathResolver` matches and strips only the first dependency component. The project-entry collision check compares single folder names. Phase 1a generalises those three owners and doesn't add a second registry or resolver.
 - `root #String = @/`, slot-wrapper const templates, namespace-qualified template heads, `|root_id String| -> Bool, Error!` annotations and `@moth/runtime` typed errors all use existing syntax. No current test proves that `SiteRoot` survives a package export and cross-module composition, so Phase 2 owns that proof.
-- The external-binding glue validates I32 range and F64 finiteness. It passes Bool and String returns through without checking them. Phase 2 tests numeric validation only and makes no claim about Bool or String validation.
+- The external-binding glue validates I32 results by range. F64 results cross as raw carriers, and the HIR binary-float boundary owns their finite check. Bool and String returns pass through unchecked. `page.js` returns browser numbers unchanged, so Phase 2 relies on those existing generic owners for numeric validation and makes no claim about Bool or String validation.
 - The sidebar has 37 navigation links plus the Documentation home link. 35 `docs/src/docs/**` roots insert it, including `@cheatsheet.moth`. `progress/packages-and-builders/` doesn't, and neither does any `docs/src/developer-docs/**` root. `docs/src/docs/@page.moth` and the site homepage stay without it.
 - `#[title]` renders an `<h1>`. The language-docs roots render a heading. Developer-docs topic headings come from imported content. Package leaves under `packages/core/` and `packages/builder/` have no exact sidebar link, and nothing links `packages/builder/` itself. Developer-docs topic pages fall under linked `compiler-design/`, `memory-management/` or `developer-docs/` ancestors.
 

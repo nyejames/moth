@@ -116,3 +116,7 @@ fn logical_source_path(package: &WebBindingPackage) -> PortableResourcePath {
 #[cfg(test)]
 #[path = "tests/canvas_error_tests.rs"]
 mod canvas_error_tests;
+
+#[cfg(test)]
+#[path = "tests/page_tests.rs"]
+mod page_tests;

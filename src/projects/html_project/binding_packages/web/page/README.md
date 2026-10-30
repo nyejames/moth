@@ -27,6 +27,8 @@ Navigation:
 
 Each getter reads the browser on every call. `sync_navigation` requires `data-page-home`, `data-page-links` and `data-page-current` descendants under the identified root. It is idempotent, installs no listeners and must be called again after History API changes.
 
-`page.js` implements the package and `../mod.rs` registers it. It is HTML-JS only; Wasm rejects reachable calls. Focused Node execution tests belong beside `web/tests/canvas_error_tests.rs`, with integration cases covering compiler and target behaviour.
+`page.js` implements the package and `../mod.rs` registers it. It is HTML-JS only. HTML-Wasm rejects reachable calls.
+
+`../tests/page_tests.rs` runs `page.js` in Node against a minimal fake DOM and owns getter and `sync_navigation` behaviour. The `tests/cases/web_page_reachable`, `web_page_unused` and `web_page_missing_import_rejected` cases own compiled callers, runtime asset emission and the missing-import boundary. Generic I32 result validation belongs to the external binding glue tests, and F64 finiteness to the HIR binary-float boundary.
 
 Event subscriptions, reactive state, general DOM access and Wiring are deferred.
