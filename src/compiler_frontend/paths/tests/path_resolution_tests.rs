@@ -234,9 +234,11 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
         ("web", None),
     ] {
         let path = paths.try_intern_portable_path(name, &mut strings).unwrap();
+        let mut components = Vec::new();
+        let components = paths.resolve_components(path, &mut components);
         assert_eq!(
             resolver
-                .source_package_root_for_dependency(path, &paths, &strings)
+                .source_package_root_for_dependency(components, &strings)
                 .as_ref(),
             expected,
             "{name}"

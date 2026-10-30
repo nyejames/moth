@@ -22,9 +22,10 @@ use crate::compiler_frontend::paths::path_normalization::{
     DependencyCandidate, DependencyCandidateSupport, candidate_dependency_files_for_source_kinds,
     dependency_contains_dotdot, is_relative_dependency_path, join_and_normalize_components,
 };
+use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -143,35 +144,17 @@ impl ProjectPathResolver {
     ///      semantics and are never mistaken for module-root-relative source paths.
     pub(crate) fn source_package_root_for_dependency(
         &self,
-        dependency_path: PathId,
-        path_fork: &PathInternerFork,
+        components: &[StringId],
         string_table: &StringTable,
     ) -> Option<DependencyPathBase> {
-        // Registration rejects overlapping prefixes, so at most one registered prefix matches
-        // the leading components. Walking interned components avoids rendering every path.
-        let depth = path_fork.depth(dependency_path) as usize;
-        self.source_package_roots
-            .roots()
-            .iter()
-            .find_map(|(prefix, root)| {
-                let matched_components = prefix.split('/').count();
-                let mut component_path = dependency_path;
-                for _ in matched_components..depth {
-                    component_path = path_fork.parent(component_path)?;
-                }
-                for expected in prefix.rsplit('/') {
-                    let actual = path_fork.component(component_path)?;
-                    if string_table.resolve(actual) != expected {
-                        return None;
-                    }
-                    component_path = path_fork.parent(component_path)?;
-                }
-                Some(DependencyPathBase {
-                    kind: CompileTimePathBase::SourcePackageRoot,
-                    root: root.clone(),
-                    matched_components,
-                })
-            })
+        let roots = self.source_package_roots.roots();
+        let (prefix, matched_components) =
+            match_package_prefix(roots.keys(), components, string_table)?;
+        Some(DependencyPathBase {
+            kind: CompileTimePathBase::SourcePackageRoot,
+            root: roots[prefix].clone(),
+            matched_components,
+        })
     }
 
     /// Returns each source-backed package's unique normal-root file as its public surface.
@@ -312,16 +295,17 @@ impl ProjectPathResolver {
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
         }
 
+        let mut components = Vec::new();
+        let components = path_fork.resolve_components(dependency_path, &mut components);
         let base = self.resolve_path_base(
             dependency_path,
+            components,
             path_fork,
             declaring_file,
             strings.strings(),
         )?;
 
         // A package root already represents its complete registered prefix.
-        let mut components = Vec::new();
-        let components = path_fork.resolve_components(dependency_path, &mut components);
         let normalized = join_and_normalize_components(
             &base.root,
             &components[base.matched_components..],
@@ -391,6 +375,7 @@ impl ProjectPathResolver {
     fn resolve_path_base(
         &self,
         path: PathId,
+        components: &[StringId],
         path_fork: &PathInternerFork,
         declaring_file: &Path,
         string_table: &StringTable,
@@ -410,7 +395,7 @@ impl ProjectPathResolver {
             });
         }
         if let Some(package_base) =
-            self.source_package_root_for_dependency(path, path_fork, string_table)
+            self.source_package_root_for_dependency(components, string_table)
         {
             return Ok(package_base);
         }

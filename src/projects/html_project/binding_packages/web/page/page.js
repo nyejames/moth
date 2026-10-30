@@ -133,19 +133,20 @@ function anchorRouteKey(anchor) {
 
     try {
         const resolved = new URL(href, document.baseURI);
-        return resolved.origin === window.location.origin ? routeKey(resolved.pathname) : null;
+        // `origin` is the string "null" for every opaque origin, so comparing it would
+        // make file pages accept mailto: and javascript: links. Scheme and host name the
+        // same origin as `origin` on web pages, without that gap.
+        const sameOrigin =
+            resolved.protocol === window.location.protocol && resolved.host === window.location.host;
+        return sameOrigin ? routeKey(resolved.pathname) : null;
     } catch {
         return null;
     }
 }
 
-// Ancestors are slash-bounded, so `/docs/pack` never contains `/docs/packages`.
-function isAncestorKey(candidate, key) {
-    return key.startsWith(candidate + "/");
-}
-
-function findNavigationHook(root, hook) {
-    return root.querySelector(`[${hook}]`);
+// Ancestors are slash-bounded, so `/docs/pack` is never an ancestor of `/docs/packages`.
+function isAncestorKey(ancestorKey, currentKey) {
+    return currentKey.startsWith(ancestorKey + "/");
 }
 
 /**
@@ -161,9 +162,9 @@ export function syncNavigation(rootId) {
         return mothErr(MOTH_ERROR_HOST_RESOURCE_NOT_FOUND, "Navigation root not found: " + rootId);
     }
 
-    const home = findNavigationHook(root, "data-page-home");
-    const links = findNavigationHook(root, "data-page-links");
-    const current = findNavigationHook(root, "data-page-current");
+    const home = root.querySelector("[data-page-home]");
+    const links = root.querySelector("[data-page-links]");
+    const current = root.querySelector("[data-page-current]");
     for (const [hook, element] of [
         ["data-page-home", home],
         ["data-page-links", links],

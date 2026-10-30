@@ -190,30 +190,27 @@ fn resolve_provider_prefix_to_canonical_path(
     project_path_resolver: &ProjectPathResolver,
     string_table: &StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
-    let base = match project_path_resolver.source_package_root_for_dependency(
-        prefix_path,
-        path_fork,
-        string_table,
-    ) {
-        Some(package_base) => package_base,
-        None => {
-            // Dependency paths are module-root-relative. Synthetic traversal has no indexed
-            // module namespace, so it derives the same owning boundary from the resolver's
-            // retained module roots and uses the entry root only for the default module.
-            let module_root = project_path_resolver
-                .module_root_for_file(declaring_file)
-                .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
-            DependencyPathBase {
-                kind: CompileTimePathBase::EntryRoot,
-                root: module_root,
-                matched_components: 0,
-            }
-        }
-    };
-
-    // A package root already represents its complete registered prefix.
     let mut components = Vec::new();
     let components = path_fork.resolve_components(prefix_path, &mut components);
+    let base =
+        match project_path_resolver.source_package_root_for_dependency(components, string_table) {
+            Some(package_base) => package_base,
+            None => {
+                // Dependency paths are module-root-relative. Synthetic traversal has no indexed
+                // module namespace, so it derives the same owning boundary from the resolver's
+                // retained module roots and uses the entry root only for the default module.
+                let module_root = project_path_resolver
+                    .module_root_for_file(declaring_file)
+                    .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
+                DependencyPathBase {
+                    kind: CompileTimePathBase::EntryRoot,
+                    root: module_root,
+                    matched_components: 0,
+                }
+            }
+        };
+
+    // A package root already represents its complete registered prefix.
     let normalized = join_and_normalize_components(
         &base.root,
         &components[base.matched_components..],

@@ -1,9 +1,9 @@
 # HTML JS glue sharing and web package V1 hardening
 
 Status: active follow-up on `web-site-and-page-v1`
-Current slice: Phase 0 - audit and tidy-up
+Current slice: Phase 1 - content-addressed glue output
 Blockers: none known
-Next action: establish a clean branch baseline and complete Phase 0 before changing glue generation
+Next action: hash final glue source and share identical glue at the HTML builder output boundary
 
 ## Goal
 
@@ -43,6 +43,19 @@ Complete and validate this phase before editing generated glue naming or build-w
 6. Audit the remaining sidebar styles, navigation hooks, exports and docs links for dead or duplicated code. Prefer deleting stale markup and unused styles rather than introducing another shared layer. Validate the actual generated docs pages, including both documentation and developer-documentation roots and the site homepage. Avoid formatting-only changes across unrelated pages.
 
 Phase 0 gate: focused Node tests, package and builder tests and `moth check docs --terse` pass. Record which audit candidates were deliberately left unchanged and why. Do not add work based only on stylistic preference.
+
+Phase 0 outcome:
+
+- Docs root and homepage now render and initialise the sidebar. All 83 sidebar pages call `init_docs_sidebar()!` exactly once. The homepage is unlisted, so its breadcrumb reads "Documentation / What is Moth?" under the documented unlisted-page rule.
+- `page.js` compares scheme and host instead of `origin`, because opaque origins serialise as "null" and let `file:` pages match `mailto:` links. `findNavigationHook` was inlined. New Node cases cover a malformed home, document-base resolution, other ports and `file:` pages.
+- `source_package_root_for_dependency` reuses `match_package_prefix` on resolved components. Dead empty-path guards, a stale test name and a stale overlap comment were removed. `site.url` docs state the leading-slash caller convention.
+- Deliberately unchanged:
+  - The `homeKey !== null` guard states that an unresolvable home never matches.
+  - No stricter hook shape check, since malformed hooks degrade without throwing.
+  - One element carrying two hooks is not validated, since that needs DOM identity checks the plan excludes.
+  - `listed = page.sync_navigation(...)!` stays because its comment explains the ignored result.
+  - `is_source_package_public_export_path` keeps its pre-existing lenient length check, since it only orders edges.
+  - Developer-docs breadcrumbs start at the single Documentation home by design.
 
 ## Phase 1 - content-addressed glue output
 

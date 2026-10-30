@@ -103,9 +103,6 @@ fn try_resolve_package_public_export(
     let components = input
         .path_fork
         .resolve_components(*input.header_path, &mut components_buf);
-    if components.is_empty() {
-        return None;
-    }
 
     let (package_prefix, prefix_len) = match_package_prefix(
         input.source_package_public_exports.keys(),

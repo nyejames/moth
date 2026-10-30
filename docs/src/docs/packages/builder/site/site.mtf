@@ -6,9 +6,15 @@ implicit scope of `.mtf` files.
 ### Static URLs
 
 `site.root` is a compile-time `String` containing the structural site root.
-`site.url` joins that root to a site-relative suffix. The suffix must
-not start with `/`. The root follows the consuming project's configured
-`origin` when the builder renders the page.
+It always ends with `/` and follows the consuming project's configured
+`origin` when the builder renders the page. `site.url` appends its slot to
+that root.
+
+Pass a site-relative suffix without a leading `/`. This is a caller
+convention, not a checked rule. `url` concatenates the two strings, so a
+leading `/` produces `/moth//docs/` under `origin = "/moth"`. Under the default
+origin it produces `//docs/`, which browsers read as a link to a host named
+`docs`.
 
 The helper composes strings without validating routes, encoding or normalising
 paths. It doesn't inspect the current page or browser. Use

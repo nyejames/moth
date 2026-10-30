@@ -143,7 +143,7 @@ fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
 }
 
 #[test]
-fn get_root_and_has_prefix_locate_registered_root() {
+fn get_root_locates_registered_root() {
     let mut registry = SourcePackageRegistry::new();
     register(
         &mut registry,

@@ -41,11 +41,13 @@ It returns `true` for an exact link or home match and `false` for an unlisted
 route. An empty root ID produces a typed invalid-argument error. A missing root
 or required hook produces a typed resource-not-found error.
 
-Matching compares same-origin link paths with the current path and ignores query
-and fragment. `/guide/index.html`, `/guide/` and `/guide` are the same route.
-Percent escapes and letter case are kept, so `/a%2Fb/` never matches `/a/b/` and
-`/Guide/` never matches `/guide/`. Links that are missing an `href`, unparsable
-or on another origin are skipped.
+Matching compares link paths with the current path and ignores query and
+fragment. Links resolve against the document base URL. `/guide/index.html`,
+`/guide/` and `/guide` are the same route. Percent escapes and letter case are
+kept, so `/a%2Fb/` never matches `/a/b/` and `/Guide/` never matches `/guide/`.
+Links that are missing an `href` or unparsable are skipped. So are links whose
+scheme, host or port differs from the current page. Pages opened from `file:`
+URLs therefore still match their own `file:` links but never `mailto:` links.
 
 Each call first clears `aria-current` from the home anchor and every candidate
 link. On the home route it marks the home anchor, empties the breadcrumb

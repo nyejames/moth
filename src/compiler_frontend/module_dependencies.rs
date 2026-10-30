@@ -424,9 +424,6 @@ impl<'a> DependencyGraph<'a> {
     ) -> bool {
         let mut scratch = Vec::new();
         let components = path_fork.resolve_components(path, &mut scratch);
-        if components.is_empty() {
-            return false;
-        }
 
         let Some((package_prefix, _)) = match_package_prefix(
             self.source_package_public_exports.keys(),

@@ -172,6 +172,9 @@ sync('/', true);
 assert.equal(home.getAttribute('aria-current'), 'page');
 assert.equal(current.hidden, true);
 assert.equal(current.children.length, 0);
+sync('/index.html', true);
+assert.equal(home.getAttribute('aria-current'), 'page');
+assert.equal(current.hidden, true);
 "#
         ),
     );
@@ -198,6 +201,79 @@ for (const hook of ['data-page-home', 'data-page-links', 'data-page-current']) {
     failure(page.syncNavigation('nav'), runtime.MOTH_ERROR_HOST_RESOURCE_NOT_FOUND, hook);
     element.setAttribute(hook, '');
 }
+"#
+        ),
+    );
+}
+
+#[test]
+fn navigation_skips_malformed_home() {
+    run_asset_in_node(
+        "page",
+        PAGE_SOURCE,
+        &format!(
+            "{DOM}{}",
+            r#"
+// A missing or malformed home href degrades to "no home match" and never throws.
+const packages = anchor('/moth/docs/packages/', 'Packages');
+links.children = [packages];
+home.removeAttribute('href');
+sync('/moth/docs/packages/', true);
+assert.equal(packages.getAttribute('aria-current'), 'page');
+assert.equal(crumb(), ' / Packages');
+sync('/moth/docs/', false);
+assert.equal(home.getAttribute('aria-current'), null);
+assert.equal(crumb(), ' / Heading');
+home.setAttribute('href', 'http://[invalid');
+sync('/moth/docs/', false);
+assert.equal(home.getAttribute('aria-current'), null);
+home.setAttribute('href', '/moth/docs/');
+sync('/moth/docs/', true);
+assert.equal(home.getAttribute('aria-current'), 'page');
+"#
+        ),
+    );
+}
+
+#[test]
+fn navigation_resolves_links_from_document_base_on_same_origin() {
+    run_asset_in_node(
+        "page",
+        PAGE_SOURCE,
+        &format!(
+            "{DOM}{}",
+            r#"
+// Without a trailing slash the page address would resolve `../reference/` to `/moth/reference/`.
+const otherPort = anchor('https://example.test:8443/moth/docs/reference', 'Other port');
+const reference = anchor('../reference/', 'Reference');
+links.children = [otherPort, reference];
+sync('/moth/docs/reference', true);
+assert.equal(otherPort.getAttribute('aria-current'), null);
+assert.equal(reference.getAttribute('aria-current'), 'page');
+assert.equal(crumb(), ' / Reference');
+"#
+        ),
+    );
+}
+
+#[test]
+fn navigation_keeps_file_pages_and_skips_non_hierarchical_links() {
+    run_asset_in_node(
+        "page",
+        PAGE_SOURCE,
+        &format!(
+            "{DOM}{}",
+            r#"
+// File pages have the opaque origin "null", so an origin comparison would match mailto: links.
+const mail = anchor('mailto:/moth/docs/packages/', 'Mail');
+const packages = anchor('/moth/docs/packages/', 'Packages');
+links.children = [mail, packages];
+window.location = new URL('file:///moth/docs/packages/');
+document.baseURI = 'file:///moth/docs/section/';
+assert.deepEqual(page.syncNavigation('nav'), { ok: true, value: true });
+assert.equal(mail.getAttribute('aria-current'), null);
+assert.equal(packages.getAttribute('aria-current'), 'page');
+assert.equal(crumb(), ' / Packages');
 "#
         ),
     );
