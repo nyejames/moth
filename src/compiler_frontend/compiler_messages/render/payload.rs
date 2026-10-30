@@ -154,7 +154,7 @@ pub(crate) fn render_type_mismatch(
     );
     RenderedPayload {
         message: type_mismatch_message(facts.context, &expected, &found),
-        guidance: type_mismatch_guidance(&expected, &found),
+        guidance: type_mismatch_guidance(facts.context, &expected, &found),
     }
 }
 
@@ -171,8 +171,16 @@ fn type_mismatch_message(
     )
 }
 
-fn type_mismatch_guidance(expected: &str, found: &str) -> Vec<String> {
-    vec![format!("Expected: {expected}"), format!("Found: {found}")]
+fn type_mismatch_guidance(
+    mismatch_context: TypeMismatchContext,
+    expected: &str,
+    found: &str,
+) -> Vec<String> {
+    let mut guidance = vec![format!("Expected: {expected}"), format!("Found: {found}")];
+    if mismatch_context == TypeMismatchContext::CatchRecovery {
+        guidance.push("Each `then` value must match the corresponding success slot.".to_owned());
+    }
+    guidance
 }
 
 /// WHAT: guarantees every terse record carries a non-empty message.

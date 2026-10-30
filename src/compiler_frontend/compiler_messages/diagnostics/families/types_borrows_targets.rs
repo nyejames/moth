@@ -51,6 +51,7 @@ unit_code! {
         ErrorReturn = 15,
         Pattern = 16,
         General = 17,
+        CatchRecovery = 18,
     }
 }
 

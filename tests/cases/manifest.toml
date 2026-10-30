@@ -5552,6 +5552,13 @@ contract = "language.results.catch_handler_binding_conflict_rejected"
 role = "boundary"
 
 [[case]]
+id = "catch_recovery_then_type_mismatch_rejected"
+path = "catch_recovery_then_type_mismatch_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.catch_recovery_then_type_mismatch_rejected"
+role = "primary"
+
+[[case]]
 id = "explicit_propagation_catch_conflict_rejected"
 path = "explicit_propagation_catch_conflict_rejected"
 tags = ["integration", "results", "diagnostics"]

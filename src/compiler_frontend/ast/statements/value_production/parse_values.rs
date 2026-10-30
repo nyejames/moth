@@ -454,9 +454,10 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
     match receiver_kind {
         ValueReceiverKind::Declaration => TypeMismatchContext::Declaration,
         ValueReceiverKind::Return => TypeMismatchContext::ReturnValue,
-        ValueReceiverKind::Assignment
-        | ValueReceiverKind::MultiBind
-        | ValueReceiverKind::CatchHandler => TypeMismatchContext::General,
+        ValueReceiverKind::CatchHandler => TypeMismatchContext::CatchRecovery,
+        ValueReceiverKind::Assignment | ValueReceiverKind::MultiBind => {
+            TypeMismatchContext::General
+        }
     }
 }
 

@@ -186,8 +186,8 @@ fn type_fact_stores_raw_ids_until_capture_and_reads_display_ids() {
 
 #[test]
 fn unit_fact_round_trips_every_type_mismatch_context() {
-    for code in 1..=17 {
-        let context = TypeMismatchContext::from_code(code).expect("codes 1 to 17 are assigned");
+    for code in 1..=18 {
+        let context = TypeMismatchContext::from_code(code).expect("codes 1 to 18 are assigned");
         assert_eq!(context.code(), code);
         let mut word = [0u32; 1];
         UnitFact::<TypeMismatchContext>::encode(&context, &mut word)
@@ -198,7 +198,7 @@ fn unit_fact_round_trips_every_type_mismatch_context() {
         );
     }
     assert!(TypeMismatchContext::from_code(0).is_none());
-    assert!(TypeMismatchContext::from_code(18).is_none());
+    assert!(TypeMismatchContext::from_code(19).is_none());
 }
 
 #[test]

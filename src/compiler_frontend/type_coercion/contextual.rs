@@ -108,7 +108,8 @@ fn value_receiver_context(context: TypeMismatchContext) -> ValueReceiverContext 
         TypeMismatchContext::MatchScrutinee => ValueReceiverContext::MatchScrutinee,
         TypeMismatchContext::MatchPattern
         | TypeMismatchContext::Pattern
-        | TypeMismatchContext::General => ValueReceiverContext::General,
+        | TypeMismatchContext::General
+        | TypeMismatchContext::CatchRecovery => ValueReceiverContext::General,
     }
 }
 

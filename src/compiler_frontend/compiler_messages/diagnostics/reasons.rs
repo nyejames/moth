@@ -170,6 +170,7 @@ pub enum TypeMismatchContext {
     ErrorReturn,
     Pattern,
     General,
+    CatchRecovery,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

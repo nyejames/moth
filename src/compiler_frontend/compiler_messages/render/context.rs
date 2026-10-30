@@ -518,6 +518,9 @@ pub(crate) fn type_mismatch_context_name(
         }
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::Pattern => "pattern",
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::General => "general",
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::CatchRecovery => {
+            "catch recovery"
+        }
     }
 }
 

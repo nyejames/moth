@@ -51,12 +51,12 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
-STATUS: ready to resume; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 4.2, catch-recovery type context
+STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
+NEXT_SLICE: Phase 3 remainders: 3.1 `RustBorrowPrefix` wording, 3.4 computed copy coverage, 3.5 alias-reuse coverage
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: start Phase 4.2 with `DiagnosticDraft`, `DiagnosticBag`, schema-typed facts, `DiagnosticStore` side stores and `DiagnosticView`; capture display types in `TypeDisplaySnapshot`/`TypeDisplayId` and keep `InfrastructureFailure`/`InfrastructureErrors` separate
+RESUME_ACTION: implement the Phase 3 remainders, then continue Phase 4 in section order from 4.1's remaining catch presentation scope
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -531,6 +531,8 @@ replacement reason matrix. Section 4.2 retains the catch-recovery type-context w
 ### 4.2 Add catch-recovery type context
 
 **Original finding:** DIAG-026
+**Status:** Delivered. Catch-handler `then` values use `TypeMismatchContext::CatchRecovery` (compact code 18) and the `catch_recovery_then_type_mismatch_rejected` case owns the rendered context and guidance.
+**Known limitation:** an optional, collection or map slot rejects a wrong-typed value inside expression evaluation with `General` before receiver coercion, for every receiver kind. Changing that evaluator-level context is outside this slice.
 
 Add `TypeMismatchContext::CatchRecovery`.
 

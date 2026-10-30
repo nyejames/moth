@@ -848,7 +848,7 @@ fn rejects_fallback_type_mismatch_before_hir_lowering() {
     let mismatch = diagnostic
         .family_view::<TypeMismatchView>()
         .expect("the first error is a type mismatch");
-    assert_eq!(mismatch.context, TypeMismatchContext::General);
+    assert_eq!(mismatch.context, TypeMismatchContext::CatchRecovery);
 }
 
 #[test]
