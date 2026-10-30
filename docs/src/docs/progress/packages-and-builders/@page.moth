@@ -1,5 +1,5 @@
 @html center, span
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Packages and Builders Progress Matrix"
 page_description #= "Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."
@@ -11,6 +11,8 @@ orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
 green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 #[title, center: PACKAGES AND BUILDERS PROGRESS]
 
 #[section, $md:

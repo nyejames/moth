@@ -1,15 +1,15 @@
 @access-and-aliasing content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Access and aliasing"
 page_description #= "How Moth shares, copies and requests exclusive access to values."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Memory management) / Access and aliasing
-
     **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
     Existing values are shared by default. Copies are explicit. `~` requests exclusive access to a mutable place.

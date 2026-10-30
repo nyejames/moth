@@ -1,17 +1,17 @@
 @style-guide content as style_content
 @testing content as testing_content
 @validation content as validation_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Codebase development standards"
 page_description #= "Rust code style, testing strategy and validation gates for Moth compiler work."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Developers) / Codebase development standards
-
     # Codebase development standards
 
     Good compiler work should be easy to read, easy to test and hard to misinterpret. 

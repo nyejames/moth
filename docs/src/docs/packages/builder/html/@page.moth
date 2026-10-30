@@ -5,7 +5,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "@html"
 page_description #= "Compile-time HTML helpers and canvas wrapper from the HTML builder."
@@ -13,9 +14,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../../ (Documentation) / @../ (Builder packages) / @html
-
     # @html
 
     `@html` provides compile-time layout and formatting helpers through a

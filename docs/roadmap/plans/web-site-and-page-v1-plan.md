@@ -1,9 +1,9 @@
 # HTML builder `@web/site` and `@web/page` V1
 
 Status: in progress
-Current slice: Phase 3 - finalise the committed sidebar
+Current slice: Phase 4 - validate, document and clean up
 Blockers: none known
-Next action: add the sidebar hooks and `init_docs_sidebar`, migrate docs page roots and remove the old introductory breadcrumbs
+Next action: update canonical package references and the progress matrix, rebuild release docs and run the validation gates
 
 ## Goal
 

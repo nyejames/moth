@@ -5,7 +5,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "@web/canvas"
 page_description #= "2D canvas drawing as a builder binding-backed runtime package."
@@ -13,9 +14,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../../ (Documentation) / @../ (Builder packages) / @web/canvas
-
     # @web/canvas
 
     `@web/canvas` exposes browser canvas drawing through opaque handles and free

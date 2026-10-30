@@ -1,5 +1,5 @@
 @moth-design-choices content as reference_content
-@styles navbar, section, theme_css
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
 
 page_title #= "02. Why Moth makes different choices"
@@ -7,10 +7,10 @@ page_description #= "The design trade-offs behind Moth's language and compiler."
 page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Compiler design) / 02. Why Moth makes different choices
-
     Moth keeps the source language small and moves complexity into the compiler on purpose. This article names the bias before the pipeline walk begins.
 ]
 

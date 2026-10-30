@@ -1,15 +1,15 @@
 @borrow-validation content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Borrow validation"
 page_description #= "How Moth checks exclusivity, aliasing and optional transfer safety."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Memory management) / Borrow validation
-
     Borrow validation runs after HIR generation. It writes analysis facts beside HIR without changing it. Lifetime topology is a separate later analysis.
 
     @../checked-proof-budget-research (Checked proof-budget research) records an open proposal for opt-in deeper analysis. It does not change the current safety contract or make ordinary code less checked.

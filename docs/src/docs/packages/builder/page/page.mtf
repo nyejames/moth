@@ -1,0 +1,48 @@
+`@web/page` belongs to the Builder origin family with ExternalBinding backing.
+See @../../#package-origins-and-backing (Package origins and backing) for the
+package model. It requires an explicit `@web/page` dependency and isn't in the
+implicit scope of `.mtf` files. It supports HTML-JS only. HTML-Wasm rejects
+reachable calls.
+
+### Browser snapshots
+
+Every getter reads the browser on each call. These are synchronous snapshots,
+not cached build values or subscriptions.
+
+- `url() -> String`: full browser address
+- `path() -> String`: location pathname
+- `origin() -> String`: location origin
+- `query() -> String`: location search, including `?` when present
+- `fragment() -> String`: location hash, including `#` when present
+- `title() -> String`: document title
+- `viewport_width() -> I32`: viewport width in CSS pixels
+- `viewport_height() -> I32`: viewport height in CSS pixels
+- `pixel_ratio() -> F64`: device pixel ratio
+- `scroll_x() -> F64`: horizontal scroll position
+- `scroll_y() -> F64`: vertical scroll position
+- `is_visible() -> Bool`: whether the document is visible
+- `has_focus() -> Bool`: whether the document has focus
+- `prefers_dark() -> Bool`: whether the browser prefers a dark colour scheme
+- `prefers_reduced_motion() -> Bool`: whether the browser prefers reduced motion
+
+`page.url()` reads the live browser address at runtime. For static links built
+at compile time use @../site (@web/site)'s `site.url` instead.
+
+### Navigation synchronisation
+
+`sync_navigation(root_id String) -> Bool, Error!` updates active links and a
+breadcrumb under the identified root. It requires these descendants:
+
+- `data-page-home` on a home anchor supplying the first breadcrumb link
+- `data-page-links` on a navigation element containing candidate anchors
+- `data-page-current` on an initially empty breadcrumb container
+
+It returns `true` for an exact link or home match and `false` for an unlisted
+route. An empty root ID produces a typed invalid-argument error. A missing root
+or required hook produces a typed resource-not-found error.
+
+Matching uses same-origin paths, ignoring query and fragment. The helper marks
+the active link and builds the breadcrumb from matching ancestors and the
+current page. For an unlisted page it uses the first heading or document title.
+It is idempotent, installs no listeners and doesn't navigate. Call it again
+after History API changes.

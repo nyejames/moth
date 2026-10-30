@@ -17,7 +17,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Traits"
 page_description #= "Static trait contracts, explicit conformance and generic bounds in Moth."
@@ -25,9 +26,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Traits
-
     # Traits
 
     A trait names a static method contract. Matching methods don't imply

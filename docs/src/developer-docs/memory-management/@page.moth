@@ -1,14 +1,14 @@
-@styles navbar, section, theme_head, codeblock
+@styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
 page_title #= "Memory management"
 page_description #= "Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Developers) / Memory management
-
     # Memory management
 
     **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**

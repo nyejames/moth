@@ -1,22 +1,22 @@
-@styles navbar, section, language_theme_head, doc_pager, sidebar
+@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
 page_title #= "Builder packages"
-page_description #= "HTML builder helpers, canvas drawing and WebGL2 graphics packages provided by the HTML builder."
+page_description #= "HTML helpers, static site URLs, canvas drawing, WebGL2 graphics and live page state from the HTML builder."
 page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../ (Documentation) / @../ (Packages and dependencies) / Builder packages
-
     # Builder packages
 
     The selected project builder supplies packages tied to its artefact model.
     This keeps browser and rendering APIs out of the core language.
 
     The HTML builder provides source-backed compile-time helpers through
-    `@html`, binding-backed runtime drawing through `@web/canvas` and WebGL2
-    rendering through `@web/graphics`. The
+    `@html` and static URLs through `@web/site`, binding-backed runtime drawing
+    through `@web/canvas`, WebGL2 rendering through `@web/graphics` and live
+    browser state through `@web/page`. The
     @../../progress/packages-and-builders (packages and builders progress matrix)
     records current support and accepted next gaps.
 
@@ -25,6 +25,8 @@ page_head #= language_theme_head
     - @./html/ (@html)
     - @./canvas/ (@web/canvas)
     - @./graphics/ (@web/graphics)
+    - @./site/ (@web/site)
+    - @./page/ (@web/page)
 ]
 
 #[section:

@@ -1,0 +1,17 @@
+`@web/site` belongs to the Builder origin family with MothSource backing. See
+@../../#package-origins-and-backing (Package origins and backing) for the
+package model. It requires an explicit `@web/site` dependency and isn't in the
+implicit scope of `.mtf` files.
+
+### Static URLs
+
+`site.root` is a compile-time `String` containing the structural site root.
+`site.url` joins that root to a site-relative suffix. The suffix must
+not start with `/`. The root follows the consuming project's configured
+`origin` when the builder renders the page.
+
+The helper composes strings without validating routes, encoding or normalising
+paths. It doesn't inspect the current page or browser. Use
+@../page (@web/page) for live browser state. In particular, `site.url` builds
+links at compile time while `page.url()` reads the current browser address at
+runtime.

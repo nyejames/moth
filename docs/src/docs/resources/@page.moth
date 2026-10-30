@@ -7,7 +7,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Resources and file values"
 page_description #= "Naming project files with file paths, and what those paths evaluate to in Moth."
@@ -15,9 +16,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Resources and file values
-
     # Resources and file values
 
     Projects contain more than source. Images, fonts, stylesheets and data files

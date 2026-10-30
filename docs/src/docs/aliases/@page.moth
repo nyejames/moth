@@ -9,7 +9,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Aliases"
 page_description #= "Type aliases, dependency aliases and choice payload capture aliases in Moth."
@@ -17,9 +18,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Aliases
-
     # Aliases
 
     An alias gives an existing type, dependency or payload field a local name. It

@@ -1,15 +1,15 @@
 @lifetime-regions-and-escape-validation content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Lifetime regions and escape validation"
 page_description #= "How Moth validates lifetime owners, retained references, escapes and region topology."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Memory management) / Lifetime regions and escape validation
-
     Every allocation has exactly one semantic lifetime owner. GC cannot bypass topology validation.
 ]
 

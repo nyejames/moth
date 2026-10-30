@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Constants and compile-time behaviour"
 page_description #= "Compile-time bindings, folding, const records and const templates in Moth."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Constants and compile-time behaviour
-
     # Constants and compile-time behaviour
 
     A constant tells the compiler to finish a value before runtime. Unlike a

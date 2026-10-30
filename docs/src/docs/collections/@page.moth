@@ -13,7 +13,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Collections and maps"
 page_description #= "Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."
@@ -21,9 +22,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Collections and maps
-
     # Collections and maps
 
     Collections store one element type in order. Maps associate one value type

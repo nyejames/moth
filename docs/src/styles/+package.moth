@@ -582,7 +582,7 @@ export:
     ]
 
     @navbar navbar
-    @sidebar sidebar
+    @sidebar sidebar, init_docs_sidebar
 
     footer #= [$html:
         <div></div>

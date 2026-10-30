@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Design scope"
 page_description #= "Moth's design principles, deferred features, open questions and intentionally excluded language families."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Design scope
-
     # Design scope
 
     Moth distinguishes three outcomes for a proposed feature. Accepted

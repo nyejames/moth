@@ -1,14 +1,14 @@
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Compiler-facing language reference"
 page_description #= "Canonical language references and related compiler design documentation."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Developers) / Compiler-facing language reference
-
     # Compiler-facing language reference
 
     Compiler changes should start from the language contract. The unsuffixed

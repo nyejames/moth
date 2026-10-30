@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Plain Markdown"
 page_description #= "Plain Markdown content dependencies for HTML projects."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Plain Markdown
-
     # Plain Markdown
 
     A `.md` file remains ordinary Markdown. The compiler renders it at compile

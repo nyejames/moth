@@ -13,7 +13,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Structs"
 page_description #= "Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth."
@@ -21,9 +22,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Structs
-
     # Structs
 
     A struct creates a nominal type with named fields. Two structs remain

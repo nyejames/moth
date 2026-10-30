@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Branching"
 page_description #= "If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Branching
-
     # Branching
 
     Use statement `if` for a Boolean decision. Use a full match when one value

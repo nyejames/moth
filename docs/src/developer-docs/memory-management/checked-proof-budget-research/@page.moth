@@ -1,15 +1,15 @@
 @checked-proof-budget-research content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Checked proof-budget research"
 page_description #= "Future research into opt-in deep static analysis for difficult borrow proofs."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Memory management) / Checked proof-budget research
-
     This page records a future design proposal and the compiler constraints current Boracle work should preserve. `$checked:` is the agreed future spelling and compiler-owned direction; proof-tier semantics remain open. It is not implemented source behaviour or current compiler behaviour.
 ]
 

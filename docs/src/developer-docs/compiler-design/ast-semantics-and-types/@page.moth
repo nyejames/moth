@@ -1,5 +1,5 @@
 @ast-semantics-and-types content as reference_content
-@styles navbar, section, theme_css
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
 
 page_title #= "07. AST semantics and types"
@@ -7,10 +7,10 @@ page_description #= "How parsed syntax becomes typed semantic structure."
 page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Compiler design) / 07. AST semantics and types
-
     Name resolution, type identity and receiving-boundary rules turn ordered shells into typed semantic structure.
 ]
 

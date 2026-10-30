@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, codeblock
+@styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 @wasm-optimisation content as optimisation_content
 
 page_title #= "Wasm optimisation"
@@ -6,10 +6,10 @@ page_description #= "Optimisation ownership across Moth, WebAssembly and native 
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Developer documentation) / Wasm optimisation
-
     # Wasm optimisation
 
     Moth and its execution environment see different information about a

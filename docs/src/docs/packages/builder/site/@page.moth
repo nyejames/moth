@@ -1,0 +1,42 @@
+@site content as site_advanced
+@site-basic content as site_basic
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+page_title #= "@web/site"
+page_description #= "Static site URL helpers from the HTML builder."
+page_head #= language_theme_head
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+#[section, $md:
+    # @web/site
+
+    `@web/site` provides compile-time helpers for static site URLs. It uses the
+    structural site root rather than reading the browser or the current page.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):site]
+        [$insert("title"):Static site URLs]
+        [$insert("advanced"):[site_advanced]]
+
+        [site_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../graphics/]
+        [$insert("previous_title"):@web/graphics]
+        [$insert("next_path"):../page/]
+        [$insert("next_title"):@web/page]
+    ]
+]

@@ -5,7 +5,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Core time"
 page_description #= "Duration, TimeMark and Timestamp helpers in @core/time."
@@ -13,9 +14,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../../ (Documentation) / @../ (Core packages) / Core time
-
     # Core time
 
     `@core/time` separates monotonic elapsed time from UTC wall-clock time. Many

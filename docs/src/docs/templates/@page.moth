@@ -15,7 +15,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Templates"
 page_description #= "Template strings, directives, slots, wrappers, control flow and Markdown in Moth."
@@ -23,9 +24,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Templates
-
     # Templates
 
     Templates form Moth's only string-composition system. Square brackets can

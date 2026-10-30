@@ -1,15 +1,15 @@
 @ownership-and-drops content as reference_content
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Affine ownership and drops"
 page_description #= "Affine cleanup responsibility, the two-bit ownership ABI and conditional destruction."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Memory management) / Affine ownership and drops
-
     Cleanup responsibility is affine: it may move or be discharged, but it never duplicates. The compiler transfers it only where static analysis proves no later source use exists, and lowering consumes a validated memory plan rather than advisory drop sites.
 ]
 
