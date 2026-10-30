@@ -1,19 +1,18 @@
 @math content as math_advanced
-
 @math-basic content as math_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Core math"
 page_description #= "F64 math constants and helper functions."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../../ (Documentation) / @../ (Core packages) / Core math
 

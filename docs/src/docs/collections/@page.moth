@@ -1,35 +1,26 @@
 @collection-literals content as collection_literals
-
 @collection-literals-basic content as collection_literals_basic
-
 @growable-collections content as growable_collections
-
 @growable-collections-basic content as growable_collections_basic
-
 @fixed-collections content as fixed_collections
-
 @fixed-collections-basic content as fixed_collections_basic
-
 @collection-operations content as collection_operations
-
 @collection-operations-basic content as collection_operations_basic
-
 @hash-maps content as hash_maps
-
 @hash-maps-basic content as hash_maps_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Collections and maps"
 page_description #= "Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Collections and maps
 

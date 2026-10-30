@@ -1,35 +1,26 @@
 @moth-template-files content as moth_template_files
-
 @moth-template-files-basic content as moth_template_files_basic
-
 @implicit-markdown content as implicit_markdown
-
 @implicit-markdown-basic content as implicit_markdown_basic
-
 @content-dependencies content as content_dependencies
-
 @content-dependencies-basic content as content_dependencies_basic
-
 @template-scope content as template_scope
-
 @template-scope-basic content as template_scope_basic
-
 @moth-template-limits content as moth_template_limits
-
 @moth-template-limits-basic content as moth_template_limits_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Moth template files"
 page_description #= "Moth-aware Markdown content files for HTML projects."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Moth template files
 

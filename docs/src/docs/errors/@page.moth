@@ -1,41 +1,29 @@
 @error-values content as error_values
-
 @error-values-basic content as error_values_basic
-
 @error-returns content as error_returns
-
 @error-returns-basic content as error_returns_basic
-
 @propagation content as propagation
-
 @propagation-basic content as propagation_basic
-
 @catch-and-recovery content as catch_and_recovery
-
 @catch-and-recovery-basic content as catch_and_recovery_basic
-
 @options content as options
-
 @options-basic content as options_basic
-
 @assertions content as assertions
-
 @assertions-basic content as assertions_basic
-
 @runtime-failures-and-termination content as runtime_failures_and_termination
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Errors, options and assertions"
 page_description #= "Recoverable errors, optional values, local recovery and assertions in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Errors, options and assertions
 

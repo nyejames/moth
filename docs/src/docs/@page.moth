@@ -5,7 +5,6 @@ page_description #= "Moth language, project and compiler documentation."
 page_head #= theme_head
 
 #[navbar]
-
 #[section, $md:
     # Documentation
 

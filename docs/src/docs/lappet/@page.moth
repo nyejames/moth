@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head
+@styles navbar, section, theme_head, sidebar
 @lappet content as lappet_content
 
 page_title #= "Lappet"
@@ -6,7 +6,7 @@ page_description #= "Moth's planned native runtime, Rust embedding and package i
 page_head #= theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Lappet
 

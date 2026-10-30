@@ -1,19 +1,18 @@
 @html-helpers content as html_advanced
-
 @html-helpers-basic content as html_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "@html"
 page_description #= "Compile-time HTML helpers and canvas wrapper from the HTML builder."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../../ (Documentation) / @../ (Builder packages) / @html
 

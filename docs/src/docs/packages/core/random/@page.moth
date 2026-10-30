@@ -1,19 +1,18 @@
 @random content as random_advanced
-
 @random-basic content as random_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Core random"
 page_description #= "Random number helpers in the Core package."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../../ (Documentation) / @../ (Core packages) / Core random
 

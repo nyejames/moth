@@ -1,43 +1,30 @@
 @trait-declarations content as trait_declarations
-
 @trait-declarations-basic content as trait_declarations_basic
-
 @trait-requirements content as trait_requirements
-
 @trait-requirements-basic content as trait_requirements_basic
-
 @conformance content as conformance
-
 @conformance-basic content as conformance_basic
-
 @generic-trait-bounds content as generic_trait_bounds
-
 @generic-trait-bounds-basic content as generic_trait_bounds_basic
-
 @trait-incompatibility content as trait_incompatibility
-
 @trait-incompatibility-basic content as trait_incompatibility_basic
-
 @core-cast-traits content as core_cast_traits
-
 @core-cast-traits-basic content as core_cast_traits_basic
-
 @trait-design-scope content as trait_design_scope
-
 @trait-design-scope-basic content as trait_design_scope_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Traits"
 page_description #= "Static trait contracts, explicit conformance and generic bounds in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Traits
 

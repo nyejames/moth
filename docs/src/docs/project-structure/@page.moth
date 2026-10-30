@@ -1,51 +1,34 @@
 @project-layout content as project_layout
-
 @project-layout-basic content as project_layout_basic
-
 @project-config content as project_config
-
 @project-config-basic content as project_config_basic
-
 @module-roots content as module_roots
-
 @module-roots-basic content as module_roots_basic
-
 @public-api content as public_api
-
 @public-api-basic content as public_api_basic
-
 @entry-runtime-and-fragments content as entry_runtime_and_fragments
-
 @entry-runtime-and-fragments-basic content as entry_runtime_and_fragments_basic
-
 @html-routing-and-artifacts content as html_routing_and_artifacts
-
 @html-routing-and-artifacts-basic content as html_routing_and_artifacts_basic
-
 @build-inputs content as build_inputs
-
 @build-inputs-basic content as build_inputs_basic
-
 @entry-config content as entry_config
-
 @entry-config-basic content as entry_config_basic
-
 @project-package-facade content as project_package_facade
-
 @project-package-facade-basic content as project_package_facade_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Project structure"
 page_description #= "How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Project structure
 

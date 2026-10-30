@@ -13,14 +13,15 @@
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Language basics"
 page_description #= "Blocks, comments, naming, core values, strings and MON syntax in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Language basics
 

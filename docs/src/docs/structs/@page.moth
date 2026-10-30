@@ -1,35 +1,26 @@
 @struct-declarations content as struct_declarations
-
 @struct-declarations-basic content as struct_declarations_basic
-
 @construction-and-fields content as construction_and_fields
-
 @construction-and-fields-basic content as construction_and_fields_basic
-
 @anonymous-records content as anonymous_records
-
 @anonymous-records-basic content as anonymous_records_basic
-
 @receiver-methods content as receiver_methods
-
 @receiver-methods-basic content as receiver_methods_basic
-
 @mutable-receivers content as mutable_receivers
-
 @mutable-receivers-basic content as mutable_receivers_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Structs"
 page_description #= "Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Structs
 

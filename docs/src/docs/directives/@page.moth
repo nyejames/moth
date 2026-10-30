@@ -1,19 +1,18 @@
 @directives content as directives
-
 @directives-basic content as directives_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Directives"
 page_description #= "General compiler and builder directives in Moth, including configuration, pages and shared argument rules."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Directives
 

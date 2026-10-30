@@ -1,23 +1,20 @@
 @file-paths content as file_paths
-
 @file-paths-basic content as file_paths_basic
-
 @file-values content as file_values
-
 @file-values-basic content as file_values_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Resources and file values"
 page_description #= "Naming project files with file paths, and what those paths evaluate to in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Resources and file values
 

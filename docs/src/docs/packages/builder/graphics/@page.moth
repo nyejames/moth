@@ -1,19 +1,18 @@
 @graphics content as graphics_advanced
-
 @graphics-basic content as graphics_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "@web/graphics"
 page_description #= "WebGL2 rendering as a builder binding-backed runtime package."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../../ (Documentation) / @../ (Builder packages) / @web/graphics
 

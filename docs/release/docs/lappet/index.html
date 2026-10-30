@@ -243,6 +243,11 @@ body {
 
 a {
     color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+    transition: color 300ms ease-in-out;
+}
+
+a:hover {
+    color: light-dark(hsl(204, 100%, 40%), hsl(217, 100%, 79%));
 }
 
 h1 {
@@ -329,20 +334,16 @@ td {
     .container {
         max-width: 1450px;
     }
-}
-
-.moth-nav-1 {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom-color: grey;
-    border-bottom-style: solid;
-    border-bottom-width: 1px;
-    padding: 0rem 2rem 0rem 2rem;
 }</style>
   </head>
   <body style="">
-<nav class="moth-nav-1" aria-label="Primary">
+<nav style="display: flex;
+justify-content: space-between;
+align-items: center;
+border-bottom-color: grey;
+border-bottom-style: solid;
+border-bottom-width: 1px;
+padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
     <a
         href="/moth/"
         style="
@@ -430,6 +431,532 @@ td {
         </a>
     </div>
 </nav>
+<style>.docs-sidebar__button:hover {
+    --docs-sidebar-button-background: light-dark(#e7eefb, #26334c);
+}
+
+.docs-sidebar__link:hover {
+    --docs-sidebar-link-background: light-dark(#e7eefb, #26334c);
+}
+
+.docs-sidebar__link[aria-current="page"] {
+    --docs-sidebar-link-background: light-dark(#dce8fc, #293a5c);
+    --docs-sidebar-link-color: light-dark(#174a91, #c3d7ff);
+    --docs-sidebar-link-weight: 700;
+}
+
+.docs-sidebar__toggle:focus-visible ~ .docs-sidebar .docs-sidebar__button,
+.docs-sidebar__link:focus-visible,
+.docs-sidebar__home:focus-visible {
+    outline: 2px solid light-dark(#226cb7, #9ec2ff);
+    outline-offset: 2px;
+}
+
+@media (min-width: 961px) {
+    .docs-sidebar {
+        position: fixed;
+        top: 4.5rem;
+        bottom: 1rem;
+        left: clamp(0.75rem, 2vw, 2rem);
+        width: 15.5rem;
+        overflow-y: auto;
+    }
+
+    body:has(> .docs-sidebar) > .container {
+        width: auto;
+        max-width: 90rem;
+        margin-left: calc(17.5rem + 2.5vw);
+        margin-right: 2rem;
+    }
+
+    .docs-sidebar__toggle:checked ~ .docs-sidebar {
+        width: 3.75rem;
+    }
+
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__home {
+        display: none;
+    }
+
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
+        --docs-sidebar-header-justify: center;
+    }
+
+    body:has(> .docs-sidebar__toggle:checked) > .container {
+        margin-left: 5.75rem;
+    }
+}
+
+@media (max-width: 960px) {
+    .docs-sidebar {
+        width: calc(100% - 2rem);
+        margin: 0.85rem auto;
+    }
+
+    .docs-sidebar__nav {
+        display: none;
+        max-height: 65dvh;
+        overflow-y: auto;
+    }
+
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav {
+        display: block;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .docs-sidebar__button,
+    .docs-sidebar__link {
+        transition: color 150ms ease, background-color 150ms ease;
+    }
+}
+
+@media print {
+    .docs-sidebar,
+    .docs-sidebar__toggle {
+        display: none;
+    }
+
+    body:has(> .docs-sidebar) > .container {
+        width: auto;
+        max-width: none;
+        margin: 0;
+    }
+}</style>
+
+<input
+    type="checkbox"
+    id="docs-sidebar-toggle"
+    class="docs-sidebar__toggle"
+    style="position: absolute;
+width: 1px;
+height: 1px;
+margin: -1px;
+overflow: hidden;
+clip-path: inset(50%);
+white-space: nowrap;"
+    aria-label="Toggle documentation navigation"
+    aria-controls="docs-sidebar-links"
+>
+
+<aside class="docs-sidebar" style="box-sizing: border-box;
+padding: 0.65rem;
+border: 1px solid light-dark(#c8d2e3, #364259);
+border-radius: 0.85rem;
+background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
+    <div class="docs-sidebar__header" style="display: flex;
+justify-content: var(--docs-sidebar-header-justify, space-between);
+align-items: center;
+gap: 0.25rem;">
+        <a class="docs-sidebar__home" style="padding: 0.45rem 0.6rem;
+color: light-dark(#243f66, #d8e6ff);
+font-weight: 700;
+text-decoration: none;" href="/moth/docs/">Documentation</a>
+        <label
+            class="docs-sidebar__button"
+            style="display: inline-grid;
+place-items: center;
+flex: none;
+width: 2.25rem;
+height: 2.25rem;
+border-radius: 0.5rem;
+color: light-dark(#385579, #c0d3f5);
+background: var(--docs-sidebar-button-background, transparent);
+cursor: pointer;
+user-select: none;"
+            for="docs-sidebar-toggle"
+            title="Toggle navigation"
+        >
+            <span aria-hidden="true">&#9776;</span>
+        </label>
+    </div>
+
+    <nav id="docs-sidebar-links" class="docs-sidebar__nav" style="margin-top: 0.7rem;
+padding-top: 0.35rem;
+border-top: 1px solid light-dark(#dce3ef, #364259);" aria-label="Documentation pages">
+        <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
+padding-inline: 0.6rem;
+color: light-dark(#5a6980, #9faec6);
+font-size: 0.72rem;
+font-weight: 700;
+letter-spacing: 0.06em;
+text-transform: uppercase;">Learn Moth</p>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/getting-started/">Getting started</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/language-overview/">Language basics</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/bindings/">Values and bindings</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/numbers/">Numbers</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/casts/">Casts</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/functions/">Functions</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/branching/">Branching</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/loops/">Loops</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/structs/">Structs</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/choices/">Choices</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/errors/">Errors and options</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/collections/">Collections and maps</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/templates/">Templates</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/constants/">Constants</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/aliases/">Aliases</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/generics/">Generics</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/traits/">Traits</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/wiring/">Wiring</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/memory/">Memory and lifetimes</a>
+
+        <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
+padding-inline: 0.6rem;
+color: light-dark(#5a6980, #9faec6);
+font-size: 0.72rem;
+font-weight: 700;
+letter-spacing: 0.06em;
+text-transform: uppercase;">Projects and content</p>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/directives/">Directives</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/project-structure/">Project structure</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/packages/">Packages</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/packages/core/">Core packages</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/resources/">Resources</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/moth-templates/">Moth template files</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/markdown/">Markdown</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/mon/">MON format</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/design-scope/">Design scope</a>
+
+        <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
+padding-inline: 0.6rem;
+color: light-dark(#5a6980, #9faec6);
+font-size: 0.72rem;
+font-weight: 700;
+letter-spacing: 0.06em;
+text-transform: uppercase;">Reference</p>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/cheatsheet/">Language cheatsheet</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/progress/">Compiler progress</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/progress/packages-and-builders/">Packages and builders</a>
+
+        <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
+padding-inline: 0.6rem;
+color: light-dark(#5a6980, #9faec6);
+font-size: 0.72rem;
+font-weight: 700;
+letter-spacing: 0.06em;
+text-transform: uppercase;">Compiler internals</p>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/developer-docs/">Developer docs</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/developer-docs/compiler-design/">Compiler design</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/developer-docs/memory-management/">Memory management</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/developer-docs/style-guide/">Development standards</a>
+
+        <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
+padding-inline: 0.6rem;
+color: light-dark(#5a6980, #9faec6);
+font-size: 0.72rem;
+font-weight: 700;
+letter-spacing: 0.06em;
+text-transform: uppercase;">Future design</p>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/async/">Async</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
+text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
+    </nav>
+</aside>
+
+<script>
+    const currentPath = window.location.pathname;
+    document.querySelectorAll(".docs-sidebar__link").forEach(link => {
+        if (link.pathname === currentPath) {
+            link.setAttribute("aria-current", "page");
+        }
+    });
+</script>
 <section class="container"><p><a href="../">Documentation</a> / Lappet</p><h1 id="lappet">Lappet</h1><p>Use an official native environment or embed Moth in a Rust application. Lappet provides the shared execution and binding foundation, with all application-facing tooling staying behind the Moth CLI.</p></section>
 <section class="container"><h2 id="choose-an-environment">Choose an environment</h2><p>Lappet is the planned native runtime and Rust host-binding library for Moth. It lives beside the compiler in the same repository. Its first consumers are Rust game engines and server applications. Browser programs continue to use the HTML builder and browser execution.</p><p>The initial crate contains design documents and a roadmap only. Runtime execution, native Core implementations and package installation are not yet available through it. These pages describe the agreed direction without adding new working commands.</p><h3 id="use-an-official-builder">Use an official builder</h3><p>Official builders are distributed with the Moth CLI and their required libraries. The intended application-author workflow needs only that distribution on a supported platform. It does not require installing Rust, Cargo, Node.js or a separate Wasm runtime. Developing Moth or writing a custom Rust host has its own tooling requirements.</p><p>All user-facing commands keep the <code>moth</code> name. Lappet identifies the library and runtime implementation, not another executable to learn. Future command syntax will be documented when its own design and implementation are complete.</p><h3 id="embed-moth-in-rust">Embed Moth in Rust</h3><p>A Rust application can use the compiler to build a Moth project and Lappet to execute its Wasm. The builder selects host packages, owns application state and chooses when exported Moth functions run. Lappet handles the runtime and typed binding boundary rather than a game loop or a server framework.</p><p>For example, a game engine can expose a checked entity API while keeping entity storage in Rust. A server can expose its own services without granting every program ambient filesystem or network access. V1 calls are synchronous.</p><p>Rust host functions may use ordinary Rust libraries or wrap C libraries. These are trusted native dependencies, outside the Wasm sandbox. Their safety and blocking behaviour remain the host author&#39;s responsibility. The package manager will not install native code merely because a Moth package asks for it.</p><h2 id="keep-core-consistent">Keep Core consistent</h2><p>Official native and browser environments share compiler-owned Core signatures and semantics. Each implementation preserves documented host differences and capability requirements. A headless server does not pretend to have a window just to make a title operation succeed.</p><p>Custom builders can use selected Core implementations or provide none. Core names, including the <code>io</code> prelude, stay reserved. A custom builder cannot replace their meaning or gain official certification simply by implementing them.</p><p>The future official package manager admits Core-dependent packages only for officially supported environments. Custom builders receive no-core packages only, even when they use Lappet. Local and builder-supplied code can still use the APIs that their host actually supports.</p><p>No-core means no direct or transitive dependency on public Core APIs. It does not remove the runtime requirements of ordinary language features such as collections. Every target still validates the Moth features it can execute.</p><h2 id="understand-the-execution-policy">Understand the execution policy</h2><p>Lappet V1 uses Wasmtime with Cranelift as its only native compiler. Development defaults to <code>OptLevel::None</code> and release to <code>OptLevel::Speed</code>, subject to benchmarks. Moth&#39;s output profile and the native optimisation level remain separate choices with the same language semantics. Winch is a possible future option.</p><p>Persistent AOT caches, async scheduling, foreign Wasm components and automatic native dependency installation are later work. JavaScript bindings remain a browser-builder capability and are not available in Lappet. File-backed WAT also requires an explicit provider and supported ABI rather than a general foreign-package loader.</p><h2 id="add-dependencies-deliberately">Add dependencies deliberately</h2><p>The planned package manager favours small, inspectable dependency graphs. Its first managed packages contain Moth source and are classified as no-core or Core-dependent. Dependencies on specialised Builder APIs remain outside that initial managed ecosystem.</p><p>An addition begins with dependency metadata checks, then obtains source in isolated staging for assessment. The report distinguishes dependency depth, breadth and size from security findings. A shallow dependency graph is not proof that a package is safe.</p><p>Failed checks or insufficient evidence cause rejection. Only an admissible proposal reaches user confirmation, and the project changes only after that confirmation. Downloading source for inspection is not installing a dependency. Exact assessment tools and limits remain future design checkpoints.</p><h2 id="follow-the-design">Follow the design</h2><ul><li><a href="../../developer-docs/project-builders">Rust project builders</a> explains the compiler SDK and host-binding contracts.</li><li><a href="../../developer-docs/wasm-optimisation">Wasm optimisation</a> owns the shared compiler and native-code optimisation policy.</li><li><a href="https://github.com/nyejames/moth/blob/main/crates/lappet/docs/design.md">Runtime
 design</a> records Lappet&#39;s execution and embedding boundaries.</li><li><a href="https://github.com/nyejames/moth/blob/main/crates/lappet/docs/package-manager.md">Package-manager design</a> records eligibility and admission policy.</li><li><a href="https://github.com/nyejames/moth/blob/main/crates/lappet/roadmap.md">Lappet

@@ -1,31 +1,24 @@
 @cast-syntax content as cast_syntax
-
 @cast-syntax-basic content as cast_syntax_basic
-
 @cast-targets content as cast_targets
-
 @cast-targets-basic content as cast_targets_basic
-
 @fallible-casts content as fallible_casts
-
 @fallible-casts-basic content as fallible_casts_basic
-
 @cast-evidence content as cast_evidence
-
 @cast-evidence-basic content as cast_evidence_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Casts"
 page_description #= "Explicit cast syntax, target contexts, fallible conversion and cast evidence in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Casts
 

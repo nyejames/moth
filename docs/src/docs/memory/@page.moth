@@ -1,35 +1,26 @@
 @reference-semantics content as reference_semantics
-
 @reference-semantics-basic content as reference_semantics_basic
-
 @copy-and-exclusive-access content as copy_and_exclusive_access
-
 @copy-and-exclusive-access-basic content as copy_and_exclusive_access_basic
-
 @lifetimes-and-result-shapes content as lifetimes_and_result_shapes
-
 @lifetimes-and-result-shapes-basic content as lifetimes_and_result_shapes_basic
-
 @automatic-cleanup-and-retained-edges content as automatic_cleanup_and_retained_edges
-
 @automatic-cleanup-and-retained-edges-basic content as automatic_cleanup_and_retained_edges_basic
-
 @declared-regions content as declared_regions
-
 @declared-regions-basic content as declared_regions_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Memory and lifetimes"
 page_description #= "Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Memory and lifetimes
 

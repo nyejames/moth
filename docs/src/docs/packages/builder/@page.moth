@@ -1,11 +1,11 @@
-@styles navbar, section, language_theme_head, doc_pager
+@styles navbar, section, language_theme_head, doc_pager, sidebar
 
 page_title #= "Builder packages"
 page_description #= "HTML builder helpers, canvas drawing and WebGL2 graphics packages provided by the HTML builder."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../ (Documentation) / @../ (Packages and dependencies) / Builder packages
 

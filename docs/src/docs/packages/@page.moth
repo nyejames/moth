@@ -1,43 +1,30 @@
 @dependency-paths content as dependency_paths
-
 @dependency-paths-basic content as dependency_paths_basic
-
 @dependency-clauses content as dependency_clauses
-
 @dependency-clauses-basic content as dependency_clauses_basic
-
 @module-visibility content as module_visibility
-
 @module-visibility-basic content as module_visibility_basic
-
 @public-reexports content as public_reexports
-
 @public-reexports-basic content as public_reexports_basic
-
 @project-local-packages content as project_local_packages
-
 @project-local-packages-basic content as project_local_packages_basic
-
 @package-origins-and-backing content as package_origins_and_backing
-
 @package-origins-and-backing-basic content as package_origins_and_backing_basic
-
 @external-binding-contracts content as external_binding_contracts
-
 @external-binding-contracts-basic content as external_binding_contracts_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Packages and dependencies"
 page_description #= "Dependency paths, module visibility, project-local packages and package origin and backing."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Packages and dependencies
 

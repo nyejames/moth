@@ -1,31 +1,24 @@
 @statement-if content as statement_if
-
 @statement-if-basic content as statement_if_basic
-
 @value-producing-if content as value_producing_if
-
 @value-producing-if-basic content as value_producing_if_basic
-
 @pattern-matching content as pattern_matching
-
 @pattern-matching-basic content as pattern_matching_basic
-
 @patterns-and-exhaustiveness content as patterns_and_exhaustiveness
-
 @patterns-and-exhaustiveness-basic content as patterns_and_exhaustiveness_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Branching"
 page_description #= "If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Branching
 

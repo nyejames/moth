@@ -1,10 +1,11 @@
-@styles navbar, section, theme_head, highlight
+@styles navbar, section, theme_head, highlight, sidebar
 
 page_title #= "What is Moth?"
 page_description #= "Introduction to the Moth language and toolchain."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
 #[section, $md:
 
     # What is Moth?

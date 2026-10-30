@@ -1,39 +1,28 @@
 @template-basics content as template_basics
-
 @template-basics-basic content as template_basics_basic
-
 @template-directives content as template_directives
-
 @template-directives-basic content as template_directives_basic
-
 @template-slots content as template_slots
-
 @template-slots-basic content as template_slots_basic
-
 @child-wrappers content as child_wrappers
-
 @child-wrappers-basic content as child_wrappers_basic
-
 @template-control-flow content as template_control_flow
-
 @template-control-flow-basic content as template_control_flow_basic
-
 @markdown-formatting content as markdown_formatting
-
 @markdown-formatting-basic content as markdown_formatting_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Templates"
 page_description #= "Template strings, directives, slots, wrappers, control flow and Markdown in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Templates
 

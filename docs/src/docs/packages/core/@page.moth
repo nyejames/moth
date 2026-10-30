@@ -1,12 +1,12 @@
 @html center
-@styles navbar, section, language_theme_head, doc_pager
+@styles navbar, section, language_theme_head, doc_pager, sidebar
 
 page_title #= "Core packages"
 page_description #= "Overview of Moth Core packages and their current HTML/JS support."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../ (Documentation) / @../ (Packages and dependencies) / Core packages
 

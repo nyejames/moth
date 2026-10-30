@@ -1,19 +1,18 @@
 @collections content as collections_advanced
-
 @collections-basic content as collections_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Core collections"
 page_description #= "Ordered collection literals and common collection methods."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../../../ (Documentation) / @../ (Core packages) / Core collections
 

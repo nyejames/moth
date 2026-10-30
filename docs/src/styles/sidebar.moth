@@ -1,0 +1,255 @@
+-- Shared documentation navigation. Add #[sidebar] after #[navbar] on each docs page.
+-- Only rules needing selectors or media queries use an embedded stylesheet.
+
+sidebar_toggle_style #= [$css("inline"):
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+]
+
+sidebar_style #= [$css("inline"):
+    box-sizing: border-box;
+    padding: 0.65rem;
+    border: 1px solid light-dark(#c8d2e3, #364259);
+    border-radius: 0.85rem;
+    background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));
+]
+
+sidebar_header_style #= [$css("inline"):
+    display: flex;
+    justify-content: var(--docs-sidebar-header-justify, space-between);
+    align-items: center;
+    gap: 0.25rem;
+]
+
+sidebar_home_style #= [$css("inline"):
+    padding: 0.45rem 0.6rem;
+    color: light-dark(#243f66, #d8e6ff);
+    font-weight: 700;
+    text-decoration: none;
+]
+
+sidebar_button_style #= [$css("inline"):
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.5rem;
+    color: light-dark(#385579, #c0d3f5);
+    background: var(--docs-sidebar-button-background, transparent);
+    cursor: pointer;
+    user-select: none;
+]
+
+sidebar_nav_style #= [$css("inline"):
+    margin-top: 0.7rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid light-dark(#dce3ef, #364259);
+]
+
+sidebar_group_style #= [$css("inline"):
+    margin: 1.1rem 0 0.3rem;
+    padding-inline: 0.6rem;
+    color: light-dark(#5a6980, #9faec6);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+]
+
+sidebar_link_style #= [$css("inline"):
+    display: block;
+    padding: 0.43rem 0.6rem;
+    border-radius: 0.45rem;
+    background: var(--docs-sidebar-link-background, transparent);
+    color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+    font-size: 0.9rem;
+    font-weight: var(--docs-sidebar-link-weight, 400);
+    line-height: 1.35;
+    text-decoration: none;
+]
+
+sidebar_rules #= [$css:
+    .docs-sidebar__button:hover {
+        --docs-sidebar-button-background: light-dark(#e7eefb, #26334c);
+    }
+
+    .docs-sidebar__link:hover {
+        --docs-sidebar-link-background: light-dark(#e7eefb, #26334c);
+    }
+
+    .docs-sidebar__link[aria-current="page"] {
+        --docs-sidebar-link-background: light-dark(#dce8fc, #293a5c);
+        --docs-sidebar-link-color: light-dark(#174a91, #c3d7ff);
+        --docs-sidebar-link-weight: 700;
+    }
+
+    .docs-sidebar__toggle:focus-visible ~ .docs-sidebar .docs-sidebar__button,
+    .docs-sidebar__link:focus-visible,
+    .docs-sidebar__home:focus-visible {
+        outline: 2px solid light-dark(#226cb7, #9ec2ff);
+        outline-offset: 2px;
+    }
+
+    @media (min-width: 961px) {
+        .docs-sidebar {
+            position: fixed;
+            top: 4.5rem;
+            bottom: 1rem;
+            left: clamp(0.75rem, 2vw, 2rem);
+            width: 15.5rem;
+            overflow-y: auto;
+        }
+
+        body:has(> .docs-sidebar) > .container {
+            width: auto;
+            max-width: 90rem;
+            margin-left: calc(17.5rem + 2.5vw);
+            margin-right: 2rem;
+        }
+
+        .docs-sidebar__toggle:checked ~ .docs-sidebar {
+            width: 3.75rem;
+        }
+
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__home {
+            display: none;
+        }
+
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
+            --docs-sidebar-header-justify: center;
+        }
+
+        body:has(> .docs-sidebar__toggle:checked) > .container {
+            margin-left: 5.75rem;
+        }
+    }
+
+    @media (max-width: 960px) {
+        .docs-sidebar {
+            width: calc(100% - 2rem);
+            margin: 0.85rem auto;
+        }
+
+        .docs-sidebar__nav {
+            display: none;
+            max-height: 65dvh;
+            overflow-y: auto;
+        }
+
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav {
+            display: block;
+        }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .docs-sidebar__button,
+        .docs-sidebar__link {
+            transition: color 150ms ease, background-color 150ms ease;
+        }
+    }
+
+    @media print {
+        .docs-sidebar,
+        .docs-sidebar__toggle {
+            display: none;
+        }
+
+        body:has(> .docs-sidebar) > .container {
+            width: auto;
+            max-width: none;
+            margin: 0;
+        }
+    }
+]
+
+sidebar #= [$html:
+    <style>[sidebar_rules]</style>
+
+    <input
+        type="checkbox"
+        id="docs-sidebar-toggle"
+        class="docs-sidebar__toggle"
+        style="[sidebar_toggle_style]"
+        aria-label="Toggle documentation navigation"
+        aria-controls="docs-sidebar-links"
+    >
+
+    <aside class="docs-sidebar" style="[sidebar_style]">
+        <div class="docs-sidebar__header" style="[sidebar_header_style]">
+            <a class="docs-sidebar__home" style="[sidebar_home_style]" href="[@/]docs/">Documentation</a>
+            <label
+                class="docs-sidebar__button"
+                style="[sidebar_button_style]"
+                for="docs-sidebar-toggle"
+                title="Toggle navigation"
+            >
+                <span aria-hidden="true">&#9776;</span>
+            </label>
+        </div>
+
+        <nav id="docs-sidebar-links" class="docs-sidebar__nav" style="[sidebar_nav_style]" aria-label="Documentation pages">
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Learn Moth</p>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/getting-started/">Getting started</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/language-overview/">Language basics</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/bindings/">Values and bindings</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/numbers/">Numbers</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/casts/">Casts</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/functions/">Functions</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/branching/">Branching</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/loops/">Loops</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/structs/">Structs</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/choices/">Choices</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/errors/">Errors and options</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/collections/">Collections and maps</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/templates/">Templates</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/constants/">Constants</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/aliases/">Aliases</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/generics/">Generics</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/traits/">Traits</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/wiring/">Wiring</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/memory/">Memory and lifetimes</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Projects and content</p>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/directives/">Directives</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/project-structure/">Project structure</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/packages/">Packages</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/packages/core/">Core packages</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/resources/">Resources</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/moth-templates/">Moth template files</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/markdown/">Markdown</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/mon/">MON format</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/design-scope/">Design scope</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Reference</p>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/cheatsheet/">Language cheatsheet</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/progress/">Compiler progress</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/progress/packages-and-builders/">Packages and builders</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Compiler internals</p>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/">Developer docs</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/compiler-design/">Compiler design</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/memory-management/">Memory management</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/style-guide/">Development standards</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Future design</p>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/async/">Async</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/lappet/">Lappet</a>
+        </nav>
+    </aside>
+
+    <script>
+        const currentPath = window.location.pathname;
+        document.querySelectorAll(".docs-sidebar__link").forEach(link => {
+            if (link.pathname === currentPath) {
+                link.setAttribute("aria-current", "page");
+            }
+        });
+    </script>
+]

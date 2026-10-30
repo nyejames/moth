@@ -1,11 +1,12 @@
 @html center
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar
 
 page_title #= "Coroutines and Async in Moth"
 page_description #= "Design draft for structured async, coroutines, channels and explicit suspension in Moth."
 page_head #= theme_head
 
 #[navbar]
+#[sidebar]
 #[title, center: COROUTINES AND ASYNC IN MOTH]
 
 #[section, $md:

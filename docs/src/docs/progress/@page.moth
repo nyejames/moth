@@ -1,5 +1,5 @@
 @html center, span
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar
 
 page_title #= "Progress Matrix"
 page_description #= "Current implementation status, coverage and feature progress for the Moth compiler."
@@ -12,7 +12,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
 #[title, center: PROGRESS MATRIX]
-
+#[sidebar]
 #[section, $md:
     This page tracks current implementation and target status for Moth's accepted core language,
     compiler, build-system and backend design. Package APIs and project-builder-specific behaviour

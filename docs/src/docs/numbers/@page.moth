@@ -1,31 +1,24 @@
 @numeric-types content as numeric_types
-
 @numeric-types-basic content as numeric_types_basic
-
 @numeric-literals content as numeric_literals
-
 @numeric-literals-basic content as numeric_literals_basic
-
 @operators content as operators
-
 @operators-basic content as operators_basic
-
 @checked-arithmetic content as checked_arithmetic
-
 @checked-arithmetic-basic content as checked_arithmetic_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Numbers"
 page_description #= "Numeric types, literals, operators and checked arithmetic in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Numbers
 

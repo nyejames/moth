@@ -1,27 +1,22 @@
 @type-aliases content as type_aliases
-
 @type-aliases-basic content as type_aliases_basic
-
 @dependency-aliases content as dependency_aliases
-
 @dependency-aliases-basic content as dependency_aliases_basic
-
 @payload-capture-aliases content as payload_capture_aliases
-
 @payload-capture-aliases-basic content as payload_capture_aliases_basic
-
 @styles navbar,
     section,
     language_theme_head,
     doc_level,
-    doc_pager
+    doc_pager,
+    sidebar
 
 page_title #= "Aliases"
 page_description #= "Type aliases, dependency aliases and choice payload capture aliases in Moth."
 page_head #= language_theme_head
 
 #[navbar]
-
+#[sidebar]
 #[section, $md:
     @../ (Documentation) / Aliases
 
