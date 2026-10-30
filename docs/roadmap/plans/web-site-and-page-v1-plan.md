@@ -1,9 +1,9 @@
 # HTML builder `@web/site` and `@web/page` V1
 
 Status: in progress
-Current slice: Phase 4 - validate, document and clean up
+Current slice: Final review
 Blockers: none known
-Next action: update canonical package references and the progress matrix, rebuild release docs and run the validation gates
+Next action: run the final review lanes and integration audit, then delete this plan and its roadmap entry
 
 ## Goal
 

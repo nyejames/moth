@@ -25,9 +25,9 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
         [: **Backing**]
     ]
 
-    [td: [:`@html`] [: Builder] [: MothSource]]
+    [td: [:`@html`, `@web/site`] [: Builder] [: MothSource]]
     [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
-    [td: [:`@web/canvas`, `@web/graphics`] [: Builder] [: ExternalBinding]]
+    [td: [:`@web/canvas`, `@web/graphics`, `@web/page`] [: Builder] [: ExternalBinding]]
     [td: [: Scoped `+*.moth` support package] [: ProjectLocal] [: MothSource]]
     [td: [: Project-root `+*.moth` facade] [: ProjectLocal] [: MothSource]]
     [td: [: Annotated project-local `.js` file] [: ProjectLocal] [: ExternalBinding]]

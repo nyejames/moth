@@ -288,6 +288,22 @@ init_docs_sidebar()!
             [: HTML / JS]
             [: The current surface covers canvas element management, 2D context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. Canvas is deliberately allowed a broader expansion target than most packages because visuals and animation make it a useful Moth language and runtime stress-test surface.]
         ]
+
+        [data:
+            [: Static site URL package [$html:<code>@web/site</code>]]
+            [: Supported]
+            [: Integration cases cover origin-aware root and suffix rendering on both HTML targets, the structural site root surviving package export and cross-module composition, no browser asset emission and absence from [$html:<code>.mtf</code>] implicit scope. A unit test covers its Builder source registration.]
+            [: HTML builder]
+            [: Builder source-backed package at the nested [$html:<code>web/site</code>] prefix. [$html:<code>root</code>] and the [$html:<code>url</code>] slot wrapper compose compile-time strings only. Route validation, encoding and route matching are outside V1.]
+        ]
+
+        [data:
+            [: Browser page state package [$html:<code>@web/page</code>]]
+            [: Supported]
+            [: Node execution tests cover every getter, navigation matching, aliases, breadcrumbs, marker cleanup and typed failures. Integration cases cover namespace and direct callers, runtime asset emission, unused imports, the missing-import boundary and HTML-Wasm rejection. The docs sidebar uses it.]
+            [: HTML / JS]
+            [: Builder binding-backed snapshots read on each call plus the opt-in [$html:<code>sync_navigation</code>] helper. Event subscriptions, reactive state and general DOM access are deferred.]
+        ]
     ]
 ]
 

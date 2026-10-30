@@ -445,9 +445,29 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
     --docs-sidebar-link-weight: 700;
 }
 
+.docs-sidebar__current {
+    color: light-dark(#5a6980, #9faec6);
+    font-size: 0.9rem;
+}
+
+.docs-sidebar__current a {
+    color: light-dark(#30465f, #cad5e8);
+    text-decoration: none;
+}
+
+.docs-sidebar__current a:hover {
+    text-decoration: underline;
+}
+
+.docs-sidebar__current [aria-current="page"] {
+    color: light-dark(#243f66, #d8e6ff);
+    font-weight: 600;
+}
+
 .docs-sidebar__toggle:focus-visible ~ .docs-sidebar .docs-sidebar__button,
 .docs-sidebar__link:focus-visible,
-.docs-sidebar__home:focus-visible {
+.docs-sidebar__home:focus-visible,
+.docs-sidebar__current a:focus-visible {
     outline: 2px solid light-dark(#226cb7, #9ec2ff);
     outline-offset: 2px;
 }
@@ -474,7 +494,7 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
     }
 
     .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__home {
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
         display: none;
     }
 
@@ -539,7 +559,7 @@ white-space: nowrap;"
     aria-controls="docs-sidebar-links"
 >
 
-<aside class="docs-sidebar" style="box-sizing: border-box;
+<aside id="docs-sidebar" class="docs-sidebar" style="box-sizing: border-box;
 padding: 0.65rem;
 border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
@@ -548,10 +568,14 @@ background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
 justify-content: var(--docs-sidebar-header-justify, space-between);
 align-items: center;
 gap: 0.25rem;">
-        <a class="docs-sidebar__home" style="padding: 0.45rem 0.6rem;
-color: light-dark(#243f66, #d8e6ff);
+        <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
+padding: 0.45rem 0.6rem;
+line-height: 1.35;" aria-label="Breadcrumb">
+            <a class="docs-sidebar__home" style="color: light-dark(#243f66, #d8e6ff);
 font-weight: 700;
-text-decoration: none;" href="/moth/docs/">Documentation</a>
+text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
+            <span class="docs-sidebar__current" data-page-current hidden></span>
+        </nav>
         <label
             class="docs-sidebar__button"
             style="display: inline-grid;
@@ -571,9 +595,15 @@ user-select: none;"
         </label>
     </div>
 
-    <nav id="docs-sidebar-links" class="docs-sidebar__nav" style="margin-top: 0.7rem;
+    <nav
+        id="docs-sidebar-links"
+        class="docs-sidebar__nav"
+        style="margin-top: 0.7rem;
 padding-top: 0.35rem;
-border-top: 1px solid light-dark(#dce3ef, #364259);" aria-label="Documentation pages">
+border-top: 1px solid light-dark(#dce3ef, #364259);"
+        aria-label="Documentation pages"
+        data-page-links
+    >
         <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
 padding-inline: 0.6rem;
 color: light-dark(#5a6980, #9faec6);
@@ -804,6 +834,15 @@ color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
 font-size: 0.9rem;
 font-weight: var(--docs-sidebar-link-weight, 400);
 line-height: 1.35;
+text-decoration: none;" href="/moth/docs/packages/builder/">Builder packages</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
 text-decoration: none;" href="/moth/docs/resources/">Resources</a>
         <a class="docs-sidebar__link" style="display: block;
 padding: 0.43rem 0.6rem;
@@ -948,15 +987,6 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
-
-<script>
-    const currentPath = window.location.pathname;
-    document.querySelectorAll(".docs-sidebar__link").forEach(link => {
-        if (link.pathname === currentPath) {
-            link.setAttribute("aria-current", "page");
-        }
-    });
-</script>
 <section class="container"><h1 id="what-is-moth">What is Moth?</h1><p>Moth is a new programming language and toolchain.</p><p>It focuses on predictable, safe and reliable code with modern language ergonomics.</p><p>There is also an ambitious and unique memory management plan and a Wasm focused but modular backend design for future proofing (with incomplete implementation).</p><span style="color: light-dark(hsl(254, 86%, 42%), hsl(184, 85%, 76%));"><p> <em>This website was created using Moth!</em></p></span><p>The source code for this whole website can be found on <a href="https://github.com/nyejames/moth/tree/main/docs/src">Github</a>.</p><br><h2 id="documentation">Documentation</h2><p>The <a href="./docs">Alpha language docs</a> explains everything about the language, compiler and making Moth projects.</p><p>This project is in early alpha, so not everything is exactly up to date with the current compiler.</p><span style="color: light-dark(hsl(254, 86%, 42%), hsl(184, 85%, 76%));"><p> <em>You can already use Moth for web projects, but be aware of the early alpha status</em></p></span><br><h2 id="ai">AI</h2><p>This project started off all handwritten, and is still human designed.</p><p>But most of the coding workflow is now heavily AI driven. You can <a href="https://github.com/nyejames/moth/blob/main/HUMANS.md">read this document</a> for more detail on the project&#39;s AI policy.</p><p>Moths design turned out to be great for LLM coding workflows due to its Rust inspiration.</p><p>It&#39;s now actively being designed for a future where most code is written by AI, with humans driving the core design and review loops.</p><p>This is because the design principles follow this rule: <em>Keep the programmer-facing model small and predictable. Make a strict compiler that proves more and gives snappy, comprehensive feedback.</em></p><h2 id="a-small-language-with-a-powerful-compiler">A small language with a powerful compiler</h2><p>Programmers should spend less time worrying about bundling piles of languages together and what their code should look like in their codebase. </p><span style="color: light-dark(hsl(254, 86%, 42%), hsl(184, 85%, 76%));"><p> <strong>This is why Moth exists.</strong></p></span><p>Most languages leave a lot of the powerful stuff we use all the time in modern development to libraries and frameworks. Template engines, bundlers, web frameworks, documentation generation and module systems often get overlooked as fertile ground for first-class features that have been tried and tested already.</p><p>Moth considers the lifecycle of a project the responsibility of the language and its integrated build system.  And it should look the same no matter the scale.</p><br><h3 id="its-time-to-re-imagine-strings">Its time to re-imagine strings</h3><p>Templates are central to all of these design principles. They are Moth&#39;s most powerful feature. </p><p>Templates are core to the language and produce ordinary <code>String</code> values.  The compiler then handles the composition, slots, control flow and Markdown formatting. When every input resolves at compile time, Moth folds the whole template to a string before HIR and code generation.  When runtime work remains, only that work survives. </p><p>The HTML builder then brings Moth source, <code>.mtf</code> templates, Markdown, assets, routing and hot reload into the same project flow.  Static content leaves no general template engine behind, and builders consume compiler graphs and link plans instead of inventing a second understanding of the program. </p><span style="color: light-dark(hsl(254, 86%, 42%), hsl(184, 85%, 76%));"><p><em>This docs site already runs through this toolchain.</em></p></span><p>General closures, operator overloading, reflection, trait objects and broad metaprogramming are excluded from the language design on purpose.  Those mechanisms can hide control flow, add runtime machinery or turn local code into a type-solving exercise.  Moth provides simpler tools that scale better. </p><p>Moth still has plenty of rough edges but aspires to grow into a language that feels joyful at every scale without different sized projects feeling like a completely different tech stack. </p></section>
 <script>
 function __moth_is_ref(value) {
