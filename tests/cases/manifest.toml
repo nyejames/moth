@@ -18262,7 +18262,7 @@ id = "web_site_case_variant_import_rejected"
 path = "web_site_case_variant_import_rejected"
 tags = ["integration", "source-packages", "dependencies", "diagnostics", "html", "html-wasm"]
 contract = "language.dependencies.package_case_variant_import_rejected"
-role = "boundary"
+role = "primary"
 
 [[case]]
 id = "web_page_reachable"

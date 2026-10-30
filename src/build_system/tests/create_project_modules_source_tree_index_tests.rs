@@ -284,7 +284,11 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
                 .context()
                 .strings()
                 .resolve(diagnostic.string_ids()[1]),
-            entry.join(folder).display().to_string(),
+            folder
+                .split('/')
+                .fold(entry.clone(), |path, component| path.join(component))
+                .display()
+                .to_string(),
             "{reason}"
         );
     };
