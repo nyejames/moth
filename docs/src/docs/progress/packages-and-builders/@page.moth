@@ -236,7 +236,7 @@ init_docs_sidebar()!
         [data:
             [: HTML project builds]
             [: Supported]
-            [: Broad routing, API-only artefact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage. Facade scenarios check exact provider materialisation and demanded wrappers without inactive assets. Multi-entry checks preserve one shared provider and page-specific wrapper selection.]
+            [: Broad routing, API-only artefact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage. Facade scenarios check exact provider materialisation and demanded wrappers without inactive assets. Multi-entry checks preserve one shared provider and page-specific wrapper selection. Pages with identical wrapper selections share one source-named glue module.]
             [: HTML / JS]
             [: This is the release-critical project builder. Only roots with HTML artefact activity participate in page, runtime asset, resource-output and homepage planning. Backend implementation and HTML-Wasm progress remain on the compiler progress matrix.]
         ]

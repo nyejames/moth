@@ -703,6 +703,12 @@ fn repeated_glue_path_shares_identical_source_and_rejects_different_bytes() {
     );
     let shared = is_shared_glue_output(&page_js, home, &page_js.clone(), about);
     assert!(!shared.expect("non-glue repeats are not glue failures"));
+    let nested = OutputFile::new(
+        PathBuf::from("_moth/js/glue/nested/module-0123456789abcdef.js"),
+        FileKind::Js(String::new()),
+    );
+    let shared = is_shared_glue_output(&nested, home, &nested.clone(), about);
+    assert!(!shared.expect("only direct glue directory children are glue"));
 }
 
 #[test]

@@ -27,6 +27,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Collecting bad diagnostics examples to be improved later](./plans/bad-diagnostics-log.md): **ONGOING**
 
+- [HTML JS glue sharing and web package V1 hardening](./plans/html-js-glue-sharing-and-web-v1-hardening-plan.md) - Implemented on `web-site-and-page-v1` and awaiting the user's final review. **ACTIVE.**
+
 ## Sequenced work
 
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.

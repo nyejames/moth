@@ -3,7 +3,7 @@
 Status: active follow-up on `web-site-and-page-v1`
 Current slice: Phase 3 - final audit and handoff
 Blockers: none known
-Next action: run the final review lanes, then hand off for the user's independent review
+Next action: the user's independent review, then retire this plan and its roadmap entry in the completion commit
 
 ## Goal
 
@@ -81,6 +81,11 @@ Required cases:
 
 Regenerate `docs/release` with `moth build docs --release`. The new output should contain one glue module for the shared `sync_navigation` selection, subject to any other genuinely distinct selections found by the build. Remove obsolete tracked glue copies. Inspect several depth levels of HTML documents to verify imports and navigation markup. Do not edit generated HTML or glue files by hand.
 
+Phase 1 and 2 outcome:
+
+- Release docs glue went from 81 files totalling 84,807 bytes to one 1,047-byte module imported by all 83 pages. Manifest cleanup removed the old copies.
+- `build_system::utils::stable_content_hash` is now the single one-shot FNV-1a owner. The incremental fingerprint hashers in `config_boundary.rs` and `build_config.rs` stay separate because they feed bytes piecewise.
+
 ## Phase 3 - final audit and handoff
 
 1. Review all changed code against the code review guide for duplicate hashing, redundant maps, arbitrary helper extraction, stale path-based comments, target-specific leakage and unnecessary allocations. Inspect the full resulting diff, not only the new tests.
@@ -88,6 +93,14 @@ Regenerate `docs/release` with `moth build docs --release`. The new output shoul
 3. Measure emitted glue file count and total bytes before and after the change. Confirm one shared glue file for the docs navigation case, valid imports and no obsolete files in the final generated release tree. Avoid claiming broader bundle-size or browser performance improvements without measurement.
 4. Update only the package README and canonical docs whose accepted behaviour actually changed. Preserve the separate deferred contextual-constants proposal and its existing roadmap entry.
 5. Commit work on `web-site-and-page-v1`, leave this plan available and provide a concise review handoff listing changed files, tests, remaining limitations and any justified deferred work. **Do not merge the branch, retire this plan or mark the V1 follow-up closed before the user's final review.**
+
+Phase 3 outcome:
+
+- Final correctness, architecture and integration audits passed with no required findings.
+- Known limits for review:
+  - The homepage is unlisted in the sidebar, so its breadcrumb reads "Documentation / What is Moth?".
+  - Collision handling inside the builder loop is unit-tested through `is_shared_glue_output`, not through a build. A real digest collision can't be constructed.
+  - The pre-existing empty-path fallback in `relative_url_path` is unreachable for real assets and was left alone.
 
 ## Acceptance criteria
 
