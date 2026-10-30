@@ -14,7 +14,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Language basics"
 page_description #= "Blocks, comments, naming, core values, strings and MON syntax in Moth."
@@ -22,9 +23,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Language basics
-
     # Language basics
 
     Moth uses a compact set of syntax rules across the whole language. Colons

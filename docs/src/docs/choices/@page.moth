@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Choices"
 page_description #= "Choice declarations, variants, payload patterns and structural equality in Moth."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Choices
-
     # Choices
 
     A choice creates a nominal tagged union. Each value carries one named variant

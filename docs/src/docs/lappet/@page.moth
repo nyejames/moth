@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, sidebar
+@styles navbar, section, theme_head, sidebar, init_docs_sidebar
 @lappet content as lappet_content
 
 page_title #= "Lappet"
@@ -7,9 +7,8 @@ page_head #= theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Lappet
-
     # Lappet
 
     Use an official native environment or embed Moth in a Rust application.

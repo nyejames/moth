@@ -171,6 +171,13 @@ body {
   vertical-align: inherit;
 }
     </style>
+<script type="importmap">
+{
+  "imports": {
+    "@moth/runtime": "../../_moth/js/runtime/moth-runtime.js"
+  }
+}
+</script>
 <style>@font-face {
     font-family: "Computer Modern Sans";
     src: url("../../styles/fonts/cmunss.woff2") format("woff2");
@@ -718,9 +725,29 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
     --docs-sidebar-link-weight: 700;
 }
 
+.docs-sidebar__current {
+    color: light-dark(#5a6980, #9faec6);
+    font-size: 0.9rem;
+}
+
+.docs-sidebar__current a {
+    color: light-dark(#30465f, #cad5e8);
+    text-decoration: none;
+}
+
+.docs-sidebar__current a:hover {
+    text-decoration: underline;
+}
+
+.docs-sidebar__current [aria-current="page"] {
+    color: light-dark(#243f66, #d8e6ff);
+    font-weight: 600;
+}
+
 .docs-sidebar__toggle:focus-visible ~ .docs-sidebar .docs-sidebar__button,
 .docs-sidebar__link:focus-visible,
-.docs-sidebar__home:focus-visible {
+.docs-sidebar__home:focus-visible,
+.docs-sidebar__current a:focus-visible {
     outline: 2px solid light-dark(#226cb7, #9ec2ff);
     outline-offset: 2px;
 }
@@ -728,11 +755,24 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
 @media (min-width: 961px) {
     .docs-sidebar {
         position: fixed;
-        top: 4.5rem;
+        top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
         bottom: 1rem;
         left: clamp(0.75rem, 2vw, 2rem);
+        display: flex;
+        flex-direction: column;
         width: 15.5rem;
+        overflow: hidden;
+    }
+
+    .docs-sidebar__nav {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
+    }
+
+    /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+    .docs-sidebar__link:focus-visible {
+        outline-offset: -2px;
     }
 
     body:has(> .docs-sidebar) > .container {
@@ -746,13 +786,19 @@ padding: 0rem 2rem 0rem 2rem;" aria-label="Primary">
         width: 3.75rem;
     }
 
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__home {
-        display: none;
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+        --docs-sidebar-button-size: auto;
+        position: absolute;
+        inset: 0;
     }
 
-    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-        --docs-sidebar-header-justify: center;
+    .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+        outline-offset: -4px;
+    }
+
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
+    .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
+        display: none;
     }
 
     body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -812,26 +858,30 @@ white-space: nowrap;"
     aria-controls="docs-sidebar-links"
 >
 
-<aside class="docs-sidebar" style="box-sizing: border-box;
+<aside id="docs-sidebar" class="docs-sidebar" style="box-sizing: border-box;
 padding: 0.65rem;
 border: 1px solid light-dark(#c8d2e3, #364259);
 border-radius: 0.85rem;
 background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));">
     <div class="docs-sidebar__header" style="display: flex;
-justify-content: var(--docs-sidebar-header-justify, space-between);
+justify-content: space-between;
 align-items: center;
 gap: 0.25rem;">
-        <a class="docs-sidebar__home" style="padding: 0.45rem 0.6rem;
-color: light-dark(#243f66, #d8e6ff);
+        <nav class="docs-sidebar__breadcrumb" style="min-width: 0;
+padding: 0.45rem 0.6rem;
+line-height: 1.35;" aria-label="Breadcrumb">
+            <a class="docs-sidebar__home" style="color: light-dark(#243f66, #d8e6ff);
 font-weight: 700;
-text-decoration: none;" href="/moth/docs/">Documentation</a>
+text-decoration: none;" href="/moth/docs/" data-page-home>Documentation</a>
+            <span class="docs-sidebar__current" data-page-current hidden></span>
+        </nav>
         <label
             class="docs-sidebar__button"
             style="display: inline-grid;
 place-items: center;
 flex: none;
-width: 2.25rem;
-height: 2.25rem;
+width: var(--docs-sidebar-button-size, 2.25rem);
+height: var(--docs-sidebar-button-size, 2.25rem);
 border-radius: 0.5rem;
 color: light-dark(#385579, #c0d3f5);
 background: var(--docs-sidebar-button-background, transparent);
@@ -844,9 +894,15 @@ user-select: none;"
         </label>
     </div>
 
-    <nav id="docs-sidebar-links" class="docs-sidebar__nav" style="margin-top: 0.7rem;
+    <nav
+        id="docs-sidebar-links"
+        class="docs-sidebar__nav"
+        style="margin-top: 0.7rem;
 padding-top: 0.35rem;
-border-top: 1px solid light-dark(#dce3ef, #364259);" aria-label="Documentation pages">
+border-top: 1px solid light-dark(#dce3ef, #364259);"
+        aria-label="Documentation pages"
+        data-page-links
+    >
         <p class="docs-sidebar__group" style="margin: 1.1rem 0 0.3rem;
 padding-inline: 0.6rem;
 color: light-dark(#5a6980, #9faec6);
@@ -1077,6 +1133,15 @@ color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
 font-size: 0.9rem;
 font-weight: var(--docs-sidebar-link-weight, 400);
 line-height: 1.35;
+text-decoration: none;" href="/moth/docs/packages/builder/">Builder packages</a>
+        <a class="docs-sidebar__link" style="display: block;
+padding: 0.43rem 0.6rem;
+border-radius: 0.45rem;
+background: var(--docs-sidebar-link-background, transparent);
+color: var(--docs-sidebar-link-color, light-dark(#30465f, #cad5e8));
+font-size: 0.9rem;
+font-weight: var(--docs-sidebar-link-weight, 400);
+line-height: 1.35;
 text-decoration: none;" href="/moth/docs/resources/">Resources</a>
         <a class="docs-sidebar__link" style="display: block;
 padding: 0.43rem 0.6rem;
@@ -1221,16 +1286,8 @@ line-height: 1.35;
 text-decoration: none;" href="/moth/docs/lappet/">Lappet</a>
     </nav>
 </aside>
-
-<script>
-    const currentPath = window.location.pathname;
-    document.querySelectorAll(".docs-sidebar__link").forEach(link => {
-        if (link.pathname === currentPath) {
-            link.setAttribute("aria-current", "page");
-        }
-    });
-</script>
-<section class="container"><p><a href="../">Documentation</a> / Project structure</p><h1 id="project-structure">Project structure</h1><p>A Moth project combines directory-scoped modules, one strict project config and a builder that selects the final artefacts.</p><p>Normal module roots start with <code>@</code>. Support and package-facade roots start with <code>+</code>. The rest of the filename stays cosmetic. <code>export:</code> currently defines the public API. <code>$page</code> will declare HTML artefacts; today the builder still selects entries from implemented root activity.</p></section>
+<script src="../../styles/sidebar.js" defer></script>
+<section class="container"><h1 id="project-structure">Project structure</h1><p>A Moth project combines directory-scoped modules, one strict project config and a builder that selects the final artefacts.</p><p>Normal module roots start with <code>@</code>. Support and package-facade roots start with <code>+</code>. The rest of the filename stays cosmetic. <code>export:</code> currently defines the public API. <code>$page</code> will declare HTML artefacts; today the builder still selects entries from implemented root activity.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Project layout
@@ -1991,7 +2048,300 @@ footer <span class='moth-code-operator'>#=</span> <span class='moth-code-delimit
 
 
 </nav></section>
-<script>
+<script type="module">
+import { __moth_glue_fn213 } from "../../_moth/js/glue/module-623782c4280f5989.js";
+let __moth_error_code, __moth_error_message, __moth_src_fn_0, __moth_src_fn_1, __moth_src_fn_2, __moth_src_fn_3, __moth_src_fn_4, __moth_src_fn_5, __moth_src_fn_6, b_fn0;
+({ __moth_src_fn_6 } = (() => {
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_alias_binding(ref) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "alias", __moth_slot: null, __moth_target: ref };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+return __moth_alias_binding(value);
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+if (__moth_resolve(ref) === binding) { return binding; }
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
+}
+
+function __moth_collection_items(collection) {
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
+}
+
+function __moth_collection_is_valid(collection) {
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
+}
+
+function __moth_collection_push_growable(collection, value) {
+    if (collection.length >= 2147483647) throw new RangeError("Collection length exceeds the I32 length carrier");
+    collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
+    return items.length;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function __moth_src_fn_6() {
+let b_l0;
+let b_l1;
+let b_l2;
+
+const __invoke_result_0 = __moth_glue_fn213("docs-sidebar");
+b_l1 = undefined;
+b_l2 = undefined;
+if (__invoke_result_0.tag === "ok") {
+b_l1 = __moth_binding(__invoke_result_0.value);
+b_l0 = __moth_binding(__moth_read(b_l1));
+return { tag: "ok", value: undefined };
+} else {
+b_l2 = __moth_binding(__invoke_result_0.value);
+return { tag: "err", value: __moth_read(b_l2) };
+}
+}
+
+return { __moth_src_fn_6 };
+})());
+({ __moth_error_code, __moth_error_message, b_fn0 } = (() => {
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;
 }
@@ -2263,16 +2613,39 @@ return String(value);
 
 function b_fn0() {
 let b_l0;
+let b_l1;
 
 b_l0 = __moth_binding([]);
-return __moth_read(b_l0);
+const __invoke_result_0 = __moth_src_fn_6();
+b_l1 = undefined;
+if (__invoke_result_0.tag === "ok") {
+return { tag: "ok", value: __moth_read(b_l0) };
+} else {
+b_l1 = __moth_binding(__invoke_result_0.value);
+return { tag: "err", value: __moth_read(b_l1) };
+}
 }
 
-</script>
-<script>
+return { __moth_error_code, __moth_error_message, b_fn0 };
+})());
+
 (function () {
   try {
-    if (typeof b_fn0 === "function") b_fn0();
+    var moth_result = b_fn0();
+    if (moth_result.tag !== "ok") {
+      if (typeof globalThis.__moth_record_entry_failure === "function") {
+        var moth_error = moth_result.value;
+        globalThis.__moth_record_entry_failure(__moth_error_code(moth_error), __moth_error_message(moth_error), moth_error.__moth_location ?? null);
+      }
+      if (typeof process !== "undefined" && process.stderr) {
+        process.stderr.write("Moth entry failed\n");
+        process.exitCode = 1;
+      }
+      if (typeof document !== "undefined" && document.body && document.createTextNode) {
+        document.body.appendChild(document.createTextNode("This page could not start."));
+      }
+      return;
+    }
   } catch (error) {
     try {
       if (typeof globalThis.__moth_record_startup_fault === "function") {

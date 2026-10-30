@@ -241,6 +241,86 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
 }
 
 #[test]
+fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(temp.path()).expect("should canonicalize temp dir");
+    let entry = root.join("src");
+    fs::create_dir_all(entry.join("web")).expect("should create ancestor folder");
+    fs::write(entry.join("@home.moth"), "").expect("should write entry root");
+    let mut config = Config::new(root.clone());
+    config.entry_root = PathBuf::from("src");
+    let mut packages = crate::builder_surface::SourcePackageRegistry::default();
+    packages
+        .register_filesystem_root("web/site", root.join("package"), PackageOrigin::Builder)
+        .expect("should register nested package prefix");
+    let discover = || {
+        super::source_tree_index::SourceTreeIndex::discover(
+            entry.clone(),
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &root,
+                validated_output_settings: None,
+            },
+            &config,
+            &packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+            &mut StringTable::new(),
+        )
+    };
+    // The diagnostic names the offending folder as spelled on disk, not the registered prefix.
+    let assert_collision = |folder: &str, reason: &str| {
+        let reports = diagnosed_reports(discover().expect_err(reason));
+        let (report, diagnostic) = first_invalid_config(&reports);
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("config failure should retain typed facts");
+        assert_eq!(
+            facts.reason,
+            InvalidConfigCode::EntryRootPackagePrefixCollision,
+            "{reason}"
+        );
+        assert_eq!(
+            report
+                .context()
+                .strings()
+                .resolve(diagnostic.string_ids()[1]),
+            folder
+                .split('/')
+                .fold(entry.clone(), |path, component| path.join(component))
+                .display()
+                .to_string(),
+            "{reason}"
+        );
+    };
+
+    discover().expect("ancestor folder alone must be allowed");
+    fs::create_dir(entry.join("web/site")).expect("should create exact nested folder");
+    assert_collision("web/site", "exact nested path must collide");
+
+    // Module ownership of the folder doesn't change its entry-root-relative identity.
+    fs::write(entry.join("web/@mod.moth"), "").expect("should write nested module root");
+    assert_collision(
+        "web/site",
+        "exact nested path inside a nested module must still collide",
+    );
+
+    // Package identities reject ASCII case-only overlaps, so case variants claim the same path
+    // on case-sensitive and case-insensitive hosts alike.
+    fs::remove_dir(entry.join("web/site")).expect("should remove exact nested folder");
+    fs::create_dir(entry.join("web/Site")).expect("should create case-variant leaf folder");
+    assert_collision(
+        "web/Site",
+        "case-variant leaf inside a nested module must collide",
+    );
+
+    fs::remove_dir_all(entry.join("web")).expect("should remove lowercase ancestor");
+    fs::create_dir(entry.join("Web")).expect("should create case-variant ancestor");
+    discover().expect("case-variant ancestor alone must be allowed");
+    fs::create_dir(entry.join("Web/site")).expect("should create case-variant nested folder");
+    assert_collision("Web/site", "case-variant ancestor path must collide");
+}
+
+#[test]
 fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();

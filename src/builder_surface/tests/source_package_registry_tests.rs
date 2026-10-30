@@ -71,7 +71,41 @@ fn register_filesystem_root_rejects_case_only_duplicate_prefix() {
             PackageOrigin::Builder,
         )
         .expect_err("case-only variants of a registered prefix must be rejected");
-    assert!(!registry.has_prefix("UI"));
+    assert!(registry.get_root("UI").is_none());
+}
+
+#[test]
+fn register_filesystem_root_accepts_nested_prefix_and_rejects_overlaps() {
+    let mut registry = SourcePackageRegistry::new();
+    register(
+        &mut registry,
+        "web/site",
+        "/builder/site",
+        PackageOrigin::Builder,
+    );
+    for overlapping in ["Web/SITE", "web", "WEB", "web/site/extra"] {
+        registry
+            .register_filesystem_root(
+                overlapping,
+                std::path::PathBuf::from("/other/site"),
+                PackageOrigin::Builder,
+            )
+            .expect_err(&format!(
+                "{overlapping:?} overlaps registered web/site and must be rejected"
+            ));
+    }
+    register(
+        &mut registry,
+        "web/sites",
+        "/builder/sites",
+        PackageOrigin::Builder,
+    );
+
+    let prefixes: Vec<&str> = registry
+        .iter()
+        .map(|root| root.package_prefix.as_str())
+        .collect();
+    assert_eq!(prefixes, vec!["web/site", "web/sites"]);
 }
 
 #[test]
@@ -84,7 +118,6 @@ fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
         "core",
         "CORE",
         "core/ui",
-        "ui/x",
         "",
         "ui//x",
         "ui#x",
@@ -110,7 +143,7 @@ fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
 }
 
 #[test]
-fn get_root_and_has_prefix_locate_registered_root() {
+fn get_root_locates_registered_root() {
     let mut registry = SourcePackageRegistry::new();
     register(
         &mut registry,
@@ -119,8 +152,7 @@ fn get_root_and_has_prefix_locate_registered_root() {
         PackageOrigin::Builder,
     );
 
-    assert!(registry.has_prefix("html"));
-    assert!(!registry.has_prefix("missing"));
+    assert!(registry.get_root("missing").is_none());
 
     let root = registry.get_root("html").expect("html root should exist");
     assert!(

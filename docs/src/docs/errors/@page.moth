@@ -16,7 +16,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Errors, options and assertions"
 page_description #= "Recoverable errors, optional values, local recovery and assertions in Moth."
@@ -24,9 +25,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Errors, options and assertions
-
     # Errors, options and assertions
 
     Moth separates ordinary absence, recoverable failure and broken invariants.

@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Loops"
 page_description #= "Conditional, collection and range loops with break and continue in Moth."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Loops
-
     # Loops
 
     Moth uses one `loop` keyword for conditional repetition, collection

@@ -1,0 +1,6 @@
+-- Static site URL helpers for HTML project builds.
+-- Provided by the HTML project builder as a source-backed Builder package.
+export:
+    root #String = @/
+    url #String = [:[root][$slot]]
+;

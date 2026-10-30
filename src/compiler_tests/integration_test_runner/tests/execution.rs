@@ -523,12 +523,11 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
             1,
             "the consumer graph must not absorb the source-backed @html package"
         );
-        assert_eq!(frontend.source_packages.len(), 1);
         let html_package = frontend
             .source_packages
-            .get(0)
+            .iter()
+            .find(|package| package.package_prefix() == "html")
             .expect("the registered HTML source package should publish separately");
-        assert_eq!(html_package.package_prefix(), "html");
         assert!(
             html_package
                 .boundary
@@ -641,19 +640,12 @@ fn synthetic_single_file_moth_template_uses_implicit_html_package() {
         .expect("should write Moth template using the implicit HTML helper");
 
         let frontend = fixture.html_frontend();
-        assert_eq!(
-            frontend.source_packages.len(),
-            1,
-            "{entry_mode}: the implicit HTML package should publish separately"
-        );
-        assert_eq!(
+        assert!(
             frontend
                 .source_packages
-                .get(0)
-                .expect("the implicit HTML package should publish")
-                .package_prefix(),
-            "html",
-            "{entry_mode}: the Moth template's helper provider remains a separate package"
+                .iter()
+                .any(|package| package.package_prefix() == "html"),
+            "{entry_mode}: the Moth template's helper provider publishes as a separate package"
         );
 
         let built = fixture.build(&[]);

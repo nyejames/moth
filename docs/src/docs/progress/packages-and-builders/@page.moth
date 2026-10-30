@@ -1,5 +1,5 @@
 @html center, span
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head
+@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Packages and Builders Progress Matrix"
 page_description #= "Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."
@@ -11,6 +11,8 @@ orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
 green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 #[title, center: PACKAGES AND BUILDERS PROGRESS]
 
 #[section, $md:
@@ -129,7 +131,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Builder-provided source-backed packages]
             [: Partial]
-            [: Targeted builder source-backed registration and HTML Builder package coverage. Direct-file and directory consumers share HTML/Canvas package boundaries and reject registered-package source collisions, including case-only names and child scopes. Missing direct-file dependencies retain authored spans, and ordinary/Boracle package failures retain source context. No-dependency direct-file consumers skip package bodies but validate namespaces. Template file values retain implicit HTML helpers. Nested and flat registered-package graphs exercise the real writer and Node with distinct logical JS paths, exact provider bytes, runtime values and stable import/wrapper order across repeated and reversed creation/registration.]
+            [: Targeted builder source-backed registration and HTML Builder package coverage. Direct-file and directory consumers share HTML/Canvas package boundaries and reject registered-package source collisions, including case-only names and child scopes. Missing direct-file dependencies retain authored spans, and ordinary/Boracle package failures retain source context. No-dependency direct-file consumers skip package bodies but validate namespaces. Template file values retain implicit HTML helpers. Nested and flat registered-package graphs exercise the real writer and Node with distinct logical JS paths, exact provider bytes, runtime values and stable import/wrapper order across repeated and reversed creation/registration. Multi-component package paths such as [$html:<code>@x/y</code>] resolve by whole components through a real build. Registration rejects overlapping source paths, and an entry-root folder at the exact package path collides while ancestor folders stay allowed.]
             [: Frontend / HTML]
             [$md: Builders expose source-backed packages through [$html:<code>BuilderSurface.source_packages</code>], including HTML's [$html:<code>@html</code>]. Registered-provider fixtures use normal [$html:<code>@mod.moth</code>] roots, without changing structural [$html:<code>+*.moth</code>] support packages. Builder/project-local prefix collisions remain hard config errors. Distinct project/package providers at the same boundary-relative path still collide independently. The @https://github.com/nyejames/moth/blob/main/docs/roadmap/evidence/js-import-linking-and-failure-reporting-review.md#independent-provider-identity-collision (retained collision report) records the stable-package-identity handoff needed next. General cross-package provider-prefix support remains incomplete.]
         ]
@@ -234,7 +236,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: HTML project builds]
             [: Supported]
-            [: Broad routing, API-only artefact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage. Facade scenarios check exact provider materialisation and demanded wrappers without inactive assets. Multi-entry checks preserve one shared provider and page-specific wrapper selection.]
+            [: Broad routing, API-only artefact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage. Facade scenarios check exact provider materialisation and demanded wrappers without inactive assets. Multi-entry checks preserve one shared provider and page-specific wrapper selection. Pages with identical wrapper selections share one source-named glue module.]
             [: HTML / JS]
             [: This is the release-critical project builder. Only roots with HTML artefact activity participate in page, runtime asset, resource-output and homepage planning. Backend implementation and HTML-Wasm progress remain on the compiler progress matrix.]
         ]
@@ -285,6 +287,22 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Broad binding-backed package registration, opaque handle types, runtime assets/glue and current drawing API coverage, including namespace, alias, missing-symbol and Wasm-unsupported rejection.]
             [: HTML / JS]
             [: The current surface covers canvas element management, 2D context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. Canvas is deliberately allowed a broader expansion target than most packages because visuals and animation make it a useful Moth language and runtime stress-test surface.]
+        ]
+
+        [data:
+            [: Static site URL package [$html:<code>@web/site</code>]]
+            [: Supported]
+            [: Integration cases cover origin-aware root and suffix rendering on both HTML targets, the structural site root surviving package export and cross-module composition, no browser asset emission and absence from [$html:<code>.mtf</code>] implicit scope. A unit test covers its Builder source registration.]
+            [: HTML builder]
+            [: Builder source-backed package at the nested [$html:<code>web/site</code>] prefix. [$html:<code>root</code>] and the [$html:<code>url</code>] slot wrapper compose compile-time strings only. Route validation, encoding and route matching are outside V1.]
+        ]
+
+        [data:
+            [: Browser page state package [$html:<code>@web/page</code>]]
+            [: Supported]
+            [: Node execution tests cover every getter, navigation matching, aliases, breadcrumbs, marker cleanup and typed failures. Integration cases cover namespace and direct callers, runtime asset emission, unused imports, the missing-import boundary and HTML-Wasm rejection. The docs sidebar uses it.]
+            [: HTML / JS]
+            [: Builder binding-backed snapshots read on each call plus the opt-in [$html:<code>sync_navigation</code>] helper. Event subscriptions, reactive state and general DOM access are deferred.]
         ]
     ]
 ]

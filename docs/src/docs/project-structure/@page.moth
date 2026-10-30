@@ -21,7 +21,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Project structure"
 page_description #= "How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."
@@ -29,9 +30,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Project structure
-
     # Project structure
 
     A Moth project combines directory-scoped modules, one strict project config

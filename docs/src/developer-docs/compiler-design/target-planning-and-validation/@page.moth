@@ -1,5 +1,5 @@
 @target-planning-and-validation content as reference_content
-@styles navbar, section, theme_css
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
 
 page_title #= "16. Target planning and validation"
@@ -7,10 +7,10 @@ page_description #= "How Moth plans and validates mixed JavaScript and Wasm targ
 page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Compiler design) / 16. Target planning and validation
-
     Per-function target assignment and validation catch capability mismatches before any backend emits code.
 ]
 

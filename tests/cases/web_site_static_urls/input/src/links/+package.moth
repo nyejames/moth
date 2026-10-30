@@ -1,0 +1,5 @@
+@web/site
+
+export:
+    docs_url #= [site.url:docs/getting-started/]
+;

@@ -1,7 +1,7 @@
 @moth-language-cheatsheet content as cheatsheet_content
 @reserved-names-list content as reserved_names_list
 
-@styles navbar, section, language_theme_head, sidebar
+@styles navbar, section, language_theme_head, sidebar, init_docs_sidebar
 
 page_title #= "Language cheatsheet"
 page_description #= "A single page, compact reference for the full Moth language surface."
@@ -9,9 +9,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Language cheatsheet
-
     # Moth language cheatsheet
 
     Moth is a small, statically typed language with first-class string templates,

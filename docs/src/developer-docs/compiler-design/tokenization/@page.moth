@@ -1,5 +1,5 @@
 @tokenization content as reference_content
-@styles navbar, section, theme_css
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
 
 page_title #= "05. Tokenization"
@@ -7,10 +7,10 @@ page_description #= "How Moth recognises source boundaries and preserves locatio
 page_head #= [:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
+#[sidebar]
+init_docs_sidebar()!
 
 #[section, $md:
-    @../ (Compiler design) / 05. Tokenization
-
     Lexical analysis cuts character streams into located tokens and prepares document source kinds for shared later stages.
 ]
 

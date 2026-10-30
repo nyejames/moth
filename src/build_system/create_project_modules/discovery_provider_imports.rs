@@ -10,7 +10,11 @@
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, project_config};
-use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
+use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
+use crate::compiler_frontend::paths::dependency_resolution::{
+    DependencyPathBase, validate_dependency_boundary,
+};
+use crate::compiler_frontend::paths::path_normalization::join_and_normalize_components;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 // -------------------------
@@ -186,28 +190,32 @@ fn resolve_provider_prefix_to_canonical_path(
     project_path_resolver: &ProjectPathResolver,
     string_table: &StringTable,
 ) -> Result<PathBuf, SourceDiscoveryError> {
-    let (base_kind, filesystem_base) = if let Some(package_root) = project_path_resolver
-        .source_package_root_for_dependency(prefix_path, path_fork, string_table)
-    {
-        (
-            crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::SourcePackageRoot,
-            package_root,
-        )
-    } else {
-        // Dependency paths are module-root-relative. Synthetic traversal has no indexed module
-        // namespace, so it derives the same owning boundary from the resolver's retained module
-        // roots and uses the entry root only for the default module.
-        let module_root = project_path_resolver
-            .module_root_for_file(declaring_file)
-            .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
-        (
-            crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase::EntryRoot,
-            module_root,
-        )
-    };
+    let mut components = Vec::new();
+    let components = path_fork.resolve_components(prefix_path, &mut components);
+    let base =
+        match project_path_resolver.source_package_root_for_dependency(components, string_table) {
+            Some(package_base) => package_base,
+            None => {
+                // Dependency paths are module-root-relative. Synthetic traversal has no indexed
+                // module namespace, so it derives the same owning boundary from the resolver's
+                // retained module roots and uses the entry root only for the default module.
+                let module_root = project_path_resolver
+                    .module_root_for_file(declaring_file)
+                    .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
+                DependencyPathBase {
+                    kind: CompileTimePathBase::EntryRoot,
+                    root: module_root,
+                    matched_components: 0,
+                }
+            }
+        };
 
-    let normalized =
-        join_and_normalize_path(&filesystem_base, prefix_path, path_fork, string_table);
+    // A package root already represents its complete registered prefix.
+    let normalized = join_and_normalize_components(
+        &base.root,
+        &components[base.matched_components..],
+        string_table,
+    );
 
     let canonical = fs::canonicalize(&normalized).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -224,14 +232,8 @@ fn resolve_provider_prefix_to_canonical_path(
         }
     })?;
 
-    crate::compiler_frontend::paths::dependency_resolution::validate_dependency_boundary(
-        &canonical,
-        &base_kind,
-        &filesystem_base,
-        prefix_path,
-        path_fork,
-    )
-    .map_err(SourceDiscoveryError::from)?;
+    validate_dependency_boundary(&canonical, &base, prefix_path, path_fork)
+        .map_err(SourceDiscoveryError::from)?;
 
     Ok(canonical)
 }

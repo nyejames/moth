@@ -1,0 +1,8 @@
+@web/page sync_navigation
+
+export:
+    sync_nav |id String| -> Bool, Error!:
+        matched = sync_navigation(id)!
+        return matched
+    ;
+;

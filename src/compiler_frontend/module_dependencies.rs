@@ -36,6 +36,7 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::header_log;
@@ -423,24 +424,21 @@ impl<'a> DependencyGraph<'a> {
     ) -> bool {
         let mut scratch = Vec::new();
         let components = path_fork.resolve_components(path, &mut scratch);
-        if components.is_empty() {
-            return false;
-        }
 
-        let first_component = string_table.resolve(components[0]);
+        let Some((package_prefix, _)) = match_package_prefix(
+            self.source_package_public_exports.keys(),
+            components,
+            string_table,
+        ) else {
+            return false;
+        };
         let Some(export_name) = path_fork.component(path) else {
             return false;
         };
 
-        if let Some(entries) = self.source_package_public_exports.get(first_component) {
-            for entry in entries {
-                if entry.export_name == export_name {
-                    return true;
-                }
-            }
-        }
-
-        false
+        self.source_package_public_exports
+            .get(package_prefix)
+            .is_some_and(|entries| entries.iter().any(|entry| entry.export_name == export_name))
     }
 
     fn is_same_file_symbol_hint(

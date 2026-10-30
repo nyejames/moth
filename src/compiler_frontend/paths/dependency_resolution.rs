@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Failure while resolving a dependency path.
 ///
@@ -29,20 +29,31 @@ impl From<InfrastructureFailure> for DependencyPathResolutionError {
     }
 }
 
+/// The filesystem base selected for one dependency path.
+///
+/// `matched_components` counts the leading authored components the base already represents: a
+/// source package's complete registered prefix, or zero for entry-root and file-relative bases.
+/// Joining and case validation skip exactly these components. Candidate selection counts a
+/// matched prefix as one logical component.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DependencyPathBase {
+    pub(crate) kind: CompileTimePathBase,
+    pub(crate) root: PathBuf,
+    pub(crate) matched_components: usize,
+}
+
 /// WHAT: rejects dependency paths that escape their resolved base directory.
 /// WHY: dependencies must stay within the project root (relative/entry) or package root.
 pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
-    base_kind: &CompileTimePathBase,
-    filesystem_base: &Path,
+    base: &DependencyPathBase,
     dependency_path: PathId,
     path_fork: &PathInternerFork,
 ) -> Result<(), DependencyPathResolutionError> {
-    let canonical_base =
-        fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
+    let canonical_base = fs::canonicalize(&base.root).unwrap_or_else(|_| base.root.clone());
     validate_dependency_boundary_against_base(
         canonical_file,
-        base_kind,
+        &base.kind,
         &canonical_base,
         dependency_path,
         path_fork,
@@ -74,14 +85,12 @@ fn validate_dependency_boundary_against_base(
 pub(crate) fn validate_dependency_case_sensitivity(
     dependency_path: PathId,
     path_fork: &PathInternerFork,
-    base_kind: &CompileTimePathBase,
-    filesystem_base: &Path,
+    base: &DependencyPathBase,
     canonical_file: &Path,
     is_parent_fallback: bool,
     strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<(), DependencyPathResolutionError> {
-    let canonical_base =
-        fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
+    let canonical_base = fs::canonicalize(&base.root).unwrap_or_else(|_| base.root.clone());
     let relative_canonical = match canonical_file.strip_prefix(&canonical_base) {
         Ok(relative) => relative,
         Err(_) => return Ok(()),
@@ -93,10 +102,10 @@ pub(crate) fn validate_dependency_case_sensitivity(
     let mut path_components = Vec::new();
     let path_components = path_fork.resolve_components(dependency_path, &mut path_components);
     let string_table = strings.strings();
-    let user_components: Vec<String> = match base_kind {
+    let user_components: Vec<String> = match base.kind {
         CompileTimePathBase::SourcePackageRoot => path_components
             .iter()
-            .skip(1)
+            .skip(base.matched_components)
             .map(|component| string_table.resolve(*component))
             .map(str::to_owned)
             .collect(),

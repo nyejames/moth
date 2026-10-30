@@ -1,0 +1,42 @@
+@page content as page_advanced
+@page-basic content as page_basic
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+page_title #= "@web/page"
+page_description #= "Live browser state and navigation from the HTML builder."
+page_head #= language_theme_head
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+#[section, $md:
+    # @web/page
+
+    `@web/page` reads live browser document and viewport state through a
+    binding-backed package. It also offers opt-in navigation synchronisation.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):page]
+        [$insert("title"):Browser page state]
+        [$insert("advanced"):[page_advanced]]
+
+        [page_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../site/]
+        [$insert("previous_title"):@web/site]
+        [$insert("next_path"):../../../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
+]

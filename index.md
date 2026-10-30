@@ -11,6 +11,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
     - [@html Builder package](packages/html/@mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
+    - [@web/site Builder package](packages/web/site/@mod.moth): static structural site-root URL helpers (`root`, `url`). Its [README](packages/web/site/README.md) holds the package boundary.
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.
 - [validate/bench/docs workflow](justfile)
 - [contributor workflow and validation commands](CONTRIBUTING.md)
@@ -259,6 +260,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [@web packages](src/projects/html_project/binding_packages/web/mod.rs): shared registration of every built-in `@web/*` JS asset. Each package directory holds its asset and a `README.md` with its living design and plan.
         - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`). Used by the `@html` canvas helpers.
         - [@web/graphics](src/projects/html_project/binding_packages/web/graphics/): WebGL2 package, registered with no public symbols yet.
+        - [@web/page](src/projects/html_project/binding_packages/web/page/): live browser document and viewport snapshots plus the opt-in `sync_navigation` helper (`page.js`).
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization, content-source discovery and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs), retaining per-document source contexts with warnings.
 - [HTML scaffold](crates/moth-cli/src/scaffold/): CLI-owned project creation and terminal prompts.
 

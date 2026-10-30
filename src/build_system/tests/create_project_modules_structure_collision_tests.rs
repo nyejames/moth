@@ -65,17 +65,20 @@ fn assert_reserved_project_dependency_failure(failure: PreparedFailure) {
 
 // ── Project-structure collision tests ─────────────────────────────────────────
 
-#[test]
-fn rejects_reserved_project_globals_module_folder_at_entry_root() {
+/// Build the project resolver after `claim` adds one reserved-name candidate and require the typed
+/// `@project` reservation failure. Each call gets a fresh project, so case variants never meet on
+/// case-insensitive filesystems.
+fn assert_claims_reserved_project_name(claim: impl FnOnce(&Path), reason: &str) {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src/project")).expect("should create project module folder");
+    fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
+    claim(&root);
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -93,78 +96,61 @@ fn rejects_reserved_project_globals_module_folder_at_entry_root() {
         &crate::builder_surface::SourceFileKindRegistry::default(),
         &mut string_table,
     )
-    .expect_err("entry-root project folder must not claim @project");
+    .expect_err(reason);
 
     assert_config_failure(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
+}
+
+#[test]
+fn rejects_reserved_project_globals_module_folder_at_entry_root() {
+    for folder in ["project", "Project"] {
+        assert_claims_reserved_project_name(
+            |root| {
+                fs::create_dir(root.join("src").join(folder))
+                    .expect("should create project module folder");
+            },
+            "entry-root project folder must not claim @project",
+        );
+    }
+}
+
+#[test]
+fn rejects_reserved_project_globals_source_file_at_entry_root() {
+    for file in ["project.moth", "Project.moth", "PROJECT.mtf"] {
+        assert_claims_reserved_project_name(
+            |root| {
+                fs::write(root.join("src").join(file), "x ~= 1\n")
+                    .expect("should write reserved source file");
+            },
+            "entry-root project source file must not claim @project",
+        );
+    }
 }
 
 #[test]
 fn rejects_reserved_project_globals_module_root_file() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/@project.moth"), "x ~= 1\n")
-        .expect("should write reserved module root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    let failure = super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    )
-    .expect_err("@project.moth must not create a real project module");
-
-    assert_config_failure(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
+    for file in ["@project.moth", "@Project.moth", "+Project.moth"] {
+        assert_claims_reserved_project_name(
+            |root| {
+                fs::write(root.join("src").join(file), "x ~= 1\n")
+                    .expect("should write reserved module root");
+            },
+            "project module root must not create a real project module",
+        );
+    }
 }
 
 #[test]
 fn rejects_reserved_project_globals_facade_root_file() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
-    fs::write(root.join("+project.moth"), "export:\n;\n")
-        .expect("should write reserved facade root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut string_table = StringTable::new();
-    let failure = super::project_roots::build_project_path_resolver(
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &mut string_table,
-    )
-    .expect_err("+project.moth must not claim the reserved project root");
-
-    assert_config_failure(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
+    for file in ["+project.moth", "+Project.moth"] {
+        assert_claims_reserved_project_name(
+            |root| {
+                fs::write(root.join(file), "export:\n;\n")
+                    .expect("should write reserved facade root");
+            },
+            "project facade root must not claim the reserved project root",
+        );
+    }
 }
 
 #[test]

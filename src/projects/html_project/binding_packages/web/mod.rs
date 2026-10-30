@@ -32,7 +32,7 @@ struct WebBindingPackage {
     asset_path: &'static str,
 }
 
-const WEB_BINDING_PACKAGES: [WebBindingPackage; 2] = [
+const WEB_BINDING_PACKAGES: [WebBindingPackage; 3] = [
     WebBindingPackage {
         package_path: "@web/canvas",
         source: include_str!("canvas/canvas.js"),
@@ -43,6 +43,11 @@ const WEB_BINDING_PACKAGES: [WebBindingPackage; 2] = [
         package_path: "@web/graphics",
         source: include_str!("graphics/graphics.js"),
         asset_path: "graphics/graphics.js",
+    },
+    WebBindingPackage {
+        package_path: "@web/page",
+        source: include_str!("page/page.js"),
+        asset_path: "page/page.js",
     },
 ];
 
@@ -111,3 +116,11 @@ fn logical_source_path(package: &WebBindingPackage) -> PortableResourcePath {
 #[cfg(test)]
 #[path = "tests/canvas_error_tests.rs"]
 mod canvas_error_tests;
+
+#[cfg(test)]
+#[path = "tests/node_asset.rs"]
+mod node_asset;
+
+#[cfg(test)]
+#[path = "tests/page_tests.rs"]
+mod page_tests;

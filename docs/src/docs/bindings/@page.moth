@@ -13,7 +13,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Values and bindings"
 page_description #= "Bindings, mutability, shared access, explicit copies and shadowing in Moth."
@@ -21,9 +22,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Values and bindings
-
     # Values and bindings
 
     A binding gives a value a name. Unlike languages that copy small values and

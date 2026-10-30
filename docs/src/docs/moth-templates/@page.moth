@@ -13,7 +13,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Moth template files"
 page_description #= "Moth-aware Markdown content files for HTML projects."
@@ -21,9 +22,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Moth template files
-
     # Moth template files
 
     A `.mtf` file puts Markdown directly inside Moth's compile-time template

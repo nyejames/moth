@@ -1,5 +1,5 @@
 @html center
-@styles navbar, section, language_theme_head, doc_pager, sidebar
+@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
 page_title #= "Core packages"
 page_description #= "Overview of Moth Core packages and their current HTML/JS support."
@@ -7,9 +7,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../ (Documentation) / @../ (Packages and dependencies) / Core packages
-
     # Core packages
 
     Core packages provide typed capabilities owned by the compiler and selected

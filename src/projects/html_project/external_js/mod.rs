@@ -23,7 +23,6 @@
 pub(crate) mod js_import_provider;
 pub(crate) mod package_registration;
 pub(crate) mod parser;
-pub(crate) mod path_identity;
 pub(crate) mod runtime_assets;
 pub(crate) mod runtime_emission_plan;
 pub(crate) mod runtime_glue;

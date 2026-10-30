@@ -14,6 +14,10 @@ executable runtime below describe accepted target design, not available APIs.
 installed files as an absolute path, and `finish` rejects a relative one.
 Registration through `BuilderDefinition::source_package` records Builder
 provenance without asking the caller to construct an internal registry entry.
+A package root may have several components, such as `@game/ui`. `finish`
+rejects a source package whose path equals, contains or nests inside another
+registered source or host package path, including case-only variants. Siblings
+such as `@game/ui` and `@game/audio` don't overlap.
 
 [codeblock, $code("rust"):
     let install_root = std::path::PathBuf::from("/srv/game/installed-packages");

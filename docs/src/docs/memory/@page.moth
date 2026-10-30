@@ -13,7 +13,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Memory and lifetimes"
 page_description #= "Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."
@@ -21,9 +22,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Memory and lifetimes
-
     # Memory and lifetimes
 
     Moth shares existing values by default, requires explicit copies and infers

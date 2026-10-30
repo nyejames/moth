@@ -5,7 +5,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Prelude policy"
 page_description #= "The small implicit surface available without explicit dependency clauses."
@@ -13,9 +14,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../../ (Documentation) / @../ (Core packages) / Prelude policy
-
     # Prelude policy
 
     The prelude registers the bare `io` namespace without a dependency clause. The

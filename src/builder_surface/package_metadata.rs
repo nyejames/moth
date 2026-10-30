@@ -88,13 +88,31 @@ pub(crate) fn validate_package_path(
         .split('/')
         .next()
         .unwrap_or_default();
-    if root.eq_ignore_ascii_case(
-        crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME,
-    ) {
+    if crate::compiler_frontend::project_globals::claims_project_globals_name(root) {
         return Err("is reserved for the @project project-globals interface");
     }
     if root.eq_ignore_ascii_case("core") && origin != PackageOrigin::Core {
         return Err("is reserved for official Core packages");
     }
     Ok(())
+}
+
+/// Whether one `@`-stripped package path equals the other or nests inside it at a `/` boundary,
+/// ignoring ASCII case.
+///
+/// WHY: an import path below an overlapping registration or local namespace would have two
+/// owners, so registrations and namespace import collisions share this one overlap rule.
+pub(crate) fn package_paths_overlap(left: &str, right: &str) -> bool {
+    let (shorter, longer) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    longer
+        .get(..shorter.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(shorter))
+        && longer[shorter.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| next == '/')
 }

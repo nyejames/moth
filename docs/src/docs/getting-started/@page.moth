@@ -6,7 +6,8 @@
     codeblock,
     language_theme_head,
     doc_pager_next,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Getting Started with moth"
 page_description #= "How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."
@@ -14,9 +15,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Getting Started
-
     # Getting Started with moth
 
     `moth` compiles and tools Moth projects.

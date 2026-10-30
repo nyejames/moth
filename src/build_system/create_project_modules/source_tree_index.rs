@@ -28,7 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
-use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
+use crate::compiler_frontend::project_globals::claims_project_globals_name;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
     portable_relative_logical_path_from,
@@ -623,7 +623,7 @@ impl SourceTreeIndex {
                 if let SourceTreeBoundaryKind::Project { .. } = kind
                     && directory == entry_root
                     && (source_stem_from_file_name(file_name)
-                        == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+                        .is_some_and(claims_project_globals_name)
                         || file_name_claims_project_globals_root(file_name))
                 {
                     let diagnostic = project_structure_diagnostic(
@@ -784,7 +784,9 @@ impl SourceTreeIndex {
             }
             if let SourceTreeBoundaryKind::Project { .. } = kind
                 && directory == entry_root
-                && dependency_folder_names.contains(PROJECT_GLOBALS_DEPENDENCY_NAME)
+                && dependency_folder_names
+                    .iter()
+                    .any(|name| claims_project_globals_name(name))
             {
                 let diagnostic =
                     project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
@@ -799,33 +801,51 @@ impl SourceTreeIndex {
                 ));
             }
 
-            // On the project root pass, reject entry-root folders whose names collide with
-            // registered source-backed package prefixes. Package boundaries carry no
-            // prefix-collision packages, so this check is skipped for them.
+            // A project folder whose entry-root-relative path equals a registered source package
+            // prefix would claim that package's identity, whichever module owns the folder.
+            // Ancestor folders alone may coexist with nested prefixes. Components compare
+            // ASCII-case-insensitively, as package identities do, so the result doesn't depend on
+            // the host filesystem. The canonical directory path keeps this independent of
+            // traversal order. Package boundaries carry no prefix-collision packages, so this
+            // check is skipped for them.
             if let SourceTreeBoundaryKind::Project {
                 source_packages, ..
             } = kind
-                && directory == entry_root
             {
-                for folder_name in &dependency_folder_names {
-                    if source_packages.has_prefix(folder_name) {
-                        let colliding_folder = directory.join(folder_name);
-                        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                        let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
-                            prefix: diagnostic_strings.intern(folder_name),
-                            entry_folder: path_id(&colliding_folder, &mut diagnostic_strings),
-                        };
-                        let diagnostic = project_structure_diagnostic(reason);
-                        let table = string_table.take_for_handoff();
-                        return Err(PreparedFailure::Diagnosed(
-                            PreparedDiagnosticBatch::capture_from_bag(
-                                DiagnosticBag::from(diagnostic),
-                                table,
-                                None,
-                                None,
-                            ),
-                        ));
+                // Traversal skips canonical directories outside the entry root before this
+                // point, so every visited project directory has an entry-relative path.
+                let relative_directory = directory
+                    .strip_prefix(&entry_root)
+                    .expect("visited project directories stay inside the entry root");
+                if let Some((package, folder_name)) = source_packages.iter().find_map(|package| {
+                    let (parent, name) = package
+                        .package_prefix
+                        .rsplit_once('/')
+                        .unwrap_or(("", &package.package_prefix));
+                    if !package_parent_matches(parent, relative_directory) {
+                        return None;
                     }
+                    dependency_folder_names
+                        .iter()
+                        .find(|folder_name| folder_name.eq_ignore_ascii_case(name))
+                        .map(|folder_name| (package, folder_name))
+                }) {
+                    let colliding_folder = directory.join(folder_name);
+                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                    let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
+                        prefix: diagnostic_strings.intern(&package.package_prefix),
+                        entry_folder: path_id(&colliding_folder, &mut diagnostic_strings),
+                    };
+                    let diagnostic = project_structure_diagnostic(reason);
+                    let table = string_table.take_for_handoff();
+                    return Err(PreparedFailure::Diagnosed(
+                        PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(diagnostic),
+                            table,
+                            None,
+                            None,
+                        ),
+                    ));
                 }
             }
 
@@ -1352,13 +1372,29 @@ fn logical_module_path_from(
         })
 }
 
+/// Whether an entry-root-relative directory is a registered package prefix's parent, comparing
+/// components ASCII-case-insensitively like package identities. An empty parent is the entry root.
+fn package_parent_matches(parent: &str, relative_directory: &Path) -> bool {
+    let mut components = relative_directory.components();
+    parent
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .all(|segment| {
+            components
+                .next()
+                .and_then(|component| component.as_os_str().to_str())
+                .is_some_and(|component| component.eq_ignore_ascii_case(segment))
+        })
+        && components.next().is_none()
+}
+
 /// Whether a canonical module-root filename uses the reserved project-globals dependency name.
 fn file_name_claims_project_globals_root(file_name: &str) -> bool {
     ["@", "+"].into_iter().any(|marker| {
         file_name
             .strip_prefix(marker)
             .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
-            == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+            .is_some_and(claims_project_globals_name)
     })
 }
 
@@ -1367,7 +1403,7 @@ fn file_name_claims_project_globals_facade(file_name: &str) -> bool {
     file_name
         .strip_prefix('+')
         .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
-        == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
+        .is_some_and(claims_project_globals_name)
 }
 
 /// Extract the dependency-name stem from a compiler-recognized source file name.

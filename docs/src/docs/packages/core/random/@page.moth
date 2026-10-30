@@ -5,7 +5,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Core random"
 page_description #= "Random number helpers in the Core package."
@@ -13,9 +14,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../../ (Documentation) / @../ (Core packages) / Core random
-
     # Core random
 
     `@core/random` provides bounded random `F64` and `I32` values. The package

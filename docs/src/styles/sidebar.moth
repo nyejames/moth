@@ -1,5 +1,8 @@
--- Shared documentation navigation. Add #[sidebar] after #[navbar] on each docs page.
+-- Shared documentation navigation. Add #[sidebar] after #[navbar] and call init_docs_sidebar()
+-- once on each docs page. sidebar.js reads the navbar for desktop geometry.
 -- Only rules needing selectors or media queries use an embedded stylesheet.
+
+@web/page
 
 sidebar_toggle_style #= [$css("inline"):
     position: absolute;
@@ -21,13 +24,18 @@ sidebar_style #= [$css("inline"):
 
 sidebar_header_style #= [$css("inline"):
     display: flex;
-    justify-content: var(--docs-sidebar-header-justify, space-between);
+    justify-content: space-between;
     align-items: center;
     gap: 0.25rem;
 ]
 
-sidebar_home_style #= [$css("inline"):
+sidebar_breadcrumb_style #= [$css("inline"):
+    min-width: 0;
     padding: 0.45rem 0.6rem;
+    line-height: 1.35;
+]
+
+sidebar_home_style #= [$css("inline"):
     color: light-dark(#243f66, #d8e6ff);
     font-weight: 700;
     text-decoration: none;
@@ -37,8 +45,8 @@ sidebar_button_style #= [$css("inline"):
     display: inline-grid;
     place-items: center;
     flex: none;
-    width: 2.25rem;
-    height: 2.25rem;
+    width: var(--docs-sidebar-button-size, 2.25rem);
+    height: var(--docs-sidebar-button-size, 2.25rem);
     border-radius: 0.5rem;
     color: light-dark(#385579, #c0d3f5);
     background: var(--docs-sidebar-button-background, transparent);
@@ -89,9 +97,29 @@ sidebar_rules #= [$css:
         --docs-sidebar-link-weight: 700;
     }
 
+    .docs-sidebar__current {
+        color: light-dark(#5a6980, #9faec6);
+        font-size: 0.9rem;
+    }
+
+    .docs-sidebar__current a {
+        color: light-dark(#30465f, #cad5e8);
+        text-decoration: none;
+    }
+
+    .docs-sidebar__current a:hover {
+        text-decoration: underline;
+    }
+
+    .docs-sidebar__current [aria-current="page"] {
+        color: light-dark(#243f66, #d8e6ff);
+        font-weight: 600;
+    }
+
     .docs-sidebar__toggle:focus-visible ~ .docs-sidebar .docs-sidebar__button,
     .docs-sidebar__link:focus-visible,
-    .docs-sidebar__home:focus-visible {
+    .docs-sidebar__home:focus-visible,
+    .docs-sidebar__current a:focus-visible {
         outline: 2px solid light-dark(#226cb7, #9ec2ff);
         outline-offset: 2px;
     }
@@ -99,11 +127,24 @@ sidebar_rules #= [$css:
     @media (min-width: 961px) {
         .docs-sidebar {
             position: fixed;
-            top: 4.5rem;
+            top: max(1rem, var(--docs-navbar-bottom, 3.5rem) + 1rem);
             bottom: 1rem;
             left: clamp(0.75rem, 2vw, 2rem);
+            display: flex;
+            flex-direction: column;
             width: 15.5rem;
+            overflow: hidden;
+        }
+
+        .docs-sidebar__nav {
+            flex: 1;
+            min-height: 0;
             overflow-y: auto;
+        }
+
+        /* The scrolling nav clips anything outside its edges, so draw link focus rings inside. */
+        .docs-sidebar__link:focus-visible {
+            outline-offset: -2px;
         }
 
         body:has(> .docs-sidebar) > .container {
@@ -117,13 +158,19 @@ sidebar_rules #= [$css:
             width: 3.75rem;
         }
 
-        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
-        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__home {
-            display: none;
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__button {
+            --docs-sidebar-button-size: auto;
+            position: absolute;
+            inset: 0;
         }
 
-        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__header {
-            --docs-sidebar-header-justify: center;
+        .docs-sidebar__toggle:checked:focus-visible ~ .docs-sidebar .docs-sidebar__button {
+            outline-offset: -4px;
+        }
+
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__nav,
+        .docs-sidebar__toggle:checked ~ .docs-sidebar .docs-sidebar__breadcrumb {
+            display: none;
         }
 
         body:has(> .docs-sidebar__toggle:checked) > .container {
@@ -169,6 +216,9 @@ sidebar_rules #= [$css:
     }
 ]
 
+-- A plain template, because $html warns on every script tag and this one is a trusted local asset.
+sidebar_script #= [:<script src="[@sidebar.js]" defer></script>]
+
 sidebar #= [$html:
     <style>[sidebar_rules]</style>
 
@@ -181,9 +231,12 @@ sidebar #= [$html:
         aria-controls="docs-sidebar-links"
     >
 
-    <aside class="docs-sidebar" style="[sidebar_style]">
+    <aside id="docs-sidebar" class="docs-sidebar" style="[sidebar_style]">
         <div class="docs-sidebar__header" style="[sidebar_header_style]">
-            <a class="docs-sidebar__home" style="[sidebar_home_style]" href="[@/]docs/">Documentation</a>
+            <nav class="docs-sidebar__breadcrumb" style="[sidebar_breadcrumb_style]" aria-label="Breadcrumb">
+                <a class="docs-sidebar__home" style="[sidebar_home_style]" href="[@/]docs/" data-page-home>Documentation</a>
+                <span class="docs-sidebar__current" data-page-current hidden></span>
+            </nav>
             <label
                 class="docs-sidebar__button"
                 style="[sidebar_button_style]"
@@ -194,7 +247,13 @@ sidebar #= [$html:
             </label>
         </div>
 
-        <nav id="docs-sidebar-links" class="docs-sidebar__nav" style="[sidebar_nav_style]" aria-label="Documentation pages">
+        <nav
+            id="docs-sidebar-links"
+            class="docs-sidebar__nav"
+            style="[sidebar_nav_style]"
+            aria-label="Documentation pages"
+            data-page-links
+        >
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Learn Moth</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/getting-started/">Getting started</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/language-overview/">Language basics</a>
@@ -221,6 +280,7 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/project-structure/">Project structure</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/packages/">Packages</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/packages/core/">Core packages</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/packages/builder/">Builder packages</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/resources/">Resources</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/moth-templates/">Moth template files</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/markdown/">Markdown</a>
@@ -243,13 +303,11 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/lappet/">Lappet</a>
         </nav>
     </aside>
-
-    <script>
-        const currentPath = window.location.pathname;
-        document.querySelectorAll(".docs-sidebar__link").forEach(link => {
-            if (link.pathname === currentPath) {
-                link.setAttribute("aria-current", "page");
-            }
-        });
-    </script>
+    [sidebar_script]
 ]
+
+-- Marks the current link and fills the breadcrumb after the static sidebar exists.
+init_docs_sidebar || -> Error!:
+    -- Unlisted pages still get a heading or title breadcrumb, so the match result needs no handling.
+    listed = page.sync_navigation("docs-sidebar")!
+;

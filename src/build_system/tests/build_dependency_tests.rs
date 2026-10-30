@@ -3,7 +3,9 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{BackendInvocationFailure, ProjectCompilation, build_project};
+use crate::build_system::build::{
+    BackendInvocationFailure, BuildResult, ProjectCompilation, build_project,
+};
 use crate::build_system::output::output_path_identity;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
@@ -18,6 +20,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -691,7 +694,7 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
         let mut surface = HtmlProjectBuilder::new().frontend_surface();
         let mut packages = [
             ("campaign", self.package_root.clone()),
-            ("marker", self.marker_root.clone()),
+            ("x/y", self.marker_root.clone()),
         ];
         if self.reverse_registration {
             packages.reverse();
@@ -863,7 +866,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 ),
                 (
                     project_root.join("src/@page.moth"),
-                    "@binding.js provider_value as project_value\n@campaign package_value\n@marker marker\n[:project=[project_value()]|package=[package_value()]|[marker]]\n",
+                    "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
                     project_root.join("src/binding.js"),
@@ -1845,4 +1848,176 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
         glue.contains("gl_mixed.js"),
         "the single glue module should import the provider asset: {glue}"
     );
+}
+
+/// Write a directory project whose pages under `page_dirs` all call `page_export` from one
+/// fallible provider. An empty directory is the homepage.
+fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str) {
+    let src = root.join("src");
+    let shared = src.join("shared");
+    fs::create_dir_all(&shared).expect("should create provider facade");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"shared_glue\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        shared.join("+package.moth"),
+        "export:\n    @provider.js get_number, get_other\n;\n",
+    )
+    .expect("should write provider facade");
+    fs::write(
+        shared.join("provider.js"),
+        "import { mothOk } from \"@moth/runtime\";\n/** @moth.sig get_number || -> I32, Error! */\nexport function getNumber() { return mothOk(7); }\n/** @moth.sig get_other || -> I32, Error! */\nexport function getOther() { return mothOk(8); }\n",
+    )
+    .expect("should write provider");
+    for page_dir in page_dirs {
+        let page_root = src.join(page_dir);
+        fs::create_dir_all(&page_root).expect("should create page directory");
+        fs::write(
+            page_root.join("@page.moth"),
+            format!("@shared {page_export}\nvalue = {page_export}() catch:\n    then 0\n;\n"),
+        )
+        .expect("should write page");
+    }
+}
+
+fn build_shared_glue_project(root: &Path, flags: &[Flag]) -> BuildResult {
+    successful_compilation_value(
+        build_project(
+            &HtmlProjectBuilder::new(),
+            root.to_str().expect("temp dir should be UTF-8"),
+            flags,
+            &BuildConfigInputSet::new(),
+        )
+        .unwrap_or_else(|never| match never {}),
+    )
+}
+
+/// Each page's emitted HTML path and the relative prefix from that page back to the output root.
+fn page_path_and_root_prefix(page_dir: &str) -> (String, String) {
+    if page_dir.is_empty() {
+        return ("index.html".to_owned(), "./".to_owned());
+    }
+    (
+        format!("{page_dir}/index.html"),
+        "../".repeat(page_dir.split('/').count()),
+    )
+}
+
+#[test]
+fn build_html_project_identical_wrapper_selections_share_one_glue_module() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let mut glue_names = Vec::new();
+    // Different project roots, route names and discovery orders select the same wrappers, so
+    // the source-derived glue name must not change.
+    for (layout, page_dirs) in [
+        ("first", ["", "about", "docs/guide"]),
+        ("second", ["", "zeta", "alpha/beta"]),
+    ] {
+        let root = temp.path().join(layout);
+        write_shared_glue_project(&root, &page_dirs, "get_number");
+        let built = build_shared_glue_project(&root, &[]);
+        let outputs = BuiltOutputs::index(&built.project);
+        let glue_path = outputs.exactly_one_path("shared glue module", |path| {
+            path.starts_with(GLUE_MODULE_PREFIX)
+        });
+        let glue = js_text(outputs.at(glue_path));
+        assert_glue_exports(glue, &[("../shared/provider.js", &["getNumber"])]);
+        for page_dir in page_dirs {
+            let (page_path, root_prefix) = page_path_and_root_prefix(page_dir);
+            assert_page_imports_glue(
+                html_text(outputs.at(&page_path)),
+                &format!("{root_prefix}{glue_path}"),
+                glue,
+            );
+        }
+        glue_names.push(glue_path.to_owned());
+    }
+    assert_eq!(glue_names[0], glue_names[1]);
+}
+
+#[test]
+fn build_html_project_release_wrappers_get_their_own_glue_name() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    write_shared_glue_project(temp.path(), &["", "docs/guide"], "get_number");
+    let mut glue_sources = Vec::new();
+    for flags in [&[][..], &[Flag::Release][..]] {
+        let built = build_shared_glue_project(temp.path(), flags);
+        let outputs = BuiltOutputs::index(&built.project);
+        let glue_path = outputs.exactly_one_path("shared glue module", |path| {
+            path.starts_with(GLUE_MODULE_PREFIX)
+        });
+        outputs.at(RUNTIME_MODULE_PATH);
+        let page = html_text(outputs.at("docs/guide/index.html"));
+        assert!(
+            page.contains("\"@moth/runtime\": \"../../_moth/js/runtime/moth-runtime.js\""),
+            "nested pages must map the runtime relative to themselves: {page}"
+        );
+        let glue = js_text(outputs.at(glue_path));
+        assert_page_imports_glue(page, &format!("../../{glue_path}"), glue);
+        glue_sources.push((glue_path.to_owned(), glue.to_owned()));
+    }
+    let [(dev_path, dev_source), (release_path, release_source)] = glue_sources.as_slice() else {
+        unreachable!("one glue module per profile");
+    };
+    assert_ne!(
+        dev_source, release_source,
+        "fallible release wrappers use release error fields"
+    );
+    assert_ne!(dev_path, release_path);
+}
+
+#[test]
+fn rebuild_with_new_wrapper_selection_replaces_stale_glue_and_keeps_unowned_files() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path();
+    let glue_directory = root.join("dev").join(GLUE_MODULE_PREFIX);
+    let mut previous_glue = None;
+    for page_export in ["get_number", "get_other"] {
+        write_shared_glue_project(root, &["", "about"], page_export);
+        let built = build_shared_glue_project(root, &[]);
+        let plan = built
+            .directory_output_plan
+            .clone()
+            .expect("directory build should carry its output plan");
+        write_project_outputs(
+            &built.project,
+            &WriteOptions {
+                output_plan: OutputPlan::Directory(plan),
+                write_mode: WriteMode::AlwaysWrite,
+            },
+        )
+        .expect("build outputs should write");
+
+        let mut glue_files = fs::read_dir(&glue_directory)
+            .expect("glue directory should exist")
+            .map(|entry| entry.expect("glue entry should read").file_name())
+            .map(|name| name.into_string().expect("glue name should be UTF-8"))
+            .filter(|name| name != "notes.txt")
+            .collect::<Vec<_>>();
+        assert_eq!(glue_files.len(), 1, "one shared glue file on disk");
+        let glue_file = glue_files.pop().expect("one glue file");
+        let manifest =
+            fs::read_to_string(root.join("dev/.moth_manifest")).expect("manifest should exist");
+        assert_eq!(
+            manifest
+                .lines()
+                .map(|line| portable_path_text(Path::new(line)))
+                .filter(|line| line.starts_with(GLUE_MODULE_PREFIX))
+                .collect::<Vec<_>>(),
+            vec![format!("{GLUE_MODULE_PREFIX}{glue_file}")]
+        );
+        if let Some(previous) = previous_glue.replace(glue_file.clone()) {
+            assert_ne!(previous, glue_file, "a new selection needs a new glue name");
+            assert_path_missing(&glue_directory.join(previous));
+            assert!(
+                glue_directory.join("notes.txt").is_file(),
+                "cleanup must keep files the manifest never owned"
+            );
+        } else {
+            fs::write(glue_directory.join("notes.txt"), "unowned")
+                .expect("should write unowned file");
+        }
+    }
 }

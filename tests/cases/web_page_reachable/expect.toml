@@ -1,0 +1,22 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "_moth/js/glue/module-",
+    "<script type=\"importmap\">",
+    "\"@moth/runtime\": \"./_moth/js/runtime/moth-runtime.js\"",
+]
+
+# The package asset is a deferred resource, so only its emitted presence is observable here.
+[[backends.html.artifact_assertions]]
+path = "_moth/js/page.js"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]

@@ -1,0 +1,17 @@
+`@web/site` builds static links at compile time. Import it explicitly in a
+`.moth` file to use the site root and add site-relative paths.
+
+[codeblock, $code("moth"):
+    @web/site
+
+    home #= site.root
+    guide #= [site.url:docs/getting-started/]
+    #[:home=[home] guide=[guide]]
+]
+
+Don't start the suffix with `/`. The root follows the project's configured
+`origin`, so the guide renders under `/moth/docs/getting-started/` when the
+origin is `/moth`.
+
+Unlike `site.url`, @../page (@web/page)'s `page.url()` reads the live browser
+address at runtime. For the package contract see @#site (@web/site advanced).

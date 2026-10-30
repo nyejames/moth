@@ -1,0 +1,21 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+artifacts_must_not_exist = ["_moth/js/page.js"]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["static page"]
+must_not_contain = ["_moth/js/page.js", "_moth/js/glue/module-", "_moth/js/runtime/moth-runtime", "<script type=\"importmap\">"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+artifacts_must_not_exist = ["_moth/js/page.js"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["static page"]
+must_not_contain = ["_moth/js/page.js", "_moth/js/glue/module-", "_moth/js/runtime/moth-runtime", "<script type=\"importmap\">"]

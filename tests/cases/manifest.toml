@@ -18242,3 +18242,45 @@ path = "adversarial_source_package_dependency_cycle_rejected"
 tags = ["integration", "dependencies", "source-packages", "diagnostics"]
 contract = "language.dependencies.source_package_dependency_cycle_rejected"
 role = "adversarial"
+
+[[case]]
+id = "web_site_static_urls"
+path = "web_site_static_urls"
+tags = ["integration", "source-packages", "dependencies", "templates", "html", "html-wasm"]
+contract = "backend.html.web_site_static_url_composition"
+role = "primary"
+
+[[case]]
+id = "web_site_template_scope_rejected"
+path = "web_site_template_scope_rejected"
+tags = ["integration", "source-packages", "templates", "diagnostics", "html", "html-wasm"]
+contract = "language.dependencies.web_site_template_scope_rejected"
+role = "primary"
+
+[[case]]
+id = "web_site_case_variant_import_rejected"
+path = "web_site_case_variant_import_rejected"
+tags = ["integration", "source-packages", "dependencies", "diagnostics", "html", "html-wasm"]
+contract = "language.dependencies.package_case_variant_import_rejected"
+role = "primary"
+
+[[case]]
+id = "web_page_reachable"
+path = "web_page_reachable"
+tags = ["integration", "external-imports", "html", "html-wasm", "reachability"]
+contract = "backend.html_wasm.external_js_function_unsupported"
+role = "backend"
+
+[[case]]
+id = "web_page_unused"
+path = "web_page_unused"
+tags = ["integration", "external-imports", "html", "html-wasm", "reachability"]
+contract = "backend.html.unreachable_external_helper_no_assets"
+role = "backend"
+
+[[case]]
+id = "web_page_missing_import_rejected"
+path = "web_page_missing_import_rejected"
+tags = ["integration", "external-imports", "diagnostics", "html", "html-wasm"]
+contract = "language.dependencies.web_page_requires_import_rejected"
+role = "primary"

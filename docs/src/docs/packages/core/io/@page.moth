@@ -5,7 +5,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Core IO"
 page_description #= "Console output and input polling helpers in Moth."
@@ -13,9 +14,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../../../ (Documentation) / @../ (Core packages) / Core IO
-
     # Core IO
 
     `io` provides console output and explicit input polling. The prelude exposes

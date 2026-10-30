@@ -27,6 +27,7 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::package_metadata::package_paths_overlap;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
@@ -606,7 +607,7 @@ impl ModuleNamespaceSet {
         &self,
         provider: &RetainedDependencyPath,
         consumer_module_id: ModuleId,
-        local_dependency_keys: impl Iterator<Item = &'a str>,
+        mut local_dependency_keys: impl Iterator<Item = &'a str>,
         key: &str,
     ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_path = provider.path;
@@ -622,7 +623,9 @@ impl ModuleNamespaceSet {
         }
 
         if let Some(binding_prefix) = binding_package_prefix {
-            if namespace_conflicts_with_package_prefix(local_dependency_keys, binding_prefix) {
+            if local_dependency_keys
+                .any(|entry_key| package_paths_overlap(entry_key, binding_prefix))
+            {
                 return Err(imports::ambiguous_import_target(
                     dependency_path,
                     dependency_span,
@@ -633,7 +636,7 @@ impl ModuleNamespaceSet {
         }
 
         if let Some((dependency_prefix, _root_file)) = source_package_surface {
-            if namespace_conflicts_with_package_prefix(local_dependency_keys, key) {
+            if local_dependency_keys.any(|entry_key| package_paths_overlap(entry_key, key)) {
                 return Err(imports::ambiguous_import_target(
                     dependency_path,
                     dependency_span,
@@ -650,6 +653,23 @@ impl ModuleNamespaceSet {
 
         if self.is_source_package_private_path(key) {
             return Err(imports::cross_module_import_not_exported(
+                dependency_path,
+                dependency_span,
+            ));
+        }
+
+        // Package identities reject ASCII case-only overlaps, so a case variant of a registered
+        // package path can't fall through to a local target with the same spelling.
+        let names_package_case_variant = self
+            .package_boundary_indexes
+            .iter()
+            .map(|(prefix, _)| prefix)
+            .chain(self.binding_package_paths.iter().map(String::as_str))
+            .any(|prefix| key.len() >= prefix.len() && package_paths_overlap(prefix, key));
+        if names_package_case_variant
+            && local_dependency_keys.any(|entry_key| package_paths_overlap(entry_key, key))
+        {
+            return Err(imports::ambiguous_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -1117,17 +1137,4 @@ fn find_module_bypass_prefix<'a>(
         }
     }
     None
-}
-
-fn namespace_conflicts_with_package_prefix<'a>(
-    mut local_dependency_keys: impl Iterator<Item = &'a str>,
-    package_prefix: &str,
-) -> bool {
-    let folded_package = package_prefix.to_ascii_lowercase();
-    local_dependency_keys.any(|entry_key| {
-        let folded_entry = entry_key.to_ascii_lowercase();
-        folded_entry == folded_package
-            || folded_entry.starts_with(&format!("{folded_package}/"))
-            || folded_package.starts_with(&format!("{folded_entry}/"))
-    })
 }

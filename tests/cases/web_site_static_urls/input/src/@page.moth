@@ -1,0 +1,7 @@
+@web/site
+@links docs_url
+
+home #= site.root
+direct #= [site.url:docs/getting-started/]
+composed #= [:nested=[docs_url]]
+#[:home=[home] direct=[direct] [composed]]

@@ -11,7 +11,8 @@
     language_theme_head,
     doc_level,
     doc_pager,
-    sidebar
+    sidebar,
+    init_docs_sidebar
 
 page_title #= "Functions"
 page_description #= "Function declarations, parameters, calls, access and return values in Moth."
@@ -19,9 +20,8 @@ page_head #= language_theme_head
 
 #[navbar]
 #[sidebar]
+init_docs_sidebar()!
 #[section, $md:
-    @../ (Documentation) / Functions
-
     # Functions
 
     Moth functions use named declarations rather than anonymous closures or
