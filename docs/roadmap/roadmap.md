@@ -65,6 +65,9 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `+` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
 
+- [contextual constants - design draft](./plans/html-builder-contextual-constants-draft.md) - look at reopening this later.
+contextual constants are useful for things like components that want to use builder compile time info at the point of their actual use (e.g canonical page url).
+
 ## Adding and maintaining plans
 
 This roadmap owns the normal serial order. A plan owns its own work and nothing else. Mark a plan as active after the plan bullet point itself, don't create a new heading or move the plan bullet elsewhere.
