@@ -112,6 +112,7 @@ fn capture_module_diagnostic(
 }
 
 const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
+const WEB_SITE_SOURCE_PACKAGE_PREFIX: &str = "web/site";
 
 #[derive(Debug, Default)]
 pub struct HtmlProjectBuilder {
@@ -444,6 +445,16 @@ impl BackendBuilder for HtmlProjectBuilder {
             )
             .expect("the built-in @html source package registers once");
         builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
+
+        // `@web/site` needs an explicit dependency clause, so it stays out of template scope.
+        builder_surface
+            .source_packages
+            .register_filesystem_root(
+                WEB_SITE_SOURCE_PACKAGE_PREFIX,
+                BuilderSurface::builtin_source_package_root(WEB_SITE_SOURCE_PACKAGE_PREFIX),
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("the built-in @web/site source package registers once");
 
         crate::builder_surface::core_packages::register_optional_core_packages(
             &mut builder_surface.binding_packages,

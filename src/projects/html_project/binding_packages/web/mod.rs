@@ -32,7 +32,7 @@ struct WebBindingPackage {
     asset_path: &'static str,
 }
 
-const WEB_BINDING_PACKAGES: [WebBindingPackage; 2] = [
+const WEB_BINDING_PACKAGES: [WebBindingPackage; 3] = [
     WebBindingPackage {
         package_path: "@web/canvas",
         source: include_str!("canvas/canvas.js"),
@@ -43,6 +43,11 @@ const WEB_BINDING_PACKAGES: [WebBindingPackage; 2] = [
         package_path: "@web/graphics",
         source: include_str!("graphics/graphics.js"),
         asset_path: "graphics/graphics.js",
+    },
+    WebBindingPackage {
+        package_path: "@web/page",
+        source: include_str!("page/page.js"),
+        asset_path: "page/page.js",
     },
 ];
 

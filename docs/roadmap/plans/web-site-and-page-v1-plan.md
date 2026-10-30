@@ -1,9 +1,9 @@
 # HTML builder `@web/site` and `@web/page` V1
 
 Status: in progress
-Current slice: Phase 1 - register and implement both packages
+Current slice: Phase 2 - focused package validation
 Blockers: none known
-Next action: register `@web/site` at nested prefix `web/site` and `@web/page` in `WEB_BINDING_PACKAGES`, then implement both package APIs
+Next action: add compiler, registration, asset and Node execution coverage for both packages and finalise README test owners
 
 ## Goal
 
