@@ -275,6 +275,71 @@ impl NestingDepth {
     }
 }
 
+/// Count the remaining top-level positional items of a parenthesised list, from the
+/// cursor through the list's matching `)`.
+///
+/// WHAT: call arguments and choice payload captures report the total authored count when
+/// they reject the first extra item.
+/// WHY: the list's opening parenthesis is already consumed, so `NestingDepth` starts at zero.
+/// A named entry (`name = ...`) is reported by its own diagnostic, so the scan stops there
+/// and the count names positional items only.
+pub(crate) fn count_remaining_top_level_positional_items(token_stream: &AstCursor) -> usize {
+    let mut depth = NestingDepth::default();
+    let mut offset = 0usize;
+    let mut count = 0usize;
+    let mut in_item = false;
+    let remaining = token_stream
+        .length()
+        .saturating_sub(token_stream.position());
+
+    while offset < remaining {
+        let Some(token) = token_stream.token_ref_at_offset(offset) else {
+            break;
+        };
+        let tag = token.tag();
+        if tag == TokenTag::EOF {
+            break;
+        }
+
+        if depth.is_top_level() {
+            if tag == TokenTag::CLOSE_PARENTHESIS {
+                break;
+            }
+            if tag == TokenTag::COMMA {
+                in_item = false;
+                offset += 1;
+                continue;
+            }
+            if tag == TokenTag::NEWLINE {
+                offset += 1;
+                continue;
+            }
+            if !in_item {
+                if item_at_offset_is_named(token_stream, offset) {
+                    break;
+                }
+                count += 1;
+                in_item = true;
+            }
+        }
+
+        depth.step_tag(tag);
+        offset += 1;
+    }
+    count
+}
+
+fn item_at_offset_is_named(token_stream: &AstCursor, offset: usize) -> bool {
+    token_stream
+        .token_ref_at_offset(offset)
+        .map(|token| token.tag())
+        == Some(TokenTag::SYMBOL)
+        && token_stream
+            .token_ref_at_offset(offset.saturating_add(1))
+            .map(|token| token.tag())
+            == Some(TokenTag::ASSIGN)
+}
+
 /// The innermost open construct tracked by the declaration-initializer scanner.
 ///
 /// WHAT: models which construct owns the next expected closing delimiter at EOF.

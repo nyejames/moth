@@ -356,7 +356,7 @@ pub(crate) fn enforce_match_exhaustiveness(
         }
 
         return Err(choices_control_flow::non_exhaustive_match(
-            NonExhaustiveMatchReason::MissingOptionPatterns,
+            NonExhaustiveMatchReason::MissingOptionalPatterns,
             vec![],
             subject_span,
         ));
@@ -388,7 +388,7 @@ pub(crate) fn enforce_match_exhaustiveness(
         }
 
         let reason = if is_option {
-            NonExhaustiveMatchReason::MissingOptionPatterns
+            NonExhaustiveMatchReason::MissingOptionalPatterns
         } else {
             NonExhaustiveMatchReason::MissingElseArm
         };

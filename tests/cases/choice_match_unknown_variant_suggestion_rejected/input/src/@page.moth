@@ -1,0 +1,8 @@
+@types Response as Reply
+
+reply Reply = Reply::Success
+
+if reply is:
+    Sucess => io.line("unknown")
+    else => io.line("fallback")
+;

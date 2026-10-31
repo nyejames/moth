@@ -682,25 +682,27 @@ fn rejects_malformed_colon_arm_as_unexpected_token() {
 }
 
 #[test]
-fn rejects_choice_match_arm_qualifier_for_other_choice() {
+fn capture_name_mismatch_with_alias_suggests_the_authored_binding() {
     let failure = parse_single_file_ast_diagnostic(
-        "Status :: Ready, Busy;\n\
-         OtherStatus :: Busy;\n\
-         current Status = Status::Ready\n\
-         if current is:\n\
-             OtherStatus::Busy => io.line([: [\"busy\"]])\n\
+        "Response :: Success, Err | message String |;\n\
+         r Response = Response::Err(\"bad\")\n\
+         if r is:\n\
+             Err(text as msg) => io.line(msg)\n\
+             Success => io.line(\"ok\")\n\
          ;\n",
     );
-    let diagnostic = assert_ast_diagnostic(
+    assert_ast_diagnostic(
         &failure,
         "MOTH-RULE-0049",
-        Some("invalid_match_pattern.qualifier_does_not_match_scrutinee"),
+        Some("invalid_match_pattern.capture_binding_name_mismatch"),
     );
-    let pattern = diagnostic
-        .family_view::<InvalidMatchPatternView>()
-        .expect("the first error is an invalid match pattern");
-    assert_eq!(pattern.variant_name, None);
-    assert!(pattern.scrutinee_name.is_some());
+    let message =
+        crate::compiler_frontend::tests::parse_support::ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("Capture 'text' does not match payload field 'message'")
+            && message.contains("write 'message as msg'"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1266,7 +1268,7 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
     let diagnostic = first_ast_error_view(&failure);
     assert_ne!(
         diagnostic.reason_key(),
-        Some("invalid_match_pattern.option_present_capture_on_non_optional"),
-        "a newline-separated pipe must not report the option-present-capture error",
+        Some("invalid_match_pattern.optional_present_capture_on_non_optional"),
+        "a newline-separated pipe must not report the optional-present-capture error",
     );
 }

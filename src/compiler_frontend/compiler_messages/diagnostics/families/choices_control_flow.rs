@@ -7,7 +7,7 @@ use super::super::schema::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    OptCountFact, OptStringFact, OptTypeFact, UnitFact, unit_code,
+    CountPair, OptCountFact, OptStringFact, OptTypeFact, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
@@ -36,7 +36,7 @@ unit_code! {
         MissingElseArm = 1,
         MissingVariants = 2,
         GuardedArmsRequireElse = 3,
-        MissingOptionPatterns = 4,
+        MissingOptionalPatterns = 4,
     }
 }
 unit_code! {
@@ -142,13 +142,12 @@ unit_code! {
         UnknownVariant = 19,
         CaptureBindingShadowsVariable = 20,
         NonePatternRequiresOptionalScrutinee = 21,
-        OptionValuePatternRequiresEquality = 22,
         BareCaptureOnOptionalScrutinee = 23,
-        OptionPresentCaptureOnNonOptional = 24,
-        EmptyOptionPresentCapture = 25,
-        OptionPresentCaptureTypeAnnotation = 26,
+        OptionalPresentCaptureOnNonOptional = 24,
+        EmptyOptionalPresentCapture = 25,
+        OptionalPresentCaptureTypeAnnotation = 26,
         MissingClosingPipe = 27,
-        ExpectedBindingInOptionPresentCapture = 28,
+        ExpectedBindingInOptionalPresentCapture = 28,
     }
 }
 
@@ -754,14 +753,63 @@ diagnostic_family! {
             reason: UnitFact<InvalidMatchPatternReason>,
             variant_name: OptStringFact,
             scrutinee_name: OptStringFact,
+            counts: OptCountFact,
         ],
         labels: [],
-        extra: None,
-        ctor: generated invalid_match_pattern,
+        extra: StringIds,
+        ctor: manual,
         reason_key: reason,
         view: InvalidMatchPatternView,
         render: render_invalid_match_pattern,
     }
+}
+
+/// Stores an invalid match-pattern draft without capture-list or candidate names.
+pub(crate) fn invalid_match_pattern(
+    reason: InvalidMatchPatternReason,
+    variant_name: Option<StringId>,
+    scrutinee_name: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    invalid_match_pattern_with_names(reason, variant_name, scrutinee_name, None, Vec::new(), span)
+}
+
+/// Stores an invalid match-pattern draft with optional counts and extra names.
+///
+/// Capture-count reasons pack expected then provided counts into `counts` and store the
+/// declared payload field names in `names`. A capture-name mismatch packs the expected count
+/// with the failing capture's one-based position and appends the authored capture name, then
+/// its `as` binding when one was written. Unknown-variant reasons leave `counts` empty and
+/// store available variant names in declaration order. A qualifier mismatch stores the
+/// authored qualifier in `variant_name`.
+pub(crate) fn invalid_match_pattern_with_names(
+    reason: InvalidMatchPatternReason,
+    variant_name: Option<StringId>,
+    scrutinee_name: Option<StringId>,
+    capture_counts: Option<(usize, usize)>,
+    names: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&INVALID_MATCH_PATTERN, span, |cursor| {
+        cursor.push::<UnitFact<InvalidMatchPatternReason>>(&reason)?;
+        cursor.push::<OptStringFact>(&variant_name)?;
+        cursor.push::<OptStringFact>(&scrutinee_name)?;
+        cursor.push::<OptCountFact>(&match capture_counts {
+            Some((expected, provided)) => Some(CountPair { expected, provided }.pack()?),
+            None => None,
+        })
+    })
+    .with_string_ids(names)
+}
+
+/// Decode packed capture counts when this reason stored a pair.
+pub(crate) fn invalid_match_pattern_capture_counts(
+    facts: &InvalidMatchPatternView,
+) -> Option<(usize, usize)> {
+    facts.counts.map(|packed| {
+        let pair = CountPair::unpack(packed);
+        (pair.expected, pair.provided)
+    })
 }
 
 diagnostic_family! {

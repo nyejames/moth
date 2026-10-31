@@ -791,20 +791,19 @@ define_stable_reason_keys! {
     &InvalidMatchPatternReason::UnknownVariant => "invalid_match_pattern.unknown_variant",
     &InvalidMatchPatternReason::CaptureBindingShadowsVariable => "invalid_match_pattern.capture_binding_shadows_variable",
     &InvalidMatchPatternReason::NonePatternRequiresOptionalScrutinee => "invalid_match_pattern.none_pattern_requires_optional_scrutinee",
-    &InvalidMatchPatternReason::OptionValuePatternRequiresEquality => "invalid_match_pattern.option_value_pattern_requires_equality",
     &InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee => "invalid_match_pattern.bare_capture_on_optional_scrutinee",
-    &InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional => "invalid_match_pattern.option_present_capture_on_non_optional",
-    &InvalidMatchPatternReason::EmptyOptionPresentCapture => "invalid_match_pattern.empty_option_present_capture",
-    &InvalidMatchPatternReason::OptionPresentCaptureTypeAnnotation => "invalid_match_pattern.option_present_capture_type_annotation",
+    &InvalidMatchPatternReason::OptionalPresentCaptureOnNonOptional => "invalid_match_pattern.optional_present_capture_on_non_optional",
+    &InvalidMatchPatternReason::EmptyOptionalPresentCapture => "invalid_match_pattern.empty_optional_present_capture",
+    &InvalidMatchPatternReason::OptionalPresentCaptureTypeAnnotation => "invalid_match_pattern.optional_present_capture_type_annotation",
     &InvalidMatchPatternReason::MissingClosingPipe => "invalid_match_pattern.missing_closing_pipe",
-    &InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture => "invalid_match_pattern.expected_binding_in_option_present_capture",
+    &InvalidMatchPatternReason::ExpectedBindingInOptionalPresentCapture => "invalid_match_pattern.expected_binding_in_optional_present_capture",
     },
 
     NonExhaustiveMatchReason => {
     &NonExhaustiveMatchReason::MissingElseArm => "non_exhaustive_match.missing_else_arm",
     &NonExhaustiveMatchReason::MissingVariants => "non_exhaustive_match.missing_variants",
     &NonExhaustiveMatchReason::GuardedArmsRequireElse => "non_exhaustive_match.guarded_arms_require_else",
-    &NonExhaustiveMatchReason::MissingOptionPatterns => "non_exhaustive_match.missing_option_patterns",
+    &NonExhaustiveMatchReason::MissingOptionalPatterns => "non_exhaustive_match.missing_optional_patterns",
     },
 
     InvalidFallibleHandlingReason => {

@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["Unknown variant 'Reply::Sucess'. Did you mean 'Reply::Success'? Available variants: [Success, Err]."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.unknown_variant"
+path = "input/@page.moth"
+line = 6
+count = 1

@@ -288,6 +288,40 @@ impl ScopeContext {
         }
     }
 
+    /// Source-visible spelling of a declaration, for diagnostic text.
+    ///
+    /// WHY: a dependency alias is the spelling the user imported under, so rendered names must
+    /// follow this file's visibility rather than the declaration's canonical name. The caller's
+    /// `preferred` spelling wins when it still resolves to `declaration`. Otherwise the
+    /// lexically smallest visible spelling is chosen, so the result never depends on hash order.
+    pub(crate) fn visible_name_for_declaration(
+        &self,
+        declaration: &PathId,
+        preferred: Option<StringId>,
+        string_table: &StringTable,
+    ) -> Option<StringId> {
+        let visibility = self.file_visibility.as_ref()?;
+        if let Some(name) = preferred {
+            let resolves_here = visibility
+                .visible_source_names
+                .get(&name)
+                .is_some_and(|target| target.local_path() == declaration);
+            if resolves_here {
+                return Some(name);
+            }
+        }
+        visibility
+            .visible_source_names
+            .iter()
+            .filter(|(_, target)| target.local_path() == declaration)
+            .map(|(name, _)| *name)
+            .min_by(|left, right| {
+                string_table
+                    .resolve(*left)
+                    .cmp(string_table.resolve(*right))
+            })
+    }
+
     /// Reject body bindings that would hide a bound or compiler-owned name.
     ///
     /// Declaration lookup can miss compile-time names and source declarations not yet emitted.

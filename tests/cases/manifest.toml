@@ -2337,6 +2337,13 @@ contract = "language.choices.match_unknown_variant_rejected"
 role = "primary"
 
 [[case]]
+id = "choice_match_unknown_variant_suggestion_rejected"
+path = "choice_match_unknown_variant_suggestion_rejected"
+tags = ["integration","control-flow","diagnostics","choices","pattern-matching"]
+contract = "language.choices.match_unknown_variant_rejected"
+role = "boundary"
+
+[[case]]
 id = "choice_match_exhaustive_merge_continuation"
 path = "choice_match_exhaustive_merge_continuation"
 tags = ["integration","control-flow","backend-contract","choices"]
@@ -5234,6 +5241,13 @@ id = "option_present_capture_non_option_rejected"
 path = "option_present_capture_non_option_rejected"
 tags = ["integration", "language", "optionals", "match", "diagnostics"]
 contract = "language.options.present_capture_non_option_rejected"
+role = "primary"
+
+[[case]]
+id = "option_present_capture_empty_rejected"
+path = "option_present_capture_empty_rejected"
+tags = ["integration", "language", "optionals", "match", "diagnostics"]
+contract = "language.options.present_capture_empty_rejected"
 role = "primary"
 
 [[case]]

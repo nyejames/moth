@@ -2,3 +2,12 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["Capture 'text' does not match payload field 'message' in variant 'Err'.", "write 'message as text'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.capture_binding_name_mismatch"
+path = "input/@page.moth"
+line = 11
+column = 9
+count = 1

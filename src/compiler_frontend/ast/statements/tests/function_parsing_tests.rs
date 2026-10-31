@@ -1306,7 +1306,7 @@ fn rejects_empty_inline_option_present_capture() {
          return name\n\
      ;\n",
         "MOTH-RULE-0049",
-        Some("invalid_match_pattern.empty_option_present_capture"),
+        Some("invalid_match_pattern.empty_optional_present_capture"),
     );
 }
 
@@ -1318,7 +1318,7 @@ fn rejects_literal_inline_option_present_capture_binding() {
          return name\n\
      ;\n",
         "MOTH-RULE-0049",
-        Some("invalid_match_pattern.expected_binding_in_option_present_capture"),
+        Some("invalid_match_pattern.expected_binding_in_optional_present_capture"),
     );
 }
 #[test]

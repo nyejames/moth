@@ -2,6 +2,7 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["Match arm uses qualifier 'RightStatus', but the scrutinee is 'LeftStatus'.", "Use a 'LeftStatus' variant or omit the qualifier."]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0049"

@@ -1,0 +1,5 @@
+value I32? = 42
+
+if value is ||:
+    io.line("present")
+;

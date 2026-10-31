@@ -817,6 +817,24 @@ pub(crate) fn render_unsupported_backend_feature(
     }
 }
 
+/// WHAT: formats declared variant names as the "Available variants" hint suffix.
+/// WHY: choice constructor and choice match diagnostics must word this list identically.
+fn format_available_variants_hint(
+    available_variants: &[StringId],
+    string_table: &dyn StringTableResolver,
+) -> String {
+    if available_variants.is_empty() {
+        return String::new();
+    }
+
+    let names = available_variants
+        .iter()
+        .map(|name| string_table.resolve(*name).to_owned())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(" Available variants: [{names}].")
+}
+
 pub(crate) fn invalid_choice_variant_message(
     reason: InvalidChoiceVariantReason,
     choice_name: Option<StringId>,
@@ -835,16 +853,7 @@ pub(crate) fn invalid_choice_variant_message(
     let variant_suggestion =
         closest_name_suggestion(&variant_name, available_variants, string_table);
 
-    let available_variants_hint = if available_variants.is_empty() {
-        String::new()
-    } else {
-        let names = available_variants
-            .iter()
-            .map(|name| string_table.resolve(*name).to_owned())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(" Available variants: [{names}].")
-    };
+    let available_variants_hint = format_available_variants_hint(available_variants, string_table);
 
     match reason {
         InvalidChoiceVariantReason::EmptyRecordBody => {

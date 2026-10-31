@@ -4,3 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0050"]
+message_contains = ["Non-exhaustive optional-value match. Add `none =>` or `|name| =>` to cover all cases."]

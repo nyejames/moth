@@ -282,10 +282,10 @@ fn invalid_external_module_reason_codec_and_key_are_stable() {
 }
 
 #[test]
-fn missing_option_patterns_reason_key_remains_stable() {
+fn missing_optional_patterns_reason_key_remains_stable() {
     assert_eq!(
-        NonExhaustiveMatchReason::MissingOptionPatterns.stable_reason_key(),
-        "non_exhaustive_match.missing_option_patterns"
+        NonExhaustiveMatchReason::MissingOptionalPatterns.stable_reason_key(),
+        "non_exhaustive_match.missing_optional_patterns"
     );
 }
 

@@ -2,6 +2,7 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["Unknown variant 'Status::Unknown'. Available variants: [Ready, Busy]."]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0049"

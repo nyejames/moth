@@ -4,3 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["`|name|` capture is only valid when matching an optional value."]

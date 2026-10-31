@@ -26,6 +26,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::utilities::token_scan::count_remaining_top_level_positional_items;
 
 use rustc_hash::FxHashMap;
 
@@ -59,12 +60,10 @@ pub fn parse_choice_variant_pattern(
         return Err(diagnostic.into());
     }
 
-    let choice_name_display = choice_display_name(choice_nominal_path, path_fork, string_table);
-    let (variant_name, variant_span) = parse_variant_name(
+    let (variant_name, variant_span, authored_qualifier) = parse_variant_name(
         token_stream,
         match_context,
         choice_nominal_path,
-        &choice_name_display,
         path_fork,
         string_table,
     )?;
@@ -78,22 +77,18 @@ pub fn parse_choice_variant_pattern(
     }
 
     let variant_index = resolve_variant_to_tag(
+        match_context,
         variants,
         variant_name,
-        &choice_name_display,
+        authored_qualifier,
         variant_span,
         path_fork,
         choice_nominal_path,
+        string_table,
     )?;
 
     let variant = &variants[variant_index];
-    let captures = parse_choice_pattern_captures(
-        token_stream,
-        variant,
-        &choice_name_display,
-        string_table,
-        path_fork,
-    )?;
+    let captures = parse_choice_pattern_captures(token_stream, variant, string_table, path_fork)?;
 
     Ok(ParsedChoicePattern {
         nominal_path: *choice_nominal_path,
@@ -160,7 +155,6 @@ pub(in crate::compiler_frontend::ast::statements) fn finish_pending_choice_patte
 fn parse_choice_pattern_captures(
     token_stream: &mut AstCursor,
     variant: &ChoiceVariant,
-    _choice_name_display: &str,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> ChoicePatternResult<Vec<ParsedChoicePayloadCapture>> {
@@ -195,12 +189,13 @@ fn parse_choice_pattern_captures(
             let mut captures = Vec::new();
             let mut seen_names: FxHashMap<StringId, Option<SourceSpan>> = FxHashMap::default();
 
-            loop {
+            let closing_span = loop {
                 token_stream.skip_newlines();
 
                 if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
+                    let closing_span = Some(token_stream.current_span());
                     token_stream.advance();
-                    break;
+                    break closing_span;
                 }
 
                 let capture_span = Some(token_stream.current_span());
@@ -299,10 +294,17 @@ fn parse_choice_pattern_captures(
                 // Validate capture position and name against declaration metadata.
                 let field_index = captures.len();
                 let Some(field_decl) = fields.get(field_index) else {
-                    return Err(choices_control_flow::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern_with_names(
                         InvalidMatchPatternReason::TooManyCaptureBindings,
                         Some(variant.id),
                         None,
+                        Some((
+                            fields.len(),
+                            captures.len()
+                                + 1
+                                + count_remaining_top_level_positional_items(token_stream),
+                        )),
+                        payload_field_names(fields, path_fork, string_table)?,
                         capture_span,
                     )
                     .into());
@@ -311,10 +313,19 @@ fn parse_choice_pattern_captures(
                 let expected_field_name =
                     choice_payload_field_name(field_decl, path_fork, string_table)?;
                 if field_name != expected_field_name {
-                    return Err(choices_control_flow::invalid_match_pattern(
+                    return Err(choices_control_flow::invalid_match_pattern_with_names(
                         InvalidMatchPatternReason::CaptureBindingNameMismatch,
                         Some(variant.id),
                         None,
+                        Some((fields.len(), captures.len() + 1)),
+                        {
+                            let mut names = payload_field_names(fields, path_fork, string_table)?;
+                            names.push(field_name);
+                            if binding_name != field_name {
+                                names.push(binding_name);
+                            }
+                            names
+                        },
                         capture_span,
                     )
                     .into());
@@ -336,8 +347,9 @@ fn parse_choice_pattern_captures(
                         continue;
                     }
                     TokenTag::CLOSE_PARENTHESIS => {
+                        let closing_span = Some(token_stream.current_span());
                         token_stream.advance();
-                        break;
+                        break closing_span;
                     }
                     TokenTag::OPEN_PARENTHESIS => {
                         return Err(names_declarations::deferred_feature_reason(
@@ -363,15 +375,17 @@ fn parse_choice_pattern_captures(
                         .into());
                     }
                 }
-            }
+            };
 
             // Check for too few captures.
             if captures.len() != fields.len() {
-                return Err(choices_control_flow::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern_with_names(
                     InvalidMatchPatternReason::TooFewCaptureBindings,
                     Some(variant.id),
                     None,
-                    variant.span,
+                    Some((fields.len(), captures.len())),
+                    payload_field_names(fields, path_fork, string_table)?,
+                    closing_span,
                 )
                 .into());
             }
@@ -403,18 +417,32 @@ fn choice_payload_field_name(
     })
 }
 
+/// WHAT: lists a variant's declared payload field names in declaration order.
+/// WHY: capture diagnostics name the expected fields; a name mismatch appends the authored
+/// capture and, when written, its `as` binding.
+fn payload_field_names(
+    fields: &[Declaration],
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> ChoicePatternResult<Vec<StringId>> {
+    fields
+        .iter()
+        .map(|field| choice_payload_field_name(field, path_fork, string_table))
+        .collect()
+}
+
 /// Parse a bare (`Ready`) or qualified (`Status::Ready`) variant name from the token stream.
 ///
 /// WHY: separating token-level parsing from tag resolution keeps each function focused
-/// and makes error messages specific to the syntactic layer they diagnose.
+/// and makes error messages specific to the syntactic layer they diagnose. A qualified arm
+/// also returns its authored qualifier so later diagnostics use the author's spelling.
 fn parse_variant_name(
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     choice_nominal_path: &PathId,
-    _choice_name_display: &str,
     path_fork: &PathInternerFork,
     string_table: &mut StringTable,
-) -> ChoicePatternResult<(StringId, Option<SourceSpan>)> {
+) -> ChoicePatternResult<(StringId, Option<SourceSpan>, Option<StringId>)> {
     match token_stream.current_tag() {
         TokenTag::SYMBOL => {
             let first_name = token_stream
@@ -448,8 +476,13 @@ fn parse_variant_name(
                 {
                     return Err(choices_control_flow::invalid_match_pattern(
                         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
-                        None,
-                        expected_choice_name,
+                        Some(first_name),
+                        choice_visible_name(
+                            match_context,
+                            choice_nominal_path,
+                            path_fork,
+                            string_table,
+                        ),
                         first_span,
                     )
                     .into());
@@ -476,9 +509,9 @@ fn parse_variant_name(
                     })?;
                 let qualified_span = Some(token_stream.current_span());
                 token_stream.advance();
-                Ok((qualified_variant_name, qualified_span))
+                Ok((qualified_variant_name, qualified_span, Some(first_name)))
             } else {
-                Ok((first_name, first_span))
+                Ok((first_name, first_span, None))
             }
         }
 
@@ -524,21 +557,27 @@ fn qualifier_resolves_to_choice(
 /// WHY: separating semantic resolution from token parsing produces clearer control flow
 /// and keeps the error-construction logic for unknown variants in one place.
 fn resolve_variant_to_tag(
+    match_context: &ScopeContext,
     variants: &[ChoiceVariant],
     variant_name: StringId,
-    _choice_name_display: &str,
+    authored_qualifier: Option<StringId>,
     variant_span: Option<SourceSpan>,
     path_fork: &PathInternerFork,
     choice_nominal_path: &PathId,
+    string_table: &StringTable,
 ) -> ChoicePatternResult<usize> {
     let Some(variant_index) = variants
         .iter()
         .position(|variant| variant.id == variant_name)
     else {
-        return Err(choices_control_flow::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern_with_names(
             InvalidMatchPatternReason::UnknownVariant,
             Some(variant_name),
-            path_fork.component(*choice_nominal_path),
+            authored_qualifier.or_else(|| {
+                choice_visible_name(match_context, choice_nominal_path, path_fork, string_table)
+            }),
+            None,
+            variants.iter().map(|variant| variant.id).collect(),
             variant_span,
         )
         .into());
@@ -546,13 +585,18 @@ fn resolve_variant_to_tag(
 
     Ok(variant_index)
 }
-fn choice_display_name(
+
+/// Resolves the choice name as the current file spells it, falling back to the canonical name.
+///
+/// WHY: an aliased import should be named by the local spelling the author wrote.
+fn choice_visible_name(
+    match_context: &ScopeContext,
     choice_nominal_path: &PathId,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-) -> String {
-    path_fork
-        .component(*choice_nominal_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<choice>"))
+) -> Option<StringId> {
+    let canonical = path_fork.component(*choice_nominal_path);
+    match_context
+        .visible_name_for_declaration(choice_nominal_path, canonical, string_table)
+        .or(canonical)
 }

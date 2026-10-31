@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 5.5 choice match-pattern diagnostics
+NEXT_SLICE: Phase 6.1 template-head conflicts
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: implement 5.5, then Phase 6
+RESUME_ACTION: implement Phase 6, then Phase 7
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -768,6 +768,7 @@ Cover user functions, struct constructors and choice constructors where they sha
 ### 5.5 Enrich choice match-pattern diagnostics
 
 **Original findings:** DIAG-049, DIAG-050, DIAG-051
+**Status:** Delivered. `INVALID_MATCH_PATTERN` carries a `CountPair` count fact and a `StringIds` list. Unknown variants render a qualified suggestion and the shared available-variant hint, using the authored qualifier or the visible local choice name. Qualifier mismatches keep the authored qualifier. Too-few captures point at the closing `)` and too-many captures report the total authored count at the first extra capture. A name mismatch renders "Use 'message' in this position, or write 'message as text'", keeping any authored `as` binding, because a full `Ok(value)` pattern only fits single-field variants. Optional-pattern reasons use optional-value terminology. `OptionalValuePatternRequiresEquality` was deleted as unreachable: literal patterns are scalars matching the inner type, so the check is now an internal invariant. `choice_match_unknown_variant_failure`, `choice_match_unknown_variant_suggestion_rejected`, `value_if_cross_choice_predicate_rejected`, the three `choice_payload_match_*` capture cases and `option_present_capture_empty_rejected` own the contracts.
 
 #### Unknown variant
 

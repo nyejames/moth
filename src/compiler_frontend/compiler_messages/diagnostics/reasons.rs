@@ -1264,13 +1264,12 @@ pub enum InvalidMatchPatternReason {
     UnknownVariant,
     CaptureBindingShadowsVariable,
     NonePatternRequiresOptionalScrutinee,
-    OptionValuePatternRequiresEquality,
     BareCaptureOnOptionalScrutinee,
-    OptionPresentCaptureOnNonOptional,
-    EmptyOptionPresentCapture,
-    OptionPresentCaptureTypeAnnotation,
+    OptionalPresentCaptureOnNonOptional,
+    EmptyOptionalPresentCapture,
+    OptionalPresentCaptureTypeAnnotation,
     MissingClosingPipe,
-    ExpectedBindingInOptionPresentCapture,
+    ExpectedBindingInOptionalPresentCapture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1278,7 +1277,7 @@ pub enum NonExhaustiveMatchReason {
     MissingElseArm,
     MissingVariants,
     GuardedArmsRequireElse,
-    MissingOptionPatterns,
+    MissingOptionalPatterns,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

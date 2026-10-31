@@ -10,11 +10,14 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
-use super::{DiagnosticRenderContext, RenderedPayload, named_value_or_default};
+use super::{
+    DiagnosticRenderContext, RenderedPayload, closest_name_suggestion,
+    format_available_variants_hint, named_value_or_default,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidControlFlowStatementView, InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
     InvalidMatchGuardView, InvalidMatchPatternView, NonExhaustiveMatchView,
-    UnreachableMatchArmView,
+    UnreachableMatchArmView, invalid_match_pattern_capture_counts,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
@@ -218,7 +221,9 @@ fn append_elided_builtin_failure_hops(message: &mut String, elided_call_hops: us
 pub(crate) fn invalid_match_pattern_message(
     reason: InvalidMatchPatternReason,
     variant_name: Option<StringId>,
-    _scrutinee_name: Option<StringId>,
+    scrutinee_name: Option<StringId>,
+    capture_counts: Option<(usize, usize)>,
+    names: &[StringId],
     string_table: &dyn StringTableResolver,
 ) -> String {
     let variant_text = named_value_or_default(variant_name, string_table, "this variant");
@@ -257,17 +262,21 @@ pub(crate) fn invalid_match_pattern_message(
         InvalidMatchPatternReason::DuplicateCaptureBinding => {
             format!("Duplicate capture binding in pattern for variant {variant_text}.")
         }
-        InvalidMatchPatternReason::TooManyCaptureBindings => {
-            format!("Too many capture bindings for variant {variant_text}.")
-        }
-        InvalidMatchPatternReason::CaptureBindingNameMismatch => {
-            format!("Capture binding does not match payload field name in variant {variant_text}.")
-        }
-        InvalidMatchPatternReason::TooFewCaptureBindings => {
-            format!("Too few capture bindings for variant {variant_text}.")
-        }
+        InvalidMatchPatternReason::TooManyCaptureBindings
+        | InvalidMatchPatternReason::TooFewCaptureBindings => capture_count_message(
+            &variant_text,
+            capture_counts.unwrap_or_default(),
+            names,
+            string_table,
+        ),
+        InvalidMatchPatternReason::CaptureBindingNameMismatch => capture_name_mismatch_message(
+            &variant_text,
+            capture_counts.unwrap_or_default(),
+            names,
+            string_table,
+        ),
         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee => {
-            "Match arm qualifier does not match the scrutinee choice.".to_string()
+            qualifier_mismatch_message(variant_name, scrutinee_name, string_table)
         }
         InvalidMatchPatternReason::ExpectedVariantNameAfterQualifier => {
             "Expected a variant name after '::' in this match pattern.".to_string()
@@ -278,41 +287,158 @@ pub(crate) fn invalid_match_pattern_message(
         InvalidMatchPatternReason::MustStartWithVariantName => {
             "Choice match arms must start with a declared variant name.".to_string()
         }
-        InvalidMatchPatternReason::UnknownVariant => format!("Unknown variant {variant_text}."),
+        InvalidMatchPatternReason::UnknownVariant => {
+            unknown_variant_message(variant_name, scrutinee_name, names, string_table)
+        }
         InvalidMatchPatternReason::CaptureBindingShadowsVariable => {
             "Capture binding shadows an existing variable. Moth does not allow shadowing.".to_string()
         }
         InvalidMatchPatternReason::NonePatternRequiresOptionalScrutinee => {
             "`none =>` is only valid when matching an optional value.".to_string()
         }
-        InvalidMatchPatternReason::OptionValuePatternRequiresEquality => {
-            "Option value patterns require the option's inner type to support equality.".to_string()
-        }
         InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee => {
             "A bare capture name is not allowed on an optional scrutinee. Use `|name|` to capture the present value.".to_string()
         }
-        InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional => {
+        InvalidMatchPatternReason::OptionalPresentCaptureOnNonOptional => {
             "`|name|` capture is only valid when matching an optional value.".to_string()
         }
-        InvalidMatchPatternReason::EmptyOptionPresentCapture => {
-            "Option present capture cannot be empty. Use `|name|` to capture the present value.".to_string()
+        InvalidMatchPatternReason::EmptyOptionalPresentCapture => {
+            "An optional-present capture cannot be empty. Use `|name|` to capture the present value."
+                .to_string()
         }
-        InvalidMatchPatternReason::OptionPresentCaptureTypeAnnotation => {
+        InvalidMatchPatternReason::OptionalPresentCaptureTypeAnnotation => {
             "Type annotations are not allowed inside `|...|`.".to_string()
         }
         InvalidMatchPatternReason::MissingClosingPipe => {
-            "Expected `|` to close the option present capture.".to_string()
+            "Expected `|` to close the optional-present capture.".to_string()
         }
-        InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture => {
+        InvalidMatchPatternReason::ExpectedBindingInOptionalPresentCapture => {
             "Expected a binding name inside `|...|`.".to_string()
         }
     }
 }
 
-/// WHAT: renders an invalid match pattern from its compact reason and variant name.
-/// WHY: both facts are the values `invalid_match_pattern_message` reads.
+/// WHAT: describes a payload capture count that does not match the choice variant.
+/// WHY: listing the declared field names shows which captures the variant takes.
+fn capture_count_message(
+    variant_text: &str,
+    counts: (usize, usize),
+    names: &[StringId],
+    string_table: &dyn StringTableResolver,
+) -> String {
+    let (expected, provided) = counts;
+    let field_word = if expected == 1 { "field" } else { "fields" };
+    let expected_names = names.get(..expected).unwrap_or_default();
+    if expected_names.is_empty() {
+        return format!(
+            "Variant {variant_text} has {expected} payload {field_word}, but this pattern captures {provided}."
+        );
+    }
+    let list = quoted_name_list(expected_names, string_table);
+    format!(
+        "Variant {variant_text} has {expected} payload {field_word}, {list}, but this pattern captures {provided}."
+    )
+}
+
+/// WHAT: describes a payload capture whose name differs from the field at its position.
+/// WHY: naming the expected field and the alias form shows both ways to fix the arm. The
+/// names list holds the declared fields, then the authored capture, then its `as` binding
+/// when one was written, so the alias suggestion keeps the binding the arm body uses.
+fn capture_name_mismatch_message(
+    variant_text: &str,
+    counts: (usize, usize),
+    names: &[StringId],
+    string_table: &dyn StringTableResolver,
+) -> String {
+    let (expected_count, provided) = counts;
+    let (Some(expected), Some(authored)) = (
+        names.get(provided.saturating_sub(1)).copied(),
+        names.get(expected_count).copied(),
+    ) else {
+        return format!("Capture does not match a payload field in variant {variant_text}.");
+    };
+    let binding = names.get(expected_count + 1).copied().unwrap_or(authored);
+    let expected = string_table.resolve(expected);
+    let authored = string_table.resolve(authored);
+    let binding = string_table.resolve(binding);
+    format!(
+        "Capture '{authored}' does not match payload field '{expected}' in variant {variant_text}. Use '{expected}' in this position, or write '{expected} as {binding}' to bind it under a different name."
+    )
+}
+
+/// WHAT: explains a match arm qualifier that names a different choice than the scrutinee.
+/// WHY: naming both choices shows which variant set the arm should draw from.
+fn qualifier_mismatch_message(
+    qualifier: Option<StringId>,
+    scrutinee: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    match (qualifier, scrutinee) {
+        (Some(qualifier), Some(scrutinee)) => {
+            let qualifier = string_table.resolve(qualifier);
+            let scrutinee = string_table.resolve(scrutinee);
+            format!(
+                "Match arm uses qualifier '{qualifier}', but the scrutinee is '{scrutinee}'. Use a '{scrutinee}' variant or omit the qualifier."
+            )
+        }
+        _ => "Match arm qualifier does not match the scrutinee choice.".to_string(),
+    }
+}
+
+/// WHAT: explains a match arm variant that the scrutinee choice does not declare.
+/// WHY: a close spelling and the declared variant list usually point straight at the fix.
+fn unknown_variant_message(
+    variant_name: Option<StringId>,
+    scrutinee_name: Option<StringId>,
+    available_variants: &[StringId],
+    string_table: &dyn StringTableResolver,
+) -> String {
+    let Some(variant_name) = variant_name else {
+        return "Unknown variant.".to_string();
+    };
+    let variant_spelling = string_table.resolve(variant_name);
+    let variant_text = quoted_variant_text(variant_spelling, scrutinee_name, string_table);
+    let did_you_mean = closest_name_suggestion(variant_spelling, available_variants, string_table)
+        .map(|suggested| {
+            let suggested = quoted_variant_text(&suggested, scrutinee_name, string_table);
+            format!(" Did you mean {suggested}?")
+        })
+        .unwrap_or_default();
+    let available = format_available_variants_hint(available_variants, string_table);
+    format!("Unknown variant {variant_text}.{did_you_mean}{available}")
+}
+
+/// WHAT: quotes a variant name, qualified by its scrutinee choice when that choice is known.
+/// WHY: qualified spellings match what authors write in match arms.
+fn quoted_variant_text(
+    variant: &str,
+    scrutinee: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    match scrutinee {
+        Some(choice) => format!("'{}::{variant}'", string_table.resolve(choice)),
+        None => format!("'{variant}'"),
+    }
+}
+
+/// WHAT: joins quoted names into an English list such as `'a', 'b' and 'c'`.
+/// WHY: capture diagnostics name every expected field in declaration order.
+fn quoted_name_list(names: &[StringId], string_table: &dyn StringTableResolver) -> String {
+    let quoted = names
+        .iter()
+        .map(|name| format!("'{}'", string_table.resolve(*name)))
+        .collect::<Vec<_>>();
+    match quoted.split_last() {
+        Some((last, [])) => last.to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// WHAT: renders an invalid match pattern from its reason and the facts its message reads.
+/// WHY: capture-count and unknown-variant messages need the packed counts and the declared name list.
 pub(crate) fn render_invalid_match_pattern(
-    _diagnostic: &DiagnosticView<'_>,
+    diagnostic: &DiagnosticView<'_>,
     facts: &InvalidMatchPatternView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
@@ -321,6 +447,8 @@ pub(crate) fn render_invalid_match_pattern(
             facts.reason,
             facts.variant_name,
             facts.scrutinee_name,
+            invalid_match_pattern_capture_counts(facts),
+            diagnostic.string_ids(),
             context.string_table,
         ),
         guidance: Vec::new(),
@@ -365,8 +493,8 @@ pub(crate) fn non_exhaustive_match_message(
             "Choice matches with guarded arms must include an explicit 'else =>' arm in Alpha."
                 .to_string()
         }
-        NonExhaustiveMatchReason::MissingOptionPatterns => {
-            "Non-exhaustive option match. Add `none =>` or `|name| =>` to cover all cases."
+        NonExhaustiveMatchReason::MissingOptionalPatterns => {
+            "Non-exhaustive optional-value match. Add `none =>` or `|name| =>` to cover all cases."
                 .to_string()
         }
     }
