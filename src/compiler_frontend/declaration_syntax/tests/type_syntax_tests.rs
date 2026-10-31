@@ -823,6 +823,8 @@ fn alias_expanded_nested_optional_type_is_rejected() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
 
     let error = resolve_parsed_type_annotation(
@@ -953,6 +955,8 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
     let unresolved = ParsedTypeRef::Applied {
         base: Box::new(ParsedTypeRef::Named {
@@ -1051,6 +1055,8 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
 
     let error = resolve_parsed_type_annotation(
@@ -1124,6 +1130,8 @@ fn bare_generic_type_name_requires_type_arguments() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
 
     let error = resolve_parsed_type_annotation(
@@ -1246,6 +1254,8 @@ fn unresolved_generic_argument_does_not_intern_instance() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
     let missing_type = string_table.intern("Missing");
     let unresolved = ParsedTypeRef::Applied {

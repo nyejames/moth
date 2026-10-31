@@ -267,6 +267,29 @@ impl TypeDisplayView for TypeEnvironment {
 /// type reads this rather than a type environment.
 pub(crate) const BOOL_TYPE_SPELLING: &str = "Bool";
 
+/// The spelling of the builtin `String`.
+pub(crate) const STRING_TYPE_SPELLING: &str = "String";
+
+/// The spelling of the builtin `Char`.
+pub(crate) const CHAR_TYPE_SPELLING: &str = "Char";
+
+/// Language-visible builtin type annotation spellings.
+///
+/// WHAT: `Bool`, `String`, `Char`, canonical `Dec`, plus every [`FixedScalar`] name.
+/// WHY: unknown-type suggestions compare these spellings at render time rather than
+/// storing a second builtin-name list on every diagnostic. `Dec` is parser-owned
+/// (`NumberScale`); named-type lookup does not intern it as a placeholder.
+pub(crate) fn builtin_type_annotation_spellings() -> impl Iterator<Item = &'static str> {
+    [
+        BOOL_TYPE_SPELLING,
+        STRING_TYPE_SPELLING,
+        CHAR_TYPE_SPELLING,
+        NumberScale::ZERO_SPELLING,
+    ]
+    .into_iter()
+    .chain(FixedScalar::ALL.into_iter().map(FixedScalar::name))
+}
+
 /// Renders one type through a view. The live environment and the frozen snapshot both call this,
 /// so each spelling rule exists exactly once.
 pub(crate) fn display_view_type<View: TypeDisplayView>(
@@ -278,8 +301,8 @@ pub(crate) fn display_view_type<View: TypeDisplayView>(
     match view.shape(type_id) {
         TypeDisplayShape::Unknown => "<unknown type>".to_owned(),
         TypeDisplayShape::Bool => BOOL_TYPE_SPELLING.to_owned(),
-        TypeDisplayShape::String => "String".to_owned(),
-        TypeDisplayShape::Char => "Char".to_owned(),
+        TypeDisplayShape::String => STRING_TYPE_SPELLING.to_owned(),
+        TypeDisplayShape::Char => CHAR_TYPE_SPELLING.to_owned(),
         TypeDisplayShape::Range => "Range".to_owned(),
         TypeDisplayShape::NoneType => "None".to_owned(),
         TypeDisplayShape::Number(scale) => scale.to_string(),

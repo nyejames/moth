@@ -24,6 +24,9 @@ impl NumberScale {
     /// Scale-zero identity shared by `Dec` and `Dec0`.
     pub const ZERO: Self = Self(0);
 
+    /// Canonical source spelling of scale-zero, shared by `Dec` and `Dec0`.
+    pub const ZERO_SPELLING: &str = "Dec";
+
     /// Validate a declared scale against the canonical capacity.
     pub const fn new(scale: u16) -> Option<Self> {
         if scale <= Self::MAX {
@@ -35,11 +38,11 @@ impl NumberScale {
 
     /// Parse only canonical source type spellings, without allocating.
     pub fn from_name(name: &str) -> Option<Self> {
-        if name == "Dec" {
+        if name == Self::ZERO_SPELLING {
             return Some(Self::ZERO);
         }
 
-        let digits = name.strip_prefix("Dec")?;
+        let digits = name.strip_prefix(Self::ZERO_SPELLING)?;
         if digits.is_empty()
             || (digits.len() > 1 && digits.starts_with('0'))
             || !digits.bytes().all(|byte| byte.is_ascii_digit())
@@ -59,7 +62,7 @@ impl NumberScale {
 impl Display for NumberScale {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         if *self == Self::ZERO {
-            formatter.write_str("Dec")
+            formatter.write_str(Self::ZERO_SPELLING)
         } else {
             write!(formatter, "Dec{}", self.get())
         }

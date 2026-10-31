@@ -17,7 +17,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::imports:
     MISSING_IMPORT_TARGET, UNUSED_IMPORT,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    self, InvalidDeclarationView, UnknownValueNameView,
+    self, InvalidDeclarationView, UNKNOWN_TYPE_NAME, UnknownValueNameView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     self, InvalidConfigView,
@@ -69,6 +69,7 @@ fn label_carrying_families_declare_their_extra_data_kind() {
         NON_EXHAUSTIVE_MATCH.extra,
         ExtraDataKind::StringIds
     ));
+    assert!(matches!(UNKNOWN_TYPE_NAME.extra, ExtraDataKind::StringIds));
     assert!(matches!(UNREACHABLE_MATCH_ARM.extra, ExtraDataKind::None));
 }
 

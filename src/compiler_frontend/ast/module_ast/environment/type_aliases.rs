@@ -11,20 +11,23 @@
 //! `create_header` collects named-type dependency edges from alias targets just like from struct
 //! fields and constant type annotations. Self-reference (`A as A`) also creates a self-loop edge.
 
+use crate::compiler_frontend::ast::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::module_ast::environment::builder::{
     AstModuleEnvironmentBuilder, DeclarationPassLanes,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::type_resolution::{
-    ResolvedTypeAlias, ResolvedTypeAnnotation, resolve_parsed_type_annotation,
+    ResolvedTypeAlias, ResolvedTypeAnnotation, VisibleTypeNameSources,
+    collect_visible_type_name_candidates, declaration_is_nominal_type,
+    resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticDraft, DiagnosticToken, InvalidDeclarationReason, InvalidTypeAnnotationReason,
-    TypeAnnotationContext,
+    TypeAnnotationContext, UnknownTypeNameSite,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -173,9 +176,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &visibility,
                 &scope_context,
                 string_table,
+                self.path_fork.component(header.declaration_path),
             )?;
 
-            self.complete_alias(header, target, resolved_target, string_table)?
+            self.complete_alias(header, target, resolved_target, &visibility, string_table)?
         };
 
         Rc::make_mut(&mut self.resolved_type_aliases_by_path)
@@ -205,9 +209,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         visibility: &FileVisibility,
         scope_context: &ScopeContext,
         string_table: &mut StringTable,
+        excluded_unknown_type_name: Option<StringId>,
     ) -> Result<ResolvedTypeAnnotation, ExpressionParseError> {
         let resolved_target = {
-            let mut type_resolution_context = self.type_resolution_context_for(visibility, None);
+            let mut type_resolution_context = self
+                .type_resolution_context_for(visibility, None)
+                .excluding_unknown_type_name(excluded_unknown_type_name);
             resolve_parsed_type_annotation(
                 target,
                 target_span,
@@ -225,6 +232,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         target: &ParsedTypeRef,
         resolved_target: ResolvedTypeAnnotation,
+        visibility: &FileVisibility,
         string_table: &mut StringTable,
     ) -> Result<ResolvedTypeAlias, ExpressionParseError> {
         // Reject aliases to external opaque types for Alpha.
@@ -254,7 +262,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         let target_span = parsed_type_span(target);
         let Some(target_type_id) = resolved_target.type_id else {
-            return Err(unresolved_alias_target_diagnostic(target, target_span).into());
+            return Err(unresolved_alias_target_diagnostic(
+                target,
+                target_span,
+                visibility,
+                self.declaration_table.as_ref(),
+            )
+            .into());
         };
 
         Ok(ResolvedTypeAlias {
@@ -285,9 +299,25 @@ fn parsed_type_span(parsed_type: &ParsedTypeRef) -> Option<SourceSpan> {
 fn unresolved_alias_target_diagnostic(
     target: &ParsedTypeRef,
     span: Option<SourceSpan>,
+    visibility: &FileVisibility,
+    declaration_table: &TopLevelDeclarationTable,
 ) -> DiagnosticDraft {
     if let Some(name) = first_authored_type_name(target) {
-        return names_declarations::unknown_type_name(name, span);
+        let candidates = if alias_target_is_bare(target) {
+            collect_visible_type_name_candidates(
+                name,
+                VisibleTypeNameSources::from_file_visibility(visibility),
+                |path| declaration_is_nominal_type(declaration_table, path),
+            )
+        } else {
+            Vec::new()
+        };
+        return names_declarations::unknown_type_name(
+            name,
+            UnknownTypeNameSite::TypeAnnotation,
+            candidates,
+            span,
+        );
     }
 
     names_declarations::invalid_type_annotation(
@@ -297,6 +327,14 @@ fn unresolved_alias_target_diagnostic(
         },
         span,
     )
+}
+
+fn alias_target_is_bare(target: &ParsedTypeRef) -> bool {
+    match target {
+        ParsedTypeRef::Named { .. } => true,
+        ParsedTypeRef::Applied { base, .. } => alias_target_is_bare(base),
+        _ => false,
+    }
 }
 
 fn first_authored_type_name(target: &ParsedTypeRef) -> Option<StringId> {

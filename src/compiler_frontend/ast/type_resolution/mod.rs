@@ -47,6 +47,9 @@ pub(crate) use context::{
     ResolvedTypeAlias, ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
     TypeResolutionFailureKind,
 };
+pub(crate) use lookup::{
+    VisibleTypeNameSources, collect_visible_type_name_candidates, declaration_is_nominal_type,
+};
 pub(crate) use maps::validate_map_key_type;
 pub(crate) use resolve_type::{
     resolve_parsed_type_annotation, resolve_parsed_type_annotation_with_failure_kind,

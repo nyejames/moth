@@ -73,6 +73,16 @@ pub(crate) struct TypeResolutionContext<'a> {
     pub trait_environment: Option<&'a TraitEnvironment>,
     pub trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
     pub visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    /// Skip collecting unknown-type candidates in this context.
+    ///
+    /// WHAT: the signature fallback pass always discards `UnknownTypeName`.
+    /// WHY: collecting candidates there is wasted work on every valid signature.
+    pub skip_unknown_type_name_candidates: bool,
+    /// Type name omitted from unknown-type suggestion candidates.
+    ///
+    /// WHAT: alias-target resolution excludes the alias being declared.
+    /// WHY: `UserId as UsrId` must not suggest `UserId` from `visible_type_alias_names`.
+    pub excluded_unknown_type_name: Option<StringId>,
 }
 
 /// Input bundle for constructing a [`TypeResolutionContext`].
@@ -124,6 +134,8 @@ impl<'a> TypeResolutionContext<'a> {
             trait_environment: None,
             trait_evidence_environment: None,
             visible_trait_names: None,
+            skip_unknown_type_name_candidates: false,
+            excluded_unknown_type_name: None,
         }
     }
 
@@ -145,6 +157,8 @@ impl<'a> TypeResolutionContext<'a> {
             trait_environment: inputs.trait_environment,
             trait_evidence_environment: inputs.trait_evidence_environment,
             visible_trait_names: inputs.visible_trait_names,
+            skip_unknown_type_name_candidates: false,
+            excluded_unknown_type_name: None,
         }
     }
 
@@ -165,6 +179,16 @@ impl<'a> TypeResolutionContext<'a> {
             self.generic_substitutions = generic_context.substitutions.as_ref();
         }
 
+        self
+    }
+
+    pub(crate) fn skip_unknown_type_name_candidates(mut self) -> Self {
+        self.skip_unknown_type_name_candidates = true;
+        self
+    }
+
+    pub(crate) fn excluding_unknown_type_name(mut self, name: Option<StringId>) -> Self {
+        self.excluded_unknown_type_name = name;
         self
     }
 }

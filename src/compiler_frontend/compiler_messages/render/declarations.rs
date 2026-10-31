@@ -5,8 +5,9 @@
 //! WHY: declarations are resolved before executable body parsing and form their own payload family.
 
 use super::{
-    DiagnosticRenderContext, RenderedPayload, duplicate_declaration_message,
-    namespace_misuse_message, token_kind_name, unknown_name_message,
+    DiagnosticRenderContext, RenderedPayload, closest_name_suggestion,
+    closest_name_suggestion_with_extra, duplicate_declaration_message, namespace_misuse_message,
+    token_kind_name, unknown_name_message,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     GenericInstantiationExtra, GenericInstantiationShape, InvalidFunctionSignatureView,
@@ -24,8 +25,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, InvalidDeclarationReason, InvalidFunctionSignatureReason,
     InvalidSignatureMemberReason, NameNamespace, NamingConvention, ReservedNameOwner,
-    TypeUsedAsValueReason,
+    TypeUsedAsValueReason, UnknownTypeNameSite,
 };
+use crate::compiler_frontend::datatypes::display::builtin_type_annotation_spellings;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_signature_member_message(reason: InvalidSignatureMemberReason) -> String {
@@ -671,15 +673,32 @@ pub(crate) fn render_unknown_value_name(
     }
 }
 
-/// WHAT: renders an unknown type name from its compact facts.
-/// WHY: the family fixes the type namespace, so the record stores only the name.
+/// WHAT: renders an unknown type name from its compact facts and optional close candidates.
+/// WHY: the family fixes the type namespace, so the record stores the name plus visible
+/// candidates; builtin spellings are compared only for type-annotation sites.
 pub(crate) fn render_unknown_type_name(
-    _diagnostic: &DiagnosticView<'_>,
+    diagnostic: &DiagnosticView<'_>,
     facts: &UnknownTypeNameView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
+    let mut message = unknown_name_message(facts.name, NameNamespace::Type, context.string_table);
+    let name_str = context.string_table.resolve(facts.name);
+    let suggested = match facts.site {
+        UnknownTypeNameSite::TypeAnnotation => closest_name_suggestion_with_extra(
+            name_str,
+            diagnostic.string_ids(),
+            builtin_type_annotation_spellings(),
+            context.string_table,
+        ),
+        UnknownTypeNameSite::NamespaceMember | UnknownTypeNameSite::ConformanceTarget => {
+            closest_name_suggestion(name_str, diagnostic.string_ids(), context.string_table)
+        }
+    };
+    if let Some(suggested) = suggested {
+        message.push_str(&format!(" Did you mean '{suggested}'?"));
+    }
     RenderedPayload {
-        message: unknown_name_message(facts.name, NameNamespace::Type, context.string_table),
+        message,
         guidance: Vec::new(),
     }
 }

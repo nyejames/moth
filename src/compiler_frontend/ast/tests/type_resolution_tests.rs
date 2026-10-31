@@ -55,12 +55,12 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, parse_single_file_ast,
-    parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+    ast_first_error_rendered_message, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -432,6 +432,126 @@ fn parsed_annotation_resolution_rejects_unknown_qualified_type_name() {
         .family_view::<UnknownTypeNameView>()
         .expect("qualified unknown type should retain typed name facts");
     assert_eq!(facts.name, missing_name);
+}
+
+#[test]
+fn unknown_type_name_suggests_close_visible_candidates() {
+    let cases = [
+        (
+            "close local type",
+            "Person = |\n    name String,\n|\nx Persn = Person(\"a\")\n",
+            Some("Did you mean 'Person'"),
+        ),
+        (
+            "close alias",
+            "UserId as I32\nx UsrId = 1\n",
+            Some("Did you mean 'UserId'"),
+        ),
+        (
+            "close generic parameter",
+            "identity type A |value A| -> Aa:\n    return value\n;\n",
+            Some("Did you mean 'A'"),
+        ),
+        ("unrelated name", "x Xyzzy = 1\n", None),
+        ("T outside generic scope", "value T = 1\n", None),
+        (
+            "declared alias is not suggested as its own target",
+            "UserId as UsrId\n",
+            None,
+        ),
+    ];
+
+    for (label, source, expected_suggestion) in cases {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(&failure, "MOTH-RULE-0035", None);
+        let message = ast_first_error_rendered_message(&failure);
+        match expected_suggestion {
+            Some(suggestion) => {
+                assert!(
+                    message.contains(suggestion),
+                    "{label}: expected {suggestion:?} in {message}"
+                );
+            }
+            None => {
+                assert!(
+                    !message.contains("Did you mean"),
+                    "{label}: unexpected suggestion in {message}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_type_name_does_not_suggest_invisible_local_types() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let gated_path = path_fork
+        .try_intern_portable_path("GatedType", &mut string_table)
+        .expect("test path fits");
+    let visible_path = path_fork
+        .try_intern_portable_path("VisibleType", &mut string_table)
+        .expect("test path fits");
+    let gated_name = string_table.intern("GatedType");
+    let visible_name = string_table.intern("VisibleType");
+    let unknown_name = string_table.intern("UnknownType");
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        vec![
+            Declaration {
+                id: gated_path,
+                type_id: builtin_type_ids::NONE,
+                type_syntax: None,
+                value_mode: ValueMode::ImmutableReference,
+                value: DeclarationValue::Shell(DeclarationShell::Struct),
+                binding_span: None,
+                config_qualifier: None,
+            },
+            Declaration {
+                id: visible_path,
+                type_id: builtin_type_ids::NONE,
+                type_syntax: None,
+                value_mode: ValueMode::ImmutableReference,
+                value: DeclarationValue::Shell(DeclarationShell::Struct),
+                binding_span: None,
+                config_qualifier: None,
+            },
+        ],
+        &path_fork,
+    ));
+    let source_bindings = FxHashMap::from_iter([
+        (visible_name, SourceDeclarationTarget::Local(visible_path)),
+        (gated_name, SourceDeclarationTarget::Local(gated_path)),
+    ]);
+    let visible_declaration_ids = Arc::new(FxHashSet::from_iter([visible_path]));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
+        &mut type_environment,
+        &const_values,
+    );
+    context.visible_source_bindings = Some(&source_bindings);
+    context.visible_declaration_ids = Some(&visible_declaration_ids);
+    let annotation = ParsedTypeRef::Named {
+        name: unknown_name,
+        span: None,
+    };
+
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("an unknown type must not resolve through a gated declaration");
+
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact.first().expect("unknown type emits one diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    assert!(
+        diagnostic.string_ids().contains(&visible_name),
+        "visible types must enter unknown-type candidates"
+    );
+    assert!(
+        !diagnostic.string_ids().contains(&gated_name),
+        "types outside visible_declaration_ids must not enter unknown-type candidates"
+    );
 }
 
 // ---------------------------------------------------------------

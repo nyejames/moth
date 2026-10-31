@@ -38,13 +38,18 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, InvalidGenericInstantiationReason, InvalidTypeAnnotationReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, TypeAnnotationContext,
+    NamespaceTypeValueMisuseKind, TypeAnnotationContext, UnknownTypeNameSite,
+};
+use crate::compiler_frontend::datatypes::display::{
+    BOOL_TYPE_SPELLING, CHAR_TYPE_SPELLING, STRING_TYPE_SPELLING,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterScope;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
-    NamespaceMemberLookup, NamespaceRecordSource, NamespaceTypeMember, lookup_namespace_member,
+    FileVisibility, NamespaceMemberLookup, NamespaceRecordSource, NamespaceTypeMember,
+    SourceDeclarationTarget, lookup_namespace_member,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -53,16 +58,154 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 fn unknown_type_name(
     name: StringId,
+    site: UnknownTypeNameSite,
     span: Option<SourceSpan>,
+    candidates: Vec<StringId>,
     failure_kind: &mut TypeResolutionFailureKind,
 ) -> DiagnosticDraft {
     *failure_kind = TypeResolutionFailureKind::UnknownTypeName;
-    names_declarations::unknown_type_name(name, span)
+    names_declarations::unknown_type_name(name, site, candidates, span)
+}
+
+/// Visible type-name maps shared by unknown-type suggestion producers.
+///
+/// WHAT: the file-local visibility tables plus optional generic parameters.
+/// WHY: alias and conformance sites have `FileVisibility` rather than a full
+/// type-resolution context, so one collector still owns the candidate set.
+pub(crate) struct VisibleTypeNameSources<'a> {
+    pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub visible_declaration_ids: Option<&'a FxHashSet<PathId>>,
+    pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
+    pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
+    pub generic_parameters: Option<&'a GenericParameterScope>,
+}
+
+impl<'a> VisibleTypeNameSources<'a> {
+    pub(crate) fn from_context(context: &'a TypeResolutionContext<'_>) -> Self {
+        Self {
+            visible_source_bindings: context.visible_source_bindings,
+            visible_declaration_ids: context.visible_declaration_ids.map(Arc::as_ref),
+            visible_type_aliases: context.visible_type_aliases,
+            visible_external_symbols: context.visible_external_symbols,
+            generic_parameters: context.generic_parameters,
+        }
+    }
+
+    pub(crate) fn from_file_visibility(visibility: &'a FileVisibility) -> Self {
+        Self {
+            visible_source_bindings: Some(&visibility.visible_source_names),
+            visible_declaration_ids: Some(visibility.visible_declaration_paths.as_ref()),
+            visible_type_aliases: Some(&visibility.visible_type_alias_names),
+            visible_external_symbols: Some(&visibility.visible_external_symbols),
+            generic_parameters: None,
+        }
+    }
+
+    pub(crate) fn same_file_nominal_types(visibility: &'a FileVisibility) -> Self {
+        Self {
+            visible_source_bindings: Some(&visibility.visible_source_names),
+            visible_declaration_ids: Some(visibility.visible_declaration_paths.as_ref()),
+            visible_type_aliases: None,
+            visible_external_symbols: None,
+            generic_parameters: None,
+        }
+    }
+}
+
+/// Collect visible type-name candidates for an unknown-type diagnostic.
+///
+/// WHAT: gathers interned names from visibility tables only, gated by visible
+/// declaration ids and an `is_nominal_type` filter for source bindings.
+/// WHY: iterating `declaration_table` wholesale would leak private and
+/// unimported types; hash-map order must not affect the chosen suggestion.
+pub(crate) fn collect_visible_type_name_candidates(
+    unknown_name: StringId,
+    sources: VisibleTypeNameSources<'_>,
+    is_nominal_type: impl Fn(&PathId) -> bool,
+) -> Vec<StringId> {
+    let mut names = FxHashSet::default();
+
+    if let Some(bindings) = sources.visible_source_bindings {
+        for (name, target) in bindings {
+            if *name == unknown_name {
+                continue;
+            }
+            if let Some(visible_ids) = sources.visible_declaration_ids
+                && !visible_ids.contains(target.local_path())
+            {
+                continue;
+            }
+            if !is_nominal_type(target.local_path()) {
+                continue;
+            }
+            names.insert(*name);
+        }
+    }
+
+    if let Some(aliases) = sources.visible_type_aliases {
+        for name in aliases.keys() {
+            if *name != unknown_name {
+                names.insert(*name);
+            }
+        }
+    }
+
+    if let Some(externals) = sources.visible_external_symbols {
+        for (name, symbol) in externals {
+            if *name != unknown_name && matches!(symbol, ExternalSymbolId::Type(_)) {
+                names.insert(*name);
+            }
+        }
+    }
+
+    if let Some(generic_parameters) = sources.generic_parameters {
+        for name in generic_parameters.parameter_names() {
+            if name != unknown_name {
+                names.insert(name);
+            }
+        }
+    }
+
+    let mut candidates: Vec<StringId> = names.into_iter().collect();
+    candidates.sort_unstable_by_key(|name| name.index());
+    candidates
+}
+
+/// True when `path` names a visible struct or choice shell.
+pub(crate) fn declaration_is_nominal_type(
+    declaration_table: &TopLevelDeclarationTable,
+    path: &PathId,
+) -> bool {
+    declaration_table
+        .get_visible_resolved_by_path(path, None)
+        .is_some_and(|declaration| {
+            matches!(
+                declaration.value,
+                DeclarationValue::Shell(DeclarationShell::Struct | DeclarationShell::Choice)
+            )
+        })
+}
+
+impl TypeResolutionContext<'_> {
+    pub(crate) fn visible_type_name_candidates(&self, unknown_name: StringId) -> Vec<StringId> {
+        if self.skip_unknown_type_name_candidates {
+            return Vec::new();
+        }
+        let mut candidates = collect_visible_type_name_candidates(
+            unknown_name,
+            VisibleTypeNameSources::from_context(self),
+            |path| declaration_is_nominal_type(self.declaration_table, path),
+        );
+        if let Some(excluded) = self.excluded_unknown_type_name {
+            candidates.retain(|name| *name != excluded);
+        }
+        candidates
+    }
 }
 
 /// Resolve a bare named type from the current type-resolution context.
@@ -156,7 +299,13 @@ pub(super) fn resolve_named_type_from_context(
         return Ok(Some(builtin_type));
     }
 
-    Err(unknown_type_name(type_name, span, failure_kind))
+    Err(unknown_type_name(
+        type_name,
+        UnknownTypeNameSite::TypeAnnotation,
+        span,
+        context.visible_type_name_candidates(type_name),
+        failure_kind,
+    ))
 }
 
 /// Find a visible trait name matching the supplied identifier.
@@ -223,11 +372,23 @@ pub(super) fn resolve_namespaced_type_from_context(
     increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
 
     let Some(visible_namespace_records) = context.visible_namespace_records else {
-        return Err(unknown_type_name(final_name, span, failure_kind));
+        return Err(unknown_type_name(
+            final_name,
+            UnknownTypeNameSite::NamespaceMember,
+            span,
+            Vec::new(),
+            failure_kind,
+        ));
     };
 
     let Some(record) = visible_namespace_records.get(&root_name) else {
-        return Err(unknown_type_name(final_name, span, failure_kind));
+        return Err(unknown_type_name(
+            final_name,
+            UnknownTypeNameSite::NamespaceMember,
+            span,
+            Vec::new(),
+            failure_kind,
+        ));
     };
 
     // Source and module public-surface namespace records remain shallow. Any attempt to traverse
@@ -263,7 +424,13 @@ pub(super) fn resolve_namespaced_type_from_context(
                 ));
             }
             NamespaceMemberLookup::Missing => {
-                return Err(unknown_type_name(*segment, span, failure_kind));
+                return Err(unknown_type_name(
+                    *segment,
+                    UnknownTypeNameSite::NamespaceMember,
+                    span,
+                    Vec::new(),
+                    failure_kind,
+                ));
             }
         }
     }
@@ -281,7 +448,13 @@ pub(super) fn resolve_namespaced_type_from_context(
                 reject_bare_generic_type_name(final_name, &declaration.id, span, context)?;
                 return Ok(registered_declaration_type_id(declaration, context));
             }
-            Err(unknown_type_name(final_name, span, failure_kind))
+            Err(unknown_type_name(
+                final_name,
+                UnknownTypeNameSite::NamespaceMember,
+                span,
+                Vec::new(),
+                failure_kind,
+            ))
         }
         Some(NamespaceTypeMember::ExternalSymbol(ExternalSymbolId::Type(type_id))) => {
             Ok(Some(context.type_environment.intern_external(*type_id)))
@@ -301,7 +474,13 @@ pub(super) fn resolve_namespaced_type_from_context(
                     span,
                 ))
             }
-            _ => Err(unknown_type_name(final_name, span, failure_kind)),
+            _ => Err(unknown_type_name(
+                final_name,
+                UnknownTypeNameSite::NamespaceMember,
+                span,
+                Vec::new(),
+                failure_kind,
+            )),
         },
     }
 }
@@ -404,7 +583,13 @@ pub(super) fn resolve_generic_base_type(
         ));
     }
 
-    Err(unknown_type_name(type_name, span, failure_kind))
+    Err(unknown_type_name(
+        type_name,
+        UnknownTypeNameSite::TypeAnnotation,
+        span,
+        context.visible_type_name_candidates(type_name),
+        failure_kind,
+    ))
 }
 
 /// Detect deferred public `Option` / `Result` syntax in generic position.
@@ -584,13 +769,16 @@ fn builtin_named_type(
 ) -> Option<TypeId> {
     let resolved = string_table.resolve(type_name);
     let builtins = type_environment.builtins();
-    match resolved {
-        "Bool" => Some(builtins.bool),
-        "String" => Some(builtins.string),
-        "Char" => Some(builtins.char),
+    if resolved == BOOL_TYPE_SPELLING {
+        Some(builtins.bool)
+    } else if resolved == STRING_TYPE_SPELLING {
+        Some(builtins.string)
+    } else if resolved == CHAR_TYPE_SPELLING {
+        Some(builtins.char)
+    } else {
         // Fixed-scalar spellings resolve through their single spelling owner.
-        _ => Some(builtin_type_ids::fixed_scalar(FixedScalar::from_name(
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::from_name(
             resolved,
-        )?)),
+        )?))
     }
 }

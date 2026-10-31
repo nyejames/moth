@@ -26,6 +26,19 @@ pub enum NameNamespace {
     ConfigKey,
 }
 
+/// Distinguishes unknown-type diagnostic sites so renderers can apply site-correct extras.
+///
+/// WHAT: type annotations compare builtin spellings; namespace members and conformance
+/// targets do not.
+/// WHY: dotted namespace failures belong to a later phase, and conformance targets
+/// cannot be builtin types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnknownTypeNameSite {
+    TypeAnnotation,
+    NamespaceMember,
+    ConformanceTarget,
+}
+
 /// Distinguishes a bare type name in value position from a generic type application.
 ///
 /// WHAT: `TYPE_USED_AS_VALUE` keeps one family; this reason selects ordinary versus

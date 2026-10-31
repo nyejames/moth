@@ -11250,6 +11250,13 @@ contract = "language.bindings.unknown_type_name_rejected"
 role = "primary"
 
 [[case]]
+id = "unknown_type_name_suggests_builtin"
+path = "unknown_type_name_suggests_builtin"
+tags = ["integration", "name-resolution", "diagnostics"]
+contract = "language.bindings.unknown_type_name_suggests_builtin"
+role = "primary"
+
+[[case]]
 id = "undeclared_collection_type_application_rejected"
 path = "undeclared_collection_type_application_rejected"
 tags = ["integration", "generics", "diagnostics", "name-resolution"]

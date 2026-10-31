@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    self, InvalidAssignmentTargetView,
+    self, InvalidAssignmentTargetView, UnknownTypeNameView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
@@ -50,7 +50,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
     InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
     NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, TypeAnnotationContext,
-    TypeMismatchContext, ValueReceiverContext,
+    TypeMismatchContext, UnknownTypeNameSite, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
@@ -484,6 +484,39 @@ fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
     assert!(message.contains("Status::Xyzzy"));
     assert!(!message.contains("Did you mean"));
     assert!(message.contains("Available variants: [Ready, Error]"));
+}
+
+#[test]
+fn unknown_type_name_non_annotation_sites_do_not_compare_builtins() {
+    let mut string_table = StringTable::new();
+    let misspelled = string_table.intern("Strng");
+    for site in [
+        UnknownTypeNameSite::NamespaceMember,
+        UnknownTypeNameSite::ConformanceTarget,
+    ] {
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(names_declarations::unknown_type_name(
+                misspelled,
+                site,
+                Vec::new(),
+                None,
+            )),
+            None,
+        );
+        let view = compact.first().expect("unknown type diagnostic compacts");
+        assert!(view.family_view::<UnknownTypeNameView>().is_some());
+        let guidance =
+            terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+        let message = guidance
+            .iter()
+            .find(|line| line.contains("Unknown type name"))
+            .expect("unknown-type message");
+        assert_eq!(
+            message, "Unknown type name 'Strng'.",
+            "{site:?} must not compare builtin spellings"
+        );
+        assert!(!message.contains("Did you mean"));
+    }
 }
 
 #[test]

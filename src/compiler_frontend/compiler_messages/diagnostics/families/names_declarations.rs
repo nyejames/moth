@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticCompoundAssignmentOperator, DiagnosticSeverity,
     DiagnosticToken, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidSignatureMemberReason, InvalidTypeAnnotationReason, NameNamespace, NamingConvention,
-    ReservedNameOwner, TypeAnnotationContext, TypeUsedAsValueReason,
+    ReservedNameOwner, TypeAnnotationContext, TypeUsedAsValueReason, UnknownTypeNameSite,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -43,6 +43,13 @@ unit_code! {
         Method = 7,
         TemplateSlot = 8,
         ConfigKey = 9,
+    }
+}
+unit_code! {
+    impl UnknownTypeNameSite {
+        TypeAnnotation = 1,
+        NamespaceMember = 2,
+        ConformanceTarget = 3,
     }
 }
 unit_code! {
@@ -495,13 +502,27 @@ diagnostic_family! {
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
         title: "Unknown type name",
-        facts: [name: StringFact],
+        facts: [name: StringFact, site: UnitFact<UnknownTypeNameSite>],
         labels: [],
-        extra: None,
-        ctor: generated unknown_type_name,
+        extra: StringIds,
+        ctor: manual,
         view: UnknownTypeNameView,
         render: render_unknown_type_name,
     }
+}
+
+/// Stores an unknown type-name draft, including visible candidate names as string ids.
+pub(crate) fn unknown_type_name(
+    name: StringId,
+    site: UnknownTypeNameSite,
+    candidates: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&UNKNOWN_TYPE_NAME, span, |cursor| {
+        cursor.push::<StringFact>(&name)?;
+        cursor.push::<UnitFact<UnknownTypeNameSite>>(&site)
+    })
+    .with_string_ids(candidates)
 }
 
 /// The duplicate-declaration draft uses the duplicate site as its primary location.

@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 5.2 scope-correct type-name suggestions
+NEXT_SLICE: Phase 5.3 namespace context and direct-member suggestions
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: implement 5.2, then 5.3 and 5.5 as separate slices
+RESUME_ACTION: implement 5.3, then 5.5 as a separate slice
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -676,6 +676,7 @@ Keep ordinary type-as-value diagnostics for non-generic cases.
 
 **Original finding:** DIAG-047
 **Original DIAG-033 disposition:** Removed. An unknown uppercase name is not enough evidence that the author forgot a generic `type` parameter.
+**Status:** Delivered. `UNKNOWN_TYPE_NAME` stores visible candidates from one collector over the file's visibility tables, and an `UnknownTypeNameSite` fact. Builtin spellings are compared at render time for type annotations only. Conformance targets offer same-file structs and choices only, alias targets exclude the alias being declared and the discarded signature fallback skips collection. The shared suggestion policy now requires a shared character and breaks ties alphabetically. `unknown_type_name_suggests_builtin` owns the integration contract and `type_resolution_tests.rs` owns the scope rows.
 
 Add candidate data to `UnknownTypeName` from the active type-resolution scope:
 
