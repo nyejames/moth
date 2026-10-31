@@ -25,6 +25,19 @@ pub enum NameNamespace {
     TemplateSlot,
     ConfigKey,
 }
+
+/// Distinguishes a bare type name in value position from a generic type application.
+///
+/// WHAT: `TYPE_USED_AS_VALUE` keeps one family; this reason selects ordinary versus
+///       `of`-application wording without a second stable code.
+/// WHY: a generic application is still a type-as-value mistake, but the correction
+///      is constructor syntax for a struct or a variant for a choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TypeUsedAsValueReason {
+    BareTypeName,
+    GenericStructApplication,
+    GenericChoiceApplication,
+}
 /// Which compact source-owned table rejected an authored request.
 ///
 /// Span resources keep the source identity on the diagnostic's primary span; this fact records
@@ -1111,7 +1124,7 @@ pub enum InvalidBuiltinCallReason {
     TooManyArguments,
     ExpressionPositionNotAllowed,
     MapLengthIsProperty,
-    ScalarConstructorRemoved,
+    ScalarTypeCalledAsFunction,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1124,7 +1137,6 @@ pub enum InvalidCastReason {
     OperandArityMismatch,
     TargetArityMismatch,
     CastPropagationRemoved,
-    ScalarConstructorRemoved,
     NoEvidence,
     BuiltinEvidenceNotConstFoldable,
     UserDefinedEvidenceNotConstFoldable,
@@ -1603,8 +1615,14 @@ pub enum InvalidCallShapeReason {
         parameter_index: usize,
     },
 
+    /// Extra positional argument past the declared slot count.
+    ///
+    /// Compacted as a `CountPair` in the call-shape `count` word: expected in
+    /// the low 16 bits, provided in the high 16 bits. The unused `parameter_name`
+    /// slot stays an `OptStringFact` for other reasons.
     ExtraPositionalArgument {
         expected_count: usize,
+        provided_count: usize,
     },
 
     DuplicateArgument {

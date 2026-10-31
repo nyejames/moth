@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0046"]
+message_contains = ["`I32` is a type, not a conversion function"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0046"
+reason = "invalid_builtin_call.scalar_type_called_as_function"
+line = 1
+column = 9

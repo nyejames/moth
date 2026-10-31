@@ -2200,8 +2200,8 @@ role = "primary"
 id = "generic_type_application_value_rejected"
 path = "generic_type_application_value_rejected"
 tags = ["integration","generics","diagnostics"]
-contract = "language.generics.type_used_as_value_rejected"
-role = "boundary"
+contract = "language.generics.generic_type_application_value_rejected"
+role = "primary"
 
 [[case]]
 id = "generic_namespace_type_value_rejected"
@@ -2827,25 +2827,11 @@ contract = "language.collections.fixed_capacity_must_be_compile_time_constant"
 role = "boundary"
 
 [[case]]
-id = "scalar_float_constructor_removed"
-path = "scalar_float_constructor_removed"
-tags = ["integration", "js-backend"]
-contract = "language.scalars.constructor_style_conversion_removed"
+id = "scalar_type_called_as_function_rejected"
+path = "scalar_type_called_as_function_rejected"
+tags = ["integration", "diagnostics", "cast"]
+contract = "language.scalars.scalar_type_called_as_function_rejected"
 role = "primary"
-
-[[case]]
-id = "scalar_int_constructor_removed"
-path = "scalar_int_constructor_removed"
-tags = ["integration", "js-backend"]
-contract = "language.scalars.constructor_style_conversion_removed"
-role = "boundary"
-
-[[case]]
-id = "scalar_uint_constructor_removed"
-path = "scalar_uint_constructor_removed"
-tags = ["integration", "js-backend"]
-contract = "language.scalars.constructor_style_conversion_removed"
-role = "boundary"
 
 [[case]]
 id = "collection_mutating_method_requires_explicit_receiver_tilde"
@@ -3657,6 +3643,13 @@ id = "function_call_named_args_positional_after_named"
 path = "function_call_named_args_positional_after_named"
 tags = ["integration", "functions", "named-args", "diagnostics"]
 contract = "language.functions.named_args_positional_after_named_rejected"
+role = "primary"
+
+[[case]]
+id = "function_call_extra_positional_argument_rejected"
+path = "function_call_extra_positional_argument_rejected"
+tags = ["integration", "functions", "diagnostics"]
+contract = "language.functions.extra_positional_argument_rejected"
 role = "primary"
 
 [[case]]
@@ -7734,27 +7727,6 @@ path = "cast_user_evidence_const_rejected"
 tags = ["integration","diagnostics","cast","const","traits","user-defined"]
 contract = "language.casts.user_evidence_must_be_const_rejected"
 role = "primary"
-
-[[case]]
-id = "cast_scalar_bool_constructor_removed"
-path = "cast_scalar_bool_constructor_removed"
-tags = ["integration","diagnostics","cast","scalar-constructors"]
-contract = "language.scalars.constructor_style_conversion_removed"
-role = "boundary"
-
-[[case]]
-id = "cast_scalar_string_constructor_removed"
-path = "cast_scalar_string_constructor_removed"
-tags = ["integration","diagnostics","cast","scalar-constructors"]
-contract = "language.scalars.constructor_style_conversion_removed"
-role = "boundary"
-
-[[case]]
-id = "cast_scalar_char_constructor_removed"
-path = "cast_scalar_char_constructor_removed"
-tags = ["integration","diagnostics","cast","scalar-constructors"]
-contract = "language.scalars.constructor_style_conversion_removed"
-role = "boundary"
 
 [[case]]
 id = "cast_core_trait_redeclaration_rejected"

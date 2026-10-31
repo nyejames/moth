@@ -9,7 +9,9 @@ use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::compiler_messages::diagnostics::compaction::CompactOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_multi_bind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCallShapeView, invalid_call_shape, invalid_call_shape_reason, invalid_multi_bind,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     non_exhaustive_match, unreachable_match_arm,
 };
@@ -34,7 +36,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, DiagnosticBag, DiagnosticCapacityResource, HirCapacityResource,
-    InvalidMultiBindReason, NonExhaustiveMatchReason,
+    InvalidCallShapeReason, InvalidMultiBindReason, NonExhaustiveMatchReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
@@ -360,4 +362,55 @@ fn path_node_capacity_uses_the_path_nodes_resource() {
     let terse =
         terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(&string_table));
     assert!(terse.contains("compiler's capacity for path nodes"));
+}
+
+#[test]
+fn extra_positional_count_pair_round_trips_through_compact() {
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(invalid_call_shape(
+            InvalidCallShapeReason::ExtraPositionalArgument {
+                expected_count: 65534,
+                provided_count: 65535,
+            },
+            None,
+            Some(exact_span(0, 1)),
+        )),
+        None,
+    );
+    let view = compact
+        .first()
+        .expect("boundary ExtraPositionalArgument counts compact");
+    let facts = view
+        .family_view::<InvalidCallShapeView>()
+        .expect("extra-positional draft keeps call-shape facts");
+    assert_eq!(
+        invalid_call_shape_reason(facts.reason, facts.parameter_name, facts.count, &[]),
+        InvalidCallShapeReason::ExtraPositionalArgument {
+            expected_count: 65534,
+            provided_count: 65535,
+        }
+    );
+}
+
+#[test]
+fn extra_positional_count_overflow_becomes_a_fact_value_capacity_record() {
+    let mut store = DiagnosticStore::new();
+    let draft = invalid_call_shape(
+        InvalidCallShapeReason::ExtraPositionalArgument {
+            expected_count: 65536,
+            provided_count: 1,
+        },
+        None,
+        Some(exact_span(0, 1)),
+    );
+
+    let CompactOutcome::Stored(id) = store.compact(draft, &mut Vec::new()) else {
+        panic!("a fact fault stores a capacity record");
+    };
+    let view = CompilerCapacityExceededView::from_record(store.record(id, &[]))
+        .expect("the stored record is a capacity record");
+    assert!(matches!(
+        view.resource,
+        CapacityResource::Store(DiagnosticCapacityResource::FactValue)
+    ));
 }

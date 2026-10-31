@@ -12,9 +12,9 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    ABSENT_PLACE_WORD, CharFact, CountFact, FactCapacityError, FactCodec, FactCursor, OptCharFact,
-    OptCountFact, OptPlaceFact, OptStringFact, OptTokenFact, OptTypeFact, OptUnitFact, PathFact,
-    PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode, UnitFact,
+    ABSENT_PLACE_WORD, CharFact, CountFact, CountPair, FactCapacityError, FactCodec, FactCursor,
+    OptCharFact, OptCountFact, OptPlaceFact, OptStringFact, OptTokenFact, OptTypeFact, OptUnitFact,
+    PathFact, PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode, UnitFact,
     type_display_from_word, type_display_word,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
@@ -132,6 +132,43 @@ fn count_fact_rejects_counts_beyond_u32() {
     let too_large = u32::MAX as usize + 1;
     assert_eq!(
         CountFact::encode(&too_large, &mut word),
+        Err(FactCapacityError)
+    );
+}
+
+#[test]
+fn count_pair_round_trips_boundary_u16_counts() {
+    let packed = CountPair {
+        expected: 65534,
+        provided: 65535,
+    }
+    .pack()
+    .expect("65534 and 65535 fit in a CountPair");
+    assert_eq!(
+        CountPair::unpack(packed),
+        CountPair {
+            expected: 65534,
+            provided: 65535,
+        }
+    );
+}
+
+#[test]
+fn count_pair_rejects_u16_overflow_and_absent_sentinel() {
+    assert_eq!(
+        CountPair {
+            expected: 65536,
+            provided: 1,
+        }
+        .pack(),
+        Err(FactCapacityError)
+    );
+    assert_eq!(
+        CountPair {
+            expected: 65535,
+            provided: 65535,
+        }
+        .pack(),
         Err(FactCapacityError)
     );
 }

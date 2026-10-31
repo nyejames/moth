@@ -43,7 +43,6 @@ fn assert_invalid_cast(source: &str, expected_reason: InvalidCastReason) {
         InvalidCastReason::OperandArityMismatch => "invalid_cast.operand_arity_mismatch",
         InvalidCastReason::TargetArityMismatch => "invalid_cast.target_arity_mismatch",
         InvalidCastReason::CastPropagationRemoved => "invalid_cast.cast_propagation_removed",
-        InvalidCastReason::ScalarConstructorRemoved => "invalid_cast.scalar_constructor_removed",
         InvalidCastReason::NoEvidence => "invalid_cast.no_evidence",
         InvalidCastReason::BuiltinEvidenceNotConstFoldable => {
             "invalid_cast.builtin_evidence_not_const_foldable"

@@ -43,8 +43,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
-    InvalidTemplateSlotReason, NameNamespace,
+    InvalidTemplateSlotReason, NameNamespace, TypeUsedAsValueReason,
 };
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -346,10 +347,35 @@ pub(super) fn parse_identifier_or_call(
                 DeclarationShell::Struct | DeclarationShell::Choice | DeclarationShell::TypeAlias
             )
         ) {
-            return Err(names_declarations::namespace_misuse(
+            // Generic `of` applications are type annotations. The type-application parser lives
+            // on DeclarationCursor and yields ParsedTypeRef, not TypeId, so this expression
+            // producer keeps the nominal name and a distinguishing reason rather than re-parsing.
+            // Type aliases are not stored in `generic_declarations_by_path`; a concrete alias
+            // followed by `of` stays a bare type-as-value mistake.
+            let reason = if token_stream.peek_next_tag() == Some(TokenTag::OF) {
+                match context
+                    .generic_declarations_by_path
+                    .as_ref()
+                    .and_then(|declarations| declarations.get(&declaration.id))
+                {
+                    Some(GenericDeclarationKind::Struct) => {
+                        TypeUsedAsValueReason::GenericStructApplication
+                    }
+                    Some(GenericDeclarationKind::Choice) => {
+                        TypeUsedAsValueReason::GenericChoiceApplication
+                    }
+                    Some(GenericDeclarationKind::Function) | None => {
+                        TypeUsedAsValueReason::BareTypeName
+                    }
+                }
+            } else {
+                TypeUsedAsValueReason::BareTypeName
+            };
+            return Err(names_declarations::type_used_as_value_row(
                 identifier,
                 NameNamespace::Value,
                 NameNamespace::Type,
+                reason,
                 Some(token_stream.current_span()),
             )
             .into());

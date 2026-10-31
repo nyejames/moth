@@ -720,7 +720,7 @@ define_stable_reason_keys! {
     &InvalidBuiltinCallReason::TooManyArguments => "invalid_builtin_call.too_many_arguments",
     &InvalidBuiltinCallReason::ExpressionPositionNotAllowed => "invalid_builtin_call.expression_position_not_allowed",
     &InvalidBuiltinCallReason::MapLengthIsProperty => "invalid_builtin_call.map_length_is_property",
-    &InvalidBuiltinCallReason::ScalarConstructorRemoved => "invalid_builtin_call.scalar_constructor_removed",
+    &InvalidBuiltinCallReason::ScalarTypeCalledAsFunction => "invalid_builtin_call.scalar_type_called_as_function",
     },
 
     InvalidCastReason => {
@@ -732,7 +732,6 @@ define_stable_reason_keys! {
     &InvalidCastReason::OperandArityMismatch => "invalid_cast.operand_arity_mismatch",
     &InvalidCastReason::TargetArityMismatch => "invalid_cast.target_arity_mismatch",
     &InvalidCastReason::CastPropagationRemoved => "invalid_cast.cast_propagation_removed",
-    &InvalidCastReason::ScalarConstructorRemoved => "invalid_cast.scalar_constructor_removed",
     &InvalidCastReason::NoEvidence => "invalid_cast.no_evidence",
     &InvalidCastReason::BuiltinEvidenceNotConstFoldable => "invalid_cast.builtin_evidence_not_const_foldable",
     &InvalidCastReason::UserDefinedEvidenceNotConstFoldable => "invalid_cast.user_defined_evidence_not_const_foldable",
@@ -1072,6 +1071,12 @@ define_stable_reason_keys! {
         &InvalidGenericInstantiationCode::RecursiveFunctionInstantiation => "invalid_generic_instantiation.recursive_function_instantiation",
         &InvalidGenericInstantiationCode::ExplicitCallTypeArgumentsUnsupported => "invalid_generic_instantiation.explicit_call_type_arguments_unsupported",
         &InvalidGenericInstantiationCode::GenericFunctionValueDeferred => "invalid_generic_instantiation.generic_function_value_deferred",
+    },
+
+    TypeUsedAsValueReason => {
+        &TypeUsedAsValueReason::BareTypeName => "type_used_as_value.bare_type_name",
+        &TypeUsedAsValueReason::GenericStructApplication => "type_used_as_value.generic_struct_application",
+        &TypeUsedAsValueReason::GenericChoiceApplication => "type_used_as_value.generic_choice_application",
     },
 
     ProjectContextEscapeReason => {

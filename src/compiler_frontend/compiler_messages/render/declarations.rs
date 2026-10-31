@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, InvalidDeclarationReason, InvalidFunctionSignatureReason,
     InvalidSignatureMemberReason, NameNamespace, NamingConvention, ReservedNameOwner,
+    TypeUsedAsValueReason,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -720,13 +721,28 @@ pub(crate) fn render_type_used_as_value(
     facts: &TypeUsedAsValueView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    RenderedPayload {
-        message: namespace_misuse_message(
-            facts.name,
-            facts.expected,
-            facts.found,
-            context.string_table,
-        ),
-        guidance: Vec::new(),
+    let name = context.string_table.resolve(facts.name);
+    match facts.reason {
+        TypeUsedAsValueReason::GenericStructApplication => RenderedPayload {
+            message: format!(
+                "`{name} of ...` is a type annotation, not a value expression. Construct the value with `{name}(...)` and provide a concrete receiving type when inference needs it."
+            ),
+            guidance: Vec::new(),
+        },
+        TypeUsedAsValueReason::GenericChoiceApplication => RenderedPayload {
+            message: format!(
+                "`{name} of ...` is a type annotation, not a value expression. Construct one of the `{name}` variants instead and provide a concrete receiving type when inference needs it."
+            ),
+            guidance: Vec::new(),
+        },
+        TypeUsedAsValueReason::BareTypeName => RenderedPayload {
+            message: namespace_misuse_message(
+                facts.name,
+                facts.expected,
+                facts.found,
+                context.string_table,
+            ),
+            guidance: Vec::new(),
+        },
     }
 }

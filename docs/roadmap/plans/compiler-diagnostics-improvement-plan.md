@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 5.1, 5.4 and 5.6 call-shape and type-in-value-position diagnostics
+NEXT_SLICE: Phase 5.2 scope-correct type-name suggestions
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: implement 5.1, 5.4 and 5.6 together, then 5.2, 5.3 and 5.5 as separate slices
+RESUME_ACTION: implement 5.2, then 5.3 and 5.5 as separate slices
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -656,6 +656,7 @@ current headers.
 
 **Original finding:** DIAG-002
 **Rejected original proposal:** `x ~Box of String = ...` and `Box of String { ... }` are not the intended constructor pattern.
+**Status:** Delivered. `TypeUsedAsValueReason` on `MOTH-RULE-0037` distinguishes a bare type name from a generic struct or generic choice application, chosen only when the declaration is generic. The expression producer has no resolved `TypeId` for the authored application, so the message names the base type as `` `Box of ...` `` rather than storing rendered type text. Generic choices are told to construct one of their variants. `generic_type_application_value_rejected` owns the struct wording and focused expression tests own the choice and non-generic rows.
 
 `Box of String` is type annotation syntax. Construction still uses the nominal constructor name:
 
@@ -745,6 +746,7 @@ offered as direct selections.
 ### 5.4 Include actual and expected argument counts
 
 **Original finding:** DIAG-045
+**Status:** Delivered. `ExtraPositionalArgument` carries the total authored positional count, counted up to the call's closing parenthesis, packed with the expected count through the `CountPair` fact codec. The existing quoted callee prefix is kept. User functions, struct constructors, choice constructors and receiver methods share the one binder. `function_call_extra_positional_argument_rejected` owns the contract and `function_call_tests.rs` owns the count rows.
 
 Extend `ExtraPositionalArgument` with `provided_count`. The extra argument is already the
 diagnostic's primary span.
@@ -821,6 +823,8 @@ reasons. Internal AST `OptionPresentCapture` node names are outside this diagnos
 and do not need a semantic refactor.
 
 ### 5.6 Keep scalar type-call diagnostics factual
+
+**Status:** Delivered. `InvalidBuiltinCallReason::ScalarTypeCalledAsFunction` (code 15) replaces the removed reason and the dead cast reason is deleted. Every active scalar type shares one dispatch arm, so `scalar_type_called_as_function_rejected` and a table test in `eval_expression_tests.rs` replace the six per-type fixtures.
 
 **Additional confirmed audit finding:** `InvalidBuiltinCallReason::ScalarConstructorRemoved`,
 several `*_constructor_removed` fixtures and the dead

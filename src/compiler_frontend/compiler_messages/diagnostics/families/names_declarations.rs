@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticCompoundAssignmentOperator, DiagnosticSeverity,
     DiagnosticToken, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidSignatureMemberReason, InvalidTypeAnnotationReason, NameNamespace, NamingConvention,
-    ReservedNameOwner, TypeAnnotationContext,
+    ReservedNameOwner, TypeAnnotationContext, TypeUsedAsValueReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -43,6 +43,13 @@ unit_code! {
         Method = 7,
         TemplateSlot = 8,
         ConfigKey = 9,
+    }
+}
+unit_code! {
+    impl TypeUsedAsValueReason {
+        BareTypeName = 1,
+        GenericStructApplication = 2,
+        GenericChoiceApplication = 3,
     }
 }
 unit_code! {
@@ -583,9 +590,13 @@ pub(crate) fn namespace_misuse(
         (NameNamespace::Type, NameNamespace::Value) => {
             value_used_as_type_row(name, expected, found, span)
         }
-        (NameNamespace::Value, NameNamespace::Type) => {
-            type_used_as_value_row(name, expected, found, span)
-        }
+        (NameNamespace::Value, NameNamespace::Type) => type_used_as_value_row(
+            name,
+            expected,
+            found,
+            TypeUsedAsValueReason::BareTypeName,
+            span,
+        ),
         _ => unknown_name_row(name, expected, found, span),
     }
 }
@@ -762,10 +773,12 @@ diagnostic_family! {
             name: StringFact,
             expected: UnitFact<NameNamespace>,
             found: UnitFact<NameNamespace>,
+            reason: UnitFact<TypeUsedAsValueReason>,
         ],
         labels: [],
         extra: None,
         ctor: generated type_used_as_value_row,
+        reason_key: reason,
         view: TypeUsedAsValueView,
         render: render_type_used_as_value,
     }

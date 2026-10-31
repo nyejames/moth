@@ -919,3 +919,134 @@ inspect(~x)
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, marker_span))
     );
 }
+
+#[test]
+fn extra_positional_argument_on_struct_constructor_uses_shared_binder() {
+    let source = r#"
+Point = |
+    x I32,
+    y I32,
+|
+
+value = Point(1, 2, 3)
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.extra_positional_argument"),
+    );
+    let extra_start = source.rfind('3').expect("extra argument") as u32;
+    let extra_span = LocalSpan::exact(extra_start, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, extra_span))
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("has 3 positional arguments, but accepts 2"),
+        "{message}"
+    );
+}
+
+#[test]
+fn extra_positional_argument_on_choice_constructor_uses_shared_binder() {
+    let source = r#"
+Status :: Ready, Failed | message String |;
+
+value = Status::Failed("a", "b")
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.extra_positional_argument"),
+    );
+    let extra_start = source.rfind("\"b\"").expect("extra argument") as u32;
+    let extra_span = LocalSpan::exact(extra_start, 3, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, extra_span))
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("has 2 positional arguments, but accepts 1"),
+        "{message}"
+    );
+}
+
+#[test]
+fn extra_positional_argument_counts_all_remaining_positionals() {
+    let source = r#"
+add |left I32, right I32| -> I32:
+    return left + right
+;
+
+value = add(1, 2, 3, 4)
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.extra_positional_argument"),
+    );
+    let extra_start = source.rfind('3').expect("first extra argument") as u32;
+    let extra_span = LocalSpan::exact(extra_start, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, extra_span))
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("has 4 positional arguments, but accepts 2"),
+        "{message}"
+    );
+}
+
+#[test]
+fn extra_positional_argument_count_skips_nested_commas_and_stops_at_named_arguments() {
+    let cases = [
+        ("add(1, 2, add(3, 4), {5, 6})", 4),
+        ("add(1, 2, [: one, two], \"x, y\", {1, 2})", 5),
+        ("add(1, 2, 3, right = 4)", 3),
+    ];
+    for (call, expected_count) in cases {
+        let source = format!(
+            "add |left I32, right I32| -> I32:\n    return left + right\n;\n\nvalue = {call}\n"
+        );
+        let failure = parse_single_file_ast_diagnostic(&source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0054",
+            Some("invalid_call_shape.extra_positional_argument"),
+        );
+        let message = ast_first_error_rendered_message(&failure);
+        assert!(
+            message.contains(&format!(
+                "has {expected_count} positional arguments, but accepts 2"
+            )),
+            "{call}: {message}"
+        );
+    }
+}
+
+#[test]
+fn extra_positional_argument_on_zero_parameter_function_uses_singular_wording() {
+    let source = r#"
+empty ||:
+;
+
+value = empty(1)
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.extra_positional_argument"),
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("has 1 positional argument, but accepts 0"),
+        "{message}"
+    );
+}

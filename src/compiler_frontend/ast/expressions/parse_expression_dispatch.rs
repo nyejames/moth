@@ -653,7 +653,7 @@ fn dispatch_non_group_expression_token(
                 let cast_name = builtin_scalar_type_name_for_tag(token)
                     .map(|spelling| string_table.intern(spelling));
                 return Err(calls_data::invalid_builtin_call(
-                    InvalidBuiltinCallReason::ScalarConstructorRemoved,
+                    InvalidBuiltinCallReason::ScalarTypeCalledAsFunction,
                     cast_name,
                     Some(token_stream.current_span()),
                 )

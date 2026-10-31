@@ -57,8 +57,18 @@ pub(crate) fn invalid_call_shape_message(
             let label = parameter_label(parameter_name, parameter_index, string_table);
             format!("{prefix} is missing an argument for {label}.")
         }
-        InvalidCallShapeReason::ExtraPositionalArgument { expected_count } => {
-            format!("{prefix} provides more positional arguments than expected (expected {expected_count}).")
+        InvalidCallShapeReason::ExtraPositionalArgument {
+            expected_count,
+            provided_count,
+        } => {
+            let argument_word = if provided_count == 1 {
+                "argument"
+            } else {
+                "arguments"
+            };
+            format!(
+                "{prefix} has {provided_count} positional {argument_word}, but accepts {expected_count}."
+            )
         }
         InvalidCallShapeReason::DuplicateArgument {
             parameter_name,
@@ -169,9 +179,15 @@ pub(crate) fn render_invalid_call_shape(
         view.count,
         diagnostic.string_ids(),
     );
+    let guidance = match &reason {
+        InvalidCallShapeReason::ExtraPositionalArgument { .. } => {
+            vec!["Remove the extra argument starting here.".to_owned()]
+        }
+        _ => Vec::new(),
+    };
     RenderedPayload {
         message: invalid_call_shape_message(reason, view.callee_name, context.string_table),
-        guidance: Vec::new(),
+        guidance,
     }
 }
 
@@ -451,9 +467,12 @@ pub(crate) fn invalid_builtin_call_message(
             "Map `length` is a property, not a method. Use `map.length` without parentheses."
                 .to_string()
         }
-        InvalidBuiltinCallReason::ScalarConstructorRemoved => {
+        InvalidBuiltinCallReason::ScalarTypeCalledAsFunction => {
+            let type_name = builtin_name
+                .map(|name| format!("`{}`", string_table.resolve(name)))
+                .unwrap_or_else(|| "This type".to_owned());
             format!(
-                "{builtin_text}(...) constructor-style conversions are removed. Use `cast` instead."
+                "{type_name} is a type, not a conversion function. Use `cast` at an explicit typed receiving boundary."
             )
         }
     }
@@ -507,10 +526,6 @@ pub(crate) fn invalid_cast_message(
              delivery through local `catch`, a private inferred failure route or a compatible `Error!` \
              slot. A custom error slot requires local recovery or explicit mapping. Postfix `!` remains \
              for fallible calls."
-                .to_owned()
-        }
-        InvalidCastReason::ScalarConstructorRemoved => {
-            "Constructor-style scalar conversions are removed. Use `cast` at an explicit typed boundary."
                 .to_owned()
         }
         InvalidCastReason::NoEvidence => {

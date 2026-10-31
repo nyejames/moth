@@ -41,8 +41,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_primary_span, ast_first_error_type_display,
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_primary_span, ast_first_error_rendered_message,
+    ast_first_error_type_display, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -437,31 +437,71 @@ fn logical_mix_rejects_non_bool_rhs_after_comparison() {
 }
 
 #[test]
-fn bool_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
-    let failure = parse_single_file_ast_diagnostic("value = Bool(true)\n");
-    assert_ast_diagnostic(
-        &failure,
-        "MOTH-RULE-0046",
-        Some("invalid_builtin_call.scalar_constructor_removed"),
-    );
-}
-
-#[test]
-fn fixed_scalar_constructors_are_rejected_with_removed_scalar_constructor_diagnostic() {
-    // Explicit-width type names are type spellings, not conversion functions, so a call form must
-    // report the removed scalar constructor instead of becoming an unknown-symbol call.
+fn scalar_type_called_as_function_is_rejected() {
+    // Bool, String, Char and explicit-width numeric tags share one builtin-scalar-type
+    // dispatch; a call form must stay a type-as-call diagnostic, not an unknown-symbol call.
     for source in [
+        "value = Bool(true)\n",
+        "value = String(1)\n",
+        "value = Char(\"a\")\n",
         "value = U8(200)\n",
+        "value = I32(\"42\")\n",
         "value = I64(200)\n",
         "value = Byte(200)\n",
+        "value = F64(\"3.14\")\n",
     ] {
         let failure = parse_single_file_ast_diagnostic(source);
         assert_ast_diagnostic(
             &failure,
             "MOTH-RULE-0046",
-            Some("invalid_builtin_call.scalar_constructor_removed"),
+            Some("invalid_builtin_call.scalar_type_called_as_function"),
         );
     }
+}
+
+#[test]
+fn generic_choice_application_in_value_position_uses_variant_guidance() {
+    let source = r#"
+Maybe type T ::
+    Some | value T |,
+    Empty,
+;
+
+value = Maybe of I32
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0037",
+        Some("type_used_as_value.generic_choice_application"),
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("`Maybe of ...` is a type annotation, not a value expression. Construct one of the `Maybe` variants instead"),
+        "{message}"
+    );
+}
+
+#[test]
+fn non_generic_type_followed_by_of_keeps_ordinary_type_as_value_wording() {
+    let source = r#"
+Point = |
+    x I32,
+|
+
+value = Point of I32
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0037",
+        Some("type_used_as_value.bare_type_name"),
+    );
+    let message = ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("'Point' is a type and cannot be used as a value"),
+        "{message}"
+    );
 }
 
 #[test]

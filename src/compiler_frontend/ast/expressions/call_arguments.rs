@@ -75,6 +75,7 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
     is_numeric_literal_destination_type_id,
 };
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
@@ -818,8 +819,12 @@ fn parse_call_arguments_inner(
             return Err(diagnostic.into());
         }
 
-        let parameter_slot =
-            slot_router.route(named_target.as_ref(), argument_span, string_table)?;
+        let parameter_slot = slot_router.route(
+            named_target.as_ref(),
+            argument_span,
+            token_stream,
+            string_table,
+        )?;
 
         let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
             let marker_span = Some(token_stream.current_span());
@@ -1666,6 +1671,7 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         named_target: Option<&(StringId, Option<SourceSpan>)>,
         argument_span: Option<SourceSpan>,
+        token_stream: &AstCursor,
         string_table: &mut StringTable,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
         if let Some(named_target_spans) = self.named_target_spans.as_mut()
@@ -1795,9 +1801,11 @@ impl<'a> ParameterSlotRouter<'a> {
         }
 
         if self.positional_cursor >= slot_count {
+            let remaining = count_remaining_top_level_positional_arguments(token_stream).max(1);
             return Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::ExtraPositionalArgument {
-                    expected_count: expectations.len(),
+                    expected_count: slot_count,
+                    provided_count: self.positional_cursor + remaining,
                 },
                 self.callee_name(string_table),
                 argument_span,
@@ -1896,6 +1904,70 @@ fn next_token_tag(token_stream: &AstCursor) -> Option<TokenTag> {
 fn current_token_starts_named_entry(token_stream: &AstCursor) -> bool {
     token_stream.current_tag() == TokenTag::SYMBOL
         && next_token_tag(token_stream) == Some(TokenTag::ASSIGN)
+}
+
+/// Count remaining top-level positional arguments from the current extra argument
+/// through the call's matching `)`.
+///
+/// The call's opening parenthesis is already consumed, so `NestingDepth` starts
+/// at zero for the argument list. Named arguments after extras (`name = ...`)
+/// are a separate diagnostic; this scan stops at the first such start so the
+/// provided count names only positional arguments.
+fn count_remaining_top_level_positional_arguments(token_stream: &AstCursor) -> usize {
+    let mut depth = NestingDepth::default();
+    let mut offset = 0usize;
+    let mut count = 0usize;
+    let mut in_argument = false;
+    let remaining = token_stream
+        .length()
+        .saturating_sub(token_stream.position());
+
+    while offset < remaining {
+        let Some(token) = token_stream.token_ref_at_offset(offset) else {
+            break;
+        };
+        let tag = token.tag();
+        if tag == TokenTag::EOF {
+            break;
+        }
+
+        if depth.is_top_level() {
+            if tag == TokenTag::CLOSE_PARENTHESIS {
+                break;
+            }
+            if tag == TokenTag::COMMA {
+                in_argument = false;
+                offset += 1;
+                continue;
+            }
+            if tag == TokenTag::NEWLINE {
+                offset += 1;
+                continue;
+            }
+            if !in_argument {
+                if argument_at_offset_is_named(token_stream, offset) {
+                    break;
+                }
+                count += 1;
+                in_argument = true;
+            }
+        }
+
+        depth.step_tag(tag);
+        offset += 1;
+    }
+    count
+}
+
+fn argument_at_offset_is_named(token_stream: &AstCursor, offset: usize) -> bool {
+    token_stream
+        .token_ref_at_offset(offset)
+        .map(|token| token.tag())
+        == Some(TokenTag::SYMBOL)
+        && token_stream
+            .token_ref_at_offset(offset.saturating_add(1))
+            .map(|token| token.tag())
+            == Some(TokenTag::ASSIGN)
 }
 
 fn reject_simple_generic_argument_type_ascription(

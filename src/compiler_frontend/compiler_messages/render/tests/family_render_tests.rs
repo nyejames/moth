@@ -1947,3 +1947,68 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
         "{terse_line}"
     );
 }
+
+#[test]
+fn extra_positional_argument_renders_counts_and_removal_guidance() {
+    let mut string_table = StringTable::new();
+    let callee = string_table.intern("add");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(calls_data::invalid_call_shape(
+            InvalidCallShapeReason::ExtraPositionalArgument {
+                expected_count: 2,
+                provided_count: 3,
+            },
+            Some(callee),
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("extra-positional draft compacts");
+    assert!(view.family_view::<InvalidCallShapeView>().is_some());
+    let context = DiagnosticRenderContext::new(&string_table);
+    let guidance = terminal::format_guidance_view(view, context);
+    let message = guidance
+        .iter()
+        .find(|line| line.contains("positional arguments"))
+        .expect("extra-positional message");
+    assert!(
+        message.contains("Call to 'add' has 3 positional arguments, but accepts 2."),
+        "{message}"
+    );
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("Remove the extra argument starting here.")),
+        "{guidance:?}"
+    );
+}
+
+#[test]
+fn scalar_type_called_as_function_renders_cast_guidance() {
+    let mut string_table = StringTable::new();
+    let scalar_name = string_table.intern("I32");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(calls_data::invalid_builtin_call(
+            InvalidBuiltinCallReason::ScalarTypeCalledAsFunction,
+            Some(scalar_name),
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("scalar type-call draft compacts");
+    assert!(
+        view.family_view::<calls_data::InvalidBuiltinCallView>()
+            .is_some()
+    );
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0046");
+    let terse_line =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(&string_table));
+    assert!(
+        terse_line.contains("`I32` is a type, not a conversion function"),
+        "{terse_line}"
+    );
+    assert!(
+        terse_line.contains("Use `cast` at an explicit typed receiving boundary"),
+        "{terse_line}"
+    );
+}

@@ -407,6 +407,39 @@ impl FactCodec for CountFact {
     }
 }
 
+/// Packed expected and provided counts sharing one `OptCountFact` word.
+///
+/// WHAT: ExtraPositionalArgument has no free schema word, so both arity counts
+/// share the existing `count` fact. Expected occupies the low 16 bits and
+/// provided the high 16 bits.
+/// WHY: `OptCountFact` treats `u32::MAX` as absence, so a pair of 65535s is
+/// rejected rather than compacting as a missing count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CountPair {
+    pub expected: usize,
+    pub provided: usize,
+}
+
+impl CountPair {
+    pub(crate) fn pack(self) -> Result<usize, FactCapacityError> {
+        let expected = u16::try_from(self.expected).map_err(|_| FactCapacityError)?;
+        let provided = u16::try_from(self.provided).map_err(|_| FactCapacityError)?;
+        let packed = (u32::from(provided) << 16) | u32::from(expected);
+        if packed == u32::MAX {
+            return Err(FactCapacityError);
+        }
+        Ok(packed as usize)
+    }
+
+    pub(crate) fn unpack(packed: usize) -> Self {
+        let word = packed as u32;
+        Self {
+            expected: (word & 0xFFFF) as usize,
+            provided: (word >> 16) as usize,
+        }
+    }
+}
+
 /// A character as one word. Decoding rejects words that are not Unicode scalar values.
 pub(crate) struct CharFact;
 
