@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
+    InvalidFieldAccessReason, NamespaceMemberRole, NamespaceTypeValueMisuseKind,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
@@ -88,6 +88,7 @@ pub(super) fn parse_namespace_access(
     token_stream.advance(); // move from '.' to first member name
 
     let mut current_record = root_record;
+    let mut child_segments = Vec::new();
 
     loop {
         let member_span = if token_stream.current_tag() == TokenTag::EOF {
@@ -136,6 +137,7 @@ pub(super) fn parse_namespace_access(
                     dot_span = Some(token_stream.current_span());
                     token_stream.advance(); // to next member name
                     current_record = child_record;
+                    child_segments.push(member_name);
                     continue;
                 }
 
@@ -203,10 +205,69 @@ pub(super) fn parse_namespace_access(
             }
 
             NamespaceMemberLookup::Missing => {
-                return Err(
-                    names_declarations::unknown_value_name(member_name, member_span).into(),
-                );
+                let member_role = if has_following_dot {
+                    NamespaceMemberRole::ChildNamespace
+                } else {
+                    NamespaceMemberRole::Value
+                };
+                return Err(names_declarations::unknown_namespace_member(
+                    names_declarations::intern_dotted_namespace_path(
+                        root_name,
+                        &child_segments,
+                        string_table,
+                    ),
+                    member_name,
+                    current_record.kind(),
+                    member_role,
+                    current_record.member_names_for_role(member_role),
+                    member_span,
+                )
+                .into());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler_frontend::external_packages::{
+        ExternalConstantId, ExternalSymbolId, ExternalTypeId,
+    };
+    use crate::compiler_frontend::headers::binding_environment::{
+        NamespaceTypeMember, NamespaceValueMember,
+    };
+
+    #[test]
+    fn value_position_leaf_excludes_type_and_child_namespace_candidates() {
+        let mut string_table = StringTable::new();
+        let package = string_table.intern("@test");
+        let value_name = string_table.intern("PI");
+        let type_name = string_table.intern("Point");
+        let child_name = string_table.intern("tools");
+        let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package));
+        record.value_members.insert(
+            value_name,
+            NamespaceValueMember::ExternalSymbol(ExternalSymbolId::Constant(ExternalConstantId(1))),
+        );
+        record.type_members.insert(
+            type_name,
+            NamespaceTypeMember::ExternalSymbol(ExternalSymbolId::Type(ExternalTypeId(2))),
+        );
+        record.child_namespaces.insert(
+            child_name,
+            NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package)),
+        );
+
+        let candidates = record.member_names_for_role(NamespaceMemberRole::Value);
+        assert!(candidates.contains(&value_name));
+        assert!(
+            !candidates.contains(&type_name),
+            "final value members must not suggest types"
+        );
+        assert!(
+            !candidates.contains(&child_name),
+            "final value members must not suggest child namespaces"
+        );
     }
 }

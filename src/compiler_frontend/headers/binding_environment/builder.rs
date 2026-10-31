@@ -527,7 +527,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .visible_namespace_records
                     .contains_key(&prelude_name_id)
             {
-                let record = self.build_external_namespace_record(package_path_id, None)?;
+                let mut record = self.build_external_namespace_record(package_path_id, None)?;
+                record.authored_clause_path = Some(package_path_id);
                 file_visibility
                     .visible_namespace_records
                     .insert(prelude_name_id, record);
@@ -1712,10 +1713,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
                     package_path,
                     symbol_name,
+                    candidates,
                 } => {
                     return Err(super::diagnostics::missing_package_symbol(
                         symbol_name,
                         package_path,
+                        candidates,
                         Some(selection.source_span),
                     )
                     .into());

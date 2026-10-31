@@ -28,15 +28,39 @@ pub enum NameNamespace {
 
 /// Distinguishes unknown-type diagnostic sites so renderers can apply site-correct extras.
 ///
-/// WHAT: type annotations compare builtin spellings; namespace members and conformance
-/// targets do not.
-/// WHY: dotted namespace failures belong to a later phase, and conformance targets
+/// WHAT: type annotations compare builtin spellings; remaining namespace-member and
+/// conformance sites do not.
+/// WHY: `NamespaceMember` covers a missing namespace table, an unknown root, or a
+/// recorded type member whose source declaration is absent. Conformance targets
 /// cannot be builtin types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnknownTypeNameSite {
     TypeAnnotation,
     NamespaceMember,
     ConformanceTarget,
+}
+
+/// Distinguishes a source-file namespace record from an external package namespace.
+///
+/// WHAT: unknown-member diagnostics keep the origin of the exact resolved node.
+/// WHY: source records stay shallow while external packages may expose child namespaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NamespaceRecordKind {
+    Source,
+    ExternalPackage,
+}
+
+/// Role of the failing segment on a namespace path.
+///
+/// WHAT: filters candidate members so an intermediate `.` only suggests child
+/// namespaces, a value-position leaf only suggests values, and a type-position
+/// leaf only suggests types.
+/// WHY: suggesting a type or child namespace as a value would teach invalid Moth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NamespaceMemberRole {
+    Value,
+    Type,
+    ChildNamespace,
 }
 
 /// Distinguishes a bare type name in value position from a generic type application.

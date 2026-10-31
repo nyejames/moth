@@ -895,14 +895,21 @@ fn missing_package_symbol_message(
     )
 }
 
-/// Renders a missing package symbol from its compact string facts.
+/// Renders a missing package symbol from its compact string facts and direct-export candidates.
 pub(crate) fn render_missing_package_symbol(
-    _diagnostic: &DiagnosticView<'_>,
+    diagnostic: &DiagnosticView<'_>,
     view: &MissingPackageSymbolView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
+    let mut message = missing_package_symbol_message(view.symbol, view.package_path, context);
+    let symbol = context.string_table.resolve(view.symbol);
+    if let Some(suggested) =
+        closest_name_suggestion(symbol, diagnostic.string_ids(), context.string_table)
+    {
+        message.push_str(&format!(" Did you mean '{suggested}'?"));
+    }
     RenderedPayload {
-        message: missing_package_symbol_message(view.symbol, view.package_path, context),
+        message,
         guidance: Vec::new(),
     }
 }

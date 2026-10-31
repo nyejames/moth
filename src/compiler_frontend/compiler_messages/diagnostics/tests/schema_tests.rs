@@ -14,10 +14,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     self, INVALID_EXTERNAL_MODULE, InvalidExternalModuleCode, InvalidExternalModuleView,
-    MISSING_IMPORT_TARGET, UNUSED_IMPORT,
+    MISSING_IMPORT_TARGET, MISSING_PACKAGE_SYMBOL, UNUSED_IMPORT,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    self, InvalidDeclarationView, UNKNOWN_TYPE_NAME, UnknownValueNameView,
+    self, InvalidDeclarationView, UNKNOWN_NAMESPACE_MEMBER, UNKNOWN_TYPE_NAME, UnknownValueNameView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     self, InvalidConfigView,
@@ -70,6 +70,14 @@ fn label_carrying_families_declare_their_extra_data_kind() {
         ExtraDataKind::StringIds
     ));
     assert!(matches!(UNKNOWN_TYPE_NAME.extra, ExtraDataKind::StringIds));
+    assert!(matches!(
+        UNKNOWN_NAMESPACE_MEMBER.extra,
+        ExtraDataKind::StringIds
+    ));
+    assert!(matches!(
+        MISSING_PACKAGE_SYMBOL.extra,
+        ExtraDataKind::StringIds
+    ));
     assert!(matches!(UNREACHABLE_MATCH_ARM.extra, ExtraDataKind::None));
 }
 

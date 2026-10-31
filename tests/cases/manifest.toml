@@ -10011,6 +10011,13 @@ contract = "language.dependencies.unknown_external_symbol_rejected"
 role = "boundary"
 
 [[case]]
+id = "core_math_missing_symbol_typo_rejected"
+path = "core_math_missing_symbol_typo_rejected"
+tags = ["integration", "math", "dependencies", "diagnostics"]
+contract = "language.dependencies.missing_package_symbol_typo_rejected"
+role = "primary"
+
+[[case]]
 id = "core_math_type_errors"
 path = "core_math_type_errors"
 tags = ["integration", "math", "diagnostics", "type-checking"]
@@ -10970,6 +10977,13 @@ contract = "language.dependencies.namespace_missing_member_rejected"
 role = "primary"
 
 [[case]]
+id = "unknown_namespace_member_typo_rejected"
+path = "unknown_namespace_member_typo_rejected"
+tags = ["integration", "dependencies", "namespace-bindings", "diagnostics"]
+contract = "language.dependencies.unknown_namespace_member_typo_rejected"
+role = "primary"
+
+[[case]]
 id = "namespace_binding_nested_external_type_as_value_rejected"
 path = "namespace_binding_nested_external_type_as_value_rejected"
 tags = ["integration", "dependencies", "namespace-bindings", "external-packages", "diagnostics"]
@@ -11241,6 +11255,27 @@ path = "unknown_value_name_rejected"
 tags = ["integration", "name-resolution", "diagnostics"]
 contract = "language.bindings.undefined_variable_reference_rejected"
 role = "boundary"
+
+[[case]]
+id = "unknown_value_unique_namespace_guidance_rejected"
+path = "unknown_value_unique_namespace_guidance_rejected"
+tags = ["integration", "name-resolution", "diagnostics"]
+contract = "language.bindings.unknown_value_unique_namespace_guidance"
+role = "primary"
+
+[[case]]
+id = "unknown_value_provider_namespace_guidance_rejected"
+path = "unknown_value_provider_namespace_guidance_rejected"
+tags = ["integration", "name-resolution", "diagnostics", "javascript"]
+contract = "language.bindings.unknown_value_provider_namespace_guidance"
+role = "primary"
+
+[[case]]
+id = "unknown_value_statement_call_namespace_guidance_rejected"
+path = "unknown_value_statement_call_namespace_guidance_rejected"
+tags = ["integration", "name-resolution", "diagnostics"]
+contract = "language.bindings.unknown_value_statement_call_namespace_guidance"
+role = "primary"
 
 [[case]]
 id = "unknown_type_name_rejected"

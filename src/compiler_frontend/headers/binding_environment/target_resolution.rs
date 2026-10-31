@@ -9,7 +9,9 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
-use crate::compiler_frontend::external_packages::{ExternalPackageRegistry, ExternalSymbolId};
+use crate::compiler_frontend::external_packages::{
+    ExternalPackageId, ExternalPackageRegistry, ExternalSymbolId,
+};
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::module_symbols::PublicExportEntry;
 use crate::compiler_frontend::source::SourceSpan;
@@ -69,6 +71,7 @@ pub(crate) enum ExternalPackageSymbolLookup {
     PackageFoundSymbolMissing {
         package_path: StringId,
         symbol_name: StringId,
+        candidates: Vec<StringId>,
     },
     NoMatch,
 }
@@ -100,9 +103,11 @@ pub(crate) fn resolve_external_package_symbol(
         VirtualPackageMatch::PackageFoundSymbolMissing {
             package_path,
             symbol_name,
+            candidates,
         } => ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
             package_path,
             symbol_name,
+            candidates,
         },
         VirtualPackageMatch::NoMatch => ExternalPackageSymbolLookup::NoMatch,
     }
@@ -181,10 +186,12 @@ pub(crate) fn resolve_dependency_target(
                 ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
                     package_path,
                     symbol_name,
+                    candidates,
                 } => {
                     return Err(diagnostics::missing_package_symbol(
                         symbol_name,
                         package_path,
+                        candidates,
                         input.span,
                     ));
                 }
@@ -305,6 +312,7 @@ enum VirtualPackageMatch {
     PackageFoundSymbolMissing {
         package_path: StringId,
         symbol_name: StringId,
+        candidates: Vec<StringId>,
     },
     NoMatch,
 }
@@ -326,7 +334,6 @@ fn resolve_virtual_package_dependency(
     else {
         return VirtualPackageMatch::NoMatch;
     };
-
     let package_path = string_table.intern(&package_match.package_path);
 
     let mut components = Vec::new();
@@ -342,6 +349,7 @@ fn resolve_virtual_package_dependency(
         return VirtualPackageMatch::PackageFoundSymbolMissing {
             package_path,
             symbol_name,
+            candidates: Vec::new(),
         };
     }
 
@@ -357,7 +365,34 @@ fn resolve_virtual_package_dependency(
     VirtualPackageMatch::PackageFoundSymbolMissing {
         package_path,
         symbol_name,
+        candidates: one_component_export_candidates(
+            registry,
+            package_match.package_id,
+            string_table,
+        ),
     }
+}
+
+fn one_component_export_candidates(
+    registry: &ExternalPackageRegistry,
+    package_id: ExternalPackageId,
+    string_table: &mut StringTable,
+) -> Vec<StringId> {
+    let Some(package) = registry.get_package_by_id(package_id) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for path in package
+        .function_ids
+        .keys()
+        .chain(package.type_ids.keys())
+        .chain(package.constant_ids.keys())
+    {
+        if path.is_single() {
+            names.push(string_table.intern(path.leaf()));
+        }
+    }
+    names
 }
 
 fn exact_path_matches_candidate(

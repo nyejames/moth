@@ -18,8 +18,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
     DuplicateDeclarationView, IdentifierNamingConventionView, InvalidDeclarationCode,
     InvalidDeclarationView, InvalidSignatureMemberView, InvalidStructDefaultValueView,
     MissingDeclarationInitializerView, ReservedBuiltinNameView, ReservedNameCollisionView,
-    ShadowedNameView, TypeUsedAsValueView, UnknownNameView, UnknownTypeNameView,
-    UnknownValueNameView, ValueUsedAsTypeView, decode_invalid_declaration_reason,
+    ShadowedNameView, TypeUsedAsValueView, UnknownNameView, UnknownNamespaceMemberView,
+    UnknownTypeNameView, UnknownValueNameView, ValueUsedAsTypeView,
+    decode_invalid_declaration_reason,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
@@ -660,15 +661,57 @@ pub(crate) fn render_duplicate_declaration(
     }
 }
 
-/// WHAT: renders an unknown value name from its compact facts.
-/// WHY: the family fixes the value namespace, so the record stores only the name.
+/// WHAT: renders an unknown value name, with namespace qualification when exactly one
+/// visible namespace exposes the name as a direct value member.
+/// WHY: the family stores optional alias and package-path facts rather than pre-rendered prose.
 pub(crate) fn render_unknown_value_name(
     _diagnostic: &DiagnosticView<'_>,
     facts: &UnknownValueNameView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
+    let message = match facts.namespace_alias {
+        Some(alias) => {
+            let name = context.string_table.resolve(facts.name);
+            let alias = context.string_table.resolve(alias);
+            match facts.package_path {
+                Some(package_path) => {
+                    let package_path = context.string_table.resolve(package_path);
+                    format!(
+                        "Unknown value '{name}'. It is available as '{alias}.{name}' from the '{package_path}' namespace. Use '{package_path} {name}' if you want the bare name."
+                    )
+                }
+                None => format!("Unknown value '{name}'. It is available as '{alias}.{name}'."),
+            }
+        }
+        None => unknown_name_message(facts.name, NameNamespace::Value, context.string_table),
+    };
     RenderedPayload {
-        message: unknown_name_message(facts.name, NameNamespace::Value, context.string_table),
+        message,
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an unknown member of an exact resolved namespace node.
+/// WHY: the family stores the source-visible namespace path, requested member, and
+/// role-filtered candidates; `closest_name_suggestion` is the only suggestion policy.
+pub(crate) fn render_unknown_namespace_member(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownNamespaceMemberView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    // Kind and role are stored for structured consumers; the source-visible
+    // message names the member and the exact namespace node.
+    let _ = (facts.namespace_kind, facts.member_role);
+    let member = context.string_table.resolve(facts.member);
+    let namespace = context.string_table.resolve(facts.namespace);
+    let mut message = format!("Unknown member '{member}' on namespace '{namespace}'.");
+    if let Some(suggested) =
+        closest_name_suggestion(member, diagnostic.string_ids(), context.string_table)
+    {
+        message.push_str(&format!(" Did you mean '{suggested}'?"));
+    }
+    RenderedPayload {
+        message,
         guidance: Vec::new(),
     }
 }

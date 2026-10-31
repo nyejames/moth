@@ -1429,11 +1429,9 @@ pub(crate) fn parse_symbol_statement(
             .into());
         }
 
-        return Err(names_declarations::unknown_value_name(
-            symbol_id,
-            Some(token_stream.current_span()),
-        )
-        .into());
+        return Err(context
+            .unknown_unqualified_value_name(symbol_id, token_stream.current_span())
+            .into());
     }
 
     // Namespace-record calls such as `canvas.fill_rect(...)` have no local binding for the

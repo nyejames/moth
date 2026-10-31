@@ -95,3 +95,7 @@ if value is:
 ```
 
 `1 -> ...` reports `invalid_match_arm.expected_arm_header` instead of `InvalidArrow`, which is only reachable through `else ->` or a pattern suffix on a line that also has `=>`. The `diagnostic_match_arrow_separator` case asserts only `MOTH-SYNTAX-0028`, so it hides the wrong reason. Inside a value match such as `result = if value is:`, an arm written `1:` or `else:` reports "Unexpected end of file, expected ';'" rather than the ordinary arm-header or expected-`=>` diagnostic.
+
+## Namespace receiver-method statement calls leak a path id
+
+A bare statement call such as `tick(value)`, where `tick` is a receiver method declared in a file bound as a source namespace, renders `'tick' is a receiver method for 'PathId(7)'`. The receiver-method branch in `src/compiler_frontend/ast/statements/body_symbol.rs` formats an internal path id instead of the source-visible receiver type name.

@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 5.3 namespace context and direct-member suggestions
+NEXT_SLICE: Phase 5.5 choice match-pattern diagnostics
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: implement 5.3, then 5.5 as a separate slice
+RESUME_ACTION: implement 5.5, then Phase 6
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -701,6 +701,7 @@ Do not search private, dependency-unbound or out-of-scope types.
 **Original findings corrected:** DIAG-009, DIAG-048
 **Original DIAG-040 disposition:** Removed. `math.PI` is valid namespace access.
 **Original DIAG-022 disposition:** Removed. Delimiter-free direct selections of external exports are valid.
+**Status:** Delivered. `UNKNOWN_NAMESPACE_MEMBER` (`MOTH-RULE-0089`) reports an unknown member of an exact resolved namespace node with the source-visible namespace path, namespace kind, segment role and role-filtered direct members. Five existing value and type cases moved to it from `MOTH-RULE-0034` and `MOTH-RULE-0035`. Unqualified unknown values, in expressions and statement calls, name the single namespace that exposes them, using the authored dependency path. `MissingPackageSymbol` suggests close one-component exports only after the lookup misses. `unknown_namespace_member_typo_rejected`, `unknown_value_unique_namespace_guidance_rejected`, `unknown_value_provider_namespace_guidance_rejected`, `unknown_value_statement_call_namespace_guidance_rejected` and `core_math_missing_symbol_typo_rejected` own the contracts.
 
 Add a namespace-member diagnostic that carries:
 

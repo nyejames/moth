@@ -773,11 +773,13 @@ fn resolve_public_export_dependency(
         ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
             package_path,
             symbol_name,
+            candidates,
         } => {
             return Err(HeaderParseFailure::Diagnostic(
                 imports::missing_package_symbol(
                     symbol_name,
                     package_path,
+                    candidates,
                     Some(selection.source_span),
                 ),
             ));

@@ -1,0 +1,9 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0034"]
+message_contains = [
+    "Unknown value 'PI'. It is available as 'math.PI' from the '@core/math' namespace. Use '@core/math PI' if you want the bare name.",
+]

@@ -200,8 +200,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 None
             };
 
-        let record = match namespace_target {
-            ResolvedNamespaceTarget::SourceFile(ref file_path) => {
+        let record = match &namespace_target {
+            ResolvedNamespaceTarget::SourceFile(file_path) => {
                 self.validate_namespace_source_boundary(file_path, clause, source_file)?;
                 match source_namespace_access.as_ref() {
                     Some(SourceDependencyAccess::PublicExport { exported_entries }) => self
@@ -215,7 +215,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 }
             }
             ResolvedNamespaceTarget::ExternalPackage { package_path } => {
-                self.build_external_namespace_record(package_path, namespace_span)?
+                let mut record =
+                    self.build_external_namespace_record(*package_path, namespace_span)?;
+                record.authored_clause_path = Some(*package_path);
+                record
             }
         };
 
@@ -258,6 +261,19 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         Ok(())
+    }
+
+    /// Intern the authored `@path` from a provider-backed namespace clause.
+    pub(super) fn intern_authored_clause_path(&mut self, path: PathId) -> StringId {
+        let mut scratch = Vec::new();
+        let rendered = self
+            .path_fork
+            .render_portable(path, self.string_table, &mut scratch);
+        if rendered.starts_with('@') {
+            self.string_table.intern(&rendered)
+        } else {
+            self.string_table.intern(&format!("@{rendered}"))
+        }
     }
 
     fn add_source_namespace_receiver_methods(
@@ -630,6 +646,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             type_members,
             child_namespaces: FxHashMap::default(),
             record_source: NamespaceRecordSource::SourceFile(*file_path),
+            authored_clause_path: None,
         })
     }
 
@@ -724,6 +741,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             type_members,
             child_namespaces: FxHashMap::default(),
             record_source: NamespaceRecordSource::SourceFile(*root_file),
+            authored_clause_path: None,
         })
     }
 

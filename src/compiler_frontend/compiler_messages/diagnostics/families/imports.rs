@@ -353,11 +353,28 @@ diagnostic_family! {
         title: "Missing package symbol",
         facts: [symbol: StringFact, package_path: StringFact],
         labels: [],
-        extra: None,
-        ctor: generated missing_package_symbol,
+        extra: StringIds,
+        ctor: manual,
         view: MissingPackageSymbolView,
         render: render_missing_package_symbol,
     }
+}
+
+/// Stores a missing package-symbol draft with one-component direct-export candidates.
+pub(crate) fn missing_package_symbol(
+    symbol: StringId,
+    package_path: StringId,
+    mut candidates: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    candidates.sort_unstable_by_key(|id| id.index());
+    candidates.dedup();
+    DiagnosticDraft::with_facts(&MISSING_PACKAGE_SYMBOL, span, |cursor| {
+        cursor.push::<StringFact>(&symbol)?;
+        cursor.push::<StringFact>(&package_path)?;
+        Ok(())
+    })
+    .with_string_ids(candidates)
 }
 
 diagnostic_family! {

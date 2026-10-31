@@ -38,7 +38,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, InvalidGenericInstantiationReason, InvalidTypeAnnotationReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, TypeAnnotationContext, UnknownTypeNameSite,
+    NamespaceMemberRole, NamespaceTypeValueMisuseKind, TypeAnnotationContext, UnknownTypeNameSite,
 };
 use crate::compiler_frontend::datatypes::display::{
     BOOL_TYPE_SPELLING, CHAR_TYPE_SPELLING, STRING_TYPE_SPELLING,
@@ -48,8 +48,8 @@ use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterSco
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
-    FileVisibility, NamespaceMemberLookup, NamespaceRecordSource, NamespaceTypeMember,
-    SourceDeclarationTarget, lookup_namespace_member,
+    FileVisibility, NamespaceMemberLookup, NamespaceRecord, NamespaceRecordSource,
+    NamespaceTypeMember, SourceDeclarationTarget, lookup_namespace_member,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -70,6 +70,31 @@ fn unknown_type_name(
 ) -> DiagnosticDraft {
     *failure_kind = TypeResolutionFailureKind::UnknownTypeName;
     names_declarations::unknown_type_name(name, site, candidates, span)
+}
+
+fn unknown_namespace_type_member(
+    namespace: StringId,
+    member: StringId,
+    record: &NamespaceRecord,
+    member_role: NamespaceMemberRole,
+    span: Option<SourceSpan>,
+    context: &TypeResolutionContext<'_>,
+    failure_kind: &mut TypeResolutionFailureKind,
+) -> DiagnosticDraft {
+    *failure_kind = TypeResolutionFailureKind::UnknownTypeName;
+    let candidates = if context.skip_unknown_type_name_candidates {
+        Vec::new()
+    } else {
+        record.member_names_for_role(member_role)
+    };
+    names_declarations::unknown_namespace_member(
+        namespace,
+        member,
+        record.kind(),
+        member_role,
+        candidates,
+        span,
+    )
 }
 
 /// Visible type-name maps shared by unknown-type suggestion producers.
@@ -347,6 +372,7 @@ pub(super) fn resolve_namespaced_type_from_context(
     path: &[StringId],
     span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
+    string_table: &mut StringTable,
     failure_kind: &mut TypeResolutionFailureKind,
 ) -> TypeResolutionResult<Option<TypeId>> {
     let Some(root_name) = path.first().copied() else {
@@ -397,14 +423,15 @@ pub(super) fn resolve_namespaced_type_from_context(
     if path.len() > 2 && matches!(record.record_source, NamespaceRecordSource::SourceFile(_)) {
         return Err(project_config::nested_dependency_traversal(root_name, span));
     }
-
     let mut current_record = record;
+    let mut child_segments = Vec::new();
 
     // Walk every segment except the root and the final one. Each intermediate segment must
     // name a child namespace; any other slot produces a misuse diagnostic.
     for segment in path.iter().skip(1).take(path.len().saturating_sub(2)) {
         match lookup_namespace_member(current_record, *segment) {
             NamespaceMemberLookup::ChildNamespace(child_record) => {
+                child_segments.push(*segment);
                 current_record = child_record;
             }
             NamespaceMemberLookup::Value(_) => {
@@ -424,11 +451,17 @@ pub(super) fn resolve_namespaced_type_from_context(
                 ));
             }
             NamespaceMemberLookup::Missing => {
-                return Err(unknown_type_name(
+                return Err(unknown_namespace_type_member(
+                    names_declarations::intern_dotted_namespace_path(
+                        root_name,
+                        &child_segments,
+                        string_table,
+                    ),
                     *segment,
-                    UnknownTypeNameSite::NamespaceMember,
+                    current_record,
+                    NamespaceMemberRole::ChildNamespace,
                     span,
-                    Vec::new(),
+                    context,
                     failure_kind,
                 ));
             }
@@ -474,11 +507,17 @@ pub(super) fn resolve_namespaced_type_from_context(
                     span,
                 ))
             }
-            _ => Err(unknown_type_name(
+            _ => Err(unknown_namespace_type_member(
+                names_declarations::intern_dotted_namespace_path(
+                    root_name,
+                    &child_segments,
+                    string_table,
+                ),
                 final_name,
-                UnknownTypeNameSite::NamespaceMember,
+                current_record,
+                NamespaceMemberRole::Type,
                 span,
-                Vec::new(),
+                context,
                 failure_kind,
             )),
         },

@@ -141,8 +141,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         let package_path_id = self.string_table.intern(&package.path);
-        let namespace_record = self
+        let mut namespace_record = self
             .build_external_namespace_record(package_path_id, Some(dependency.dependency.span))?;
+        namespace_record.authored_clause_path =
+            Some(self.intern_authored_clause_path(dependency.dependency.path));
 
         let local_name = self.derive_namespace_name(dependency)?;
 

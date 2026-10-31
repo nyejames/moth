@@ -27,13 +27,17 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
     InvalidCollectionTypeCode, InvalidCollectionTypeView, InvalidMapTypeCode, InvalidMapTypeView,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownTypeNameView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    UnknownNamespaceMemberView, UnknownTypeNameView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::NamespaceTypeValueMisuseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
     CompactDiagnosticBagForTest, compact_bag_for_test,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, NamespaceTypeValueMisuseKind};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind,
+};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
@@ -46,11 +50,12 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplateSlot, PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::headers::binding_environment::{
-    NamespaceRecord, NamespaceRecordSource, NamespaceTypeMember, SourceDeclarationTarget,
+    NamespaceRecord, NamespaceRecordSource, NamespaceTypeMember, NamespaceValueMember,
+    SourceDeclarationTarget,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
@@ -423,15 +428,227 @@ fn parsed_annotation_resolution_rejects_unknown_qualified_type_name() {
     let diagnostic = compact
         .first()
         .expect("qualified unknown type emits a diagnostic");
-    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0089");
     assert_eq!(
         site_span(diagnostic.primary_site()),
         Some(expected_source_span(source, "source.QualifiedMissing"))
     );
     let facts = diagnostic
-        .family_view::<UnknownTypeNameView>()
-        .expect("qualified unknown type should retain typed name facts");
-    assert_eq!(facts.name, missing_name);
+        .family_view::<UnknownNamespaceMemberView>()
+        .expect("qualified unknown type should retain typed namespace-member facts");
+    assert_eq!(facts.member, missing_name);
+    assert_eq!(facts.namespace, namespace_name);
+    assert_eq!(facts.member_role, NamespaceMemberRole::Type);
+    assert_eq!(facts.namespace_kind, NamespaceRecordKind::Source);
+}
+
+fn namespaced_record_with_mixed_members(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (StringId, StringId, StringId, StringId, NamespaceRecord) {
+    let math_name = string_table.intern("math");
+    let package = string_table.intern("@core/math");
+    let point_name = string_table.intern("Point");
+    let pi_name = string_table.intern("PI");
+    let tools_name = string_table.intern("tools");
+    let point_path = path_fork
+        .try_intern_portable_path("Point", string_table)
+        .expect("test path fits");
+    let pi_path = path_fork
+        .try_intern_portable_path("PI", string_table)
+        .expect("test path fits");
+    let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package));
+    record.type_members.insert(
+        point_name,
+        NamespaceTypeMember::SourceDeclaration(SourceDeclarationTarget::Local(point_path)),
+    );
+    record.value_members.insert(
+        pi_name,
+        NamespaceValueMember::SourceDeclaration(SourceDeclarationTarget::Local(pi_path)),
+    );
+    record.child_namespaces.insert(
+        tools_name,
+        NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package)),
+    );
+    (math_name, point_name, pi_name, tools_name, record)
+}
+
+#[test]
+fn namespaced_type_member_candidates_exclude_values_and_child_namespaces() {
+    let source = "math.Poin";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (math_name, point_name, pi_name, tools_name, record) =
+        namespaced_record_with_mixed_members(&mut string_table, &mut path_fork);
+    let poin_name = string_table.intern("Poin");
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
+        &mut type_environment,
+        &const_values,
+    );
+    let namespace_records = FxHashMap::from_iter([(math_name, record)]);
+    context.visible_namespace_records = Some(&namespace_records);
+    let annotation = ParsedTypeRef::Qualified {
+        path: vec![math_name, poin_name],
+        span: Some(expected_source_span(source, "math.Poin")),
+    };
+
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("unknown type member must be rejected");
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("unknown type member emits a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0089");
+    let facts = diagnostic
+        .family_view::<UnknownNamespaceMemberView>()
+        .expect("unknown type member should retain typed facts");
+    assert_eq!(facts.member_role, NamespaceMemberRole::Type);
+    assert!(
+        diagnostic.string_ids().contains(&point_name),
+        "type members must be candidates"
+    );
+    assert!(
+        !diagnostic.string_ids().contains(&pi_name),
+        "value members must not be type-position candidates"
+    );
+    assert!(
+        !diagnostic.string_ids().contains(&tools_name),
+        "child namespaces must not be type-position candidates"
+    );
+}
+
+#[test]
+fn namespaced_type_member_skips_candidates_when_requested() {
+    let source = "math.Poin";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (math_name, point_name, _, _, record) =
+        namespaced_record_with_mixed_members(&mut string_table, &mut path_fork);
+    let poin_name = string_table.intern("Poin");
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
+        &mut type_environment,
+        &const_values,
+    );
+    let namespace_records = FxHashMap::from_iter([(math_name, record)]);
+    context.visible_namespace_records = Some(&namespace_records);
+    context.skip_unknown_type_name_candidates = true;
+    let annotation = ParsedTypeRef::Qualified {
+        path: vec![math_name, poin_name],
+        span: Some(expected_source_span(source, "math.Poin")),
+    };
+
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("unknown type member must be rejected");
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("unknown type member emits a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0089");
+    assert!(
+        diagnostic.string_ids().is_empty(),
+        "skip_unknown_type_name_candidates must suppress member suggestions"
+    );
+    assert!(
+        !diagnostic.string_ids().contains(&point_name),
+        "skipped candidate collection must not retain type members"
+    );
+}
+
+#[test]
+fn namespaced_nested_type_member_names_the_walked_path() {
+    let source = "math.tools.Missing";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (math_name, _, _, tools_name, record) =
+        namespaced_record_with_mixed_members(&mut string_table, &mut path_fork);
+    let missing_name = string_table.intern("Missing");
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
+        &mut type_environment,
+        &const_values,
+    );
+    let namespace_records = FxHashMap::from_iter([(math_name, record)]);
+    context.visible_namespace_records = Some(&namespace_records);
+    let annotation = ParsedTypeRef::Qualified {
+        path: vec![math_name, tools_name, missing_name],
+        span: Some(expected_source_span(source, "math.tools.Missing")),
+    };
+
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("unknown nested type member must be rejected");
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("unknown nested type member emits a diagnostic");
+    let facts = diagnostic
+        .family_view::<UnknownNamespaceMemberView>()
+        .expect("nested unknown type should retain typed facts");
+    let expected_namespace = string_table.intern("math.tools");
+    assert_eq!(facts.namespace, expected_namespace);
+    assert_eq!(facts.member, missing_name);
+}
+
+#[test]
+fn namespaced_intermediate_member_candidates_are_child_namespaces_only() {
+    let source = "math.toolz.Point";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (math_name, point_name, pi_name, tools_name, record) =
+        namespaced_record_with_mixed_members(&mut string_table, &mut path_fork);
+    let toolz_name = string_table.intern("toolz");
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
+        &mut type_environment,
+        &const_values,
+    );
+    let namespace_records = FxHashMap::from_iter([(math_name, record)]);
+    context.visible_namespace_records = Some(&namespace_records);
+    let annotation = ParsedTypeRef::Qualified {
+        path: vec![math_name, toolz_name, point_name],
+        span: Some(expected_source_span(source, "math.toolz.Point")),
+    };
+
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("unknown child namespace must be rejected");
+    let compact = compact_diagnostic(diagnostic, None);
+    let diagnostic = compact
+        .first()
+        .expect("unknown child namespace emits a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0089");
+    let facts = diagnostic
+        .family_view::<UnknownNamespaceMemberView>()
+        .expect("unknown child namespace should retain typed facts");
+    assert_eq!(facts.member_role, NamespaceMemberRole::ChildNamespace);
+    assert!(
+        diagnostic.string_ids().contains(&tools_name),
+        "child namespaces must be candidates for an intermediate segment"
+    );
+    assert!(
+        !diagnostic.string_ids().contains(&point_name),
+        "types must not be intermediate-segment candidates"
+    );
+    assert!(
+        !diagnostic.string_ids().contains(&pi_name),
+        "values must not be intermediate-segment candidates"
+    );
 }
 
 #[test]

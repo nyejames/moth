@@ -656,10 +656,9 @@ pub(super) fn parse_identifier_or_call(
         .into());
     }
 
-    Err(
-        names_declarations::unknown_value_name(identifier, Some(token_stream.current_span()))
-            .into(),
-    )
+    Err(context
+        .unknown_unqualified_value_name(identifier, token_stream.current_span())
+        .into())
 }
 
 /// Parse a `this` reference inside a receiver method body.

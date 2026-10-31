@@ -8,8 +8,9 @@
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, DiagnosticBag, NamespaceMemberRole, NamespaceRecordKind,
+};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
@@ -84,6 +85,11 @@ pub(crate) struct NamespaceRecord {
     /// value-position traversal respect the source/public export shallow boundary without
     /// rebuilding binding visibility in the expression parser.
     pub(crate) record_source: NamespaceRecordSource,
+    /// Authored `@path` from the dependency clause that bound this record.
+    ///
+    /// WHAT: the source-visible clause path, not the internal registry path.
+    /// WHY: qualification guidance must suggest a clause that can actually resolve.
+    pub(crate) authored_clause_path: Option<StringId>,
 }
 
 impl NamespaceRecord {
@@ -98,6 +104,28 @@ impl NamespaceRecord {
             type_members: FxHashMap::default(),
             child_namespaces: FxHashMap::default(),
             record_source,
+            authored_clause_path: None,
+        }
+    }
+
+    /// Direct member names of this exact node for one diagnostic role.
+    ///
+    /// WHAT: plain collect of the matching map keys. Sorting and dedup live in the
+    /// diagnostic constructors.
+    /// WHY: value, type, and nested producers share one candidate source.
+    pub(crate) fn member_names_for_role(&self, role: NamespaceMemberRole) -> Vec<StringId> {
+        match role {
+            NamespaceMemberRole::Value => self.value_members.keys().copied().collect(),
+            NamespaceMemberRole::Type => self.type_members.keys().copied().collect(),
+            NamespaceMemberRole::ChildNamespace => self.child_namespaces.keys().copied().collect(),
+        }
+    }
+
+    /// Origin kind of this exact namespace node.
+    pub(crate) fn kind(&self) -> NamespaceRecordKind {
+        match self.record_source {
+            NamespaceRecordSource::SourceFile(_) => NamespaceRecordKind::Source,
+            NamespaceRecordSource::ExternalPackage(_) => NamespaceRecordKind::ExternalPackage,
         }
     }
 }
@@ -282,6 +310,30 @@ pub(crate) struct FileVisibility {
     ///      Only same-file nominal receiver types contribute source-authored methods;
     ///      builtins, external types, and types declared in other files do not.
     pub(crate) visible_receiver_methods: FxHashMap<StringId, Vec<ReceiverMethodVisibility>>,
+}
+
+impl FileVisibility {
+    /// The one visible namespace that has this name as a direct value member.
+    ///
+    /// WHAT: used only after an unqualified value lookup has already failed.
+    /// Returns `None` when zero or several namespaces expose the name.
+    /// WHY: qualification guidance must not choose arbitrarily among colliding aliases.
+    pub(crate) fn unique_namespace_with_value_member(
+        &self,
+        name: StringId,
+    ) -> Option<(StringId, &NamespaceRecord)> {
+        let mut found = None;
+        for (alias, record) in &self.visible_namespace_records {
+            if !record.value_members.contains_key(&name) {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some((*alias, record));
+        }
+        found
+    }
 }
 
 /// Header-built binding environment for the entire module.

@@ -34,7 +34,8 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::binding_environment::{
-    BindingEnvironmentInput, prepare_binding_environment,
+    BindingEnvironmentInput, ExternalPackageSymbolLookup, ExternalPackageSymbolResolutionInput,
+    prepare_binding_environment, resolve_external_package_symbol,
 };
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
     DependencyAlias, RetainedDependencyPath,
@@ -1096,6 +1097,182 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
     assert!(!record.value_members.contains_key(&method_name));
     assert!(!record.type_members.contains_key(&method_name));
     assert!(record.child_namespaces.is_empty());
+    assert!(
+        !record
+            .member_names_for_role(
+                crate::compiler_frontend::compiler_messages::NamespaceMemberRole::Value
+            )
+            .contains(&method_name)
+    );
+    assert!(
+        !record
+            .member_names_for_role(
+                crate::compiler_frontend::compiler_messages::NamespaceMemberRole::Type
+            )
+            .contains(&method_name)
+    );
+    assert!(
+        !record
+            .member_names_for_role(
+                crate::compiler_frontend::compiler_messages::NamespaceMemberRole::ChildNamespace
+            )
+            .contains(&method_name)
+    );
+}
+
+#[test]
+fn unique_namespace_with_value_member_is_none_when_ambiguous() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let pi = string_table.intern("PI");
+    let math_alias = string_table.intern("math");
+    let other_alias = string_table.intern("other");
+    let package = string_table.intern("@core/math");
+    let other_package = string_table.intern("@other/math");
+    let file_path = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+
+    let mut math = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package));
+    math.value_members.insert(
+        pi,
+        NamespaceValueMember::ExternalSymbol(ExternalSymbolId::Constant(ExternalConstantId(1))),
+    );
+    let mut visibility = FileVisibility::default();
+    visibility
+        .visible_namespace_records
+        .insert(math_alias, math.clone());
+    assert_eq!(
+        visibility
+            .unique_namespace_with_value_member(pi)
+            .map(|(alias, _)| alias),
+        Some(math_alias)
+    );
+
+    let mut other = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(other_package));
+    other.value_members.insert(
+        pi,
+        NamespaceValueMember::ExternalSymbol(ExternalSymbolId::Constant(ExternalConstantId(2))),
+    );
+    visibility
+        .visible_namespace_records
+        .insert(other_alias, other);
+    assert!(visibility.unique_namespace_with_value_member(pi).is_none());
+
+    let mut source = NamespaceRecord::empty(NamespaceRecordSource::SourceFile(file_path));
+    source.value_members.insert(
+        pi,
+        NamespaceValueMember::SourceDeclaration(SourceDeclarationTarget::Local(file_path)),
+    );
+    let mut source_visibility = FileVisibility::default();
+    source_visibility
+        .visible_namespace_records
+        .insert(math_alias, source);
+    assert_eq!(
+        source_visibility
+            .unique_namespace_with_value_member(pi)
+            .map(|(alias, _)| alias),
+        Some(math_alias)
+    );
+}
+
+#[test]
+fn missing_package_symbol_candidates_exclude_nested_paths() {
+    let mut registry = ExternalPackageRegistry::new();
+    let package_id = registry
+        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .expect("test package should register");
+    registry
+        .register_constant_at_path(
+            package_id,
+            ExternalSymbolPath::from_single("PI"),
+            ExternalConstantId(501),
+            ExternalConstantDef {
+                name: "PI".to_owned(),
+                data_type: ExternalAbiType::Fixed(FixedScalar::I32).into(),
+                value: ExternalConstantValue::Fixed(
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+                ),
+            },
+        )
+        .expect("direct constant should register");
+    registry
+        .register_function_at_path(
+            package_id,
+            ExternalSymbolPath::from_components(vec!["tools".to_owned(), "helper".to_owned()]),
+            ExternalFunctionId::Synthetic(502),
+            empty_void_function("helper"),
+        )
+        .expect("nested function should register");
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let dependency_path = intern_path(&["test", "path", "nope"], &mut string_table, &mut path_fork);
+    let lookup = resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
+        dependency_path: &dependency_path,
+        external_package_registry: &registry,
+        string_table: &mut string_table,
+        path_fork: &path_fork,
+    });
+    let ExternalPackageSymbolLookup::PackageFoundSymbolMissing { candidates, .. } = lookup else {
+        panic!("missing symbol should match the registered package");
+    };
+    let pi = string_table.intern("PI");
+    let helper = string_table.intern("helper");
+    let tools = string_table.intern("tools");
+    assert!(
+        candidates.contains(&pi),
+        "one-component exports are candidates"
+    );
+    assert!(
+        !candidates.contains(&helper),
+        "nested package-local paths are not direct exports"
+    );
+    assert!(
+        !candidates.contains(&tools),
+        "child namespace names are not one-component exports"
+    );
+}
+
+#[test]
+fn missing_package_symbol_multi_component_path_has_no_candidates() {
+    let mut registry = ExternalPackageRegistry::new();
+    let package_id = registry
+        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .expect("test package should register");
+    registry
+        .register_constant_at_path(
+            package_id,
+            ExternalSymbolPath::from_single("PI"),
+            ExternalConstantId(501),
+            ExternalConstantDef {
+                name: "PI".to_owned(),
+                data_type: ExternalAbiType::Fixed(FixedScalar::I32).into(),
+                value: ExternalConstantValue::Fixed(
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+                ),
+            },
+        )
+        .expect("direct constant should register");
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let dependency_path = intern_path(
+        &["test", "path", "foo", "PI"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let lookup = resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
+        dependency_path: &dependency_path,
+        external_package_registry: &registry,
+        string_table: &mut string_table,
+        path_fork: &path_fork,
+    });
+    let ExternalPackageSymbolLookup::PackageFoundSymbolMissing { candidates, .. } = lookup else {
+        panic!("multi-component remaining path should miss inside the package");
+    };
+    assert!(
+        candidates.is_empty(),
+        "multi-component authored paths must not suggest one-component exports"
+    );
 }
 
 #[test]

@@ -374,9 +374,36 @@ impl ScopeContext {
                     Some(span),
                 )
             } else {
-                names_declarations::unknown_value_name(name, Some(span))
+                self.unknown_unqualified_value_name(name, span)
             }
         })
+    }
+
+    /// Diagnose an unqualified unknown value, offering namespace qualification when unique.
+    ///
+    /// WHAT: scans visible namespace records only after ordinary value lookup has failed.
+    /// WHY: expression identifiers and place roots share this error path.
+    pub(crate) fn unknown_unqualified_value_name(
+        &self,
+        name: StringId,
+        span: SourceSpan,
+    ) -> DiagnosticDraft {
+        if let Some((alias, record)) = self
+            .shared
+            .file_visibility
+            .as_ref()
+            .and_then(|visibility| visibility.unique_namespace_with_value_member(name))
+        {
+            let package_path = record.authored_clause_path;
+            names_declarations::unknown_value_name_with_namespace(
+                name,
+                Some(alias),
+                package_path,
+                Some(span),
+            )
+        } else {
+            names_declarations::unknown_value_name(name, Some(span))
+        }
     }
 
     /// Check local and source-visible declarations before publishing a new binding.
