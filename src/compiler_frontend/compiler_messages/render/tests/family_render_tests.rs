@@ -1275,7 +1275,7 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
         "top-level generic declaration header",
         "`Box of String`",
         "compatible fallible function",
-        "`if ... is |present| ... else ...`",
+        "Inspect the optional value with an `if` present-value capture",
         "`!` propagates an `Error!` return, but this expression is not fallible",
         "Config declarations cannot depend on runtime evaluation",
         "User-defined cast evidence must be fully evaluable at compile time",

@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 4.1 remaining catch presentation scope
+NEXT_SLICE: Phase 4.3, statement-match expression bodies
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: refine catch eligibility and optional-value rejection guidance, then continue Phase 4 in section order
+RESUME_ACTION: implement 4.3, then continue Phase 4 in section order (4.6 with 4.7, then 4.8)
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -517,12 +517,12 @@ built-in `start` `Error!`, so compatible top-level `!` remains legal. An incompa
 uses `invalid_fallible_handling.entry_has_incompatible_error`, separately from a function without
 an error slot. Both reasons retain `MOTH-RULE-0051`.
 
-**Remaining catch presentation scope:** refine eligibility and recovery guidance through the
-existing reason family. Plain-value rejection should explain the absence of compatible recoverable
-failure and authored safety-catch eligibility. Optional-value rejection should guide authors
-towards explicit inspection. Keep authored handler, operand channel and expression boundary clear
-without describing a source Result carrier. This scope adds no propagation-boundary owner or
-replacement reason matrix. Section 4.2 retains the catch-recovery type-context work.
+**Catch presentation status: Delivered.** Plain-value rejection explains that the expression has no
+compatible recoverable failure and is not an authored safety-catch site, owned by
+`implicit_failure_literal_catch_rejected`. Optional-value `catch` and `!` rejections guide authors
+towards explicit inspection with optional-value terminology, owned by `catch_on_optional_rejected`
+and `bang_on_optional_rejected`. The reason family, keys and codes are unchanged. Assertion suffix
+wording is logged separately as a bad diagnostic.
 
 #### Reclassify invalid public carrier type spellings
 
@@ -590,7 +590,7 @@ duplicating coverage.
 
 **Original finding:** DIAG-032
 
-**Delivered routing:** Module and function body dispatch emit `ThenWithNoActiveValueTarget`. The remaining work is source-visible wording and ownership cleanup: the `result_then_outside_catch_rejected` fixture ID, path and contract still describe `then` as catch-specific even though value-producing `if`, full match and catch all own it.
+**Status: Delivered.** Module and function body dispatch emit `ThenWithNoActiveValueTarget` with the wording below. The `then_without_active_value_target_rejected` case, renamed from the catch-specific fixture, owns it.
 
 Render the structured reason with source-visible guidance:
 

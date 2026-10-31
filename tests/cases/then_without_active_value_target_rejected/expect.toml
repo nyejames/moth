@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+message_contains = ["value-producing `if`"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+path = "input/@page.moth"
+line = 2
+column = 5
+reason = "invalid_fallible_handling.then_with_no_active_value_target"

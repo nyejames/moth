@@ -5209,6 +5209,20 @@ contract = "language.options.postfix_catch_conflict_rejected"
 role = "primary"
 
 [[case]]
+id = "catch_on_optional_rejected"
+path = "catch_on_optional_rejected"
+tags = ["integration", "language", "optionals", "diagnostics", "results"]
+contract = "language.options.catch_on_optional_rejected"
+role = "primary"
+
+[[case]]
+id = "bang_on_optional_rejected"
+path = "bang_on_optional_rejected"
+tags = ["integration", "language", "optionals", "diagnostics", "results"]
+contract = "language.options.bang_on_optional_rejected"
+role = "primary"
+
+[[case]]
 id = "option_present_capture_bare_capture_rejected"
 path = "option_present_capture_bare_capture_rejected"
 tags = ["integration", "language", "optionals", "match", "diagnostics"]
@@ -5678,10 +5692,10 @@ contract = "language.results.multiple_catch_handler_bindings_rejected"
 role = "primary"
 
 [[case]]
-id = "result_then_outside_catch_rejected"
-path = "result_then_outside_catch_rejected"
+id = "then_without_active_value_target_rejected"
+path = "then_without_active_value_target_rejected"
 tags = ["integration", "results", "diagnostics"]
-contract = "language.results.then_outside_catch_rejected"
+contract = "language.control_flow.then_without_active_value_target_rejected"
 role = "primary"
 
 [[case]]

@@ -74,3 +74,13 @@ The `MOTH-SYNTAX-0005` warning says `Potentially unsafe '<script' tag found in '
 Likely cause (inspected on main): `src/projects/html_project/styles/html.rs` calculates literal-match start/end character offsets. `src/projects/html_project/styles/validation.rs` then selects the containing `FormatterInputPiece::Text` source span in `map_warning_span_to_source_span` without narrowing that span to the matched substring. The test `html_validation_warnings_keep_authored_spans` currently expects a whole-body span, so it also encodes the overly broad result.
 
 Fix the source mapping where formatter spans are still available, preserving the original authored location through whitespace formatting, nested pieces and interpolations. Convert character offsets to source-byte spans correctly (including non-ASCII text) rather than treating flattened-character indexes as byte offsets. Preserve multiple distinct warning sites within one template. Update the existing test and add multiline, multiple-violation, non-ASCII and composed-template coverage. Expected primary span: the exact offending `<script` tag, not the template opener.
+
+## `catch` after an assertion explains safety-catch eligibility
+
+```moth
+assert(a + b > 0) catch:
+    then false
+;
+```
+
+`reject_assert_fallible_suffix` in `src/compiler_frontend/ast/statements/asserts.rs` reuses `CatchOnNonFallible` and `BangOnNonFallible`. The message then describes the assertion as an expression that is not an authored safety-catch site such as arithmetic, which reads as self-contradictory when the condition contains arithmetic. Assertions sit outside `catch` and `!` entirely, so the diagnostic should say the assertion statement cannot take a handler or propagation suffix.

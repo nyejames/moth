@@ -1374,12 +1374,13 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOnNonFallible => {
-                "`catch` needs a compatible recoverable failure or an authored cast, arithmetic operation or \
-                 multiple calls at this expression level; this expression has none."
+                "`catch` has nothing to recover here. This expression has no compatible recoverable \
+                 failure, and it is not an authored safety-catch site such as a cast, arithmetic \
+                 operation or more than one call at this expression level."
             }
 
             InvalidFallibleHandlingReason::CatchOnOptional => {
-                "`catch` does not recover an optional value. Inspect the optional value with an `if ... is |present| ... else ...` expression."
+                "`catch` does not recover an optional value. Inspect the optional value with an `if` present-value capture."
             }
 
             InvalidFallibleHandlingReason::BangOnNonFallible => {
@@ -1387,7 +1388,7 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::BangOnOptional => {
-                "Postfix `!` propagates an `Error!` return, but this expression is optional. Use postfix `?` only inside a compatible optional-returning function, or inspect the option explicitly."
+                "Postfix `!` propagates an `Error!` return, but this expression is an optional value. Use postfix `?` only inside a compatible optional-returning function, or inspect the optional value explicitly."
             }
 
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot => {
@@ -1439,7 +1440,7 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::ThenWithNoActiveValueTarget => {
-                "`then` is only valid inside a value-producing block."
+                "`then` is only valid inside a value-producing `if`, full match or `catch` recovery that has an active receiving site."
             }
 
             InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct => {
