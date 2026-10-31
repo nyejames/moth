@@ -3331,6 +3331,13 @@ contract = "language.patterns.match_arm_must_start_new_line"
 role = "primary"
 
 [[case]]
+id = "diagnostic_match_arm_missing_body"
+path = "diagnostic_match_arm_missing_body"
+tags = ["integration", "diagnostics", "pattern-matching"]
+contract = "language.patterns.match_arm_body_required"
+role = "primary"
+
+[[case]]
 id = "diagnostic_match_deferred_capture_pattern"
 path = "diagnostic_match_deferred_capture_pattern"
 tags = ["integration", "diagnostics"]
@@ -3352,17 +3359,17 @@ contract = "language.patterns.negated_pattern_deferred"
 role = "primary"
 
 [[case]]
-id = "diagnostic_match_legacy_colon_syntax"
-path = "diagnostic_match_legacy_colon_syntax"
-tags = ["integration", "diagnostics"]
-contract = "language.patterns.match_arm_arrow_separator_required"
-role = "boundary"
-
-[[case]]
 id = "diagnostic_match_semicolon_between_arms"
 path = "diagnostic_match_semicolon_between_arms"
 tags = ["integration", "diagnostics"]
 contract = "language.patterns.match_arm_semicolon_rejected"
+role = "primary"
+
+[[case]]
+id = "diagnostic_match_statement_expression_body"
+path = "diagnostic_match_statement_expression_body"
+tags = ["integration", "diagnostics", "pattern-matching"]
+contract = "language.patterns.statement_match_expression_body_rejected"
 role = "primary"
 
 [[case]]

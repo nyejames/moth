@@ -43,12 +43,14 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 };
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
 use crate::compiler_frontend::ast::statements::body_expr_stmt::{
-    is_expression_statement, push_statement_expression,
+    is_expression_statement, is_statement_match_arm, push_statement_expression,
+    statement_match_expression_body_diagnostic,
 };
 use crate::compiler_frontend::ast::statements::declarations::ResolvedDeclarationStatementKind;
 use crate::compiler_frontend::ast::statements::declarations::{
     NewDeclarationOutcome, new_declaration,
 };
+use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_ends_match_arm_body;
 use crate::compiler_frontend::ast::statements::multi_bind::{
     MultiBindStatement, parse_multi_bind_statement,
 };
@@ -179,6 +181,12 @@ fn push_accessed_symbol_statement(
         return Ok(());
     }
 
+    if let Some(diagnostic) =
+        statement_match_expression_body_diagnostic(context, token_stream, view.span())
+    {
+        return Err(diagnostic.into());
+    }
+
     // A bare field read (e.g., `obj.field`) does nothing, so it is rejected.
     if matches!(
         view.operation(),
@@ -236,6 +244,8 @@ fn push_retained_accessed_symbol_statement(
             expression,
             span,
             scope: context.scope,
+            in_statement_match_arm: is_statement_match_arm(context)
+                && current_token_ends_match_arm_body(token_stream),
         }),
     )?;
     draft.push_pending(continuation);

@@ -1761,11 +1761,11 @@ pub enum NamespaceTypeValueMisuseKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidMatchArmReason {
     SemicolonDelimiter,
-    LegacyColonSyntax,
-    LegacyElseSyntax,
     InvalidArrow,
     ArmMustStartNewLine,
     ExpectedArmHeader,
+    MissingBody,
+    ExpressionBodyInStatementMatch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1776,7 +1776,6 @@ pub enum InvalidMatchGuardReason {
 pub enum InvalidLoopHeaderReason {
     EmptyHeader,
     MissingColon,
-    RemovedInSyntax,
     MissingClosingPipe,
     MalformedBindingPipes,
     MissingSourceBeforeBindings,

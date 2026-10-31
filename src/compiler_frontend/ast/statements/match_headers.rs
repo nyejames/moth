@@ -308,8 +308,7 @@ pub(crate) fn parse_single_predicate_match_pattern(
         path_fork,
     )?;
 
-    // Colon starts the block body of a single-predicate value match. Full match
-    // arms still reject it as legacy `pattern:` syntax through `parse_match_arm_header`.
+    // Colon starts the block body of a single-predicate value match.
     if token_stream.current_tag() != TokenTag::COLON {
         reject_invalid_pattern_suffix(token_stream)?;
     }
@@ -592,13 +591,6 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
         .into());
     }
 
-    if token_stream.current_tag() == TokenTag::COLON {
-        return Err(choices_control_flow::invalid_match_arm(
-            InvalidMatchArmReason::LegacyColonSyntax,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
     if token_stream.current_tag() == TokenTag::ARROW {
         return Err(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,

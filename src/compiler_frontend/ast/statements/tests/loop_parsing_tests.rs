@@ -645,19 +645,6 @@ fn collection_index_binding_has_i32_type() {
 }
 
 // --------------------------
-//  Legacy syntax rejections
-// --------------------------
-
-#[test]
-fn rejects_old_in_loop_syntax_with_migration_error() {
-    assert_loop_fixture_diagnostic(
-        "loop i in 0 to 3:\n    io.line([: [i]])\n;",
-        "MOTH-SYNTAX-0029",
-        Some("invalid_loop_header.removed_in_syntax"),
-    );
-}
-
-// --------------------------
 //  Bare binding rejections
 // --------------------------
 

@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0028"]
+message_contains = ["This match arm has no body"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0028"
+reason = "invalid_match_arm.missing_body"
+path = "input/@page.moth"
+line = 6
+column = 11

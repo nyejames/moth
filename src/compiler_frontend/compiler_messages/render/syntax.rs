@@ -677,12 +677,6 @@ pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String
         InvalidMatchArmReason::SemicolonDelimiter => {
             "Match arms are not closed with semicolons. Use the next line-initial arm, 'else', or the final match ';' to delimit arms.".to_string()
         }
-        InvalidMatchArmReason::LegacyColonSyntax => {
-            "Legacy match arm syntax is no longer supported. Use `<pattern> => <body>`.".to_string()
-        }
-        InvalidMatchArmReason::LegacyElseSyntax => {
-            "Legacy default-arm syntax 'else:' is no longer supported. Use 'else =>'.".to_string()
-        }
         InvalidMatchArmReason::InvalidArrow => {
             "Unexpected '->' in match arm. Match arms use '=>'.".to_string()
         }
@@ -691,6 +685,12 @@ pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String
         }
         InvalidMatchArmReason::ExpectedArmHeader => {
             "Expected a match arm like `<pattern> => <body>` or `else => <body>`.".to_string()
+        }
+        InvalidMatchArmReason::MissingBody => {
+            "This match arm has no body. Add a statement after `=>`. Only `else =>` may be bodyless.".to_string()
+        }
+        InvalidMatchArmReason::ExpressionBodyInStatementMatch => {
+            "This is a statement match, so this arm body must contain statements. To compute a value, place the match at a declaration, assignment, return or multi-bind receiver and use `then` in every producing arm.".to_string()
         }
     }
 }
@@ -715,9 +715,6 @@ pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> St
         }
         InvalidLoopHeaderReason::MissingColon => {
             "A loop must have ':' after the loop header.".to_string()
-        }
-        InvalidLoopHeaderReason::RemovedInSyntax => {
-            "Old loop syntax 'loop <binder> in ...' was removed. Use 'loop 0 to 10 |i|:' or 'loop items |item|:'.".to_string()
         }
         InvalidLoopHeaderReason::MissingClosingPipe => {
             "Missing closing pipe in loop bindings.".to_string()

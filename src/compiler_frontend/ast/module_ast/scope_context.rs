@@ -498,6 +498,13 @@ pub struct ScopeContext {
     /// Preserves an enclosing match arm's line boundary in child expression contexts.
     pub(crate) match_arm_boundary: bool,
 
+    /// True only on a statement-match arm body. Nested children of that arm stay false.
+    ///
+    /// WHY: a statement match nested in a catch or value-producing branch still inherits
+    ///      `active_value_target` for `then`. Missing-body and expression-body diagnostics
+    ///      must follow the match's own receiving site, not that inherited target.
+    pub(crate) in_statement_match_arm: bool,
+
     /// Defers typed producer rejection until the complete root expression is known.
     /// This is parser control state, not an expression failure fact.
     pub(crate) defer_typed_error_validation: bool,
@@ -586,6 +593,7 @@ impl Clone for ScopeContext {
             kind: self.kind.clone(),
             scope: self.scope,
             match_arm_boundary: self.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: self.defer_typed_error_validation,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -913,6 +921,7 @@ impl ScopeContext {
         ScopeContext {
             kind,
             match_arm_boundary: false,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
             shared,
@@ -976,6 +985,7 @@ impl ScopeContext {
         Ok(ScopeContext {
             kind,
             match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
             shared: Rc::clone(&self.shared),
@@ -1014,6 +1024,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Expression,
             match_arm_boundary: self.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: self.defer_typed_error_validation,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
@@ -1076,6 +1087,7 @@ impl ScopeContext {
         ScopeContext {
             kind: template_kind,
             match_arm_boundary: self.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
@@ -1116,6 +1128,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Constant,
             match_arm_boundary: parent.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
             shared: Rc::clone(&parent.shared),

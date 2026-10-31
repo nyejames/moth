@@ -381,7 +381,6 @@ pub(crate) fn parse_loop_header_cursor(
     token_stream
         .set_position(header_start)
         .map_err(ExpressionParseError::from)?;
-    reject_removed_in_loop_syntax_cursor(token_stream, header_start, header_end, string_table)?;
 
     let loop_header = {
         let mut parser = LoopHeaderParser {
@@ -609,36 +608,6 @@ fn parse_non_range_loop_header_cursor(
     Ok(ParsedLoopHeader::Conditional {
         condition: StatementExpression::Built(expression),
     })
-}
-
-fn reject_removed_in_loop_syntax_cursor(
-    token_stream: &AstCursor,
-    header_start: usize,
-    header_end: usize,
-    string_table: &mut StringTable,
-) -> LoopHeaderResult<()> {
-    if header_end.saturating_sub(header_start) < 3 {
-        return Ok(());
-    }
-
-    if token_tag_at(token_stream, header_start) != Some(TokenTag::SYMBOL)
-        || token_tag_at(token_stream, header_start + 1) != Some(TokenTag::SYMBOL)
-    {
-        return Ok(());
-    }
-    let Some(second_symbol) = token_string_id_at(token_stream, header_start + 1, string_table)?
-    else {
-        return Ok(());
-    };
-
-    if string_table.resolve(second_symbol) != "in" {
-        return Ok(());
-    }
-
-    loop_header_error(
-        InvalidLoopHeaderReason::RemovedInSyntax,
-        token_stream.span_at(header_start + 1),
-    )
 }
 
 fn parse_pipe_binding_suffix_cursor(

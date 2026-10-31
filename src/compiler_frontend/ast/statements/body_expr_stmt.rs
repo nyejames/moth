@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::numeric_construction::{
     BodyDraft, ExpressionStatementContinuation, NumericContinuation, StatementExpression,
     deferred_numeric_expression,
 };
+use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_ends_match_arm_body;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -29,12 +30,15 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, token_lexical,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticToken, InvalidFallibleHandlingReason, InvalidStandaloneStatementReason,
+    DiagnosticToken, InvalidFallibleHandlingReason, InvalidMatchArmReason,
+    InvalidStandaloneStatementReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
+
 /// Returns `true` if the given expression is valid in statement position.
 ///
 /// Direct calls and handled fallible calls are always valid statements.
@@ -65,6 +69,42 @@ pub(crate) fn is_expression_statement(expression: ExpressionView<'_>) -> bool {
     }
 }
 
+/// True when this body is a statement-match arm, not a value-producing match arm.
+///
+/// WHY: retained expression statements resume at the body root, so this fact has to be
+///      recorded at parse time rather than recovered from the root context.
+pub(crate) fn is_statement_match_arm(context: &ScopeContext) -> bool {
+    context.in_statement_match_arm
+}
+
+fn statement_match_arm_ended_at_body_boundary(
+    context: &ScopeContext,
+    token_stream: &AstCursor,
+) -> bool {
+    is_statement_match_arm(context) && current_token_ends_match_arm_body(token_stream)
+}
+
+/// Diagnose a bare expression used as a statement-match arm body.
+///
+/// WHAT: the standalone-expression filter owns this case so the primary span stays on the
+///       expression rather than the next arm header.
+/// WHY: a statement match has no receiving site; suggesting `then` without moving the match
+///      would teach an invalid pattern. Value-producing matches keep their completeness path.
+pub(crate) fn statement_match_expression_body_diagnostic(
+    context: &ScopeContext,
+    token_stream: &AstCursor,
+    span: Option<SourceSpan>,
+) -> Option<DiagnosticDraft> {
+    if statement_match_arm_ended_at_body_boundary(context, token_stream) {
+        Some(choices_control_flow::invalid_match_arm(
+            InvalidMatchArmReason::ExpressionBodyInStatementMatch,
+            span,
+        ))
+    } else {
+        None
+    }
+}
+
 /// Validate an expression that numeric completion resumed in statement position.
 ///
 /// WHAT: applies the same two statement-position rules the parser applies before retention
@@ -73,11 +113,19 @@ pub(crate) fn is_expression_statement(expression: ExpressionView<'_>) -> bool {
 ///      expression has no cursor to report against, so the authored span carries the diagnostic.
 pub(crate) fn validate_resumed_statement_expression(
     expression: ExpressionView<'_>,
+    in_statement_match_arm: bool,
 ) -> Result<(), ExpressionParseError> {
     if let Some(diagnostic) = rejects_discarded_fallible_success(expression) {
         return Err(diagnostic.into());
     }
     if !is_expression_statement(expression) {
+        if in_statement_match_arm {
+            return Err(choices_control_flow::invalid_match_arm(
+                InvalidMatchArmReason::ExpressionBodyInStatementMatch,
+                expression.span(),
+            )
+            .into());
+        }
         return Err(choices_control_flow::invalid_standalone_statement(
             InvalidStandaloneStatementReason::Expression,
             expression.span(),
@@ -151,6 +199,7 @@ fn parse_and_validate_statement_expression(
     let expression = create_expression_with_trailing_newline_policy(input)?;
     validate_statement_expression(
         expression_builder.view_owned(expression)?,
+        context,
         token_stream,
         string_table,
     )?;
@@ -160,6 +209,7 @@ fn parse_and_validate_statement_expression(
 /// Apply the statement-position rules to one parsed expression.
 fn validate_statement_expression(
     expression: ExpressionView<'_>,
+    context: &ScopeContext,
     token_stream: &AstCursor,
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
@@ -168,6 +218,11 @@ fn validate_statement_expression(
     }
 
     if !is_expression_statement(expression) {
+        if let Some(diagnostic) =
+            statement_match_expression_body_diagnostic(context, token_stream, expression.span())
+        {
+            return Err(diagnostic.into());
+        }
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
@@ -240,6 +295,10 @@ pub(crate) fn push_statement_expression(
                     expression,
                     span,
                     scope: context.scope,
+                    in_statement_match_arm: statement_match_arm_ended_at_body_boundary(
+                        context,
+                        token_stream,
+                    ),
                 }),
             )?;
             draft.push_pending(continuation);

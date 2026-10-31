@@ -52,11 +52,11 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: active on `diagnostics-improvements`; the compact diagnostic layout is delivered
-NEXT_SLICE: Phase 4.3, statement-match expression bodies
+NEXT_SLICE: Phase 5.1, 5.4 and 5.6 call-shape and type-in-value-position diagnostics
 BLOCKERS: none; bounded recovery is not a prerequisite
 TRANSFERRED: Phase 4.1c propagation-context and Phase 4.4 result-arity work are delivered and must not be rescheduled
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their schema-typed facts without duplicating coverage
-RESUME_ACTION: implement 4.3, then continue Phase 4 in section order (4.6 with 4.7, then 4.8)
+RESUME_ACTION: implement 5.1, 5.4 and 5.6 together, then 5.2, 5.3 and 5.5 as separate slices
 ```
 
 The native-result transfers below remain delivered. Their coverage and source-visible messages belong to the compact typed-expression and native result-channel work.
@@ -551,12 +551,13 @@ Guidance may explain that each `then` value must match the corresponding success
 ### 4.3 Reject statement-match expression bodies at the expression
 
 **Original finding:** DIAG-003
+**Status:** Delivered. `InvalidMatchArmReason::ExpressionBodyInStatementMatch` fires at the bare expression when it ends at an arm-body boundary. The match owns statement-match status, so matches nested in `catch` handlers and value-producing branches are classified correctly. `diagnostic_match_statement_expression_body` and focused branching tests own it; `choice_match_exhaustive_success` and `value_match_declaration_init` remain the positive owners. The canonical receiving sites exclude nested `then` receivers, so the message lists only the four delivered receivers.
 
 A statement match and a value-producing match are different source shapes. Do not suggest inserting `then` without also moving the match to a receiving site.
 
 Message:
 
-> This is a statement match, so this arm body must contain statements. To compute a value, place the match at a declaration, assignment, return, multi-bind or nested `then` receiver and use `then` in every producing arm.
+> This is a statement match, so this arm body must contain statements. To compute a value, place the match at a declaration, assignment, return or multi-bind receiver and use `then` in every producing arm.
 
 The primary label belongs on the bare expression body, not the next arm header.
 
@@ -601,6 +602,7 @@ Preserve the structured reason rather than falling back to a generic unexpected-
 ### 4.6 Reject bodyless non-`else` match arms
 
 **Original finding:** DIAG-052
+**Status:** Delivered. `InvalidMatchArmReason::MissingBody` rejects bodyless non-`else` statement-match arms at `=>`, owned by `diagnostic_match_arm_missing_body`.
 
 A direct exhaustive-choice probe confirmed that `Ready =>` followed by `else =>` currently
 compiles successfully. This is a missing rejection, not only weak wording.
@@ -617,6 +619,8 @@ Keep positive coverage for bodyless `else =>`. Value-producing matches must cont
 
 ### 4.7 Delete legacy match-arm compatibility diagnostics
 
+**Status:** Delivered. `pattern:` reaches `ExpectedArmHeader`, `else:` reaches the expected-`=>` diagnostic and `->` keeps `InvalidArrow`. The boundary fixture was removed because `diagnostic_match_arrow_separator` owns the separator contract.
+
 **Additional audit finding:** `InvalidMatchArmReason::{LegacyColonSyntax, LegacyElseSyntax}` and
 the `current_line_contains_top_level_colon` pre-scan exist only to identify discontinued match-arm
 grammar. They preserve migration history in the current parser and renderer.
@@ -631,6 +635,8 @@ grammar. They preserve migration history in the current parser and renderer.
 - Do not add replacement recognisers, fixtures or compatibility messages.
 
 ### 4.8 Delete the removed `in` loop compatibility diagnostic
+
+**Status:** Delivered. Authored `loop x in items` now reaches the ordinary expression and loop-header owners.
 
 **Additional audit finding:** `InvalidLoopHeaderReason::RemovedInSyntax`,
 `reject_removed_in_loop_syntax_cursor` and their migration-only unit test exist only to recognise the

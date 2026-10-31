@@ -973,11 +973,11 @@ define_stable_reason_keys! {
 
     InvalidMatchArmReason => {
     &InvalidMatchArmReason::SemicolonDelimiter => "invalid_match_arm.semicolon_delimiter",
-    &InvalidMatchArmReason::LegacyColonSyntax => "invalid_match_arm.legacy_colon_syntax",
-    &InvalidMatchArmReason::LegacyElseSyntax => "invalid_match_arm.legacy_else_syntax",
     &InvalidMatchArmReason::InvalidArrow => "invalid_match_arm.invalid_arrow",
     &InvalidMatchArmReason::ArmMustStartNewLine => "invalid_match_arm.arm_must_start_new_line",
     &InvalidMatchArmReason::ExpectedArmHeader => "invalid_match_arm.expected_arm_header",
+    &InvalidMatchArmReason::MissingBody => "invalid_match_arm.missing_body",
+    &InvalidMatchArmReason::ExpressionBodyInStatementMatch => "invalid_match_arm.expression_body_in_statement_match",
     },
     InvalidMatchGuardReason => {
     &InvalidMatchGuardReason::SideEffectingPrelude => "invalid_match_guard.side_effecting_prelude",
@@ -989,7 +989,6 @@ define_stable_reason_keys! {
     InvalidLoopHeaderCode => {
     &InvalidLoopHeaderCode::EmptyHeader => "invalid_loop_header.empty_header",
     &InvalidLoopHeaderCode::MissingColon => "invalid_loop_header.missing_colon",
-    &InvalidLoopHeaderCode::RemovedInSyntax => "invalid_loop_header.removed_in_syntax",
     &InvalidLoopHeaderCode::MissingClosingPipe => "invalid_loop_header.missing_closing_pipe",
     &InvalidLoopHeaderCode::MalformedBindingPipes => "invalid_loop_header.malformed_binding_pipes",
     &InvalidLoopHeaderCode::MissingSourceBeforeBindings => "invalid_loop_header.missing_source_before_bindings",

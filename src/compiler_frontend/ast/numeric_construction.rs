@@ -1406,11 +1406,15 @@ pub(crate) enum StatementExpression {
 }
 
 /// Continuation for an expression statement.
+///
+/// `in_statement_match_arm` is kept so resume can emit the statement-match body diagnostic
+/// at the expression instead of the generic standalone-expression rule.
 #[derive(Debug, Clone)]
 pub(crate) struct ExpressionStatementContinuation {
     pub(crate) expression: StatementExpression,
     pub(crate) span: Option<SourceSpan>,
     pub(crate) scope: PathId,
+    pub(crate) in_statement_match_arm: bool,
 }
 
 /// Continuation for `return` / `return!` with pending slots.

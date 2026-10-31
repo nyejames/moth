@@ -27,7 +27,7 @@ pub(crate) struct MatchArmHeaderCandidate {
 ///
 /// A token starts a logical line when:
 /// - it is not `Newline`, `End`, or `Eof`;
-pub(crate) fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> bool {
+fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> bool {
     if index >= token_stream.length() {
         return false;
     }
@@ -143,27 +143,17 @@ pub(crate) fn token_index_starts_match_arm_header(
     })
 }
 
-fn find_top_level_token_on_line(
-    token_stream: &AstCursor,
-    start_index: usize,
-    matches_target: impl Fn(TokenTag) -> bool,
-) -> Option<usize> {
-    let mut walk = token_stream
-        .subcursor_window(start_index, token_stream.length())
-        .expect("match-arm line window stays inside the active parser view");
-    let mut nesting_depth = NestingDepth::default();
-    while !walk.is_at_end() {
-        let tag = walk.current_tag();
-        match tag {
-            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => break,
-            _ if nesting_depth.is_top_level() && matches_target(tag) => {
-                return Some(walk.position());
-            }
-            _ => nesting_depth.step_tag(walk.current_tag()),
-        }
-        walk.advance();
-    }
-    None
+/// True when the current token ends a match-arm body rather than continuing an expression.
+///
+/// WHY: a bare expression that stops at `:` or another in-line token is a malformed header,
+///      not a finished statement-match arm body, so it keeps the ordinary unexpected-token path.
+///      Single-value expressions skip their trailing newline, so a line-initial token also
+///      marks the end of the body statement.
+pub(crate) fn current_token_ends_match_arm_body(token_stream: &AstCursor) -> bool {
+    matches!(
+        token_stream.current_tag(),
+        TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF | TokenTag::ELSE
+    ) || token_is_line_initial(token_stream, token_stream.position())
 }
 
 /// Returns true when the current logical line contains a top-level `=>` at any
@@ -171,18 +161,18 @@ fn find_top_level_token_on_line(
 ///
 /// Used by `body_dispatch.rs` to detect same-line accidental second arms.
 pub(crate) fn current_line_contains_top_level_fat_arrow(token_stream: &AstCursor) -> bool {
-    find_top_level_token_on_line(token_stream, token_stream.position(), |tag| {
-        tag == TokenTag::FAT_ARROW
-    })
-    .is_some()
-}
-
-/// Scan forward from the current token looking for a top-level `Colon` on the same
-/// logical line. Returns `true` if one is found at delimiter depth `0` before any
-/// `Newline`, `End`, or `Eof`.
-pub(crate) fn current_line_contains_top_level_colon(token_stream: &AstCursor) -> bool {
-    find_top_level_token_on_line(token_stream, token_stream.position(), |tag| {
-        tag == TokenTag::COLON
-    })
-    .is_some()
+    let mut walk = token_stream
+        .subcursor_window(token_stream.position(), token_stream.length())
+        .expect("match-arm line window stays inside the active parser view");
+    let mut nesting_depth = NestingDepth::default();
+    while !walk.is_at_end() {
+        let tag = walk.current_tag();
+        match tag {
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => break,
+            TokenTag::FAT_ARROW if nesting_depth.is_top_level() => return true,
+            _ => nesting_depth.step_tag(walk.current_tag()),
+        }
+        walk.advance();
+    }
+    false
 }

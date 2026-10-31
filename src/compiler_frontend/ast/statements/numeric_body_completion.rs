@@ -1156,7 +1156,10 @@ impl Completion<'_, '_> {
         continuation: ExpressionStatementContinuation,
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         let expression = self.complete_statement_expression(continuation.expression)?;
-        validate_resumed_statement_expression(self.expression_builder.view_owned(expression)?)?;
+        validate_resumed_statement_expression(
+            self.expression_builder.view_owned(expression)?,
+            continuation.in_statement_match_arm,
+        )?;
         Ok(vec![AstNode {
             kind: NodeKind::ExpressionStatement(expression.id()),
             span: continuation.span,

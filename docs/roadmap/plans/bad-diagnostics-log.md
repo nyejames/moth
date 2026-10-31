@@ -84,3 +84,14 @@ assert(a + b > 0) catch:
 ```
 
 `reject_assert_fallible_suffix` in `src/compiler_frontend/ast/statements/asserts.rs` reuses `CatchOnNonFallible` and `BangOnNonFallible`. The message then describes the assertion as an expression that is not an authored safety-catch site such as arithmetic, which reads as self-contradictory when the condition contains arithmetic. Assertions sit outside `catch` and `!` entirely, so the diagnostic should say the assertion statement cannot take a handler or propagation suffix.
+
+## Match arm `->` and value-match colons reach the wrong diagnostic
+
+```moth
+if value is:
+    1 -> io.line("one")
+    else => io.line("other")
+;
+```
+
+`1 -> ...` reports `invalid_match_arm.expected_arm_header` instead of `InvalidArrow`, which is only reachable through `else ->` or a pattern suffix on a line that also has `=>`. The `diagnostic_match_arrow_separator` case asserts only `MOTH-SYNTAX-0028`, so it hides the wrong reason. Inside a value match such as `result = if value is:`, an arm written `1:` or `else:` reports "Unexpected end of file, expected ';'" rather than the ordinary arm-header or expected-`=>` diagnostic.

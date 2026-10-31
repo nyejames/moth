@@ -29,8 +29,7 @@ use crate::compiler_frontend::ast::statements::body_dispatch::{
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
-    current_line_contains_top_level_colon, current_token_starts_match_arm_header,
-    token_index_has_top_level_fat_arrow, token_is_line_initial,
+    current_token_starts_match_arm_header, token_index_has_top_level_fat_arrow,
 };
 use crate::compiler_frontend::ast::statements::match_exhaustiveness::{
     MatchArmCoverageTracker, MatchExhaustivenessCheck, MatchExhaustivenessSubject,
@@ -107,6 +106,10 @@ impl MatchBody {
 
     fn has_pending(&self) -> bool {
         self.draft.has_pending()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.draft.entries.is_empty()
     }
 
     fn into_deferred(self) -> DeferredBody {
@@ -712,6 +715,10 @@ pub(crate) fn parse_match_block(
     }
 
     token_stream.advance();
+    // The parameter, not an inherited catch/value-branch target, decides whether this
+    // full match is a statement match. `create_match_node` passes `None`; a value
+    // receiver passes `Some`.
+    let is_statement_match = active_value_target.is_none();
     let mut match_context =
         context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
     if let Some(active_value_target) = active_value_target {
@@ -806,6 +813,7 @@ pub(crate) fn parse_match_block(
                     expression_builder,
                     const_values,
                     warnings,
+                    is_statement_match,
                     string_table,
                     path_fork,
                 )?);
@@ -824,6 +832,7 @@ pub(crate) fn parse_match_block(
                         expression_builder,
                         const_values,
                         warnings,
+                        is_statement_match,
                         string_table,
                         path_fork,
                     )?;
@@ -850,14 +859,6 @@ pub(crate) fn parse_match_block(
                     continue;
                 }
 
-                if token_is_line_initial(token_stream, token_stream.position())
-                    && current_line_contains_top_level_colon(token_stream)
-                {
-                    return Err(branching_error(choices_control_flow::invalid_match_arm(
-                        InvalidMatchArmReason::LegacyColonSyntax,
-                        Some(token_stream.current_span()),
-                    )));
-                }
                 return Err(branching_error(choices_control_flow::invalid_match_arm(
                     InvalidMatchArmReason::ExpectedArmHeader,
                     Some(token_stream.current_span()),
@@ -1139,18 +1140,12 @@ fn parse_else_arm(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     warnings: &mut DiagnosticBag,
+    is_statement_match: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<MatchBody> {
     token_stream.advance();
     token_stream.skip_newlines();
-
-    if token_stream.current_tag() == TokenTag::COLON {
-        return Err(branching_error(choices_control_flow::invalid_match_arm(
-            InvalidMatchArmReason::LegacyElseSyntax,
-            Some(token_stream.current_span()),
-        )));
-    }
 
     if token_stream.current_tag() == TokenTag::ARROW {
         return Err(branching_error(choices_control_flow::invalid_match_arm(
@@ -1169,7 +1164,8 @@ fn parse_else_arm(
     }
 
     token_stream.advance();
-    let arm_context = new_match_arm_body_context(match_context, string_table, path_fork)?;
+    let arm_context =
+        new_match_arm_body_context(match_context, is_statement_match, string_table, path_fork)?;
     let arm_scope = arm_context.scope;
     Ok(MatchBody::from_parsed(
         parse_function_body_statements(
@@ -1207,6 +1203,7 @@ fn parse_match_arm(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     warnings: &mut DiagnosticBag,
+    is_statement_match: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<ParsedMatchArm> {
@@ -1237,8 +1234,10 @@ fn parse_match_arm(
         ));
     }
 
+    let arrow_span = Some(token_stream.current_span());
     token_stream.advance();
-    let arm_body_context = new_match_arm_body_context(&arm_scope, string_table, path_fork)?;
+    let arm_body_context =
+        new_match_arm_body_context(&arm_scope, is_statement_match, string_table, path_fork)?;
     let arm_body_scope = arm_body_context.scope;
     let body = MatchBody::from_parsed(
         parse_function_body_statements(
@@ -1254,6 +1253,13 @@ fn parse_match_arm(
         arm_body_scope,
     );
 
+    if is_statement_match && body.is_empty() {
+        return Err(branching_error(choices_control_flow::invalid_match_arm(
+            InvalidMatchArmReason::MissingBody,
+            arrow_span,
+        )));
+    }
+
     Ok(ParsedMatchArm {
         pattern,
         guard,
@@ -1265,6 +1271,7 @@ fn parse_match_arm(
 
 fn new_match_arm_body_context(
     match_context: &ScopeContext,
+    is_statement_match: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ScopeContext, crate::compiler_frontend::compiler_messages::DiagnosticDraft> {
@@ -1272,6 +1279,7 @@ fn new_match_arm_body_context(
     let mut arm_context =
         match_context.new_child_control_flow(ContextKind::MatchArm, string_table, path_fork)?;
     arm_context.active_value_target = active_value_target;
+    arm_context.in_statement_match_arm = is_statement_match;
     Ok(arm_context)
 }
 

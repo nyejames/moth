@@ -1,0 +1,8 @@
+Status :: Ready, Waiting;
+
+current Status = Status::Ready
+
+if current is:
+    Ready =>
+    Waiting => io.line("waiting")
+;

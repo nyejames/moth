@@ -54,11 +54,11 @@ unit_code! {
 unit_code! {
     impl InvalidMatchArmReason {
         SemicolonDelimiter = 1,
-        LegacyColonSyntax = 2,
-        LegacyElseSyntax = 3,
         InvalidArrow = 4,
         ArmMustStartNewLine = 5,
         ExpectedArmHeader = 6,
+        MissingBody = 7,
+        ExpressionBodyInStatementMatch = 8,
     }
 }
 
@@ -156,7 +156,6 @@ unit_code! {
     pub(crate) enum InvalidLoopHeaderCode {
         EmptyHeader = 1,
         MissingColon = 2,
-        RemovedInSyntax = 3,
         MissingClosingPipe = 4,
         MalformedBindingPipes = 5,
         MissingSourceBeforeBindings = 6,
@@ -185,7 +184,6 @@ impl InvalidLoopHeaderCode {
         match reason {
             InvalidLoopHeaderReason::EmptyHeader => Self::EmptyHeader,
             InvalidLoopHeaderReason::MissingColon => Self::MissingColon,
-            InvalidLoopHeaderReason::RemovedInSyntax => Self::RemovedInSyntax,
             InvalidLoopHeaderReason::MissingClosingPipe => Self::MissingClosingPipe,
             InvalidLoopHeaderReason::MalformedBindingPipes => Self::MalformedBindingPipes,
             InvalidLoopHeaderReason::MissingSourceBeforeBindings => {
@@ -226,7 +224,6 @@ impl InvalidLoopHeaderCode {
         match self {
             Self::EmptyHeader => InvalidLoopHeaderReason::EmptyHeader,
             Self::MissingColon => InvalidLoopHeaderReason::MissingColon,
-            Self::RemovedInSyntax => InvalidLoopHeaderReason::RemovedInSyntax,
             Self::MissingClosingPipe => InvalidLoopHeaderReason::MissingClosingPipe,
             Self::MalformedBindingPipes => InvalidLoopHeaderReason::MalformedBindingPipes,
             Self::MissingSourceBeforeBindings => {

@@ -596,15 +596,89 @@ fn parses_exhaustive_choice_match_without_else_marks_exhaustive_choice() {
 }
 
 #[test]
-fn rejects_legacy_colon_match_arm_syntax() {
+fn rejects_bodyless_statement_match_arm_nested_in_catch() {
     let failure = parse_single_file_ast_diagnostic(
-        "value = 1\nif value is:\n    1: io.line([: [\"one\"]])\n    else => io.line([: [\"other\"]])\n;\n",
+        "can_error || -> I32, Error!:\n\
+         return 1\n\
+         ;\n\
+         recover || -> I32:\n\
+             return can_error() catch:\n\
+                 if 1 is:\n\
+                     1 =>\n\
+                     else => io.line([: [\"e\"]])\n\
+                 ;\n\
+                 then 2\n\
+             ;\n\
+         ;\n",
     );
     assert_ast_diagnostic(
         &failure,
         "MOTH-SYNTAX-0028",
-        Some("invalid_match_arm.legacy_colon_syntax"),
+        Some("invalid_match_arm.missing_body"),
     );
+}
+
+#[test]
+fn rejects_statement_match_expression_body_nested_in_catch() {
+    let failure = parse_single_file_ast_diagnostic(
+        "can_error || -> I32, Error!:\n\
+         return 1\n\
+         ;\n\
+         recover || -> I32:\n\
+             return can_error() catch:\n\
+                 if 1 is:\n\
+                     1 => \"text\"\n\
+                     else => io.line([: [\"e\"]])\n\
+                 ;\n\
+                 then 2\n\
+             ;\n\
+         ;\n",
+    );
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0028",
+        Some("invalid_match_arm.expression_body_in_statement_match"),
+    );
+}
+
+#[test]
+fn rejects_typed_operand_expression_body_in_statement_match() {
+    // A literal skips its trailing newline, so the mid-body case ends at a line-initial call.
+    let sources = [
+        "value = 1\n\
+         if value is:\n\
+             1 => \"text\"\n\
+             else => io.line([: [\"e\"]])\n\
+         ;\n",
+        "value = 1\n\
+         if value is:\n\
+             1 =>\n\
+                 42\n\
+                 io.line([: [\"one\"]])\n\
+             else => io.line([: [\"e\"]])\n\
+         ;\n",
+    ];
+    for source in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0028",
+            Some("invalid_match_arm.expression_body_in_statement_match"),
+        );
+    }
+}
+
+#[test]
+fn rejects_malformed_colon_arm_as_unexpected_token() {
+    let failure = parse_single_file_ast_diagnostic(
+        "value = 1\n\
+         if value is:\n\
+             1 => io.line([: [\"one\"]])\n\
+             2: io.line([: [\"two\"]])\n\
+             else => io.line([: [\"other\"]])\n\
+         ;\n",
+    );
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
 }
 
 #[test]
