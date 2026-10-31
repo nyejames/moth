@@ -26,3 +26,7 @@ mod eval_expression_tests;
 #[cfg(test)]
 #[path = "../tests/evaluator_escape_tests.rs"]
 mod evaluator_escape_tests;
+
+#[cfg(test)]
+#[path = "../tests/dec_exponent_depth_tests.rs"]
+mod dec_exponent_depth_tests;

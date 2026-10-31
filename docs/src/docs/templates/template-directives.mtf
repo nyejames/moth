@@ -91,4 +91,49 @@ Moth template files are the exception:
 - a nested template with no explicit directive defaults to `$md`
 - any explicit directive overrides that default
 
-Incompatible formatter declarations in one template head are rejected.
+### Combining items in one head
+
+A template head can hold several comma-separated items, such as an expression
+and a formatter. Most directives combine freely with other items, but a few
+change what the whole template is, so they need the head to themselves.
+
+`$slot`, `$note`, `$todo` and `$doc` must be the only meaningful item in their
+head. A slot declaration marks a place for content that arrives from elsewhere,
+and the comment directives turn the template into a comment, so any other item
+in that head would have nothing to act on:
+
+[codeblock, $code("moth"):
+    -- Error: the slot shares its head with a string
+    card = [:
+        <section>["prefix", $slot]</section>
+    ]
+]
+
+Put the extra content in the surrounding template body instead:
+
+[codeblock, $code("moth"):
+    card = [:
+        <section>prefix[$slot]</section>
+    ]
+]
+
+Each template head can contain at most one formatter. `$md`, `$raw`, `$html`,
+`$css`, `$escape_html` and `$code` each decide how the body is formatted, so
+the compiler rejects a second formatter, including a repeat of the same one:
+
+[codeblock, $code("moth"):
+    -- Error: both directives format the body
+    io.line([$md, $raw: Hello])
+]
+
+`$insert(...)` can sit beside other items, but it can appear only once per
+head. Each insert sends its body to one named slot, so use one insert template
+for each slot you fill:
+
+[codeblock, $code("moth"):
+    [card:
+        [$insert("title"): Hello]
+        [$insert("footer"): Goodbye]
+        Body content
+    ]
+]

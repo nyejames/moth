@@ -30,9 +30,9 @@ pub(crate) struct CanonicalPageRoute {
 
 /// A resolved output plan for one HTML route.
 ///
-/// `html_path` is the physical HTML file location on disk. For JS-only mode this equals the
-/// route's `logical_html_path`; for Wasm mode both can differ only when legacy non-folder paths
-/// are normalised into `<route>/index.html` form.
+/// `html_path` is the physical HTML file location on disk. Directory builds keep it equal to
+/// `logical_html_path`, while single-file builds place the page at `<route>/index.html` in Wasm
+/// mode and use `<route>.html` for JS-only output.
 ///
 /// `js_path` and `wasm_path` are `None` for JS-only builds and `Some` for Wasm builds.
 #[allow(clippy::struct_field_names)]
@@ -91,7 +91,7 @@ impl From<InfrastructureFailure> for LogicalHtmlPathError {
 ///
 /// - Directory builds use only the module root directory relative to `entry_root`, so a root
 ///   module emits `index.html` and a nested module emits `<directory>/index.html`.
-/// - Single-file builds strip `@` prefix and use legacy `.html` extension.
+/// - Single-file builds strip a cosmetic `@` prefix and name the page `<stem>.html`.
 ///
 /// WHY: all HTML output consumers must use the same route projections rather than re-deriving
 /// route semantics from the logical path.
@@ -199,7 +199,6 @@ fn derive_single_file_logical_html_path(
     }
 
     let logical_html_path = PathBuf::from(format!("{route_name}.html"));
-    // Preserve the canonical homepage projection for legacy `index.moth` entries too.
     let is_homepage = route_name == "index";
 
     Ok(CanonicalPageRoute {

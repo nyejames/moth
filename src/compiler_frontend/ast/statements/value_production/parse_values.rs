@@ -138,7 +138,8 @@ pub(crate) fn parse_retained_produced_values(
                 allow_expected_result_evidence: false,
             },
         )
-        .with_numeric_deferral_owner();
+        .with_numeric_deferral_owner()
+        .with_mismatch_context(mismatch_context_for_receiver(target.receiver_kind));
         if known_slot_type.is_none() {
             // An unresolved slot has no destination yet, so a literal-only fallback must stay
             // unresolved too; a known slot materialises it through its own expectation.
@@ -454,9 +455,10 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
     match receiver_kind {
         ValueReceiverKind::Declaration => TypeMismatchContext::Declaration,
         ValueReceiverKind::Return => TypeMismatchContext::ReturnValue,
-        ValueReceiverKind::Assignment
-        | ValueReceiverKind::MultiBind
-        | ValueReceiverKind::CatchHandler => TypeMismatchContext::General,
+        ValueReceiverKind::CatchHandler => TypeMismatchContext::CatchRecovery,
+        ValueReceiverKind::Assignment | ValueReceiverKind::MultiBind => {
+            TypeMismatchContext::General
+        }
     }
 }
 

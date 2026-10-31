@@ -1,0 +1,5 @@
+@values helper as local_helper
+
+parameter_binding |local_helper I32| -> I32:
+    return local_helper
+;

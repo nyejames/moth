@@ -14,7 +14,10 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::BlockId;
 
-use super::{AccessCheckContext, BlockTransferStats, BorrowTransferContext, MutableAccessPolicy};
+use super::{
+    AccessCheckContext, AliasExclusivity, BlockTransferStats, BorrowTransferContext,
+    MutableAccessPolicy,
+};
 
 // WHAT: Validates shared-root reads against statement-local and active mutable conflicts.
 // WHY: Shared reads must be blocked when the same root is mutably active.
@@ -143,78 +146,79 @@ pub(super) fn check_mutable_access(
             ));
         }
 
-        if policy.check_alias_exclusivity {
-            let actor_index = check.actor_index_hint.unwrap_or(root_index);
-            let alias_count = active_alias_count_for_root(
+        let direct_alias_only = policy.alias_exclusivity == AliasExclusivity::Direct;
+        let actor_index = check.actor_index_hint.unwrap_or(root_index);
+        let alias_count = active_alias_count_for_root(
+            &alias_activity,
+            root_index,
+            actor_index,
+            policy.strict_move_exclusivity,
+            direct_alias_only,
+        );
+        if alias_count > 1 {
+            let conflicting_local_index = conflicting_active_local_for_root(
                 &alias_activity,
                 root_index,
                 actor_index,
                 policy.strict_move_exclusivity,
+                direct_alias_only,
             );
-            if alias_count > 1 {
-                let conflicting_local_index = conflicting_active_local_for_root(
-                    &alias_activity,
-                    root_index,
-                    actor_index,
-                    policy.strict_move_exclusivity,
-                );
-                let place = check
-                    .context
-                    .diagnostics
-                    .local_place(check.layout.local_ids[actor_index]);
+            let place = check
+                .context
+                .diagnostics
+                .local_place(check.layout.local_ids[actor_index]);
 
-                if !policy.strict_move_exclusivity
-                    && conflicting_local_index.is_some_and(|index| {
-                        // CFG lowering may use mutable storage slots for iterable aliases, but the
-                        // alias remains shared access from the source program's perspective.
-                        preserve_cfg_future_use_activity
-                            && has_cfg_future_use_after_linear_expiry(
-                                check.layout,
-                                index,
-                                check.block_id,
-                                check.current_order,
-                            )
-                            && is_shared_alias_conflict(check.context, check.layout, index)
-                    })
-                {
-                    let conflicting_place = conflicting_local_index.map(|index| {
-                        check
-                            .context
-                            .diagnostics
-                            .local_place(check.layout.local_ids[index])
-                    });
-                    return Err(check.context.diagnostics.shared_mutable_conflict(
-                        place,
-                        BorrowAccessKind::Shared,
-                        BorrowAccessKind::Mutable,
-                        conflicting_place,
-                        None,
-                        check.span,
-                    ));
-                }
-
-                let conflicting_place = conflicting_local_index
-                    .map(|index| {
-                        check
-                            .context
-                            .diagnostics
-                            .local_place(check.layout.local_ids[index])
-                    })
-                    .or(Some(DiagnosticPlace::Unknown));
-                let conflicting_span = conflicting_local_index.and_then(|index| {
+            if !policy.strict_move_exclusivity
+                && conflicting_local_index.is_some_and(|index| {
+                    // CFG lowering may use mutable storage slots for iterable aliases, but the
+                    // alias remains shared access from the source program's perspective.
+                    preserve_cfg_future_use_activity
+                        && has_cfg_future_use_after_linear_expiry(
+                            check.layout,
+                            index,
+                            check.block_id,
+                            check.current_order,
+                        )
+                        && is_shared_alias_conflict(check.context, check.layout, index)
+                })
+            {
+                let conflicting_place = conflicting_local_index.map(|index| {
                     check
                         .context
                         .diagnostics
-                        .local_source_span(check.layout.local_ids[index])
+                        .local_place(check.layout.local_ids[index])
                 });
-                return Err(check.context.diagnostics.invalid_mutable_access(
+                return Err(check.context.diagnostics.shared_mutable_conflict(
                     place,
-                    InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+                    BorrowAccessKind::Shared,
+                    BorrowAccessKind::Mutable,
                     conflicting_place,
-                    conflicting_span,
+                    None,
                     check.span,
                 ));
             }
+
+            let conflicting_place = conflicting_local_index
+                .map(|index| {
+                    check
+                        .context
+                        .diagnostics
+                        .local_place(check.layout.local_ids[index])
+                })
+                .or(Some(DiagnosticPlace::Unknown));
+            let conflicting_span = conflicting_local_index.and_then(|index| {
+                check
+                    .context
+                    .diagnostics
+                    .local_source_span(check.layout.local_ids[index])
+            });
+            return Err(check.context.diagnostics.invalid_mutable_access(
+                place,
+                InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+                conflicting_place,
+                conflicting_span,
+                check.span,
+            ));
         }
 
         check
@@ -276,6 +280,7 @@ fn active_alias_count_for_root(
     root_index: usize,
     actor_index: usize,
     strict_move_exclusivity: bool,
+    direct_alias_only: bool,
 ) -> u32 {
     let mut count = 0u32;
     let actor_state = activity.state.local_state(actor_index);
@@ -297,6 +302,10 @@ fn active_alias_count_for_root(
 
         if candidate_index == actor_index {
             count += 1;
+            continue;
+        }
+
+        if !alias_observes_cell_write(activity, root_index, candidate_index, direct_alias_only) {
             continue;
         }
 
@@ -371,6 +380,7 @@ fn conflicting_active_local_for_root(
     root_index: usize,
     actor_index: usize,
     strict_move_exclusivity: bool,
+    direct_alias_only: bool,
 ) -> Option<usize> {
     let actor_state = activity.state.local_state(actor_index);
     let actor_is_alias_for_root = actor_index != root_index
@@ -396,6 +406,10 @@ fn conflicting_active_local_for_root(
             continue;
         }
 
+        if !alias_observes_cell_write(activity, root_index, candidate_index, direct_alias_only) {
+            continue;
+        }
+
         if !is_local_active_for_alias_conflict(
             activity,
             root_index,
@@ -409,6 +423,24 @@ fn conflicting_active_local_for_root(
     }
 
     None
+}
+
+// WHAT: Decides whether a candidate alias observes a write to the root of this binding cell.
+// WHY: a definite-slot rebinding to a fresh value replaces the slot's value provenance. Only an
+// alias of the cell itself (a direct source alias) sees that replacement, while a slot-backed
+// value alias keeps pointing at the older allocation.
+fn alias_observes_cell_write(
+    activity: &AliasActivityContext<'_>,
+    root_index: usize,
+    candidate_index: usize,
+    direct_alias_only: bool,
+) -> bool {
+    !direct_alias_only
+        || activity
+            .state
+            .local_state(candidate_index)
+            .direct_alias_roots
+            .contains(root_index)
 }
 
 // WHAT: Determines whether a candidate alias can still participate in exclusivity conflicts.

@@ -65,8 +65,7 @@ pub struct HirChoice {
 #[derive(Debug, Clone)]
 pub struct HirChoiceVariant {
     /// The interned variant name from the frontend `TypeEnvironment`.
-    /// WHY: preserved for completeness and future diagnostic rendering.
-    ///      Currently not read outside tests.
+    /// WHY: reserved for diagnostic rendering and not read outside tests.
     #[allow(dead_code)]
     pub name: StringId,
     pub fields: Vec<HirChoiceField>,

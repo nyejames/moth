@@ -1,5 +1,0 @@
-foo || -> I32:
-    x = 1
-    x I32 = 2
-    return x
-;

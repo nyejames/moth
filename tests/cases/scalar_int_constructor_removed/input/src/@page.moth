@@ -1,3 +1,0 @@
--- Prove I32() constructor-style conversion is rejected with removed-constructor diagnostic.
-
-value = I32("42")

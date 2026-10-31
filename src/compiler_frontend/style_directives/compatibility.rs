@@ -4,6 +4,7 @@
 //! directive specs. Named bit tags make combinations clearer than threading many boolean flags
 //! through tokenizer and template parsing code.
 
+use crate::compiler_frontend::compiler_messages::TemplateHeadConflictReason;
 use std::ops::{BitAnd, BitOr, BitOrAssign};
 
 /// Template-head compatibility tags for directives and other meaningful head items.
@@ -21,14 +22,45 @@ impl TemplateHeadTag {
     pub const RAW_DIRECTIVE: Self = Self(1 << 7);
     pub const CODE_DIRECTIVE: Self = Self(1 << 8);
 
+    /// How many one-bit tag slots exist. Every declared tag constant uses one index below this.
+    pub const SLOT_COUNT: usize = 9;
+
     pub const fn empty() -> Self {
         Self(0)
+    }
+
+    /// The one-bit tag indices this mask contains, in declaration order.
+    pub fn indices(self) -> impl Iterator<Item = usize> {
+        (0..Self::SLOT_COUNT).filter(move |index| (self.0 & (1 << index)) != 0)
     }
 
     pub const fn intersects(self, other: Self) -> bool {
         (self.0 & other.0) != 0
     }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
 }
+
+// Per-tag conflict slots index by bit position, so every declared tag must sit below the
+// slot count or a detected conflict could not name its earlier item.
+const _: () = assert!(
+    matches!(
+        (TemplateHeadTag::MEANINGFUL_ITEM.0
+            | TemplateHeadTag::SLOT_DIRECTIVE.0
+            | TemplateHeadTag::INSERT_DIRECTIVE.0
+            | TemplateHeadTag::COMMENT_DIRECTIVE.0
+            | TemplateHeadTag::FORMATTER_DIRECTIVE.0
+            | TemplateHeadTag::CHILDREN_DIRECTIVE.0
+            | TemplateHeadTag::FRESH_DIRECTIVE.0
+            | TemplateHeadTag::RAW_DIRECTIVE.0
+            | TemplateHeadTag::CODE_DIRECTIVE.0)
+            .checked_shr(TemplateHeadTag::SLOT_COUNT as u32),
+        Some(0)
+    ),
+    "raise TemplateHeadTag::SLOT_COUNT when adding a tag"
+);
 
 impl BitOr for TemplateHeadTag {
     type Output = Self;
@@ -58,6 +90,9 @@ pub struct TemplateHeadCompatibility {
     pub presence_tags: TemplateHeadTag,
     pub required_absent_tags: TemplateHeadTag,
     pub blocks_future_tags: TemplateHeadTag,
+    /// The semantic rule that rejects a conflicting pair. A specification whose tags can reject
+    /// another item must declare one so the diagnostic can name both items and explain the rule.
+    pub conflict_reason: Option<TemplateHeadConflictReason>,
 }
 
 impl TemplateHeadCompatibility {
@@ -66,22 +101,25 @@ impl TemplateHeadCompatibility {
             presence_tags: TemplateHeadTag::MEANINGFUL_ITEM,
             required_absent_tags: TemplateHeadTag::empty(),
             blocks_future_tags: TemplateHeadTag::empty(),
+            conflict_reason: None,
         }
     }
 
-    pub fn exclusive_meaningful() -> Self {
+    pub fn exclusive_meaningful(conflict_reason: TemplateHeadConflictReason) -> Self {
         Self {
             presence_tags: TemplateHeadTag::MEANINGFUL_ITEM,
             required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
             blocks_future_tags: TemplateHeadTag::MEANINGFUL_ITEM,
+            conflict_reason: Some(conflict_reason),
         }
     }
 
-    pub fn blocks_same(tag: TemplateHeadTag) -> Self {
+    pub fn blocks_same(tag: TemplateHeadTag, conflict_reason: TemplateHeadConflictReason) -> Self {
         Self {
             presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | tag,
             required_absent_tags: TemplateHeadTag::empty(),
             blocks_future_tags: tag,
+            conflict_reason: Some(conflict_reason),
         }
     }
 }

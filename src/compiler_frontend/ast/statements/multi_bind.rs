@@ -67,9 +67,11 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_bindi
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
+    reject_reserved_word_token,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::syntax_errors::expression_position::separator_equality_mistake;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::has_top_level_comma_before_statement_end;
@@ -445,6 +447,16 @@ fn parse_target_list(
             .into());
         }
 
+        // A reserved word in a target slot is an authored name, not a missing target. Report the
+        // collision at the word so the author sees why the binding cannot be declared.
+        if let Some(diagnostic) = reject_reserved_word_token(
+            token_stream.current_tag(),
+            Some(token_stream.current_span()),
+            string_table,
+        ) {
+            return Err(diagnostic.into());
+        }
+
         if token_stream.current_tag() != TokenTag::SYMBOL {
             return Err(token_lexical::invalid_multi_bind_syntax(
                 if continuation_comma.is_some() {
@@ -520,7 +532,16 @@ fn parse_target_list(
                 }
             }
 
-            TokenTag::ASSIGN => break,
+            TokenTag::ASSIGN => {
+                if let Some(diagnostic) = separator_equality_mistake(
+                    token_stream.current(),
+                    token_stream.token_ref_at_offset(1),
+                    token_stream.token_ref_at_offset(2),
+                ) {
+                    return Err(diagnostic.into());
+                }
+                break;
+            }
 
             TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                 return Err(token_lexical::invalid_multi_bind_syntax(

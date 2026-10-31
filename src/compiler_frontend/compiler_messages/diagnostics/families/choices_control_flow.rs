@@ -7,7 +7,7 @@ use super::super::schema::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    OptCountFact, OptStringFact, OptTypeFact, UnitFact, unit_code,
+    CountPair, OptCountFact, OptStringFact, OptTypeFact, OptUnitFact, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidStandaloneStatementReason, InvalidStatementPositionReason, NonExhaustiveMatchReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -36,7 +37,7 @@ unit_code! {
         MissingElseArm = 1,
         MissingVariants = 2,
         GuardedArmsRequireElse = 3,
-        MissingOptionPatterns = 4,
+        MissingOptionalPatterns = 4,
     }
 }
 unit_code! {
@@ -49,16 +50,17 @@ unit_code! {
         FieldRead = 1,
         Expression = 2,
         StandaloneTemplate = 3,
+        Comparison = 4,
     }
 }
 unit_code! {
     impl InvalidMatchArmReason {
         SemicolonDelimiter = 1,
-        LegacyColonSyntax = 2,
-        LegacyElseSyntax = 3,
         InvalidArrow = 4,
         ArmMustStartNewLine = 5,
         ExpectedArmHeader = 6,
+        MissingBody = 7,
+        ExpressionBodyInStatementMatch = 8,
     }
 }
 
@@ -140,15 +142,13 @@ unit_code! {
         MustUseVariantNamesNotLiterals = 17,
         MustStartWithVariantName = 18,
         UnknownVariant = 19,
-        CaptureBindingShadowsVariable = 20,
         NonePatternRequiresOptionalScrutinee = 21,
-        OptionValuePatternRequiresEquality = 22,
         BareCaptureOnOptionalScrutinee = 23,
-        OptionPresentCaptureOnNonOptional = 24,
-        EmptyOptionPresentCapture = 25,
-        OptionPresentCaptureTypeAnnotation = 26,
+        OptionalPresentCaptureOnNonOptional = 24,
+        EmptyOptionalPresentCapture = 25,
+        OptionalPresentCaptureTypeAnnotation = 26,
         MissingClosingPipe = 27,
-        ExpectedBindingInOptionPresentCapture = 28,
+        ExpectedBindingInOptionalPresentCapture = 28,
     }
 }
 
@@ -156,7 +156,6 @@ unit_code! {
     pub(crate) enum InvalidLoopHeaderCode {
         EmptyHeader = 1,
         MissingColon = 2,
-        RemovedInSyntax = 3,
         MissingClosingPipe = 4,
         MalformedBindingPipes = 5,
         MissingSourceBeforeBindings = 6,
@@ -169,7 +168,6 @@ unit_code! {
         BareDualBinding = 13,
         TooManyBindings = 14,
         DuplicateBindingName = 15,
-        BindingAlreadyDeclared = 16,
         CollectionSourceNotCollection = 17,
         MissingRangeSeparator = 18,
         MissingRangeEndBound = 19,
@@ -185,7 +183,6 @@ impl InvalidLoopHeaderCode {
         match reason {
             InvalidLoopHeaderReason::EmptyHeader => Self::EmptyHeader,
             InvalidLoopHeaderReason::MissingColon => Self::MissingColon,
-            InvalidLoopHeaderReason::RemovedInSyntax => Self::RemovedInSyntax,
             InvalidLoopHeaderReason::MissingClosingPipe => Self::MissingClosingPipe,
             InvalidLoopHeaderReason::MalformedBindingPipes => Self::MalformedBindingPipes,
             InvalidLoopHeaderReason::MissingSourceBeforeBindings => {
@@ -200,7 +197,6 @@ impl InvalidLoopHeaderCode {
             InvalidLoopHeaderReason::BareDualBinding => Self::BareDualBinding,
             InvalidLoopHeaderReason::TooManyBindings => Self::TooManyBindings,
             InvalidLoopHeaderReason::DuplicateBindingName => Self::DuplicateBindingName,
-            InvalidLoopHeaderReason::BindingAlreadyDeclared => Self::BindingAlreadyDeclared,
             InvalidLoopHeaderReason::CollectionSourceNotCollection { .. } => {
                 Self::CollectionSourceNotCollection
             }
@@ -226,7 +222,6 @@ impl InvalidLoopHeaderCode {
         match self {
             Self::EmptyHeader => InvalidLoopHeaderReason::EmptyHeader,
             Self::MissingColon => InvalidLoopHeaderReason::MissingColon,
-            Self::RemovedInSyntax => InvalidLoopHeaderReason::RemovedInSyntax,
             Self::MissingClosingPipe => InvalidLoopHeaderReason::MissingClosingPipe,
             Self::MalformedBindingPipes => InvalidLoopHeaderReason::MalformedBindingPipes,
             Self::MissingSourceBeforeBindings => {
@@ -241,7 +236,6 @@ impl InvalidLoopHeaderCode {
             Self::BareDualBinding => InvalidLoopHeaderReason::BareDualBinding,
             Self::TooManyBindings => InvalidLoopHeaderReason::TooManyBindings,
             Self::DuplicateBindingName => InvalidLoopHeaderReason::DuplicateBindingName,
-            Self::BindingAlreadyDeclared => InvalidLoopHeaderReason::BindingAlreadyDeclared,
             Self::CollectionSourceNotCollection => {
                 InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type }
             }
@@ -278,12 +272,12 @@ unit_code! {
         OptionPropagationReturnTypeMismatch = 19,
         OptionPropagationCatchConflict = 20,
         ExplicitPropagationCatchConflict = 21,
-        CatchHandlerConflicts = 22,
         CatchHandlerCanFallThrough = 23,
         InlineCatchMultiline = 24,
         AssertionMessageCannotEscape = 25,
         ThenWithNoActiveValueTarget = 26,
         ThenCrossesBlockedConstruct = 27,
+        ThenInsideLoopBody = 37,
         ThenRequiresValues = 28,
         DirectOptionFallbackSyntax = 29,
         UnhandledErrorReturn = 30,
@@ -292,6 +286,7 @@ unit_code! {
         CustomErrorMixedWithImplicitFailure = 33,
         UnhandledBuiltinFailureInCustomErrorFunction = 34,
         UnhandledBuiltinFailureInExportedFunction = 35,
+        FallibleSuffixOnAssertion = 36,
     }
 }
 
@@ -396,6 +391,9 @@ impl InvalidFallibleHandlingCode {
             InvalidFallibleHandlingReason::CatchOnOptional => Self::CatchOnOptional,
             InvalidFallibleHandlingReason::BangOnNonFallible => Self::BangOnNonFallible,
             InvalidFallibleHandlingReason::BangOnOptional => Self::BangOnOptional,
+            InvalidFallibleHandlingReason::FallibleSuffixOnAssertion => {
+                Self::FallibleSuffixOnAssertion
+            }
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot => Self::FunctionHasNoErrorSlot,
             InvalidFallibleHandlingReason::NotOptionExpression => Self::NotOptionExpression,
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => {
@@ -410,7 +408,6 @@ impl InvalidFallibleHandlingCode {
             InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict => {
                 Self::ExplicitPropagationCatchConflict
             }
-            InvalidFallibleHandlingReason::CatchHandlerConflicts => Self::CatchHandlerConflicts,
             InvalidFallibleHandlingReason::CatchHandlerCanFallThrough => {
                 Self::CatchHandlerCanFallThrough
             }
@@ -424,6 +421,7 @@ impl InvalidFallibleHandlingCode {
             InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct => {
                 Self::ThenCrossesBlockedConstruct
             }
+            InvalidFallibleHandlingReason::ThenInsideLoopBody => Self::ThenInsideLoopBody,
             InvalidFallibleHandlingReason::ThenRequiresValues => Self::ThenRequiresValues,
             InvalidFallibleHandlingReason::DirectOptionFallbackSyntax => {
                 Self::DirectOptionFallbackSyntax
@@ -477,6 +475,9 @@ impl InvalidFallibleHandlingCode {
             Self::CatchOnOptional => InvalidFallibleHandlingReason::CatchOnOptional,
             Self::BangOnNonFallible => InvalidFallibleHandlingReason::BangOnNonFallible,
             Self::BangOnOptional => InvalidFallibleHandlingReason::BangOnOptional,
+            Self::FallibleSuffixOnAssertion => {
+                InvalidFallibleHandlingReason::FallibleSuffixOnAssertion
+            }
             Self::FunctionHasNoErrorSlot => InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
             Self::NotOptionExpression => InvalidFallibleHandlingReason::NotOptionExpression,
             Self::FunctionHasNoOptionalReturn => {
@@ -491,7 +492,6 @@ impl InvalidFallibleHandlingCode {
             Self::ExplicitPropagationCatchConflict => {
                 InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict
             }
-            Self::CatchHandlerConflicts => InvalidFallibleHandlingReason::CatchHandlerConflicts,
             Self::CatchHandlerCanFallThrough => {
                 InvalidFallibleHandlingReason::CatchHandlerCanFallThrough
             }
@@ -505,6 +505,7 @@ impl InvalidFallibleHandlingCode {
             Self::ThenCrossesBlockedConstruct => {
                 InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct
             }
+            Self::ThenInsideLoopBody => InvalidFallibleHandlingReason::ThenInsideLoopBody,
             Self::ThenRequiresValues => InvalidFallibleHandlingReason::ThenRequiresValues,
             Self::DirectOptionFallbackSyntax => {
                 InvalidFallibleHandlingReason::DirectOptionFallbackSyntax
@@ -540,6 +541,7 @@ unit_code! {
         StructFieldDefaultNotFoldable = 15,
         EvaluationOutputBoundExceeded = 16,
         StructuralStringRequiresFinalText = 17,
+        DecExponentIntegerOverflow = 18,
     }
 }
 
@@ -757,14 +759,63 @@ diagnostic_family! {
             reason: UnitFact<InvalidMatchPatternReason>,
             variant_name: OptStringFact,
             scrutinee_name: OptStringFact,
+            counts: OptCountFact,
         ],
         labels: [],
-        extra: None,
-        ctor: generated invalid_match_pattern,
+        extra: StringIds,
+        ctor: manual,
         reason_key: reason,
         view: InvalidMatchPatternView,
         render: render_invalid_match_pattern,
     }
+}
+
+/// Stores an invalid match-pattern draft without capture-list or candidate names.
+pub(crate) fn invalid_match_pattern(
+    reason: InvalidMatchPatternReason,
+    variant_name: Option<StringId>,
+    scrutinee_name: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    invalid_match_pattern_with_names(reason, variant_name, scrutinee_name, None, Vec::new(), span)
+}
+
+/// Stores an invalid match-pattern draft with optional counts and extra names.
+///
+/// Capture-count reasons pack expected then provided counts into `counts` and store the
+/// declared payload field names in `names`. A capture-name mismatch packs the expected count
+/// with the failing capture's one-based position and appends the authored capture name, then
+/// its `as` binding when one was written. Unknown-variant reasons leave `counts` empty and
+/// store available variant names in declaration order. A qualifier mismatch stores the
+/// authored qualifier in `variant_name`.
+pub(crate) fn invalid_match_pattern_with_names(
+    reason: InvalidMatchPatternReason,
+    variant_name: Option<StringId>,
+    scrutinee_name: Option<StringId>,
+    capture_counts: Option<(usize, usize)>,
+    names: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&INVALID_MATCH_PATTERN, span, |cursor| {
+        cursor.push::<UnitFact<InvalidMatchPatternReason>>(&reason)?;
+        cursor.push::<OptStringFact>(&variant_name)?;
+        cursor.push::<OptStringFact>(&scrutinee_name)?;
+        cursor.push::<OptCountFact>(&match capture_counts {
+            Some((expected, provided)) => Some(CountPair { expected, provided }.pack()?),
+            None => None,
+        })
+    })
+    .with_string_ids(names)
+}
+
+/// Decode packed capture counts when this reason stored a pair.
+pub(crate) fn invalid_match_pattern_capture_counts(
+    facts: &InvalidMatchPatternView,
+) -> Option<(usize, usize)> {
+    facts.counts.map(|packed| {
+        let pair = CountPair::unpack(packed);
+        (pair.expected, pair.provided)
+    })
 }
 
 diagnostic_family! {
@@ -822,14 +873,49 @@ diagnostic_family! {
         facts: [
             reason: UnitFact<CompileTimeEvaluationErrorReason>,
             operation: OptStringFact,
+            numeric_type: OptUnitFact<NumericScalar>,
         ],
-        labels: [LabelMessageCode::CONFIG_INPUT_ORIGIN],
+        labels: [
+            LabelMessageCode::CONFIG_INPUT_ORIGIN,
+            LabelMessageCode::PREVIOUS_DECLARATION,
+        ],
         extra: None,
-        ctor: generated compile_time_evaluation_error,
+        ctor: manual,
         reason_key: reason,
         view: CompileTimeEvaluationErrorView,
         render: render_compile_time_evaluation_error,
     }
+}
+
+/// Compile-time evaluation draft without a numeric domain.
+///
+/// Most failures are not numeric, so they leave the optional `numeric_type` fact empty.
+pub(crate) fn compile_time_evaluation_error(
+    reason: CompileTimeEvaluationErrorReason,
+    operation: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    compile_time_evaluation_error_with_numeric_type(reason, operation, None, span)
+}
+
+/// Compile-time evaluation draft that names the numeric domain an operation evaluated in.
+///
+/// WHAT: `numeric_type` is the failing operation's exact numeric domain, such as `I32` or `F64`.
+/// WHY: an overflow message must say which type overflowed. The domain is a typed fact on the
+///      draft so the renderer formats it at the payload boundary instead of the producer
+///      pre-rendering a type name.
+pub(crate) fn compile_time_evaluation_error_with_numeric_type(
+    reason: CompileTimeEvaluationErrorReason,
+    operation: Option<StringId>,
+    numeric_type: Option<NumericScalar>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&COMPILE_TIME_EVALUATION_ERROR, span, |cursor| {
+        cursor.push::<UnitFact<CompileTimeEvaluationErrorReason>>(&reason)?;
+        cursor.push::<OptStringFact>(&operation)?;
+        cursor.push::<OptUnitFact<NumericScalar>>(&numeric_type)?;
+        Ok(())
+    })
 }
 
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[

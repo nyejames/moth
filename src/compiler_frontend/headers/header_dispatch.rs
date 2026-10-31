@@ -1,7 +1,7 @@
 //! Header declaration dispatch.
 //!
-//! WHAT: classifies one top-level declaration after its leading symbol has been seen and builds the
-//! concrete `HeaderKind` payload.
+//! WHAT: classifies one top-level declaration by the marker or syntax following its declaration name
+//! and builds the concrete `HeaderKind` payload.
 //! WHY: declaration-kind parsing is separate from per-file token walking and from dependency sorting.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -9,7 +9,6 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
@@ -58,7 +57,9 @@ use crate::compiler_frontend::tokenizer::tokens::{
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
 };
-use crate::compiler_frontend::utilities::token_scan::InitializerReference;
+use crate::compiler_frontend::utilities::token_scan::{
+    InitializerReference, NestingDepth, unclosed_delimiter_eof_diagnostic,
+};
 use rustc_hash::FxHashSet;
 use std::collections::HashSet;
 
@@ -196,8 +197,8 @@ fn cursor_span(cursor: &TokenCursor<'_>, fallback: SourceSpan) -> SourceSpan {
         .current()
         .map_or(fallback, |token| token.source_span())
 }
-// token pattern. This function dispatches on that token and delegates to kind-specific helpers
-// where they exist, or captures body source ranges directly for simpler cases.
+// Dispatches on the marker or syntax following the declaration name and delegates to kind-specific
+// helpers where they exist, or captures body source ranges directly for simpler cases.
 //
 // Dispatch summary:
 //   `|`  (TypeParameterBracket)  → function signature + body range capture
@@ -874,6 +875,15 @@ fn empty_token_range(
     })
 }
 
+/// Whether a newline after `tag` continues the same expression.
+///
+/// WHAT: mirrors the expression parser's logical-line rule for the tokens the body scanner sees.
+/// WHY: a region header starts a fresh statement, while `if count >` followed by `limit:` on the
+/// next line is one header. The distinction keeps a continued header from adding a phantom scope.
+fn tag_continues_into_next_line(tag: TokenTag) -> bool {
+    tag.continues_expression() && !matches!(tag, TokenTag::END | TokenTag::TYPE_PARAMETER_BRACKET)
+}
+
 /// Capture a function body directly from a canonical cursor.
 ///
 /// WHAT: consumes the cursor that the declaration parser left on the first body token and returns
@@ -903,6 +913,25 @@ pub(super) fn capture_function_body_range_from_cursor(
     let mut scopes_opened: usize = 1;
     let mut scopes_closed: usize = 0;
     let mut body_end = None;
+    let mut nesting = NestingDepth::default();
+    // A block opener is the colon that ends an `if`, `catch` or `loop` header. Colons in
+    // malformed match-arm headers (`1:` or `else:`) belong to the arm syntax and must not open a
+    // scope here, or this stage reports EOF before the AST can name the missing `=>`. The flag
+    // survives newlines because a condition may continue after an expression-continuing token,
+    // and it clears only when its colon is consumed or the header resolves inline through `then`.
+    let mut block_header_pending = false;
+    // The scope depth of the outermost open match body. A match header ends `is:` while other
+    // block headers keep a condition or binding before their colon. Its arms use `name =>`, so a
+    // line-initial `name:` inside one is a malformed arm that the AST must name, and it cannot
+    // declare a region there. Suppression stays on at or above that depth, so an arm-shaped colon
+    // cannot invent a scope that the function's real closing `;` never balances. Closing the
+    // match body clears the floor.
+    let mut match_body_floor: Option<usize> = None;
+    // Declared-region headers (`name:`) look like a symbol followed by a colon at the start of a
+    // line. Tracking line starts keeps match-arm and field colons out of that shape, and a line
+    // that continues the previous expression (`if count >` then `limit:`) is not a region.
+    let mut at_line_start = true;
+    let mut previous_meaningful_tag = None;
 
     // `parse_function_signature_syntax` stops on the first body token, so inspect the current
     // canonical token before moving the cursor. EOF is handled from its exact TokenRef span.
@@ -916,19 +945,52 @@ pub(super) fn capture_function_body_range_from_cursor(
 
         match current.tag() {
             TokenTag::END => {
+                block_header_pending = false;
                 scopes_closed = scopes_closed.checked_add(1).ok_or_else(|| {
                     HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
                         "Function body closing-delimiter depth overflowed.",
                         Some(current.source_span()),
                     ))
                 })?;
+                if match_body_floor
+                    .is_some_and(|floor| scopes_opened.saturating_sub(scopes_closed) < floor)
+                {
+                    match_body_floor = None;
+                }
                 if scopes_opened == scopes_closed {
                     body_end = Some(current.index());
                 }
             }
+            TokenTag::IF | TokenTag::CATCH | TokenTag::LOOP => block_header_pending = true,
+            // Inline headers resolve through `then`, and a match guard resolves through `=>`.
+            // Neither shape opens a source scope.
+            TokenTag::THEN | TokenTag::FAT_ARROW => block_header_pending = false,
             // Colons used in templates parse into a different token (`StartTemplateBody`), so
-            // every ordinary colon still contributes one balanced source scope.
-            TokenTag::COLON => {
+            // only a block-header colon still contributes one balanced source scope.
+            TokenTag::COLON if block_header_pending => {
+                block_header_pending = false;
+                scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+                        "Function body opening-delimiter depth overflowed.",
+                        Some(current.source_span()),
+                    ))
+                })?;
+                if previous_meaningful_tag == Some(TokenTag::IS) {
+                    let depth = scopes_opened.saturating_sub(scopes_closed);
+                    match_body_floor =
+                        Some(match_body_floor.map_or(depth, |floor| floor.min(depth)));
+                }
+            }
+            // A line-initial `name:` declares a region, which balances its `;` like a block.
+            TokenTag::SYMBOL
+                if at_line_start
+                    && nesting.is_top_level()
+                    && match_body_floor.is_none()
+                    && !previous_meaningful_tag.is_some_and(tag_continues_into_next_line)
+                    && cursor
+                        .peek()
+                        .is_some_and(|token| token.tag() == TokenTag::COLON) =>
+            {
                 scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
                     HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
                         "Function body opening-delimiter depth overflowed.",
@@ -936,16 +998,27 @@ pub(super) fn capture_function_body_range_from_cursor(
                     ))
                 })?;
             }
+            // An arm-header colon or `else:` inside a match block stays part of that block.
+            TokenTag::COLON => {}
             TokenTag::DOUBLE_COLON => {}
             TokenTag::EOF => {
-                return Err(token_lexical::unexpected_end_of_file(
-                    Some(string_table.intern(";")),
+                return Err(unclosed_delimiter_eof_diagnostic(
+                    source,
+                    body_start,
+                    current.index(),
                     Some(current.source_span()),
+                    Some(";"),
+                    string_table,
                 )
                 .into());
             }
             _ => {}
         }
+        at_line_start = current.tag() == TokenTag::NEWLINE;
+        if current.tag() != TokenTag::NEWLINE {
+            previous_meaningful_tag = Some(current.tag());
+        }
+        nesting.step_tag(current.tag());
     }
 
     let body_end = body_end.ok_or_else(|| {

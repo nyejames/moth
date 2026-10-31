@@ -7,7 +7,11 @@ use super::super::schema::DiagnosticCategory;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    OptCharFact, OptCountFact, OptStringFact, OptTypeFact, StringFact, UnitFact, unit_code,
+    FactCapacityError, FactCodec, IdRemap, OptCharFact, OptCountFact, OptStringFact, OptTypeFact,
+    StringFact, UnitCode, UnitFact, unit_code,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    LabelDraftMessage, LabelMessageCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
@@ -20,6 +24,8 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{
     CssTemplateWarning, DiagnosticSeverity, HtmlTemplateWarning, InvalidTemplateDirectiveReason,
     InvalidTemplateSlotReason, InvalidTemplateStructureReason, MalformedTemplateReason,
+    StoredTemplateHeadConflict, TemplateHeadConflictOwner, TemplateHeadConflictReason,
+    TemplateHeadItemKind,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -42,6 +48,7 @@ unit_code! {
         InsertTargetsUnknownNamedSlot = 5,
         InsertTargetsUnknownPositionalSlot = 6,
         SlotDefinitionOutsideTemplateBody = 7,
+        NamedInsertOutsideParentSlot = 8,
     }
 }
 
@@ -221,6 +228,92 @@ impl HtmlTemplateWarningCode {
 }
 
 unit_code! {
+    impl TemplateHeadConflictReason {
+        MultipleFormatters = 1,
+        DuplicateExclusiveDirective = 2,
+        DiscardedCommentDirectiveMustBeOnlyMeaningfulItem = 3,
+        DocumentationDirectiveMustBeOnlyMeaningfulItem = 4,
+        SlotDirectiveMustBeExclusive = 5,
+    }
+}
+
+unit_code! {
+    impl TemplateHeadConflictOwner {
+        EarlierItem = 1,
+        IncomingItem = 2,
+    }
+}
+
+unit_code! {
+    impl TemplateHeadItemKind {
+        Directive = 1,
+        Expression = 2,
+    }
+}
+
+/// One optional template-head conflict, packed into one word.
+///
+/// Bits 0-2 hold the conflict reason, bit 3 the rule owner, bits 4-5 the incoming item kind and
+/// bits 6-7 the earlier item kind. Zero is absent. Directive names live in the family's
+/// string-id list; the kinds say which entries the list holds.
+pub(crate) struct OptTemplateHeadConflictFact;
+
+impl FactCodec for OptTemplateHeadConflictFact {
+    type Draft = Option<StoredTemplateHeadConflict>;
+    type Durable = Option<StoredTemplateHeadConflict>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Self::Draft, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(conflict) => {
+                debug_assert!(
+                    (1..=5).contains(&conflict.reason.code()),
+                    "conflict reasons use codes 1 to 5"
+                );
+                debug_assert!(
+                    (1..=2).contains(&conflict.owner.code()),
+                    "conflict owners use codes 1 and 2"
+                );
+                debug_assert!(
+                    (1..=2).contains(&conflict.incoming_kind.code()),
+                    "head item kinds use codes 1 and 2"
+                );
+                debug_assert!(
+                    (1..=2).contains(&conflict.earlier_kind.code()),
+                    "head item kinds use codes 1 and 2"
+                );
+                conflict.reason.code()
+                    | ((conflict.owner.code() - 1) << 3)
+                    | (conflict.incoming_kind.code() << 4)
+                    | (conflict.earlier_kind.code() << 6)
+            }
+            None => 0,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Self::Durable> {
+        let word = words[0];
+        if word == 0 {
+            return Some(None);
+        }
+        if word >> 8 != 0 {
+            return None;
+        }
+        Some(Some(StoredTemplateHeadConflict {
+            reason: TemplateHeadConflictReason::from_code(word & 0b111)?,
+            owner: TemplateHeadConflictOwner::from_code(((word >> 3) & 0b1) + 1)?,
+            incoming_kind: TemplateHeadItemKind::from_code((word >> 4) & 0b11)?,
+            earlier_kind: TemplateHeadItemKind::from_code((word >> 6) & 0b11)?,
+        }))
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
+}
+
+unit_code! {
     pub(crate) enum InvalidTemplateStructureCode {
         MissingClosingBracket = 1,
         SlotInHead = 2,
@@ -259,6 +352,26 @@ unit_code! {
 impl InvalidTemplateStructureCode {
     pub(crate) fn of(reason: &InvalidTemplateStructureReason) -> Self {
         Self::split(*reason).0
+    }
+
+    /// The compact conflict fact for a rejected head-item pair.
+    ///
+    /// The directive names stay in the family's string-id list, so this fact only carries the
+    /// rule identity and both item kinds.
+    pub(crate) fn head_conflict(
+        reason: &InvalidTemplateStructureReason,
+    ) -> Option<StoredTemplateHeadConflict> {
+        match reason {
+            InvalidTemplateStructureReason::IncompatibleHeadItem { conflict } => {
+                Some(StoredTemplateHeadConflict {
+                    reason: conflict.reason,
+                    owner: conflict.owner,
+                    incoming_kind: conflict.incoming.kind(),
+                    earlier_kind: conflict.earlier.kind(),
+                })
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn split(
@@ -302,7 +415,7 @@ impl InvalidTemplateStructureCode {
             InvalidTemplateStructureReason::EmptyPathInTemplateHead => {
                 (Self::EmptyPathInTemplateHead, None, None)
             }
-            InvalidTemplateStructureReason::IncompatibleHeadItem => {
+            InvalidTemplateStructureReason::IncompatibleHeadItem { .. } => {
                 (Self::IncompatibleHeadItem, None, None)
             }
             InvalidTemplateStructureReason::HelperOutsideWrapperSlot => {
@@ -392,7 +505,9 @@ impl InvalidTemplateStructureCode {
             Self::EmptyPathInTemplateHead => {
                 InvalidTemplateStructureReason::EmptyPathInTemplateHead
             }
-            Self::IncompatibleHeadItem => InvalidTemplateStructureReason::IncompatibleHeadItem,
+            // The conflict code renders from its stored conflict fact and item names. The
+            // authored locations in the reason payload are not stored in the fact area.
+            Self::IncompatibleHeadItem => return None,
             Self::HelperOutsideWrapperSlot => {
                 InvalidTemplateStructureReason::HelperOutsideWrapperSlot
             }
@@ -538,9 +653,14 @@ diagnostic_family! {
             reason: UnitFact<InvalidTemplateStructureCode>,
             type_id: OptTypeFact,
             limit: OptCountFact,
+            head_conflict: OptTemplateHeadConflictFact,
         ],
-        labels: [],
-        extra: None,
+        labels: [
+            LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
+            LabelMessageCode::TEMPLATE_STARTS_HERE,
+            LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
+        ],
+        extra: StringIds,
         ctor: manual,
         reason_key: reason,
         view: InvalidTemplateStructureView,
@@ -574,6 +694,7 @@ diagnostic_family! {
         facts: [
             reason: UnitFact<InvalidTemplateSlotReason>,
             slot_name: OptStringFact,
+            insert_name: OptStringFact,
         ],
         labels: [],
         extra: None,
@@ -631,18 +752,59 @@ pub(crate) fn invalid_template_directive(
     })
 }
 
+/// Builds the truncation diagnostic for a template that reaches end of file before its `]`.
+///
+/// The primary span is the EOF token; the secondary label points at the opening `[` that is still
+/// open. Head, body and nested parsers all call this constructor, so nested templates name their
+/// own opening bracket rather than an outer one.
+pub(crate) fn missing_closing_bracket(
+    eof_span: Option<SourceSpan>,
+    opening_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft = invalid_template_structure(
+        InvalidTemplateStructureReason::MissingClosingBracket,
+        eof_span,
+    );
+    match opening_span {
+        Some(opening_span) => draft.with_label(
+            Some(opening_span),
+            Some(LabelDraftMessage::TemplateStartsHere),
+        ),
+        None => draft,
+    }
+}
+
 /// Builds the compact template-structure diagnostic from its typed reason.
+///
+/// The incompatible-head-item reason also stores the earlier item as a secondary label and both
+/// directive names in the family's string-id list, in incoming-then-earlier order.
 pub(crate) fn invalid_template_structure(
     reason: InvalidTemplateStructureReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
+    let conflict = match reason {
+        InvalidTemplateStructureReason::IncompatibleHeadItem { conflict } => Some(conflict),
+        _ => None,
+    };
+    let head_conflict = InvalidTemplateStructureCode::head_conflict(&reason);
+    let primary_span = conflict.map_or(span, |conflict| Some(conflict.incoming_span));
     let (reason, type_id, limit) = InvalidTemplateStructureCode::split(reason);
-    DiagnosticDraft::with_facts(&INVALID_TEMPLATE_STRUCTURE, span, |cursor| {
+    let draft = DiagnosticDraft::with_facts(&INVALID_TEMPLATE_STRUCTURE, primary_span, |cursor| {
         cursor.push::<UnitFact<InvalidTemplateStructureCode>>(&reason)?;
         cursor.push::<OptTypeFact>(&type_id)?;
         cursor.push::<OptCountFact>(&limit)?;
-        Ok(())
-    })
+        cursor.push::<OptTemplateHeadConflictFact>(&head_conflict)
+    });
+    match conflict {
+        Some(conflict) => draft
+            .with_primary_label(LabelDraftMessage::ConflictsWithEarlierHeadItem)
+            .with_label(
+                Some(conflict.earlier_span),
+                Some(LabelDraftMessage::EarlierTemplateHeadItem),
+            )
+            .with_string_ids(conflict.head_item_names()),
+        None => draft,
+    }
 }
 
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[

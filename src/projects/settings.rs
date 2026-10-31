@@ -53,17 +53,13 @@ pub const IMPLICIT_START_FUNC_NAME: &str = "start";
 pub const TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY: &str = "template_const_loop_iteration_limit";
 pub const MAX_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 1_000_000;
 
-// This is a guess about how much should be initially allocated for vecs in the compiler.
-// This should be a rough guess to help avoid too many allocations
-// and is just a heuristic based on tests with rudimentary small snippets of code.
-// Should be recalculated at a later point.
+// Capacity heuristics for compiler-side vectors. They avoid repeated growth on typical input.
 pub const MINIMUM_STRING_TABLE_CAPACITY: usize = 32;
-pub const SRC_TO_TOKEN_RATIO: usize = 5; // (Maybe) About 1/6 source code to tokens observed
-pub const EXPORTS_CAPACITY: usize = 6; // (No Idea atm)
-pub const TOKEN_TO_HEADER_RATIO: usize = 35; // (Maybe) About 1/35 tokens to AstNode ratio
-pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens for each new declaration symbol
-pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
-pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
+pub const SRC_TO_TOKEN_RATIO: usize = 5; // About one token per five source bytes.
+pub const TOKEN_TO_HEADER_RATIO: usize = 35; // About one header per 35 tokens.
+pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // About one declaration per 20 tokens.
+pub const TOKEN_TO_NODE_RATIO: usize = 10; // About ten AST nodes per header.
+pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // Baseline symbol reservation for small files.
 
 /// One additional authored `project` field retained after compiler-owned fields are applied.
 ///

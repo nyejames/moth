@@ -1,6 +1,7 @@
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ReservedNameCollisionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidStyleDirectiveView, UnescapedImplicitTemplateCloseView,
 };
@@ -18,8 +19,8 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, DiagnosticBag, DiagnosticCompoundAssignmentOperator,
-    DiagnosticOperator, InvalidStringEscapeReason, MissingWhitespace, SourceSpanCapacityResource,
-    SymbolicSpacingConstruct, SymbolicSpacingError,
+    DiagnosticOperator, InvalidStringEscapeReason, MissingWhitespace, ReservedNameOwner,
+    SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -915,6 +916,51 @@ fn rejects_unary_plus() {
 #[test]
 fn rejects_unary_negation_with_whitespace() {
     for source in ["value = - 1\n", "value = - count\n"] {
+        let (diagnostic, _string_table) = tokenize_source_error(source);
+        assert_common_syntax_mistake(
+            &diagnostic,
+            CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing,
+        );
+    }
+}
+
+#[test]
+fn reports_reserved_keyword_name_before_spaced_binary_minus() {
+    for (source, keyword) in [
+        ("value = if ok then 0 else by - 1\n", "by"),
+        ("value = left - by - right\n", "by"),
+    ] {
+        let (diagnostic, string_table) = tokenize_source_error(source);
+        let view = first_diagnostic_view(&diagnostic);
+        assert_eq!(
+            view.descriptor().code,
+            "MOTH-RULE-0039",
+            "{source}: a reserved word before a spaced minus must be a name collision",
+        );
+        let facts = view
+            .family_view::<ReservedNameCollisionView>()
+            .expect("the diagnostic is a reserved name collision");
+        assert_eq!(string_table.resolve(facts.name), keyword);
+        assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+        let keyword_start = source.find(keyword).expect("keyword must occur") as u32;
+        assert_eq!(
+            diagnostic_byte_range(&diagnostic),
+            (keyword_start, keyword_start + keyword.len() as u32),
+            "{source}: the collision must point at the keyword, not the minus",
+        );
+    }
+}
+
+#[test]
+fn keeps_unary_negation_spacing_after_operand_introducing_keywords() {
+    // The keyword itself introduces the operand, so the minus stays a unary spacing mistake.
+    for source in [
+        "loop 0 to 10 by - 1:\n;\n",
+        "value = if ok then - 1 else 0\n",
+        "value = if ok then not - 1 else 0\n",
+        "value = base + copy - delta\n",
+        "value = base + cast - delta\n",
+    ] {
         let (diagnostic, _string_table) = tokenize_source_error(source);
         assert_common_syntax_mistake(
             &diagnostic,

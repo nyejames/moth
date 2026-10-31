@@ -255,6 +255,11 @@ impl GenericParameterScope {
     pub(crate) fn contains_name(&self, name: StringId) -> bool {
         self.parameters_by_name.contains_key(&name)
     }
+
+    /// Visible generic parameter names in this scope.
+    pub(crate) fn parameter_names(&self) -> impl Iterator<Item = StringId> + '_ {
+        self.parameters_by_name.keys().copied()
+    }
 }
 
 fn scoped_parameter(

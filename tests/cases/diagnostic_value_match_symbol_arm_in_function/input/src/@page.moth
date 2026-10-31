@@ -1,0 +1,10 @@
+-- A symbol-shaped arm is missing its '=>' separator. It must report the arm-header diagnostic
+-- at the arm instead of a declared-region claim or a function body scan's end-of-file report.
+work ||:
+    value = 1
+    if value is:
+        1 => io.line("one")
+        Ready: io.line("ready")
+        else => io.line("other")
+    ;
+;

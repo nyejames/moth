@@ -1,0 +1,10 @@
+-- A block header may continue after an expression-continuing token on the next line.
+check |count I32, limit I32| -> Bool:
+    if count >
+        limit:
+        return true
+    ;
+    return false
+;
+
+io.line([:multiline-if=[check(3, 2)]])

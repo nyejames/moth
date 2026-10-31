@@ -317,6 +317,37 @@ impl DiagnosticDraft {
         self.with_label_at(index, span, message)
     }
 
+    /// Attaches a message to this draft's primary span.
+    ///
+    /// The message reuses the family's label roles and data encoding. A primary label has no span
+    /// of its own: renderers place it on the caret line of the record's primary span.
+    pub(crate) fn with_primary_label(mut self, message: LabelDraftMessage) -> Self {
+        if self.core.faulted {
+            return self;
+        }
+        assert!(
+            self.extra
+                .as_ref()
+                .is_none_or(|extra| extra.primary_label.is_none()),
+            "a draft sets at most one primary label"
+        );
+        let label = {
+            let extra = self.extra.get_or_insert_with(Box::default);
+            encode_label(None, Some(message), &mut extra.substitutions)
+        };
+        match label {
+            Ok(label) => {
+                let extra = self
+                    .extra
+                    .as_deref_mut()
+                    .expect("primary label insertion initialized extra");
+                extra.primary_label = Some(label);
+                self
+            }
+            Err(FactCapacityError) => self.faulted_by(DiagnosticCapacityResource::FactValue),
+        }
+    }
+
     /// Inserts a secondary label before the label at `index`.
     pub(crate) fn with_label_at(
         mut self,
@@ -562,6 +593,7 @@ impl DiagnosticDraft {
         }
 
         let mut label_updates = Vec::new();
+        let mut primary_label_update = None;
         let mut substitution_updates = Vec::new();
         if let Some(extra) = self.extra.as_deref() {
             for (index, label) in extra.labels.iter().enumerate() {
@@ -576,6 +608,17 @@ impl DiagnosticDraft {
                 }
                 label_updates.push((index, data));
             }
+            if let Some(label) = &extra.primary_label
+                && label.pending_types != 0
+            {
+                let mut data = label.data;
+                for (slot, word) in data.iter_mut().enumerate() {
+                    if is_marked(label.pending_types, slot) {
+                        *word = captured_word(rewrite, *word)?;
+                    }
+                }
+                primary_label_update = Some(data);
+            }
             for (index, entry) in extra.substitutions.iter().enumerate() {
                 if let DraftType::Pending(word) = entry.concrete {
                     substitution_updates.push((index, captured_word(rewrite, word)?));
@@ -589,6 +632,14 @@ impl DiagnosticDraft {
         if let Some(extra) = self.extra.as_deref_mut() {
             for (index, data) in label_updates {
                 let label = &mut extra.labels[index];
+                label.data = data;
+                label.pending_types = 0;
+            }
+            if let Some(data) = primary_label_update {
+                let label = extra
+                    .primary_label
+                    .as_mut()
+                    .expect("a primary label update names the captured label");
                 label.data = data;
                 label.pending_types = 0;
             }
@@ -617,6 +668,13 @@ impl DiagnosticDraft {
             );
             assert!(
                 extra
+                    .primary_label
+                    .as_ref()
+                    .is_none_or(|label| label.pending_types == 0),
+                "type-display rebasing needs `capture_types` to run first"
+            );
+            assert!(
+                extra
                     .substitutions
                     .iter()
                     .all(|entry| matches!(&entry.concrete, DraftType::Captured(_))),
@@ -632,6 +690,13 @@ impl DiagnosticDraft {
 
         if let Some(extra) = self.extra.as_deref() {
             for label in &extra.labels {
+                for (slot, &word) in label.data.iter().enumerate() {
+                    if is_marked(label.type_words, slot) {
+                        rebased_type_word(word, base)?;
+                    }
+                }
+            }
+            if let Some(label) = &extra.primary_label {
                 for (slot, &word) in label.data.iter().enumerate() {
                     if is_marked(label.type_words, slot) {
                         rebased_type_word(word, base)?;
@@ -658,6 +723,14 @@ impl DiagnosticDraft {
 
         if let Some(extra) = self.extra.as_deref_mut() {
             for label in &mut extra.labels {
+                for (slot, word) in label.data.iter_mut().enumerate() {
+                    if is_marked(label.type_words, slot) {
+                        *word = rebased_type_word(*word, base)
+                            .expect("type-display rebase preflight checked every label");
+                    }
+                }
+            }
+            if let Some(label) = &mut extra.primary_label {
                 for (slot, word) in label.data.iter_mut().enumerate() {
                     if is_marked(label.type_words, slot) {
                         *word = rebased_type_word(*word, base)

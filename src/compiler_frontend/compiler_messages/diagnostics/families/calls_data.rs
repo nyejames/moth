@@ -7,7 +7,8 @@ use super::super::schema::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    CountFact, OptCountFact, OptStringFact, OptTypeFact, OptUnitFact, TypeFact, UnitFact, unit_code,
+    CountFact, CountPair, OptCountFact, OptStringFact, OptTypeFact, OptUnitFact, TypeFact,
+    UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
@@ -55,7 +56,7 @@ unit_code! {
         TooManyArguments = 11,
         ExpressionPositionNotAllowed = 12,
         MapLengthIsProperty = 13,
-        ScalarConstructorRemoved = 14,
+        ScalarTypeCalledAsFunction = 15,
     }
 }
 
@@ -93,7 +94,6 @@ unit_code! {
         OperandArityMismatch = 6,
         TargetArityMismatch = 7,
         CastPropagationRemoved = 8,
-        ScalarConstructorRemoved = 9,
         NoEvidence = 10,
         BuiltinEvidenceNotConstFoldable = 11,
         UserDefinedEvidenceNotConstFoldable = 12,
@@ -631,6 +631,16 @@ pub(crate) fn invalid_call_shape(
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     let code = InvalidCallShapeCode::of(&reason);
+    let extra_positional_counts = match &reason {
+        InvalidCallShapeReason::ExtraPositionalArgument {
+            expected_count,
+            provided_count,
+        } => Some(CountPair {
+            expected: *expected_count,
+            provided: *provided_count,
+        }),
+        _ => None,
+    };
     let (parameter_name, count, string_ids) = match reason {
         InvalidCallShapeReason::MissingArgument {
             parameter_name,
@@ -652,9 +662,7 @@ pub(crate) fn invalid_call_shape(
             parameter_name,
             parameter_index,
         } => (parameter_name, Some(parameter_index), Vec::new()),
-        InvalidCallShapeReason::ExtraPositionalArgument { expected_count } => {
-            (None, Some(expected_count), Vec::new())
-        }
+        InvalidCallShapeReason::ExtraPositionalArgument { .. } => (None, None, Vec::new()),
         InvalidCallShapeReason::NamedArgumentNotFound {
             name,
             known_parameters,
@@ -688,6 +696,10 @@ pub(crate) fn invalid_call_shape(
         | InvalidCallShapeReason::RouteInputFieldMismatch => (None, None, Vec::new()),
     };
     DiagnosticDraft::with_facts(&INVALID_CALL_SHAPE, span, |cursor| {
+        let count = match extra_positional_counts {
+            Some(pair) => Some(pair.pack()?),
+            None => count,
+        };
         cursor.push::<UnitFact<InvalidCallShapeCode>>(&code)?;
         cursor.push::<OptStringFact>(&callee_name)?;
         cursor.push::<OptStringFact>(&parameter_name)?;
@@ -895,8 +907,10 @@ pub(crate) fn invalid_call_shape_reason(
             parameter_index: parameter_index(),
         },
         InvalidCallShapeCode::ExtraPositionalArgument => {
+            let CountPair { expected, provided } = CountPair::unpack(parameter_index());
             InvalidCallShapeReason::ExtraPositionalArgument {
-                expected_count: parameter_index(),
+                expected_count: expected,
+                provided_count: provided,
             }
         }
         InvalidCallShapeCode::DuplicateArgument => InvalidCallShapeReason::DuplicateArgument {

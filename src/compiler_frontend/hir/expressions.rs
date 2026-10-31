@@ -40,7 +40,7 @@ pub const OPTION_SOME_VARIANT_INDEX: usize = 1;
 
 /// One field inside a `VariantConstruct`.
 ///
-/// WHY: payload field names are part of the runtime carrier shape for JS and future backends.
+/// WHY: payload field names are part of the runtime carrier shape.
 #[derive(Debug, Clone, Copy)]
 pub struct HirVariantField {
     pub name: Option<StringId>,

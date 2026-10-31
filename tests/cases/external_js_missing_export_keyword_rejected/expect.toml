@@ -1,0 +1,25 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0022"]
+message_contains = ["Add `export` before `function` in `broken.js`."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0022"
+reason = "invalid_external_module.missing_export_keyword"
+path = "input/src/broken.js"
+line = 2
+column = 4
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/src/broken.js"
+line = 4
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@page.moth"
+line = 1

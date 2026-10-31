@@ -14,7 +14,7 @@ use super::extras::{
 };
 use super::foreign::{ForeignSiteDraft, ForeignSiteRecord, ForeignSlot};
 use super::labels::{
-    DraftType, GenericSubstitutionRecord, LabelMessageCode, SecondaryDiagnosticLabel,
+    DraftType, GenericSubstitutionRecord, LabelMessageCode, LabelWord, SecondaryDiagnosticLabel,
 };
 use super::reasons::{CapacityResource, DiagnosticCapacityResource};
 use super::record::DiagnosticRecord;
@@ -73,6 +73,13 @@ fn assert_captured(draft: &DiagnosticDraft) {
     );
     assert!(
         extra
+            .primary_label
+            .as_ref()
+            .is_none_or(|label| label.pending_types == 0),
+        "compaction needs `capture_types` to run first: the primary label still holds a raw type"
+    );
+    assert!(
+        extra
             .substitutions
             .iter()
             .all(|entry| matches!(entry.concrete, DraftType::Captured(_))),
@@ -90,6 +97,14 @@ fn assert_label_roles(draft: &DiagnosticDraft) {
         assert!(
             draft.core.family.permits_label(label.message),
             "label role {} is not declared by family {}",
+            label.message.name(),
+            draft.core.family.descriptor.code
+        );
+    }
+    if let Some(label) = &extra.primary_label {
+        assert!(
+            draft.core.family.permits_label(label.message),
+            "primary label role {} is not declared by family {}",
             label.message.name(),
             draft.core.family.descriptor.code
         );
@@ -120,11 +135,18 @@ impl DiagnosticStore {
         let no_parts = DiagnosticExtraDraft::default();
         let extra = draft.extra.as_deref().unwrap_or(&no_parts);
 
-        let label_data_rows = extra
-            .labels
-            .iter()
-            .filter(|label| label.message.carries_data())
-            .count();
+        let primary_label_data_rows = usize::from(
+            extra
+                .primary_label
+                .as_ref()
+                .is_some_and(|label| label.message.carries_data()),
+        );
+        let label_data_rows = primary_label_data_rows
+            + extra
+                .labels
+                .iter()
+                .filter(|label| label.message.carries_data())
+                .count();
         check_room(
             self.label_data.len(),
             label_data_rows,
@@ -168,8 +190,10 @@ impl DiagnosticStore {
             DiagnosticCapacityResource::IdentityContexts,
         )?;
 
-        let needs_extra =
-            !extra.labels.is_empty() || !extra.foreign_sites.is_empty() || string_count > 0;
+        let needs_extra = extra.primary_label.is_some()
+            || !extra.labels.is_empty()
+            || !extra.foreign_sites.is_empty()
+            || string_count > 0;
         check_room(
             self.extras.len(),
             usize::from(needs_extra),
@@ -249,6 +273,7 @@ impl DiagnosticStore {
         let DiagnosticDraft { core, extra } = draft;
         let DiagnosticExtraDraft {
             labels,
+            primary_label,
             foreign_sites,
             owner_handles: _owner_handles,
             substitutions,
@@ -272,6 +297,26 @@ impl DiagnosticStore {
 
         let label_start = self.labels.len();
         let label_count = labels.len();
+
+        let primary_label = match primary_label {
+            Some(label) => {
+                let data_index = if label.message.carries_data() {
+                    let mut row = label.data;
+                    if label.message == LabelMessageCode::GENERIC_INSTANTIATION_SUBSTITUTIONS {
+                        row[0] += substitution_base;
+                    }
+                    let index = u32::try_from(self.label_data.len())
+                        .expect("the label data limit keeps every index inside 24 bits");
+                    self.label_data.push(row);
+                    index
+                } else {
+                    0
+                };
+                LabelWord::pack(label.message, data_index)
+            }
+            None => LabelWord::NONE,
+        };
+
         for label in labels {
             let data_index = if label.message.carries_data() {
                 let mut row = label.data;
@@ -321,7 +366,10 @@ impl DiagnosticStore {
         }
 
         // Must agree with the `needs_extra` rule in `plan`, or the extras ceiling could be overrun by one.
-        let has_extra = label_count > 0 || site_count > 0 || string_count > 0;
+        let has_extra = primary_label != LabelWord::NONE
+            || label_count > 0
+            || site_count > 0
+            || string_count > 0;
         let extra_id = if has_extra {
             let index = self.extras.len();
             self.extras.push(DiagnosticExtraRecord {
@@ -331,6 +379,7 @@ impl DiagnosticStore {
                     kind: data_kind,
                     list: DiagnosticListRange::new(string_start, string_count),
                 },
+                primary_label,
             });
             Some(DiagnosticExtraId::from_index(index))
         } else {

@@ -2,6 +2,10 @@ use super::super::create_project_modules_tests::{diagnosed_reports, successful_c
 use super::*;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    ExternalJsBindingShape, InvalidExternalModuleView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn fresh_warning_owner() -> BoundaryAccumulator {
@@ -1668,6 +1672,106 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     assert!(
         rendered.contains("drawing.js"),
         "provider diagnostic primary path should resolve to the JS source, got: {rendered}"
+    );
+}
+
+#[test]
+fn html_js_provider_missing_export_keyword_points_into_the_js_source() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        dir.join("@page.moth"),
+        "@drawing.js add\nvalue = add(1, 2)\n",
+    )
+    .expect("should write page");
+    let js_source = "/** @moth.sig add |a I32, b I32| -> I32 */\nfunction addImpl(a, b) {\n    return a + b;\n}\n";
+    fs::write(dir.join("drawing.js"), js_source).expect("should write js");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = fresh_warning_owner();
+    let mut frontend_surface = builder_surface_with_html_js_provider();
+
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
+    assert_has_diagnostic_code(&result, "MOTH-IMPORT-0022");
+
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| {
+            view.descriptor().code == "MOTH-IMPORT-0022"
+                && view.reason_key() == Some("invalid_external_module.missing_export_keyword")
+        })
+        .expect("missing-export diagnostic keeps its typed reason key");
+    let facts = view
+        .family_view::<InvalidExternalModuleView>()
+        .expect("external-module reason facts remain typed");
+    assert_eq!(facts.binding, Some(ExternalJsBindingShape::SigFunction));
+
+    let context = DiagnosticRenderContext::for_report(report);
+    let names = view
+        .string_ids()
+        .iter()
+        .map(|id| context.string_table.resolve(*id))
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["add", "addImpl"]);
+
+    let primary = context
+        .site_position(view.primary_site())
+        .expect("the annotation should carry an exact JavaScript position");
+    assert!(
+        primary.path.ends_with("drawing.js"),
+        "primary site should be the provider-owned JS source, got: {:?}",
+        primary.path
+    );
+    assert_eq!(primary.start.line, 0);
+    assert_eq!(primary.start.column, 4);
+
+    let labels = view.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 2, "declaration and import-site labels");
+    let declaration = context
+        .site_position(labels[0].site)
+        .expect("the declaration label should carry an exact JavaScript position");
+    assert!(
+        declaration.path.ends_with("drawing.js"),
+        "declaration label should be in the JS source, got: {:?}",
+        declaration.path
+    );
+    assert_eq!(declaration.start.line, 1);
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::MissingExportDeclaration
+    ));
+    let import_site = context
+        .site_position(labels[1].site)
+        .expect("the import-site label should carry the importing Moth position");
+    assert!(
+        import_site.path.ends_with("@page.moth"),
+        "import-site label should be the importing Moth source, got: {:?}",
+        import_site.path
+    );
+    assert_eq!(import_site.start.line, 0);
+
+    let rendered = terse::format_terse_diagnostic_view(view, context);
+    assert!(
+        rendered.contains(
+            "`@moth.sig` for `add` applies to JavaScript function `addImpl`, but the function is not exported. Add `export` before `function` in `drawing.js`."
+        ),
+        "provider diagnostic should render the typed missing-export message, got: {rendered}"
     );
 }
 

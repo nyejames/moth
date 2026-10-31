@@ -29,8 +29,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 ///
 /// WHAT: runs the TIR formatter adapter over the template's current referenced
 ///       root and stores the append-only formatted root as a new TIR template.
-/// WHY: linear templates carry their formatted root directly in TIR, making TIR formatting
-///      the production authority for linear bodies.
+/// WHY: a linear template carries its formatted root directly in TIR.
 pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_reference_for_linear_template(
     tir_reference: &mut TemplateTirReference,
     has_control_flow: bool,

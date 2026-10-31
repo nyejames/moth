@@ -1,0 +1,11 @@
+-- A symbol-shaped arm is missing its '=>' separator. It must report the arm-header diagnostic
+-- at the arm instead of a declared-region claim or a function body scan's end-of-file report.
+Status :: Ready, Busy;
+
+pick |s Status|:
+    if s is:
+        Ready => io.line("ready")
+        Busy: io.line("busy")
+        else => io.line("other")
+    ;
+;

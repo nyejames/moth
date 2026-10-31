@@ -259,16 +259,12 @@ impl TemplateConstructionContext {
     pub(crate) fn record_insert_contribution(
         &mut self,
         contribution_template_id: TemplateIrId,
+        authored_name: Option<StringId>,
         span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
-            store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::InsertContribution {
-                    template: contribution_template_id,
-                },
-                span,
-            ))
+            store.push_insert_contribution(contribution_template_id, authored_name, span)
         };
 
         self.children.push(node_id);

@@ -58,6 +58,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    TemplateHeadConflict, TemplateHeadConflictOwner, TemplateHeadConflictReason,
+    TemplateHeadItemName,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
@@ -91,34 +93,134 @@ pub(crate) struct TemplateHeadParseRequest<'a, 'types> {
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork:
         &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    /// The opening `[` of this template, when the stream owns an authored one.
+    pub(crate) opening_span: Option<SourceSpan>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+/// The first earlier item that carried one tag.
+///
+/// One record per tag slot replaces a growable list: the head only needs the earliest carrier
+/// (required-absent checks) and the earliest blocker (blocking checks) of each fixed tag.
+#[derive(Clone, Copy, Debug)]
+struct FirstPresentHeadItem {
+    name: TemplateHeadItemName,
+    location: SourceSpan,
+    order: u32,
+}
+
+/// The first earlier item that blocked one tag, with the rule reason its spec declared.
+#[derive(Clone, Copy, Debug)]
+struct FirstBlockingHeadItem {
+    name: TemplateHeadItemName,
+    location: SourceSpan,
+    order: u32,
+    reason: Option<TemplateHeadConflictReason>,
+}
+
+/// Aggregate tags for the fast check plus one first-item slot per tag for naming the conflict.
+///
+/// Tags are fixed one-bit constants, so the retained facts are a fixed-size `Copy` value and the
+/// success path allocates nothing.
+#[derive(Clone, Copy, Debug)]
 struct TemplateHeadState {
     seen_tags: TemplateHeadTag,
     blocked_future_tags: TemplateHeadTag,
+    first_present: [Option<FirstPresentHeadItem>; TemplateHeadTag::SLOT_COUNT],
+    first_blocking: [Option<FirstBlockingHeadItem>; TemplateHeadTag::SLOT_COUNT],
+    seen_item_count: u32,
     has_explicit_template_directive: bool,
+}
+
+impl Default for TemplateHeadState {
+    fn default() -> Self {
+        Self {
+            seen_tags: TemplateHeadTag::empty(),
+            blocked_future_tags: TemplateHeadTag::empty(),
+            first_present: [None; TemplateHeadTag::SLOT_COUNT],
+            first_blocking: [None; TemplateHeadTag::SLOT_COUNT],
+            seen_item_count: 0,
+            has_explicit_template_directive: false,
+        }
+    }
+}
+
+const _: () = assert!(
+    std::mem::size_of::<TemplateHeadState>() <= 512,
+    "template-head state stays a small stack value"
+);
+
+impl TemplateHeadState {
+    /// The earliest earlier item whose own blocking rule rejects the incoming item.
+    fn first_blocking_item(
+        &self,
+        incoming: &TemplateHeadCompatibility,
+    ) -> Option<FirstBlockingHeadItem> {
+        incoming
+            .presence_tags
+            .indices()
+            .filter_map(|index| self.first_blocking[index])
+            .min_by_key(|item| item.order)
+    }
+
+    /// The earliest earlier item that the incoming item's required-absent rule rejects.
+    fn first_required_absent_item(
+        &self,
+        incoming: &TemplateHeadCompatibility,
+    ) -> Option<FirstPresentHeadItem> {
+        incoming
+            .required_absent_tags
+            .indices()
+            .filter_map(|index| self.first_present[index])
+            .min_by_key(|item| item.order)
+    }
 }
 
 fn enforce_head_compatibility(
     state: &TemplateHeadState,
     incoming: &TemplateHeadCompatibility,
-    token_stream: &AstCursor,
+    incoming_name: TemplateHeadItemName,
+    incoming_span: SourceSpan,
 ) -> TemplateHeadResult<()> {
-    if !state.blocked_future_tags.intersects(incoming.presence_tags)
-        && !state.seen_tags.intersects(incoming.required_absent_tags)
-    {
-        Ok(())
-    } else {
-        Err(with_current_token_span(
-            token_stream,
-            templates::invalid_template_structure(
-                InvalidTemplateStructureReason::IncompatibleHeadItem,
-                Some(token_stream.current_span()),
-            ),
-        )
-        .into())
+    let blocked_by_earlier = state.blocked_future_tags.intersects(incoming.presence_tags);
+    let requires_absent = state.seen_tags.intersects(incoming.required_absent_tags);
+    if !blocked_by_earlier && !requires_absent {
+        return Ok(());
     }
+
+    let conflict = if let Some(earlier) = state.first_blocking_item(incoming) {
+        TemplateHeadConflict {
+            reason: earlier
+                .reason
+                .expect("every registered blocking rule declares its conflict reason"),
+            owner: TemplateHeadConflictOwner::EarlierItem,
+            earlier: earlier.name,
+            earlier_span: earlier.location,
+            incoming: incoming_name,
+            incoming_span,
+        }
+    } else if let Some(earlier) = state.first_required_absent_item(incoming) {
+        TemplateHeadConflict {
+            reason: incoming
+                .conflict_reason
+                .expect("every registered required-absent rule declares its conflict reason"),
+            owner: TemplateHeadConflictOwner::IncomingItem,
+            earlier: earlier.name,
+            earlier_span: earlier.location,
+            incoming: incoming_name,
+            incoming_span,
+        }
+    } else {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "template-head compatibility tags rejected a pair that no retained item explains"
+        )
+    };
+
+    Err(templates::invalid_template_structure(
+        InvalidTemplateStructureReason::IncompatibleHeadItem { conflict },
+        Some(incoming_span),
+    )
+    .into())
 }
 
 /// Attach the current authored head-item span when a constructor did not
@@ -146,7 +248,32 @@ fn with_source_span(
 fn apply_head_compatibility(
     state: &mut TemplateHeadState,
     compatibility: &TemplateHeadCompatibility,
+    name: TemplateHeadItemName,
+    location: SourceSpan,
 ) {
+    let order = state.seen_item_count;
+    state.seen_item_count = order.saturating_add(1);
+
+    for index in compatibility.presence_tags.indices() {
+        if state.first_present[index].is_none() {
+            state.first_present[index] = Some(FirstPresentHeadItem {
+                name,
+                location,
+                order,
+            });
+        }
+    }
+    for index in compatibility.blocks_future_tags.indices() {
+        if state.first_blocking[index].is_none() {
+            state.first_blocking[index] = Some(FirstBlockingHeadItem {
+                name,
+                location,
+                order,
+                reason: compatibility.conflict_reason,
+            });
+        }
+    }
+
     state.seen_tags |= compatibility.presence_tags;
     state.blocked_future_tags |= compatibility.blocks_future_tags;
 }
@@ -253,6 +380,7 @@ pub fn parse_template_head(
         control_flow_validation,
         string_table,
         path_fork,
+        opening_span,
     } = request;
 
     // Each meaningful head item must be separated with a comma before another
@@ -279,12 +407,9 @@ pub fn parse_template_head(
         // closing ] delimiter. This is a malformed template, not a valid stream
         // boundary; the user needs a structured diagnostic.
         if token == TokenTag::EOF {
-            return Err(with_current_token_span(
-                token_stream,
-                token_lexical::unexpected_end_of_file(
-                    Some(string_table.intern("]")),
-                    Some(token_stream.current_span()),
-                ),
+            return Err(templates::missing_closing_bracket(
+                Some(token_stream.current_span()),
+                opening_span,
             )
             .into());
         }
@@ -447,12 +572,14 @@ pub fn parse_template_head(
                             "template-head symbol token had no string payload",
                         )
                     })?;
+                let item_span = token_stream.current_span();
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
-                    token_stream,
+                    TemplateHeadItemName::Expression,
+                    item_span,
                 )?;
-                let value_span = Some(token_stream.current_span());
+                let value_span = Some(item_span);
                 let value_reference = context.get_value_reference(&name, value_span)?;
 
                 // Extract an inlinable template before the mutable expression parse.
@@ -523,6 +650,7 @@ pub fn parse_template_head(
                         &inserted_template,
                         context,
                         construction_context,
+                        Some(name),
                         value_span,
                     )?;
                 } else {
@@ -564,7 +692,12 @@ pub fn parse_template_head(
                     defer_comma_advance = true;
                 }
 
-                apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
+                apply_head_compatibility(
+                    &mut head_state,
+                    &meaningful_item_compatibility,
+                    TemplateHeadItemName::Expression,
+                    item_span,
+                );
             }
 
             // Receiver self-reference
@@ -586,12 +719,14 @@ pub fn parse_template_head(
                     })
                     .transpose()?;
                 if let Some(value_mode) = receiver_value_mode {
+                    let item_span = token_stream.current_span();
                     enforce_head_compatibility(
                         &head_state,
                         &meaningful_item_compatibility,
-                        token_stream,
+                        TemplateHeadItemName::Expression,
+                        item_span,
                     )?;
-                    let value_span = Some(token_stream.current_span());
+                    let value_span = Some(item_span);
                     let expression = parse_head_expression(
                         token_stream,
                         context,
@@ -618,7 +753,12 @@ pub fn parse_template_head(
                         string_table,
                     )?;
                     defer_comma_advance = true;
-                    apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
+                    apply_head_compatibility(
+                        &mut head_state,
+                        &meaningful_item_compatibility,
+                        TemplateHeadItemName::Expression,
+                        item_span,
+                    );
                 } else {
                     let span = Some(token_stream.current_span());
                     let diagnostic = token_stream
@@ -646,12 +786,14 @@ pub fn parse_template_head(
             | TokenTag::BOOL_LITERAL
             | TokenTag::STRING_SLICE_LITERAL
             | TokenTag::RAW_STRING_LITERAL => {
+                let item_span = token_stream.current_span();
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
-                    token_stream,
+                    TemplateHeadItemName::Expression,
+                    item_span,
                 )?;
-                let value_span = Some(token_stream.current_span());
+                let value_span = Some(item_span);
                 let expression = parse_head_expression(
                     token_stream,
                     context,
@@ -679,7 +821,12 @@ pub fn parse_template_head(
                     string_table,
                 )?;
                 defer_comma_advance = true;
-                apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
+                apply_head_compatibility(
+                    &mut head_state,
+                    &meaningful_item_compatibility,
+                    TemplateHeadItemName::Expression,
+                    item_span,
+                );
             }
 
             // Path references
@@ -703,10 +850,12 @@ pub fn parse_template_head(
                         "template-head path token had no validated syntax row",
                     )
                 })?;
+                let item_span = token_stream.current_span();
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
-                    token_stream,
+                    TemplateHeadItemName::Expression,
+                    item_span,
                 )?;
                 push_template_head_path_expression(
                     path_id,
@@ -719,17 +868,24 @@ pub fn parse_template_head(
                     string_table,
                     path_fork,
                 )?;
-                apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
+                apply_head_compatibility(
+                    &mut head_state,
+                    &meaningful_item_compatibility,
+                    TemplateHeadItemName::Expression,
+                    item_span,
+                );
             }
 
             // Parenthesized sub-expressions
             TokenTag::OPEN_PARENTHESIS => {
+                let item_span = token_stream.current_span();
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
-                    token_stream,
+                    TemplateHeadItemName::Expression,
+                    item_span,
                 )?;
-                let value_span = Some(token_stream.current_span());
+                let value_span = Some(item_span);
                 let expression = parse_head_expression(
                     token_stream,
                     context,
@@ -757,7 +913,12 @@ pub fn parse_template_head(
                     string_table,
                 )?;
                 defer_comma_advance = true;
-                apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
+                apply_head_compatibility(
+                    &mut head_state,
+                    &meaningful_item_compatibility,
+                    TemplateHeadItemName::Expression,
+                    item_span,
+                );
             }
 
             // Style and setting directives
@@ -772,6 +933,7 @@ pub fn parse_template_head(
                     })?;
                 // Template directives share the `$name` token shape with style directives.
                 // Parse `$slot` / `$insert` first, then fall back to style handling.
+                let directive_span = token_stream.current_span();
                 head_state.has_explicit_template_directive = true;
                 let directive_name = string_table.resolve(directive).to_owned();
                 let Some(spec) = context.style_directives.find(&directive_name) else {
@@ -785,7 +947,12 @@ pub fn parse_template_head(
                     )
                     .into());
                 };
-                enforce_head_compatibility(&head_state, &spec.head_compatibility, token_stream)?;
+                enforce_head_compatibility(
+                    &head_state,
+                    &spec.head_compatibility,
+                    TemplateHeadItemName::Directive(directive),
+                    directive_span,
+                )?;
 
                 let slot_insert_had_arguments = directive_has_arguments(token_stream);
                 let handled_slot_insert = maybe_parse_slot_or_insert_helper_directive(
@@ -802,7 +969,12 @@ pub fn parse_template_head(
 
                 if handled_slot_insert {
                     defer_comma_advance = slot_insert_had_arguments;
-                    apply_head_compatibility(&mut head_state, &spec.head_compatibility);
+                    apply_head_compatibility(
+                        &mut head_state,
+                        &spec.head_compatibility,
+                        TemplateHeadItemName::Directive(directive),
+                        directive_span,
+                    );
                 } else {
                     defer_comma_advance = parse_style_directive_from_spec(
                         token_stream,
@@ -816,7 +988,12 @@ pub fn parse_template_head(
                         string_table,
                         path_fork,
                     )?;
-                    apply_head_compatibility(&mut head_state, &spec.head_compatibility);
+                    apply_head_compatibility(
+                        &mut head_state,
+                        &spec.head_compatibility,
+                        TemplateHeadItemName::Directive(directive),
+                        directive_span,
+                    );
                 }
             }
 
@@ -872,14 +1049,7 @@ pub fn parse_template_head(
 
         // Guard against malformed or truncated synthetic token streams.
         if token_stream.position() >= token_stream.length() {
-            return Err(with_source_span(
-                token_lexical::unexpected_end_of_file(
-                    Some(string_table.intern("]")),
-                    last_known_span,
-                ),
-                last_known_span,
-            )
-            .into());
+            return Err(templates::missing_closing_bracket(last_known_span, opening_span).into());
         }
 
         if token_stream.current_tag() == TokenTag::START_TEMPLATE_BODY {
@@ -891,12 +1061,9 @@ pub fn parse_template_head(
         }
 
         if token_stream.current_tag() == TokenTag::EOF {
-            return Err(with_current_token_span(
-                token_stream,
-                token_lexical::unexpected_end_of_file(
-                    Some(string_table.intern("]")),
-                    Some(token_stream.current_span()),
-                ),
+            return Err(templates::missing_closing_bracket(
+                Some(token_stream.current_span()),
+                opening_span,
             )
             .into());
         }
@@ -914,11 +1081,7 @@ pub fn parse_template_head(
         }
     }
 
-    Err(with_source_span(
-        token_lexical::unexpected_end_of_file(Some(string_table.intern("]")), last_known_span),
-        last_known_span,
-    )
-    .into())
+    Err(templates::missing_closing_bracket(last_known_span, opening_span).into())
 }
 
 /// Dispatches a `$directive` token using the already-resolved registry spec.

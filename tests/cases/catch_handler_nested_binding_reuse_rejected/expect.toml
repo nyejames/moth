@@ -1,11 +1,16 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0051"]
+diagnostic_codes = ["MOTH-RULE-0002"]
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0051"
-reason = "invalid_fallible_handling.catch_handler_conflicts"
+code = "MOTH-RULE-0002"
 path = "input/@page.moth"
 line = 9
 column = 37
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 8
+column = 33

@@ -583,6 +583,10 @@ mod file_value_resolution_tests;
 mod cursor_tests;
 
 #[cfg(test)]
+#[path = "tests/receiver_method_tests.rs"]
+mod receiver_method_tests;
+
+#[cfg(test)]
 #[path = "tests/numeric_construction_tests.rs"]
 mod numeric_construction_tests;
 

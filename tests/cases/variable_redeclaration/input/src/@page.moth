@@ -5,9 +5,3 @@ value = 42
 
 -- INVALID: Trying to redeclare the same variable (shadowing not allowed)
 value I32 = 84
-
--- Another case with mutable variables
-counter ~= 0
-
--- INVALID: Trying to redeclare mutable variable
-counter ~= 10

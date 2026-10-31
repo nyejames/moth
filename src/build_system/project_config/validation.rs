@@ -976,8 +976,8 @@ fn string_in_closed_domain(text: &str, allowed_strings: Option<&'static [&'stati
 
 /// The diagnostic reason for one shape or domain failure on a schema field.
 ///
-/// String fields with a closed domain report the allowed set; every other shape reports its
-/// own description, mirroring the long-standing closed-set diagnostic text.
+/// String fields with a closed domain report the allowed set. Every other shape reports its own
+/// description.
 fn shape_failure_reason(
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
@@ -1066,10 +1066,7 @@ fn concrete_template_string(template: &PublicConstTemplate) -> Option<String> {
     Some(text)
 }
 
-/// Format a human-readable expected-value description for a closed string set.
-///
-/// WHY: the diagnostic renderer needs a concrete message that lists the allowed strings
-/// so users know exactly which values are accepted.
+/// Format the expected-value description for a closed string set declared by the config schema.
 fn format_closed_string_set_expected(allowed: &[&str]) -> String {
     if allowed.len() == 1 {
         format!("\"{}\"", allowed[0])

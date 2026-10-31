@@ -227,6 +227,13 @@ pub(crate) struct ModuleSymbols {
     pub(crate) dependency_bindable_source_symbol_paths: FxHashSet<PathId>,
     pub(crate) declared_paths_by_file: FxHashMap<PathId, FxHashSet<PathId>>,
     pub(crate) declared_names_by_file: FxHashMap<PathId, FxHashSet<StringId>>,
+    /// Top-level runtime binding names and authored declaration spans, keyed by prepared file.
+    ///
+    /// WHAT: carries the implicit `start` body's value bindings beyond header parsing.
+    /// WHY: these names are not module declarations, so they are absent from
+    ///      `declared_paths_by_file`. A constant context still needs to recognise them and
+    ///      report a non-constant reference instead of an unknown name.
+    pub(crate) start_body_binding_spans_by_file: FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>,
     // Source constants detected during header symbol collection.
     // WHY: Moth template's implicit body scope is header-stage visibility over source constants only.
     // AST later decides whether those constants actually fold to plain values or const records.
@@ -328,6 +335,7 @@ impl ModuleSymbols {
             dependency_bindable_source_symbol_paths: FxHashSet::default(),
             declared_paths_by_file: FxHashMap::default(),
             declared_names_by_file: FxHashMap::default(),
+            start_body_binding_spans_by_file: FxHashMap::default(),
             constant_paths: FxHashSet::default(),
             builtin_visible_symbol_paths: FxHashSet::default(),
             builtin_struct_ast_nodes: Vec::new(),

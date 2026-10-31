@@ -108,6 +108,12 @@ pub(super) fn build_module_symbols(
                 std::mem::take(&mut file_output.dependency_selections),
             );
         }
+        if !file_output.start_body_binding_spans.is_empty() {
+            module_symbols.start_body_binding_spans_by_file.insert(
+                file_output.source_file.to_owned(),
+                std::mem::take(&mut file_output.start_body_binding_spans),
+            );
+        }
     }
 
     register_builtin_symbols(&mut module_symbols, string_table, path_fork);

@@ -11,13 +11,13 @@
 //!
 //! - `parsed_js_module`: parser-owned data model (spans, diagnostics, signatures).
 //! - `comment_extractor`: finds `/** ... */` blocks and extracts `@moth.*` annotations.
-//! - `export_scanner`: finds supported JS exports, counts parameters and provides shared JS
-//!   lexical skipping used by import scanning.
+//! - `export_scanner`: finds supported JS exports and top-level declarations, counts parameters
+//!   and provides shared JS lexical skipping used by import scanning.
 //! - `import_scan`: validates static import / `require()` forms against the runtime module
 //!   registry as an extra `ExportScanner` implementation.
 //! - `signature_parser`: parses the Moth parameter/return syntax inside `@moth.sig`.
-//! - `binding`: matches extracted annotations to scanned exports, validates signatures and
-//!   constants, and deduplicates runtime imports.
+//! - `binding`: matches extracted annotations to the nearest scanned declaration, validates
+//!   signatures and constants, and deduplicates runtime imports.
 //! - `mod.rs` (this file): orchestrates extraction → scanning → binding.
 
 mod binding;

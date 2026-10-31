@@ -700,7 +700,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
         !header_names
             .iter()
             .any(|name| name == "items" || name == "item" || name == "index"),
-        "only legitimate '#'-prefixed declarations should become headers"
+        "only legitimate postfix constant declarations should become headers"
     );
 }
 

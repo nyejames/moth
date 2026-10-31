@@ -17,7 +17,7 @@
 //! - Frontend built-ins define language/template semantics and generic formatter directives
 //!   such as `$md`.
 //! - Project builders may only register additional project-owned directives such as the HTML
-//!   project's `$html`, `$css`, and `$escape_html`.
+//!   project's `$html`, `$css`, `$escape_html` and `$code`.
 //! - The frontend always executes directive handlers during parsing/folding, regardless of
 //!   whether the directive itself is frontend-owned or project-owned.
 
@@ -26,8 +26,10 @@ mod compatibility;
 mod registry;
 mod specs;
 
+pub(crate) use crate::compiler_frontend::compiler_messages::TemplateHeadConflictReason;
 pub use compatibility::{TemplateHeadCompatibility, TemplateHeadTag};
 pub use registry::StyleDirectiveRegistry;
+pub(crate) use specs::DOC_DIRECTIVE_NAME;
 pub use specs::{
     CoreStyleDirectiveKind, StyleDirectiveArgumentType, StyleDirectiveArgumentValue,
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveKind, StyleDirectiveSpec,

@@ -352,7 +352,7 @@ pub(crate) fn compile_project_config_file(
     }
 
     let validated_config =
-        validated_config.expect("a non-AST config result has a validation outcome");
+        validated_config.expect("a successful config compilation has a validation outcome");
     let (compiled_config, validated_output_settings) = validated_config?;
 
     // Retain compiler-owned provenance until the build boundary projects source providers,

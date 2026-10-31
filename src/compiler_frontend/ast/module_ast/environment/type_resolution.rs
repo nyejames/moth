@@ -1016,7 +1016,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// WHAT: drives one [`ConstantResolutionSession`] across the ordered declaration sequence,
     /// publishing each waiting alias, rebuilding each nominal's member shells and constructor
     /// scaffold, and committing each folded constant at its own position.
-    /// WHY: Stage 3 already orders a `#capacity` constant before `Items as {capacity T}` and that
+    /// WHY: Stage 3 already orders a capacity constant before `Items as {capacity T}` and that
     /// alias before a constant typed by it. Walking one sequence honours both edges, so no
     /// consumer sees a provisional alias target. The session owns the module view the pass reads,
     /// so const-heavy modules prepare their side tables a fixed number of times.

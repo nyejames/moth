@@ -23,11 +23,24 @@ use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use super::head_chain::HeadChainResolutionInputs;
 
 type SlotCompositionResult<T> = Result<T, TemplateError>;
-type StoredInsertContributionTemplates = Option<Vec<(TemplateIrId, Option<SourceSpan>)>>;
+
+/// One `$insert(...)` contribution stored under an insert-only carrier template.
+///
+/// WHAT: keeps the helper root together with the authored insertion span and constant name.
+/// WHY: flattening an insert-only carrier must preserve the authored site so later diagnostics
+///      can point at the insert the author wrote rather than the helper definition.
+pub(crate) struct StoredInsertContribution {
+    pub(crate) template: TemplateIrId,
+    pub(crate) span: Option<SourceSpan>,
+    pub(crate) authored_name: Option<StringId>,
+}
+
+type StoredInsertContributionTemplates = Option<Vec<StoredInsertContribution>>;
 
 /// Builds a template infrastructure failure without rendering it into the source-diagnostic lane.
 pub(super) fn internal_infrastructure_failure(message: &str) -> TemplateError {
@@ -49,15 +62,18 @@ pub(super) fn unknown_slot_target_error(
         SlotKey::Default => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertCannotTargetDefaultSlot,
             None,
+            None,
             span,
         ),
         SlotKey::Named(name) => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot,
             Some(*name),
+            None,
             span,
         ),
         SlotKey::Positional(_) => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot,
+            None,
             None,
             span,
         ),
@@ -72,6 +88,7 @@ pub(super) fn loose_content_without_default_slot_error(
     templates::invalid_template_slot(
         InvalidTemplateSlotReason::LooseContentWithoutDefaultSlot,
         None,
+        None,
         span,
     )
 }
@@ -81,6 +98,7 @@ pub(super) fn extra_loose_content_without_default_slot_error(
 ) -> DiagnosticDraft {
     templates::invalid_template_slot(
         InvalidTemplateSlotReason::ExtraLooseContentWithoutDefaultSlot,
+        None,
         None,
         span,
     )
@@ -154,7 +172,11 @@ pub(crate) fn stored_insert_contribution_templates(
         let TemplateIrNodeKind::InsertContribution { template } = child.kind else {
             return Ok(None);
         };
-        contributions.push((template, child.span));
+        contributions.push(StoredInsertContribution {
+            template,
+            span: child.span,
+            authored_name: store.insert_contribution_name(*child_id),
+        });
     }
 
     Ok(Some(contributions))

@@ -5,6 +5,7 @@
 //! WHY: keeps the provider API general so JS, WIT, Rust, and host-manifest providers all
 //!      fit the same shape without leaking JS-specific concepts into the trait.
 
+use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -117,6 +118,11 @@ pub struct ExternalImportProviderContext<'a> {
     ///      every returned ID resolvable by the caller's frozen path table.
     pub path_fork: &'a mut PathInternerFork,
     pub string_table: &'a mut StringTable,
+    /// Stage 0's provider-owned source registration service.
+    ///
+    /// Production discovery always supplies this service. Synthetic provider tests that never
+    /// exercise source-backed diagnostics pass `None`.
+    pub provider_sources: Option<&'a mut dyn ProviderSourceRegistrar>,
 }
 impl ExternalImportProviderContext<'_> {
     /// Capture diagnostics against the identity tables owned by this provider invocation.
@@ -146,6 +152,7 @@ impl std::fmt::Debug for ExternalImportProviderContext<'_> {
             .field("package_registry", &"...")
             .field("path_fork", &"...")
             .field("string_table", &"...")
+            .field("provider_sources", &"...")
             .finish()
     }
 }

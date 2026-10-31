@@ -1,0 +1,6 @@
+-- Test file: a spaced mutable marker on an existing name reports marker spacing.
+
+value ~= 0
+
+-- INVALID: `~ =` is not the adjacent mutable declaration marker.
+value ~ = 1

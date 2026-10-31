@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "borrow_conflict_resolved_by_reusing_alias seen=7",
+    "borrow_conflict_resolved_by_reusing_alias alias=8",
+    "borrow_conflict_resolved_by_reusing_alias source=8",
+]

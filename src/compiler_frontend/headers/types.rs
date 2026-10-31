@@ -1529,6 +1529,12 @@ pub struct FileFrontendPrepareOutput {
     pub runtime_fragment_count: usize,
     /// Whether this file is the active root and contains non-trivial top-level root/start code.
     pub has_non_trivial_root_body: bool,
+    /// Names and authored spans of bindings introduced by this file's implicit start body.
+    ///
+    /// WHY: header parsing owns runtime-root symbol discovery. Later constant-context lookup
+    /// reports one of these names as a non-constant reference instead of an unknown name, and
+    /// labels its declaration through the retained span.
+    pub start_body_binding_spans: FxHashMap<StringId, SourceSpan>,
     /// Warnings emitted while parsing this file.
     ///
     /// WHY: per-file preparation must be self-contained; warnings are merged into the caller's
@@ -1736,6 +1742,15 @@ impl FileFrontendPrepareOutput {
             fragment.remap_string_ids(remap);
         }
 
+        if !self.start_body_binding_spans.is_empty() {
+            let mut remapped_names = FxHashMap::default();
+            remapped_names.reserve(self.start_body_binding_spans.len());
+            for (name, span) in self.start_body_binding_spans.drain() {
+                remapped_names.insert(remap.get(name), span);
+            }
+            self.start_body_binding_spans = remapped_names;
+        }
+
         self.warnings.remap_string_ids(remap);
 
         Ok(())
@@ -1783,6 +1798,7 @@ impl FileFrontendPrepareOutput {
         path_fork: &mut PathInternerFork,
     ) -> Result<(), InfrastructureFailure> {
         let provisional_source_file = self.source_file;
+        let provisional_file_id = self.file_id;
         // Validate all required source-owned paths and the mutable lifecycle before any retained
         // output is changed. A failed rebinding must never leave a partially finalised file.
         self.path_syntax.table_mut()?;
@@ -1826,6 +1842,13 @@ impl FileFrontendPrepareOutput {
         }
         for warning in self.warnings.iter_mut() {
             warning.rebind_source_ids(&mut |_| Ok(final_file_id))?;
+        }
+        // Runtime-root binding spans were authored in this file, so their source identity
+        // follows the prepared file through the same rebinding boundary as warnings.
+        for span in self.start_body_binding_spans.values_mut() {
+            if span.source() == provisional_file_id {
+                *span = SourceSpan::new(final_file_id, span.local());
+            }
         }
 
         // The table remains private to this output until every retained header has had

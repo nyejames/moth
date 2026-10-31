@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["in I32.", "Dec power takes an I32 exponent"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.dec_exponent_integer_overflow"
+path = "input/@page.moth"
+line = 1

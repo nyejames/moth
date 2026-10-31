@@ -2,3 +2,12 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["Variant 'Err' has 1 payload field, 'message', but this pattern captures 3."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.too_many_capture_bindings"
+path = "input/@page.moth"
+line = 11
+column = 18
+count = 1

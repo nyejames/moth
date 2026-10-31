@@ -1,0 +1,7 @@
+-- Value-match arms use '=>', so a ':' arm must report the arm-header diagnostic.
+value = 1
+label = if value is:
+    1: then "one"
+    else => then "other"
+;
+io.line([: [label]])

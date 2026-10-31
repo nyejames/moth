@@ -1,4 +1,5 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0035"]
+diagnostic_codes = ["MOTH-RULE-0089"]
+message_contains = ["Unknown member 'Missing' on namespace 'nested.tools'."]

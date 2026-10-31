@@ -1,4 +1,5 @@
 mod config_schema_tests;
 mod provider_registry_tests;
+mod provider_source_span_tests;
 mod source_file_kind_registry_tests;
 mod source_package_registry_tests;

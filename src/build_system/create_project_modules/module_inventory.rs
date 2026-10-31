@@ -51,8 +51,9 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic, path_id};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{
-    ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
-    StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
+    BoundaryProviderSources, ExternalImportDiscoveryState, ResolvedDependencyEdge,
+    ResolvedSourcePackageDependency, StructuralProviderAction, prepare_owned_source_input,
+    resolve_structural_provider_reference,
 };
 use super::source_loading::SelectedSourceTextMap;
 use super::source_tree_index::{
@@ -845,14 +846,17 @@ fn prepare_check_only_module(
         for dependency in &mut prepared_output.file_dependency_clauses {
             let provider = &mut dependency.dependency;
             let action = {
-                let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                let (syntax_string_table, selected_source_texts, syntax_path_fork) =
                     syntax.source_preparation_inputs_and_path_fork_mut();
+                let mut provider_sources =
+                    BoundaryProviderSources::new(source_spans, selected_source_texts);
                 resolve_structural_provider_reference(
                     provider,
                     dependency.binding.clause_kind(),
                     &current_file_path,
                     project_path_resolver,
                     syntax_path_fork,
+                    &mut provider_sources,
                     &mut isolated_external_imports,
                     directory_dependency_resolution,
                     syntax_string_table,
@@ -1359,14 +1363,17 @@ fn discover_modules_serial_provider_capable(
             for dependency in &mut prepared_output.file_dependency_clauses {
                 let provider = &mut dependency.dependency;
                 let action = {
-                    let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                    let (syntax_string_table, selected_source_texts, syntax_path_fork) =
                         syntax.source_preparation_inputs_and_path_fork_mut();
+                    let mut provider_sources =
+                        BoundaryProviderSources::new(source_spans, selected_source_texts);
                     resolve_structural_provider_reference(
                         provider,
                         dependency.binding.clause_kind(),
                         &source_path,
                         project_path_resolver,
                         syntax_path_fork,
+                        &mut provider_sources,
                         external_imports,
                         directory_dependency_resolution,
                         syntax_string_table,

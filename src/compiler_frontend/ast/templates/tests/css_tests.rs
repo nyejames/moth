@@ -187,7 +187,7 @@ fn missing_colon_reports_malformed_declaration_with_scalar_offsets() {
         warnings[0].reason,
         MalformedTemplateReason::Css(CssTemplateWarning::MalformedDeclaration)
     );
-    assert_eq!((warnings[0].start_offset, warnings[0].end_offset), (5, 14));
+    assert_eq!((warnings[0].start_char, warnings[0].end_char), (5, 14));
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn empty_declaration_value_pins_first_colon_offset() {
         warnings[0].reason,
         MalformedTemplateReason::Css(CssTemplateWarning::MissingDeclarationValue)
     );
-    assert_eq!((warnings[0].start_offset, warnings[0].end_offset), (10, 11));
+    assert_eq!((warnings[0].start_char, warnings[0].end_char), (10, 11));
 }
 
 #[test]
@@ -227,12 +227,12 @@ fn combined_invalid_name_and_missing_value_keep_warning_order() {
             name: string_table.intern("123"),
         })
     );
-    assert_eq!((warnings[0].start_offset, warnings[0].end_offset), (5, 8));
+    assert_eq!((warnings[0].start_char, warnings[0].end_char), (5, 8));
     assert_eq!(
         warnings[1].reason,
         MalformedTemplateReason::Css(CssTemplateWarning::MissingDeclarationValue)
     );
-    assert_eq!((warnings[1].start_offset, warnings[1].end_offset), (8, 9));
+    assert_eq!((warnings[1].start_char, warnings[1].end_char), (8, 9));
 
     // Empty property and empty value warn in the same order on the same span.
     let warnings = validate_css_source(
@@ -247,12 +247,12 @@ fn combined_invalid_name_and_missing_value_keep_warning_order() {
             name: string_table.intern(""),
         })
     );
-    assert_eq!((warnings[0].start_offset, warnings[0].end_offset), (5, 6));
+    assert_eq!((warnings[0].start_char, warnings[0].end_char), (5, 6));
     assert_eq!(
         warnings[1].reason,
         MalformedTemplateReason::Css(CssTemplateWarning::MissingDeclarationValue)
     );
-    assert_eq!((warnings[1].start_offset, warnings[1].end_offset), (5, 6));
+    assert_eq!((warnings[1].start_char, warnings[1].end_char), (5, 6));
 }
 
 #[test]
@@ -270,12 +270,12 @@ fn declaration_offsets_count_unicode_scalars_not_bytes() {
             name: string_table.intern("café"),
         })
     );
-    assert_eq!((warnings[0].start_offset, warnings[0].end_offset), (5, 9));
+    assert_eq!((warnings[0].start_char, warnings[0].end_char), (5, 9));
     assert_eq!(
         warnings[1].reason,
         MalformedTemplateReason::Css(CssTemplateWarning::MissingDeclarationValue)
     );
-    assert_eq!((warnings[1].start_offset, warnings[1].end_offset), (9, 10));
+    assert_eq!((warnings[1].start_char, warnings[1].end_char), (9, 10));
 }
 
 #[test]
@@ -315,13 +315,17 @@ fn css_formatter_passes_through_comments_and_maps_warning_to_source_piece() {
         FormatterOutputPiece::Text(text) if text == "/* keep */ bad; }"
     ));
 
-    // The `bad` declaration warns once, attributed to the piece that authored it.
+    // The `bad` declaration warns once, narrowed to its exact bytes inside the authoring piece.
     let warnings =
         crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test(
             result.warnings,
             None,
         );
     assert_eq!(warnings.views().count(), 1);
+    let bad_offset = u32::try_from("/* keep */ ".len()).expect("the prefix length fits u32");
+    let bad_span = second_span
+        .narrow_inline(bad_offset, 3, 17)
+        .expect("the `bad` range lies inside the inline piece span");
     assert!(matches!(
         warnings
             .first()
@@ -331,6 +335,6 @@ fn css_formatter_passes_through_comments_and_maps_warning_to_source_piece() {
             | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
                 span,
                 ..
-            } if span == second_span
+            } if span == bad_span
     ));
 }

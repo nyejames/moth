@@ -1,0 +1,58 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0002", "MOTH-RULE-0002", "MOTH-RULE-0002", "MOTH-RULE-0002"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0002"
+occurrence = 1
+path = "input/body/@mod.moth"
+line = 4
+column = 5
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/body/@mod.moth"
+line = 1
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0002"
+occurrence = 2
+path = "input/capture/@mod.moth"
+line = 4
+column = 25
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/capture/@mod.moth"
+line = 1
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0002"
+occurrence = 3
+path = "input/parameter/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/parameter/@mod.moth"
+line = 1
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0002"
+occurrence = 4
+path = "input/repeated/@mod.moth"
+line = 5
+column = 5
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/repeated/@mod.moth"
+line = 1
+column = 8

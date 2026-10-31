@@ -105,8 +105,6 @@ pub(crate) fn render_unexpected_trailing_comma(
     }
 }
 
-/// WHAT: renders an invalid character from its compact fact.
-/// WHY: the character is the whole message.
 pub(crate) fn render_invalid_character(
     _diagnostic: &DiagnosticView<'_>,
     view: &InvalidCharacterView,
@@ -154,7 +152,7 @@ pub(crate) fn render_type_mismatch(
     );
     RenderedPayload {
         message: type_mismatch_message(facts.context, &expected, &found),
-        guidance: type_mismatch_guidance(&expected, &found),
+        guidance: type_mismatch_guidance(facts.context, &expected, &found),
     }
 }
 
@@ -171,8 +169,16 @@ fn type_mismatch_message(
     )
 }
 
-fn type_mismatch_guidance(expected: &str, found: &str) -> Vec<String> {
-    vec![format!("Expected: {expected}"), format!("Found: {found}")]
+fn type_mismatch_guidance(
+    mismatch_context: TypeMismatchContext,
+    expected: &str,
+    found: &str,
+) -> Vec<String> {
+    let mut guidance = vec![format!("Expected: {expected}"), format!("Found: {found}")];
+    if mismatch_context.is_catch_recovery() {
+        guidance.push("Each `then` value must match the corresponding success slot.".to_owned());
+    }
+    guidance
 }
 
 /// WHAT: guarantees every terse record carries a non-empty message.
@@ -193,8 +199,6 @@ fn unknown_trait_message(name: StringId, string_table: &dyn StringTableResolver)
     format!("Unknown trait '{}'.", string_table.resolve(name))
 }
 
-/// WHAT: renders an unknown trait from its compact name fact.
-/// WHY: the name is the only variable part of this message.
 pub(crate) fn render_unknown_trait(
     _diagnostic: &DiagnosticView<'_>,
     facts: &UnknownTraitView,
@@ -887,14 +891,21 @@ fn missing_package_symbol_message(
     )
 }
 
-/// Renders a missing package symbol from its compact string facts.
+/// Renders a missing package symbol from its compact string facts and direct-export candidates.
 pub(crate) fn render_missing_package_symbol(
-    _diagnostic: &DiagnosticView<'_>,
+    diagnostic: &DiagnosticView<'_>,
     view: &MissingPackageSymbolView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
+    let mut message = missing_package_symbol_message(view.symbol, view.package_path, context);
+    let symbol = context.string_table.resolve(view.symbol);
+    if let Some(suggested) =
+        closest_name_suggestion(symbol, diagnostic.string_ids(), context.string_table)
+    {
+        message.push_str(&format!(" Did you mean '{suggested}'?"));
+    }
     RenderedPayload {
-        message: missing_package_symbol_message(view.symbol, view.package_path, context),
+        message,
         guidance: Vec::new(),
     }
 }

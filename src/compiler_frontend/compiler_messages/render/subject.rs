@@ -45,6 +45,18 @@ impl<'a> DiagnosticSubject<'a> {
         context.site_position(self.view.primary_site())
     }
 
+    /// The message attached to the primary span, rendered for a caret line.
+    pub(crate) fn primary_label_text(
+        &self,
+        context: DiagnosticRenderContext<'_>,
+    ) -> Option<String> {
+        compact_label_message_text(
+            self.view.primary_label_message()?,
+            self.view.types(),
+            context,
+        )
+    }
+
     /// The secondary labels that have a resolvable span or a message, in declaration order.
     pub(crate) fn resolved_labels(
         &self,

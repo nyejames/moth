@@ -12,6 +12,7 @@ use super::discovery_provider_imports::{
     unsupported_external_extension_error,
 };
 use super::*;
+use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -38,6 +39,7 @@ pub(crate) fn resolve_structural_provider_reference(
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
     path_fork: &mut PathInternerFork,
+    provider_sources: &mut dyn ProviderSourceRegistrar,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     string_table: &mut StringTable,
@@ -55,6 +57,7 @@ pub(crate) fn resolve_structural_provider_reference(
             directory_dependency_resolution: Some(directory_dependency_resolution),
             string_table,
         },
+        provider_sources,
         external_imports,
     )? {
         DependencyPolicyAction::QueueLocal => Ok(StructuralProviderAction::ResolveSource),
@@ -105,11 +108,12 @@ impl<'a, 'b> DependencyPolicy<'a, 'b> {
     fn handle_dependency(
         &mut self,
         input: ProviderCapableDependencyInput<'_>,
+        provider_sources: &mut dyn ProviderSourceRegistrar,
     ) -> Result<DependencyPolicyAction, SourceDiscoveryError> {
         match self {
-            DependencyPolicy::Capable {
-                external_imports: state,
-            } => handle_provider_capable_dependency(input, state),
+            DependencyPolicy::Capable { external_imports } => {
+                handle_provider_capable_dependency(input, provider_sources, external_imports)
+            }
         }
     }
 }
@@ -228,6 +232,7 @@ fn traverse_reachable_source_files(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     policy: &mut DependencyPolicy<'_, '_>,
+    provider_sources: &mut ProviderOwnedSourceStaging,
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
@@ -278,6 +283,7 @@ fn traverse_reachable_source_files(
         namespace_set,
         &context,
         policy,
+        provider_sources,
         &mut file_reference_resolver,
         path_fork,
         string_table,
@@ -304,6 +310,7 @@ fn traverse_reachable_source_files(
         project_path_resolver,
         string_table,
         path_fork,
+        provider_sources,
         failure,
         &mut resolved_file_references,
         &mut source_package_dependencies,
@@ -316,11 +323,16 @@ fn traverse_reachable_source_files(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the walk keeps its shared context separate from each independently borrowed mutable owner: inventory, dependency policy, provider-source staging, reference resolver and path/string tables"
+)]
 fn walk_reachable_sources(
     inventory: &mut ReachableSourceInventory,
     namespace_set: &ModuleNamespaceSet,
     context: &DiscoveryWalkContext<'_>,
     policy: &mut DependencyPolicy<'_, '_>,
+    provider_sources: &mut ProviderOwnedSourceStaging,
     file_reference_resolver: &mut SingleFileReferenceResolver<'_>,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
@@ -435,18 +447,21 @@ fn walk_reachable_sources(
             // paths during discovery.
             let provider = &clause.dependency;
             let dependency_path = provider.path;
-            let action = policy.handle_dependency(ProviderCapableDependencyInput {
-                dependency_path,
-                dependency_span: Some(provider.span),
-                clause_kind: clause.binding.clause_kind(),
-                target: &provider.target,
-                provider_target: provider.provider_target.as_ref(),
-                canonical_file: &canonical_file,
-                project_path_resolver,
-                path_fork: &mut *path_fork,
-                directory_dependency_resolution: None,
-                string_table,
-            })?;
+            let action = policy.handle_dependency(
+                ProviderCapableDependencyInput {
+                    dependency_path,
+                    dependency_span: Some(provider.span),
+                    clause_kind: clause.binding.clause_kind(),
+                    target: &provider.target,
+                    provider_target: provider.provider_target.as_ref(),
+                    canonical_file: &canonical_file,
+                    project_path_resolver,
+                    path_fork: &mut *path_fork,
+                    directory_dependency_resolution: None,
+                    string_table,
+                },
+                provider_sources,
+            )?;
 
             // Virtual binding packages also need local collision checks before their policy
             // skips filesystem discovery. Explicit-extension providers retain their own owner.
@@ -568,6 +583,7 @@ pub(crate) fn discover_reachable_source_files(
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
+    provider_sources: &mut ProviderOwnedSourceStaging,
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     path_fork: &mut PathInternerFork,
@@ -581,6 +597,7 @@ pub(crate) fn discover_reachable_source_files(
         project_path_resolver,
         style_directives,
         &mut policy,
+        provider_sources,
         source_file_kinds,
         resource_inputs,
         string_table,
@@ -734,6 +751,7 @@ fn resolve_module_root_bare_dependency(
 }
 fn handle_provider_capable_dependency(
     input: ProviderCapableDependencyInput<'_>,
+    provider_sources: &mut dyn ProviderSourceRegistrar,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
 ) -> Result<DependencyPolicyAction, SourceDiscoveryError> {
     let ProviderCapableDependencyInput {
@@ -839,6 +857,7 @@ fn handle_provider_capable_dependency(
                 provider,
                 project_path_resolver,
                 path_fork,
+                provider_sources,
             };
             // The single-file traversal has no directory namespace; target resolution falls
             // through to the filesystem lane inside `resolve_provider_backed_import`.

@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, Scop
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data::InvalidValueReceiverView,
-    names_declarations::{ReservedNameCollisionView, ShadowedNameView},
+    names_declarations::{DuplicateDeclarationView, ReservedNameCollisionView},
     token_lexical::{ExpectedTokenView, UnexpectedTokenShape, UnexpectedTokenView},
     types_borrows_targets::TypeMismatchView,
 };
@@ -244,10 +244,10 @@ fn rejects_keyword_shadow_variable_declarations() {
 }
 
 #[test]
-fn shadowed_declaration_retains_exact_duplicate_name_span() {
+fn redeclaration_retains_exact_duplicate_name_span() {
     let source = "value = \"π\"\nvalue I32 = 2\n";
     let failure = parse_single_file_ast_diagnostic(source);
-    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
 
     let duplicate_start = source
         .rfind("value I32")
@@ -282,6 +282,166 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
     ));
 }
 
+#[test]
+fn body_local_redeclaration_shapes_use_duplicate_declaration() {
+    // Every unambiguous body-local declaration shape after a visible name is a redeclaration,
+    // even when the annotation is not a builtin type token.
+    for (source, name) in [
+        (
+            "holder || -> I32:\n    duplicated = 1\n    duplicated I32 = 2\n    return duplicated\n;\n",
+            "duplicated",
+        ),
+        (
+            "holder || -> I32:\n    duplicated ~= 0\n    duplicated ~= 1\n    return duplicated\n;\n",
+            "duplicated",
+        ),
+        (
+            "Record = |\n    field I32,\n|\n\nholder || -> I32:\n    duplicated = Record(field = 1)\n    duplicated Record = Record(field = 2)\n    return 1\n;\n",
+            "duplicated",
+        ),
+        (
+            "AccountId as I32\n\nholder || -> I32:\n    duplicated = 1\n    duplicated AccountId = 2\n    return duplicated\n;\n",
+            "duplicated",
+        ),
+        (
+            "Box type T = |\n    value T,\n|\n\nholder || -> I32:\n    duplicated = Box(value = 1)\n    duplicated Box of I32 = Box(value = 2)\n    return 1\n;\n",
+            "duplicated",
+        ),
+        (
+            "@core/io\n\nholder || -> I32:\n    duplicated = 1\n    duplicated io.input.Input = 2\n    return duplicated\n;\n",
+            "duplicated",
+        ),
+        (
+            "holder || -> I32:\n    duplicated = {1, 2}\n    duplicated {I32} = {3}\n    return 1\n;\n",
+            "duplicated",
+        ),
+        (
+            "holder || -> I32:\n    duplicated = 1\n    duplicated #= 2\n    return duplicated\n;\n",
+            "duplicated",
+        ),
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
+        assert!(
+            diagnostic
+                .family_view::<DuplicateDeclarationView>()
+                .is_some(),
+            "the diagnostic is a duplicate declaration: {source}",
+        );
+
+        let mut builder = ExtendedSpanBuilder::new();
+        // The earlier binding is the first authored occurrence and the redeclaration is the
+        // second; a later use of the same name must not be mistaken for either.
+        let mut occurrences = source.match_indices(name).map(|(start, _)| start as u32);
+        let previous_start = occurrences.next().expect("the earlier name must occur");
+        let duplicate_start = occurrences
+            .next()
+            .expect("the redeclaration name must occur");
+        let duplicate_span = LocalSpan::exact(duplicate_start, name.len() as u32, &mut builder)
+            .expect("the duplicate name span must fit");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, duplicate_span)),
+            "{source}",
+        );
+
+        let previous_span = LocalSpan::exact(previous_start, name.len() as u32, &mut builder)
+            .expect("the earlier name span must fit");
+        assert_eq!(
+            ast_error_label_spans(diagnostic),
+            vec![Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                previous_span
+            ))],
+            "{source}",
+        );
+    }
+}
+
+#[test]
+fn malformed_marker_spacing_on_an_existing_binding_keeps_the_marker_error() {
+    // A binding marker after a visible name proves a declaration attempt, so its own spacing
+    // diagnostic wins over expression parsing and matches the new-name behaviour.
+    for (source, reason) in [
+        (
+            "holder || -> I32:\n    count ~= 0\n    count ~ = 1\n    return count\n;\n",
+            "common_syntax_mistake.invalid_mutable_binding_spacing",
+        ),
+        (
+            "holder || -> I32:\n    count ~= 0\n    count ~ I32 = 1\n    return count\n;\n",
+            "common_syntax_mistake.invalid_mutable_binding_spacing",
+        ),
+        (
+            "holder || -> I32:\n    count = 1\n    count # I32 = 2\n    return count\n;\n",
+            "common_syntax_mistake.invalid_compile_time_binding_spacing",
+        ),
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0031", Some(reason));
+    }
+}
+
+#[test]
+fn body_redeclaration_of_a_visible_source_declaration_labels_it() {
+    // A shared source declaration keeps its authored binding span, so the earlier top-level
+    // binding is the secondary label instead of an unlabelled duplicate.
+    for (source, name) in [
+        (
+            "value #= 1\n\nholder || -> I32:\n    value I32 = 2\n    return value\n;\n",
+            "value",
+        ),
+        (
+            "helper || -> I32:\n    return 1\n;\n\nholder || -> I32:\n    helper ~= 2\n    return 1\n;\n",
+            "helper",
+        ),
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
+        let mut builder = ExtendedSpanBuilder::new();
+        let mut occurrences = source.match_indices(name).map(|(start, _)| start as u32);
+        let previous_start = occurrences.next().expect("the top-level name must occur");
+        let duplicate_start = occurrences
+            .next()
+            .expect("the body redeclaration must occur");
+        let duplicate_span = LocalSpan::exact(duplicate_start, name.len() as u32, &mut builder)
+            .expect("the duplicate name span must fit");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, duplicate_span)),
+            "{source}",
+        );
+        let previous_span = LocalSpan::exact(previous_start, name.len() as u32, &mut builder)
+            .expect("the top-level name span must fit");
+        assert_eq!(
+            ast_error_label_spans(diagnostic),
+            vec![Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                previous_span
+            ))],
+            "{source}: the shared declaration is the previous declaration",
+        );
+    }
+}
+
+#[test]
+fn prefixed_write_updates_an_existing_mutable_binding() {
+    parse_single_file_ast(
+        "holder || -> I32:\n    count ~= 0\n    ~count = 1\n    return count\n;\n",
+    );
+}
+
+#[test]
+fn plain_write_to_an_existing_mutable_binding_requires_the_prefix() {
+    let failure = parse_single_file_ast_diagnostic(
+        "holder || -> I32:\n    count ~= 0\n    count = 1\n    return count\n;\n",
+    );
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.missing_write_prefix"),
+    );
+}
+
 fn body_prelude_registry() -> ExternalPackageRegistry {
     let mut registry = ExternalPackageRegistry::new();
     registry
@@ -295,28 +455,34 @@ fn body_prelude_registry() -> ExternalPackageRegistry {
 
 #[test]
 fn body_local_prelude_collisions_retain_authored_name_span() {
-    for (source, name) in [
-        ("io = 1\n", "io"),
-        ("io I32 = 1\n", "io"),
-        ("prelude_print = 1\n", "prelude_print"),
-        ("prelude_print I32 = 1\n", "prelude_print"),
-        ("if true:\n    io = 1\n;\n", "io"),
+    // Prelude symbols are compiler-owned aliases without an authored binding location; an
+    // explicit dependency alias keeps the authored alias span for the secondary label.
+    for (source, name, previous_label) in [
+        ("io = 1\n", "io", false),
+        ("io I32 = 1\n", "io", false),
+        ("prelude_print = 1\n", "prelude_print", false),
+        ("prelude_print I32 = 1\n", "prelude_print", false),
+        ("if true:\n    io = 1\n;\n", "io", false),
         (
             "pair || -> I32, I32:\n    return 1, 2\n;\nvalue, io = pair()\n",
             "io",
+            false,
         ),
         (
             "pair || -> I32, I32:\n    return 1, 2\n;\nvalue I32, io I32 = pair()\n",
             "io",
+            false,
         ),
         (
             "@core/io line as host_line\nhost_line I32 = 1\n",
             "host_line",
+            true,
         ),
-        ("@core/io as output\noutput = 1\n", "output"),
+        ("@core/io as output\noutput = 1\n", "output", false),
         (
             "@core/io line as host_line\npair || -> I32, I32:\n    return 1, 2\n;\nvalue, host_line I32 = pair()\n",
             "host_line",
+            true,
         ),
     ] {
         let failure =
@@ -325,12 +491,12 @@ fn body_local_prelude_collisions_retain_authored_name_span() {
                 .expect("a body binding must not replace a visible prelude binding");
         let failure = freeze_ast_diagnostic_failure(failure);
         let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
-            panic!("the shadowed declaration should produce a diagnosed result");
+            panic!("the duplicate declaration should produce a diagnosed result");
         };
-        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
         let facts = diagnostic
-            .family_view::<ShadowedNameView>()
-            .expect("the diagnostic is a shadowed name");
+            .family_view::<DuplicateDeclarationView>()
+            .expect("the diagnostic is a duplicate declaration");
         let (report, _) = reports
             .iter_severity(DiagnosticSeverity::Error)
             .next()
@@ -353,14 +519,33 @@ fn body_local_prelude_collisions_retain_authored_name_span() {
             Some(SourceSpan::new(SourceId::COMPILATION_ROOT, expected_span)),
             "{source}",
         );
-        assert!(
-            ast_error_label_spans(diagnostic).is_empty(),
-            "{source}: prelude collisions have no secondary declaration label",
-        );
+        let labels = ast_error_label_spans(diagnostic);
+        if previous_label {
+            let alias_start = source
+                .find(name)
+                .expect("the dependency alias name must be present")
+                as u32;
+            let alias_span =
+                LocalSpan::exact(alias_start, name.len() as u32, &mut expected_builder)
+                    .expect("the dependency alias span must fit the inline representation");
+            assert_eq!(
+                labels,
+                vec![Some(SourceSpan::new(
+                    SourceId::COMPILATION_ROOT,
+                    alias_span
+                ))],
+                "{source}: the authored dependency alias is the earlier binding",
+            );
+        } else {
+            assert!(
+                labels.is_empty(),
+                "{source}: prelude collisions have no secondary declaration label",
+            );
+        }
         assert_eq!(
             reports.iter().count(),
             1,
-            "{source}: expected one shadowing diagnostic for {name}",
+            "{source}: expected one duplicate diagnostic for {name}",
         );
     }
 }
@@ -411,6 +596,45 @@ fn malformed_multi_bind_keeps_missing_target_priority_over_name_collision() {
     assert_eq!(
         ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+    );
+}
+
+#[test]
+fn multi_bind_reports_double_equals_as_equality_mistake() {
+    let source = "a ~= 1\nb ~= 2\n~a, ~b == {3, 4}\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0031",
+        Some("common_syntax_mistake.equality_operator"),
+    );
+    let operator_start = source.rfind("==").expect("equality should be present") as u32;
+    let operator_span = LocalSpan::exact(operator_start, 2, &mut ExtendedSpanBuilder::new())
+        .expect("the operator span should fit inline");
+
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operator_span))
+    );
+}
+
+#[test]
+fn multi_bind_reports_reserved_keyword_target_name() {
+    let source = "pair || -> I32, I32:\n    return 1, 2\n;\nbx, by = pair()\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the multi-bind target must report a reserved name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+
+    let keyword_start = source.rfind("by").expect("the reserved target must occur") as u32;
+    let mut builder = ExtendedSpanBuilder::new();
+    let keyword_span = LocalSpan::exact(keyword_start, "by".len() as u32, &mut builder)
+        .expect("the keyword span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, keyword_span)),
     );
 }
 
@@ -872,4 +1096,43 @@ fn assignments_reject_zero_and_multiple_success_slots() {
         assert_eq!(facts.target_count, 1, "{source}");
         assert_eq!(facts.produced_count, produced_count, "{source}");
     }
+}
+
+#[test]
+fn rejects_double_equals_statement_as_equality_mistake() {
+    let failure = parse_single_file_ast_diagnostic("x = 1\nx == 1\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0031",
+        Some("common_syntax_mistake.equality_operator"),
+    );
+}
+
+#[test]
+fn typed_declaration_reports_equality_written_after_its_separator() {
+    let source = "x I32 == 1\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0031",
+        Some("common_syntax_mistake.equality_operator"),
+    );
+    let operator_start = source.find("==").expect("operator should be present") as u32;
+    let operator_span = LocalSpan::exact(operator_start, 2, &mut ExtendedSpanBuilder::new())
+        .expect("the operator span should fit inline");
+
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operator_span))
+    );
+}
+
+#[test]
+fn rejects_discarded_comparison_statement_with_comparison_reason() {
+    let failure = parse_single_file_ast_diagnostic("x = 1\nx is 1\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0025",
+        Some("invalid_standalone_statement.comparison"),
+    );
 }

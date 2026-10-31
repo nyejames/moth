@@ -38,7 +38,8 @@ impl HtmlEntryPathPlan {
     /// Return whether an artifact-producing module is the directory-build homepage.
     ///
     /// WHAT: identifies the active module whose root directory is exactly `entry_root`.
-    /// WHY: normal-root filenames are cosmetic and API-only roots must not claim the homepage.
+    /// WHY: directory routing keys on the module directory, not a cosmetic root filename.
+    ///      API-only support and facade roots produce no entry, so they never reach this check.
     pub(crate) fn is_homepage_entry(&self, entry_point: &Path) -> bool {
         self.is_directory_build && entry_point.parent() == self.resolved_entry_root.as_deref()
     }

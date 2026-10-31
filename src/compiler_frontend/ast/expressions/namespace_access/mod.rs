@@ -11,6 +11,7 @@
 mod leaf_resolution;
 mod traversal;
 
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
@@ -26,7 +27,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
+    InvalidFieldAccessReason, NamespaceMemberRole, NamespaceTypeValueMisuseKind,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
@@ -87,6 +88,7 @@ pub(super) fn parse_namespace_access(
     let mut dot_span = Some(token_stream.current_span());
     token_stream.advance(); // move from '.' to first member name
 
+    let first_member_position = token_stream.position();
     let mut current_record = root_record;
 
     loop {
@@ -108,7 +110,7 @@ pub(super) fn parse_namespace_access(
         let member_name = token_stream
             .current_string_id_in(string_table)?
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,
                     "namespace member symbol had no string payload",
                 )
@@ -203,10 +205,51 @@ pub(super) fn parse_namespace_access(
             }
 
             NamespaceMemberLookup::Missing => {
-                return Err(
-                    names_declarations::unknown_value_name(member_name, member_span).into(),
-                );
+                let member_role = if has_following_dot {
+                    NamespaceMemberRole::ChildNamespace
+                } else {
+                    NamespaceMemberRole::Value
+                };
+
+                // The success path allocates nothing for child segments. Rebuild them from the
+                // walked token range only when the diagnostic needs the dotted path.
+                let mut child_segments = Vec::new();
+                for index in first_member_position..token_stream.position() {
+                    let is_symbol = token_stream
+                        .token_ref_at(index)
+                        .is_some_and(|token| token.tag() == TokenTag::SYMBOL);
+                    if !is_symbol {
+                        continue;
+                    }
+                    let segment = token_stream
+                        .token_string_id_at_in(index, string_table)?
+                        .ok_or_else(|| {
+                            InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
+                                "namespace member symbol had no string payload",
+                            )
+                        })?;
+                    child_segments.push(segment);
+                }
+
+                return Err(names_declarations::unknown_namespace_member(
+                    names_declarations::intern_dotted_namespace_path(
+                        root_name,
+                        &child_segments,
+                        string_table,
+                    ),
+                    member_name,
+                    current_record.kind(),
+                    member_role,
+                    current_record.member_names_for_role(member_role),
+                    member_span,
+                )
+                .into());
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/namespace_access_tests.rs"]
+mod namespace_access_tests;

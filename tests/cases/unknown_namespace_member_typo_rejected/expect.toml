@@ -1,0 +1,9 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0089"]
+message_contains = [
+    "Unknown member 'pi' on namespace 'math'. Did you mean 'PI'?",
+]

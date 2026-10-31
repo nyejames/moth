@@ -1,0 +1,5 @@
+@core/math pi
+
+foo || -> I32:
+    return 1
+;

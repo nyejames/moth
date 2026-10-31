@@ -125,6 +125,16 @@ fn assert_compile_time_error(
     expected_operation: Option<&str>,
     string_table: &StringTable,
 ) {
+    let facts = compile_time_error_facts(error);
+    assert_eq!(facts.reason, expected_reason);
+    let operation_text = facts
+        .operation
+        .map(|operation| string_table.resolve(operation));
+    assert_eq!(operation_text, expected_operation);
+}
+
+/// Decodes one compile-time evaluation failure into its typed facts.
+fn compile_time_error_facts(error: ConstantFoldError) -> CompileTimeEvaluationErrorView {
     let diagnostic = match error {
         ConstantFoldError::Diagnostic(diagnostic)
         | ConstantFoldError::NumericFailure(diagnostic) => diagnostic,
@@ -134,14 +144,9 @@ fn assert_compile_time_error(
     };
     let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
     let diagnostic = compact.first().expect("the diagnostic is retained");
-    let facts = diagnostic
+    diagnostic
         .family_view::<CompileTimeEvaluationErrorView>()
-        .expect("the diagnostic is a compile-time evaluation failure");
-    assert_eq!(facts.reason, expected_reason);
-    let operation_text = facts
-        .operation
-        .map(|operation| string_table.resolve(operation));
-    assert_eq!(operation_text, expected_operation);
+        .expect("the diagnostic is a compile-time evaluation failure")
 }
 
 fn assert_invalid_cast_error(error: ConstantFoldError, expected_reason: InvalidCastReason) {
@@ -1173,6 +1178,55 @@ fn evaluate_operator_rejects_integer_exponent_overflow() {
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("^"),
         &f.strings,
+    );
+}
+
+#[test]
+fn evaluate_operator_names_the_overflowing_numeric_type() {
+    let mut f = FoldFixture::new();
+    let lhs = f.fixed_integer(FixedScalar::I32, 2);
+    let rhs = f.fixed_integer(FixedScalar::I32, 31);
+    let error = f
+        .fold_binary(Operator::Exponent, None, lhs, rhs)
+        .expect_err("integer exponentiation overflow should fail");
+    let facts = compile_time_error_facts(error);
+
+    assert_eq!(
+        facts.reason,
+        CompileTimeEvaluationErrorReason::IntegerOverflow
+    );
+    assert_eq!(
+        facts.numeric_type,
+        Some(NumericScalar::Fixed(FixedScalar::I32))
+    );
+}
+
+#[test]
+fn evaluate_operator_reports_overflow_inside_dec_power_exponent() {
+    let mut f = FoldFixture::new();
+    let dec_base = f.number("100", NumericLiteralSign::Positive, 0);
+    let exponent_base = f.fixed_integer(FixedScalar::I32, 2);
+    let exponent_operand = f.fixed_integer(FixedScalar::I32, 31);
+    // `2 ^ 31` overflows I32 before the Dec power can apply it as an exponent.
+    let exponent = f.binary(exponent_base, exponent_operand, Operator::Exponent, None);
+    let error = f
+        .fold_binary(Operator::Exponent, None, dec_base, exponent)
+        .expect_err("an I32 overflow inside a Dec exponent should fail");
+    let facts = compile_time_error_facts(error);
+
+    assert_eq!(
+        facts.reason,
+        CompileTimeEvaluationErrorReason::DecExponentIntegerOverflow
+    );
+    assert_eq!(
+        facts
+            .operation
+            .map(|operation| f.strings.resolve(operation)),
+        Some("^")
+    );
+    assert_eq!(
+        facts.numeric_type,
+        Some(NumericScalar::Fixed(FixedScalar::I32))
     );
 }
 

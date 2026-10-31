@@ -6,7 +6,7 @@
 use super::super::schema::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    OptStringFact, PathFact, StringFact, UnitFact, unit_code,
+    OptStringFact, OptUnitFact, PathFact, StringFact, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     LabelDraftMessage, LabelMessageCode,
@@ -28,8 +28,8 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_unsupported_external_extension, render_unsupported_source_file_kind,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, ImportPublicSurfaceType, InvalidExternalModuleReason,
-    InvalidImportPathReason,
+    DiagnosticSeverity, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
+    ImportPublicSurfaceType, InvalidExternalModuleReason, InvalidImportPathReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -57,7 +57,109 @@ unit_code! {
         ParserDiagnostic = 2,
         NonUtf8Source = 3,
         PathContainsPackageSeparator = 4,
+        MissingExportKeyword = 5,
+        OrphanedAnnotation = 6,
     }
+}
+
+unit_code! {
+    /// The annotation directive and declaration form of one external JS binding site.
+    ///
+    /// WHAT: one compact word for the facts the two annotation-binding reasons need.
+    /// WHY: `INVALID_EXTERNAL_MODULE` has four fact words, also holding the path, reason code and
+    ///      one-based JavaScript line. The directive and declaration pair packs into this word.
+    pub(crate) enum ExternalJsBindingShape {
+        SigFunction = 1,
+        SigConstant = 2,
+        ConstConstant = 3,
+        SigOrphaned = 4,
+        ConstOrphaned = 5,
+    }
+}
+
+impl ExternalJsBindingShape {
+    fn missing_export(
+        directive: ExternalJsAnnotationDirective,
+        declaration: ExternalJsDeclarationKind,
+    ) -> Option<Self> {
+        match (directive, declaration) {
+            (ExternalJsAnnotationDirective::Sig, ExternalJsDeclarationKind::Function) => {
+                Some(Self::SigFunction)
+            }
+            (ExternalJsAnnotationDirective::Sig, ExternalJsDeclarationKind::BlockArrow) => {
+                Some(Self::SigConstant)
+            }
+            (ExternalJsAnnotationDirective::Const, ExternalJsDeclarationKind::Constant) => {
+                Some(Self::ConstConstant)
+            }
+            _ => {
+                // Binding reports a directive that does not fit the declaration as a kind
+                // mismatch or unsupported form, so no missing-export reason carries this pair.
+                debug_assert!(
+                    false,
+                    "mismatched or unsupported external JS annotation/declaration pair"
+                );
+                None
+            }
+        }
+    }
+
+    fn orphaned(directive: ExternalJsAnnotationDirective) -> Self {
+        match directive {
+            ExternalJsAnnotationDirective::Sig => Self::SigOrphaned,
+            ExternalJsAnnotationDirective::Const => Self::ConstOrphaned,
+        }
+    }
+
+    fn missing_export_parts(
+        self,
+    ) -> Option<(ExternalJsAnnotationDirective, ExternalJsDeclarationKind)> {
+        match self {
+            Self::SigFunction => Some((
+                ExternalJsAnnotationDirective::Sig,
+                ExternalJsDeclarationKind::Function,
+            )),
+            Self::SigConstant => Some((
+                ExternalJsAnnotationDirective::Sig,
+                ExternalJsDeclarationKind::BlockArrow,
+            )),
+            Self::ConstConstant => Some((
+                ExternalJsAnnotationDirective::Const,
+                ExternalJsDeclarationKind::Constant,
+            )),
+            Self::SigOrphaned | Self::ConstOrphaned => None,
+        }
+    }
+
+    fn orphaned_directive(self) -> Option<ExternalJsAnnotationDirective> {
+        match self {
+            Self::SigOrphaned => Some(ExternalJsAnnotationDirective::Sig),
+            Self::ConstOrphaned => Some(ExternalJsAnnotationDirective::Const),
+            Self::SigFunction | Self::SigConstant | Self::ConstConstant => None,
+        }
+    }
+}
+
+/// The compact columns one invalid-external-module reason writes.
+///
+/// Strings stay in the family's schema-declared string-id list; every other value occupies one
+/// typed fact word.
+pub(crate) struct InvalidExternalModuleColumns {
+    pub code: InvalidExternalModuleCode,
+    pub binding: Option<ExternalJsBindingShape>,
+    pub strings: Vec<StringId>,
+}
+
+/// Exact source sites for one invalid external-module diagnostic.
+///
+/// WHAT: the primary authored range plus optional declaration and import-site labels.
+/// WHY: provider-owned JavaScript ranges are the primary site, while the importing Moth clause
+///      and the offending declaration stay related sites rather than prose.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct InvalidExternalModuleSites {
+    pub(crate) primary: Option<SourceSpan>,
+    pub(crate) declaration: Option<SourceSpan>,
+    pub(crate) import_site: Option<SourceSpan>,
 }
 
 impl InvalidExternalModuleCode {
@@ -69,41 +171,121 @@ impl InvalidExternalModuleCode {
             InvalidExternalModuleReason::PathContainsPackageSeparator => {
                 Self::PathContainsPackageSeparator
             }
+            InvalidExternalModuleReason::MissingExportKeyword { .. } => Self::MissingExportKeyword,
+            InvalidExternalModuleReason::OrphanedAnnotation { .. } => Self::OrphanedAnnotation,
         }
     }
 
-    pub(crate) fn split(reason: &InvalidExternalModuleReason) -> (Self, Option<StringId>) {
+    pub(crate) fn split(reason: &InvalidExternalModuleReason) -> InvalidExternalModuleColumns {
         match reason {
             InvalidExternalModuleReason::ReceiverMethod { moth_name } => {
-                (Self::ReceiverMethod, Some(*moth_name))
+                InvalidExternalModuleColumns {
+                    code: Self::ReceiverMethod,
+                    binding: None,
+                    strings: vec![*moth_name],
+                }
             }
             InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
-                (Self::ParserDiagnostic, Some(*parser_detail))
+                InvalidExternalModuleColumns {
+                    code: Self::ParserDiagnostic,
+                    binding: None,
+                    strings: vec![*parser_detail],
+                }
             }
             InvalidExternalModuleReason::NonUtf8Source { utf8_detail } => {
-                (Self::NonUtf8Source, Some(*utf8_detail))
+                InvalidExternalModuleColumns {
+                    code: Self::NonUtf8Source,
+                    binding: None,
+                    strings: vec![*utf8_detail],
+                }
             }
             InvalidExternalModuleReason::PathContainsPackageSeparator => {
-                (Self::PathContainsPackageSeparator, None)
+                InvalidExternalModuleColumns {
+                    code: Self::PathContainsPackageSeparator,
+                    binding: None,
+                    strings: Vec::new(),
+                }
             }
+            InvalidExternalModuleReason::MissingExportKeyword {
+                directive,
+                declaration,
+                moth_name,
+                js_name,
+            } => InvalidExternalModuleColumns {
+                code: Self::MissingExportKeyword,
+                binding: ExternalJsBindingShape::missing_export(*directive, *declaration),
+                strings: vec![*moth_name, *js_name],
+            },
+            InvalidExternalModuleReason::OrphanedAnnotation {
+                directive,
+                moth_name,
+            } => InvalidExternalModuleColumns {
+                code: Self::OrphanedAnnotation,
+                binding: Some(ExternalJsBindingShape::orphaned(*directive)),
+                strings: vec![*moth_name],
+            },
         }
     }
 
-    pub(crate) fn to_reason(self, detail: Option<StringId>) -> Option<InvalidExternalModuleReason> {
-        match (self, detail) {
-            (Self::ReceiverMethod, Some(moth_name)) => {
-                Some(InvalidExternalModuleReason::ReceiverMethod { moth_name })
+    pub(crate) fn to_reason(
+        self,
+        binding: Option<ExternalJsBindingShape>,
+        strings: &[StringId],
+    ) -> Option<InvalidExternalModuleReason> {
+        match self {
+            Self::ReceiverMethod => {
+                let [moth_name] = strings else {
+                    return None;
+                };
+                binding
+                    .is_none()
+                    .then_some(InvalidExternalModuleReason::ReceiverMethod {
+                        moth_name: *moth_name,
+                    })
             }
-            (Self::ParserDiagnostic, Some(parser_detail)) => {
-                Some(InvalidExternalModuleReason::ParserDiagnostic { parser_detail })
+            Self::ParserDiagnostic => {
+                let [parser_detail] = strings else {
+                    return None;
+                };
+                binding
+                    .is_none()
+                    .then_some(InvalidExternalModuleReason::ParserDiagnostic {
+                        parser_detail: *parser_detail,
+                    })
             }
-            (Self::NonUtf8Source, Some(utf8_detail)) => {
-                Some(InvalidExternalModuleReason::NonUtf8Source { utf8_detail })
+            Self::NonUtf8Source => {
+                let [utf8_detail] = strings else {
+                    return None;
+                };
+                binding
+                    .is_none()
+                    .then_some(InvalidExternalModuleReason::NonUtf8Source {
+                        utf8_detail: *utf8_detail,
+                    })
             }
-            (Self::PathContainsPackageSeparator, None) => {
-                Some(InvalidExternalModuleReason::PathContainsPackageSeparator)
+            Self::PathContainsPackageSeparator => (binding.is_none() && strings.is_empty())
+                .then_some(InvalidExternalModuleReason::PathContainsPackageSeparator),
+            Self::MissingExportKeyword => {
+                let [moth_name, js_name] = strings else {
+                    return None;
+                };
+                let (directive, declaration) = binding?.missing_export_parts()?;
+                Some(InvalidExternalModuleReason::MissingExportKeyword {
+                    directive,
+                    declaration,
+                    moth_name: *moth_name,
+                    js_name: *js_name,
+                })
             }
-            _ => None,
+            Self::OrphanedAnnotation => {
+                let [moth_name] = strings else {
+                    return None;
+                };
+                Some(InvalidExternalModuleReason::OrphanedAnnotation {
+                    directive: binding?.orphaned_directive()?,
+                    moth_name: *moth_name,
+                })
+            }
         }
     }
 }
@@ -353,11 +535,28 @@ diagnostic_family! {
         title: "Missing package symbol",
         facts: [symbol: StringFact, package_path: StringFact],
         labels: [],
-        extra: None,
-        ctor: generated missing_package_symbol,
+        extra: StringIds,
+        ctor: manual,
         view: MissingPackageSymbolView,
         render: render_missing_package_symbol,
     }
+}
+
+/// Stores a missing package-symbol draft with one-component direct-export candidates.
+pub(crate) fn missing_package_symbol(
+    symbol: StringId,
+    package_path: StringId,
+    mut candidates: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    candidates.sort_unstable_by_key(|id| id.index());
+    candidates.dedup();
+    DiagnosticDraft::with_facts(&MISSING_PACKAGE_SYMBOL, span, |cursor| {
+        cursor.push::<StringFact>(&symbol)?;
+        cursor.push::<StringFact>(&package_path)?;
+        Ok(())
+    })
+    .with_string_ids(candidates)
 }
 
 diagnostic_family! {
@@ -414,19 +613,40 @@ pub(crate) fn invalid_import_path(
     })
 }
 
-/// Stores an invalid external-module reason code and its optional string fact.
+/// Stores one typed invalid external-module reason and its source sites.
+///
+/// WHAT: the reason code and binding shape occupy typed fact words, while the primary authored
+///       range and its optional related sites travel as exact spans.
+/// WHY: annotation-binding failures must keep their structured facts instead of collapsing to a
+///      prose parser detail, and their JavaScript ranges must render in the provider-owned file.
 pub(crate) fn invalid_external_module(
     path: PathId,
     reason: InvalidExternalModuleReason,
-    span: Option<SourceSpan>,
+    sites: InvalidExternalModuleSites,
 ) -> DiagnosticDraft {
-    let (reason_code, detail) = InvalidExternalModuleCode::split(&reason);
-    DiagnosticDraft::with_facts(&INVALID_EXTERNAL_MODULE, span, |cursor| {
+    let columns = InvalidExternalModuleCode::split(&reason);
+    let draft = DiagnosticDraft::with_facts(&INVALID_EXTERNAL_MODULE, sites.primary, |cursor| {
         cursor.push::<PathFact>(&path)?;
-        cursor.push::<UnitFact<InvalidExternalModuleCode>>(&reason_code)?;
-        cursor.push::<OptStringFact>(&detail)?;
+        cursor.push::<UnitFact<InvalidExternalModuleCode>>(&columns.code)?;
+        cursor.push::<OptUnitFact<ExternalJsBindingShape>>(&columns.binding)?;
         Ok(())
     })
+    .with_string_ids(columns.strings);
+
+    let draft = match sites.declaration {
+        Some(declaration) => draft.with_label(
+            Some(declaration),
+            Some(LabelDraftMessage::MissingExportDeclaration),
+        ),
+        None => draft,
+    };
+    match sites.import_site {
+        Some(import_site) => draft.with_label(
+            Some(import_site),
+            Some(LabelDraftMessage::ExternalImportSite),
+        ),
+        None => draft,
+    }
 }
 
 diagnostic_family! {
@@ -518,10 +738,13 @@ diagnostic_family! {
         facts: [
             path: PathFact,
             reason_code: UnitFact<InvalidExternalModuleCode>,
-            reason_detail: OptStringFact,
+            binding: OptUnitFact<ExternalJsBindingShape>,
         ],
-        labels: [],
-        extra: None,
+        labels: [
+            LabelMessageCode::MISSING_EXPORT_DECLARATION,
+            LabelMessageCode::EXTERNAL_IMPORT_SITE,
+        ],
+        extra: StringIds,
         ctor: manual,
         reason_key: reason_code,
         view: InvalidExternalModuleView,

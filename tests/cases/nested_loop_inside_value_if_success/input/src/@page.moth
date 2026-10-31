@@ -1,0 +1,14 @@
+-- A loop block inside a value-producing if owns its own closing ';'.
+pick |flag Bool, items {I32}| -> I32:
+    total = if flag:
+        loop items |item|:
+            io.line([:nested-item=[item]])
+        ;
+        then 1
+    else
+        then 0
+    ;
+    return total
+;
+
+io.line([:nested-value-if-total=[pick(true, {2, 3})]])

@@ -3,25 +3,43 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0038", "MOTH-RULE-0038", "MOTH-RULE-0038"]
+diagnostic_codes = ["MOTH-RULE-0002", "MOTH-RULE-0002", "MOTH-RULE-0002"]
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0038"
+code = "MOTH-RULE-0002"
 occurrence = 1
 path = "input/import_alias/@mod.moth"
 line = 3
 column = 20
 
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/import_alias/@mod.moth"
+line = 1
+column = 21
+
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0038"
+code = "MOTH-RULE-0002"
 occurrence = 2
 path = "input/source_alias/@mod.moth"
 line = 1
 column = 20
 
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/source_alias/@mod.moth"
+line = 5
+column = 1
+
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0038"
+code = "MOTH-RULE-0002"
 occurrence = 3
 path = "input/source_trait/@mod.moth"
 line = 1
 column = 20
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/source_trait/@mod.moth"
+line = 5
+column = 1

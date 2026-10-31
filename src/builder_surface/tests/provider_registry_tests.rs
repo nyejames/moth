@@ -222,6 +222,7 @@ fn dummy_provider_resolves_import_with_all_fields() {
         cache: &mut cache,
         path_fork: &mut path_fork,
         string_table: &mut string_table,
+        provider_sources: None,
     };
 
     let request = ExternalImportRequest {

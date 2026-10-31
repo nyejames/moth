@@ -1,7 +1,10 @@
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
-    families::token_lexical::UnexpectedEndOfFileView, test_support::compact_bag_for_test,
+    families::templates::{InvalidTemplateStructureCode, InvalidTemplateStructureView},
+    families::token_lexical::UnexpectedEndOfFileView,
+    labels::DurableLabelMessage,
+    test_support::compact_bag_for_test,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -10,16 +13,18 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenCursor, TokenIndex, TokenRange, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{
-    InitializerReference, OpenConstruct, TokenFactView, TokenScanFailure,
+    InitializerReference, OpenConstruct, TokenFactView, TokenScanFailure, UnclosedDelimiter,
     collect_declaration_initializer_range, collect_scanned_symbol_references,
     consume_balanced_template_region_from_source, has_top_level_comma_before_statement_end,
-    innermost_open_construct,
+    innermost_open_construct, innermost_unclosed_delimiter, innermost_unclosed_template_opening,
 };
 use std::sync::Arc;
 
 enum FixturePart {
     Static(TokenTag),
+    SpannedStatic(TokenTag, LocalSpan),
     Symbol(crate::compiler_frontend::symbols::string_interning::StringId),
+    StyleDirective(crate::compiler_frontend::symbols::string_interning::StringId),
     Numeric(NumericLiteralToken),
     StringSlice(crate::compiler_frontend::symbols::string_interning::StringId),
 }
@@ -31,9 +36,15 @@ fn source_tokens_from_parts(source: SourceId, parts: Vec<FixturePart>) -> Arc<So
             FixturePart::Static(tag) => builder
                 .push_static(tag, LocalSpan::source_start())
                 .expect("static fixture token should build"),
+            FixturePart::SpannedStatic(tag, span) => builder
+                .push_static(tag, span)
+                .expect("spanned fixture token should build"),
             FixturePart::Symbol(value) => builder
                 .push_symbol(TokenTag::SYMBOL, value, LocalSpan::source_start())
                 .expect("symbol fixture token should build"),
+            FixturePart::StyleDirective(value) => builder
+                .push_symbol(TokenTag::STYLE_DIRECTIVE, value, LocalSpan::source_start())
+                .expect("style directive fixture token should build"),
             FixturePart::Numeric(literal) => builder
                 .push_numeric(literal, LocalSpan::source_start())
                 .expect("numeric fixture token should build"),
@@ -137,6 +148,176 @@ fn canonical_range_view_rejects_out_of_owner_range() {
         TokenFactView::from_source_range(&owner, out_of_owner),
         Err(crate::compiler_frontend::tokenizer::tokens::TokenRangeError::OutOfBounds { .. })
     ));
+}
+
+fn fixture_span(start: u32, length: u32) -> LocalSpan {
+    LocalSpan::exact(start, length, &mut ExtendedSpanBuilder::new())
+        .expect("small fixture span should fit")
+}
+
+fn unclosed_delimiter_for(
+    parts: Vec<FixturePart>,
+    string_table: &StringTable,
+) -> Option<UnclosedDelimiter> {
+    let owner = source_tokens_from_parts(SourceId::COMPILATION_ROOT, parts);
+    let eof = TokenIndex::try_from_index(owner.len() - 1).expect("EOF index should fit");
+    innermost_unclosed_delimiter(&owner, TokenIndex::from_raw(0), eof, string_table)
+}
+
+#[test]
+fn eof_scan_names_the_innermost_unclosed_template() {
+    let inner = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(5, 1));
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(5, 1)),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &StringTable::new(),
+        ),
+        Some(UnclosedDelimiter::Template(inner)),
+    );
+}
+
+#[test]
+fn eof_scan_ignores_a_stray_close_before_an_unclosed_template() {
+    let opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(5, 1));
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_CLOSE, fixture_span(0, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(5, 1)),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &StringTable::new(),
+        ),
+        Some(UnclosedDelimiter::Template(opening)),
+    );
+}
+
+#[test]
+fn eof_scan_reports_no_delimiter_when_the_region_is_balanced() {
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_CLOSE, fixture_span(5, 1)),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &StringTable::new(),
+        ),
+        None,
+    );
+}
+
+#[test]
+fn eof_scan_skips_balanced_nested_pairs() {
+    let outer_opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(0, 1));
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(10, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_CLOSE, fixture_span(11, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(20, 1)),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_CLOSE, fixture_span(21, 1)),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &StringTable::new(),
+        ),
+        Some(UnclosedDelimiter::Template(outer_opening)),
+    );
+}
+
+/// A literal `[` inside `$doc` must not become the label. The scan recognises the authored
+/// `[$doc` head, so its unclosed template is the documentation template itself.
+#[test]
+fn eof_scan_labels_the_doc_opening_not_a_literal_bracket_in_its_body() {
+    let mut string_table = StringTable::new();
+    let doc_directive = string_table.intern("doc");
+    let doc_opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(0, 1));
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+                FixturePart::StyleDirective(doc_directive),
+                FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
+                FixturePart::StringSlice(string_table.intern("a ")),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(20, 1)),
+                FixturePart::StringSlice(string_table.intern(" b")),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &string_table,
+        ),
+        Some(UnclosedDelimiter::Template(doc_opening)),
+    );
+}
+
+/// A documentation template nested in an ordinary template is still the innermost authored
+/// opening, and its literal body brackets do not replace it.
+#[test]
+fn eof_scan_labels_a_nested_doc_opening_inside_an_outer_template() {
+    let mut string_table = StringTable::new();
+    let doc_directive = string_table.intern("doc");
+    let doc_opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(20, 1));
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+                FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(20, 1)),
+                FixturePart::StyleDirective(doc_directive),
+                FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(30, 1)),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &string_table,
+        ),
+        Some(UnclosedDelimiter::Template(doc_opening)),
+    );
+}
+
+#[test]
+fn eof_scan_returns_the_innermost_unmatched_parenthesis() {
+    let parenthesis = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(5, 1));
+    assert_eq!(
+        unclosed_delimiter_for(
+            vec![
+                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+                FixturePart::SpannedStatic(TokenTag::OPEN_PARENTHESIS, fixture_span(5, 1)),
+                FixturePart::Static(TokenTag::EOF),
+            ],
+            &StringTable::new(),
+        ),
+        Some(UnclosedDelimiter::Parenthesis(parenthesis)),
+    );
+}
+
+#[test]
+fn template_only_scan_labels_the_template_holding_an_open_parenthesis() {
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+            FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(9, 1)),
+            FixturePart::SpannedStatic(TokenTag::OPEN_PARENTHESIS, fixture_span(19, 1)),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+    let eof = TokenIndex::try_from_index(owner.len() - 1).expect("EOF index should fit");
+    assert_eq!(
+        innermost_unclosed_template_opening(
+            &owner,
+            TokenIndex::from_raw(0),
+            eof,
+            &StringTable::new()
+        ),
+        Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            fixture_span(9, 1)
+        )),
+    );
 }
 
 #[test]
@@ -308,6 +489,61 @@ fn declaration_initializer_range_balances_nested_blocks_inside_catch() {
 }
 
 #[test]
+fn declaration_initializer_range_pairs_nested_loop_block_inside_value_if() {
+    let mut string_table = StringTable::new();
+    let flag_name = string_table.intern("flag");
+    let items_name = string_table.intern("items");
+    let item_name = string_table.intern("item");
+    let io_name = string_table.intern("io");
+    let next_statement_name = string_table.intern("next_statement");
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(flag_name),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::LOOP),
+            FixturePart::Symbol(items_name),
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Symbol(item_name),
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(io_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::THEN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::ELSE),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::THEN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("0", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement_name),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let (range, _) = scan_initializer(&owner, &mut string_table)
+        .expect("value-if initializer with a loop block should scan successfully");
+    let tags = tags_in_range(&owner, range);
+    assert!(tags.contains(&TokenTag::THEN));
+    assert_eq!(
+        tags.iter().filter(|tag| **tag == TokenTag::END).count(),
+        2,
+        "the loop block and the value-if block should both contribute a terminator",
+    );
+    assert_eq!(boundary_tag(&owner, range), Some(TokenTag::NEWLINE));
+}
+
+#[test]
 fn balanced_template_region_consumes_nested_templates_from_source() {
     let mut string_table = StringTable::new();
     let text_outer = string_table.intern("outer");
@@ -331,8 +567,9 @@ fn balanced_template_region_consumes_nested_templates_from_source() {
     let end = consume_balanced_template_region_from_source(
         &mut cursor,
         opening,
+        &string_table,
         |token| consumed.push(token.tag()),
-        |_location| String::from("unexpected eof"),
+        |_location, _opening| String::from("unexpected eof"),
         |error| format!("infrastructure failure: {error:?}"),
     )
     .expect("balanced template scan should succeed");
@@ -371,13 +608,91 @@ fn balanced_template_region_errors_on_eof_before_close_from_source() {
     let error = consume_balanced_template_region_from_source(
         &mut cursor,
         opening,
+        &string_table,
         |_token| {},
-        |_location| String::from("missing template close"),
+        |_location, _opening| String::from("missing template close"),
         |error| format!("infrastructure failure: {error:?}"),
     )
     .expect_err("unterminated template should fail");
 
     assert_eq!(error, "missing template close");
+}
+
+/// A `$doc` body keeps its balanced literal brackets. The scan must consume the whole
+/// documentation template rather than closing at the inner literal pair.
+#[test]
+fn balanced_template_region_consumes_doc_body_literal_brackets() {
+    let mut string_table = StringTable::new();
+    let doc_directive = string_table.intern("doc");
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StyleDirective(doc_directive),
+            FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
+            FixturePart::StringSlice(string_table.intern("see ")),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(string_table.intern("linked text")),
+            FixturePart::Static(TokenTag::TEMPLATE_CLOSE),
+            FixturePart::StringSlice(string_table.intern(" after")),
+            FixturePart::Static(TokenTag::TEMPLATE_CLOSE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let mut cursor = full_cursor(&owner);
+    let opening = cursor.advance().expect("opening token should be present");
+    let end = consume_balanced_template_region_from_source(
+        &mut cursor,
+        opening,
+        &string_table,
+        |_token| {},
+        |_location, _opening| String::from("unexpected eof"),
+        |error| format!("infrastructure failure: {error:?}"),
+    )
+    .expect("balanced documentation template should scan successfully");
+
+    assert_eq!(
+        end,
+        TokenIndex::try_from_index(9).expect("index should fit")
+    );
+    assert_eq!(cursor.peek().map(|token| token.tag()), Some(TokenTag::EOF));
+}
+
+/// An unclosed documentation template reports its own opening, even when a literal bracket in
+/// its body is still unbalanced.
+#[test]
+fn balanced_template_region_labels_doc_opening_on_eof() {
+    let mut string_table = StringTable::new();
+    let doc_directive = string_table.intern("doc");
+    let doc_opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(0, 1));
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
+            FixturePart::StyleDirective(doc_directive),
+            FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
+            FixturePart::StringSlice(string_table.intern("see ")),
+            FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(10, 1)),
+            FixturePart::StringSlice(string_table.intern("linked text")),
+            FixturePart::SpannedStatic(TokenTag::TEMPLATE_CLOSE, fixture_span(11, 1)),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let mut cursor = full_cursor(&owner);
+    let opening = cursor.advance().expect("opening token should be present");
+    let (_eof_span, labelled_opening) = consume_balanced_template_region_from_source(
+        &mut cursor,
+        opening,
+        &string_table,
+        |_token| {},
+        |span, labelled_opening| (span, labelled_opening),
+        |error| panic!("template scan infrastructure failure: {error:?}"),
+    )
+    .expect_err("unclosed documentation template should fail");
+
+    assert_eq!(labelled_opening, doc_opening);
 }
 
 #[test]
@@ -502,8 +817,36 @@ fn eof_expected_delimiter(failure: TokenScanFailure, string_table: &StringTable)
         .map(|id| string_table.resolve(id).to_owned())
 }
 
+/// Asserts a failed declaration-initializer scan reported an unclosed template.
+fn assert_template_missing_close(failure: TokenScanFailure) {
+    let draft = match failure {
+        TokenScanFailure::Diagnostic(diagnostic) => diagnostic,
+        TokenScanFailure::Infrastructure(error) => {
+            panic!("token scanner infrastructure failure: {error:?}")
+        }
+    };
+    let compacted = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compacted
+        .first()
+        .expect("the failed scan should retain its diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0022");
+    let facts = diagnostic
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("an unclosed template should retain structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::MissingClosingBracket
+    );
+    let labels: Vec<_> = diagnostic.durable_labels().collect();
+    assert_eq!(labels.len(), 1, "the opening bracket should carry a label");
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::TemplateStartsHere
+    ));
+}
+
 #[test]
-fn eof_in_template_reports_closing_bracket() {
+fn eof_in_template_reports_missing_closing_bracket() {
     let mut string_table = StringTable::new();
     let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
@@ -516,11 +859,7 @@ fn eof_in_template_reports_closing_bracket() {
 
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated template should report EOF");
-    assert_eq!(
-        eof_expected_delimiter(error, &string_table),
-        Some("]".to_owned()),
-        "open template expects ]"
-    );
+    assert_template_missing_close(error);
 }
 
 #[test]
@@ -676,10 +1015,7 @@ fn eof_in_template_inside_parenthesis_reports_innermost_template() {
 
     let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated template inside parenthesis should report EOF");
-    assert_eq!(
-        eof_expected_delimiter(error, &string_table),
-        Some("]".to_owned())
-    );
+    assert_template_missing_close(error);
 }
 
 #[test]

@@ -27,7 +27,9 @@ use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuil
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
+use crate::compiler_frontend::style_directives::{
+    CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, StyleDirectiveKind,
+};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -150,7 +152,7 @@ pub(super) fn parse_core_style_directive(
         }
 
         CoreStyleDirectiveKind::Doc => {
-            let doc_name = string_table.intern("doc");
+            let doc_name = string_table.intern(DOC_DIRECTIVE_NAME);
             reject_unexpected_directive_arguments(doc_name, token_stream)?;
             apply_doc_comment_defaults(build_state);
         }

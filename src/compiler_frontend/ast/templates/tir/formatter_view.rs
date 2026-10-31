@@ -898,23 +898,37 @@ fn process_formatter_run(
         pieces: input_pieces,
     };
 
-    // 1. Pre-format whitespace passes.
-    let mut output =
-        apply_whitespace_passes_to_input(input, pre_format_passes, run_position, string_table);
-
-    // 2. Style formatter.
+    // 1. Pre-format whitespace passes, then 2. the style formatter.
+    //
+    // A formatter with no pre-format pass receives its text pieces directly. The whitespace
+    // adapter rebuilds pieces without spans, so routing through it would replace every exact
+    // authored span with the run's representative span and misplace formatter-owned warnings.
     let mut formatter_warnings = DiagnosticBag::new();
-
-    if let Some(fmt) = formatter {
-        let formatter_input = output_to_input(output, representative_span, string_table);
-        let formatter_result = {
-            let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-            fmt.formatter
-                .format(formatter_input, &mut diagnostic_strings)?
-        };
-        formatter_warnings = formatter_result.warnings;
-        output = formatter_result.output;
-    }
+    let mut output = match formatter {
+        Some(fmt) => {
+            let formatter_input = if pre_format_passes.is_empty() {
+                input
+            } else {
+                let whitespace_output = apply_whitespace_passes_to_input(
+                    input,
+                    pre_format_passes,
+                    run_position,
+                    string_table,
+                );
+                output_to_input(whitespace_output, representative_span, string_table)
+            };
+            let formatter_result = {
+                let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                fmt.formatter
+                    .format(formatter_input, &mut diagnostic_strings)?
+            };
+            formatter_warnings = formatter_result.warnings;
+            formatter_result.output
+        }
+        None => {
+            apply_whitespace_passes_to_input(input, pre_format_passes, run_position, string_table)
+        }
+    };
 
     // 3. Post-format whitespace passes.
     if !post_format_passes.is_empty() {

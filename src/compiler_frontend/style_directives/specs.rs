@@ -9,6 +9,13 @@ use crate::compiler_frontend::ast::templates::template::{BodyWhitespacePolicy, F
 use crate::compiler_frontend::style_directives::compatibility::TemplateHeadCompatibility;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
+/// The core `$doc` directive name.
+///
+/// A `$doc` body suppresses child templates, so header-stage token scans must recognise this
+/// name to treat its brackets as literal text. Both the directive registry and those scans read
+/// the name from here so they cannot drift apart.
+pub(crate) const DOC_DIRECTIVE_NAME: &str = "doc";
+
 /// Core language directive behavior handled directly by compiler-owned template parsing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreStyleDirectiveKind {

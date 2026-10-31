@@ -538,7 +538,7 @@ fn parse_option_present_capture_if_header(
     };
     if !is_option {
         return Err(choices_control_flow::invalid_match_pattern(
-            InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
+            InvalidMatchPatternReason::OptionalPresentCaptureOnNonOptional,
             None,
             None,
             subject_span,
@@ -578,7 +578,7 @@ fn ensure_option_present_capture_pattern(pattern: &DeferredArmPattern) -> IfHead
     }
 
     Err(choices_control_flow::invalid_match_pattern(
-        InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
+        InvalidMatchPatternReason::ExpectedBindingInOptionalPresentCapture,
         None,
         None,
         deferred_pattern_span(pattern),

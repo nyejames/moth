@@ -1,0 +1,7 @@
+can_error || -> I32, Error!:
+    return 1
+;
+
+value = can_error() catch:
+    then "fallback"
+;

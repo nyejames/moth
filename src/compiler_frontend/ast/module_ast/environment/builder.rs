@@ -510,7 +510,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------
         //  Resolve type aliases
         // ----------------------
-        // Aliases whose targets fold a `#capacity` constant (and aliases naming those) wait for
+        // Aliases whose targets fold a capacity constant (and aliases naming those) wait for
         // the constant pass, which publishes them at their own Stage 3 position. No consumer ever
         // observes a provisional alias target.
         let aliases_waiting_for_constants =
@@ -534,7 +534,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------------------------------
         //  Publish constant-dependent alias targets
         // ----------------------------------------------
-        // Trait requirements may name an alias whose target folds a `#capacity` constant, so the
+        // Trait requirements may name an alias whose target folds a capacity constant, so the
         // Stage 3 walk runs as far as the last waiting alias before user traits are resolved. The
         // main constant pass below continues the same sequence with full trait metadata. Core
         // traits are registered first so member shells reached by this prefix keep rejecting

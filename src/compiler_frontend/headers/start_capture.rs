@@ -6,12 +6,14 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::headers::types::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenRange, TokenRef, TokenTag};
-use crate::compiler_frontend::utilities::token_scan::TemplateBalance;
+use crate::compiler_frontend::utilities::token_scan::{
+    TemplateNestingTracker, innermost_unclosed_template_opening,
+};
 
 /// Consume one runtime template directly through a borrowed canonical cursor.
 ///
@@ -22,7 +24,7 @@ pub(super) fn capture_runtime_template_range_from_cursor(
     opening: TokenRef<'_>,
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
-    string_table: &mut StringTable,
+    string_table: &StringTable,
 ) -> Result<TokenRange, HeaderParseFailure> {
     if opening.source() != file_id || opening.tag() != TokenTag::TEMPLATE_HEAD {
         return Err(HeaderParseFailure::Infrastructure(
@@ -47,8 +49,9 @@ pub(super) fn capture_runtime_template_range_from_cursor(
         ));
     }
 
-    let closing_bracket = string_table.intern("]");
-    let mut balance = TemplateBalance::with_opening_template();
+    let source = cursor.source_tokens();
+    let mut balance =
+        TemplateNestingTracker::with_opening_template(source, opening.index(), string_table);
     while balance.has_unclosed_templates() {
         let token = cursor.advance().ok_or_else(|| {
             HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
@@ -57,13 +60,19 @@ pub(super) fn capture_runtime_template_range_from_cursor(
             ))
         })?;
         if token.is_eof() {
-            return Err(token_lexical::unexpected_end_of_file(
-                Some(closing_bracket),
+            return Err(templates::missing_closing_bracket(
                 Some(token.source_span()),
+                innermost_unclosed_template_opening(
+                    source,
+                    opening.index(),
+                    token.index(),
+                    string_table,
+                )
+                .or_else(|| Some(opening.source_span())),
             )
             .into());
         }
-        balance.step_tag(token.tag());
+        balance.step_token(source, token, string_table);
     }
 
     let end = cursor.position();

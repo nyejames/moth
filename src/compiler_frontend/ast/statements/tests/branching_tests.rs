@@ -18,17 +18,19 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data::InvalidValueReceiverView, choices_control_flow::InvalidMatchPatternView,
-    token_lexical::CommonSyntaxMistakeView, types_borrows_targets::TypeMismatchView,
+    names_declarations::DuplicateDeclarationView, token_lexical::CommonSyntaxMistakeView,
+    types_borrows_targets::TypeMismatchView,
 };
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, first_ast_error_view, parse_single_file_ast,
-    parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, first_ast_error_view,
+    parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -596,37 +598,151 @@ fn parses_exhaustive_choice_match_without_else_marks_exhaustive_choice() {
 }
 
 #[test]
-fn rejects_legacy_colon_match_arm_syntax() {
+fn rejects_bodyless_statement_match_arm_nested_in_catch() {
     let failure = parse_single_file_ast_diagnostic(
-        "value = 1\nif value is:\n    1: io.line([: [\"one\"]])\n    else => io.line([: [\"other\"]])\n;\n",
+        "can_error || -> I32, Error!:\n\
+         return 1\n\
+         ;\n\
+         recover || -> I32:\n\
+             return can_error() catch:\n\
+                 if 1 is:\n\
+                     1 =>\n\
+                     else => io.line([: [\"e\"]])\n\
+                 ;\n\
+                 then 2\n\
+             ;\n\
+         ;\n",
     );
     assert_ast_diagnostic(
         &failure,
         "MOTH-SYNTAX-0028",
-        Some("invalid_match_arm.legacy_colon_syntax"),
+        Some("invalid_match_arm.missing_body"),
     );
 }
 
 #[test]
-fn rejects_choice_match_arm_qualifier_for_other_choice() {
+fn rejects_statement_match_expression_body_nested_in_catch() {
     let failure = parse_single_file_ast_diagnostic(
-        "Status :: Ready, Busy;\n\
-         OtherStatus :: Busy;\n\
-         current Status = Status::Ready\n\
-         if current is:\n\
-             OtherStatus::Busy => io.line([: [\"busy\"]])\n\
+        "can_error || -> I32, Error!:\n\
+         return 1\n\
+         ;\n\
+         recover || -> I32:\n\
+             return can_error() catch:\n\
+                 if 1 is:\n\
+                     1 => \"text\"\n\
+                     else => io.line([: [\"e\"]])\n\
+                 ;\n\
+                 then 2\n\
+             ;\n\
          ;\n",
     );
-    let diagnostic = assert_ast_diagnostic(
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0028",
+        Some("invalid_match_arm.expression_body_in_statement_match"),
+    );
+}
+
+#[test]
+fn rejects_typed_operand_expression_body_in_statement_match() {
+    // A literal skips its trailing newline, so the mid-body case ends at a line-initial call.
+    let sources = [
+        "value = 1\n\
+         if value is:\n\
+             1 => \"text\"\n\
+             else => io.line([: [\"e\"]])\n\
+         ;\n",
+        "value = 1\n\
+         if value is:\n\
+             1 =>\n\
+                 42\n\
+                 io.line([: [\"one\"]])\n\
+             else => io.line([: [\"e\"]])\n\
+         ;\n",
+    ];
+    for source in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0028",
+            Some("invalid_match_arm.expression_body_in_statement_match"),
+        );
+    }
+}
+
+#[test]
+fn rejects_malformed_colon_arm_as_unexpected_token() {
+    let failure = parse_single_file_ast_diagnostic(
+        "value = 1\n\
+         if value is:\n\
+             1 => io.line([: [\"one\"]])\n\
+             2: io.line([: [\"two\"]])\n\
+             else => io.line([: [\"other\"]])\n\
+         ;\n",
+    );
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
+}
+
+#[test]
+fn rejects_symbol_shaped_colon_arm_as_an_expected_arm_header() {
+    // A line-initial `name:` where an arm is expected is either a declared region or an arm
+    // that used the wrong separator. The match body accepts `=>` only, so the statement scan
+    // stops there and the match parser names the missing arm header.
+    let sources = [
+        (
+            "Status :: Ready, Busy;\nhandle |s Status|:\n    if s is:\n        Ready => io.line(\"ready\")\n        Busy: io.line(\"busy\")\n        else => io.line(\"other\")\n    ;\n;\n",
+            "Busy",
+        ),
+        (
+            "work ||:\n    value = 1\n    if value is:\n        1 => io.line(\"one\")\n        Ready: io.line(\"ready\")\n        else => io.line(\"other\")\n    ;\n;\n",
+            "Ready",
+        ),
+    ];
+
+    for (source, arm_name) in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0028",
+            Some("invalid_match_arm.expected_arm_header"),
+        );
+        let needle = format!("{arm_name}:");
+        let start = source
+            .find(needle.as_str())
+            .expect("the malformed arm must occur") as u32;
+        let mut builder = ExtendedSpanBuilder::new();
+        let span = LocalSpan::exact(start, arm_name.len() as u32, &mut builder)
+            .expect("the malformed arm span must fit");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            "{source}: the malformed arm name is primary",
+        );
+    }
+}
+
+#[test]
+fn capture_name_mismatch_with_alias_suggests_the_authored_binding() {
+    let failure = parse_single_file_ast_diagnostic(
+        "Response :: Success, Err | message String |;\n\
+         r Response = Response::Err(\"bad\")\n\
+         if r is:\n\
+             Err(text as msg) => io.line(msg)\n\
+             Success => io.line(\"ok\")\n\
+         ;\n",
+    );
+    assert_ast_diagnostic(
         &failure,
         "MOTH-RULE-0049",
-        Some("invalid_match_pattern.qualifier_does_not_match_scrutinee"),
+        Some("invalid_match_pattern.capture_binding_name_mismatch"),
     );
-    let pattern = diagnostic
-        .family_view::<InvalidMatchPatternView>()
-        .expect("the first error is an invalid match pattern");
-    assert_eq!(pattern.variant_name, None);
-    assert!(pattern.scrutinee_name.is_some());
+    let message =
+        crate::compiler_frontend::tests::parse_support::ast_first_error_rendered_message(&failure);
+    assert!(
+        message.contains("Capture 'text' does not match payload field 'message'")
+            && message.contains("write 'message as msg'"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1192,7 +1308,104 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
     let diagnostic = first_ast_error_view(&failure);
     assert_ne!(
         diagnostic.reason_key(),
-        Some("invalid_match_pattern.option_present_capture_on_non_optional"),
-        "a newline-separated pipe must not report the option-present-capture error",
+        Some("invalid_match_pattern.optional_present_capture_on_non_optional"),
+        "a newline-separated pipe must not report the optional-present-capture error",
     );
+}
+
+#[test]
+fn capture_collisions_use_duplicate_declaration_with_the_authored_local_label() {
+    for (source, capture_name, previous_occurrence, capture_occurrence) in [
+        (
+            "holder |maybe I32?| -> I32:\n    amount = 1\n    return if maybe is |amount| then amount else 0\n;\n",
+            "amount",
+            0,
+            1,
+        ),
+        (
+            "Response :: Ready |amount I32|;\n\nholder |subject Response| -> I32:\n    amount = 1\n    return if subject is:\n        Ready(amount) => then amount\n    ;\n;\n",
+            "amount",
+            1,
+            2,
+        ),
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
+        let mut builder = ExtendedSpanBuilder::new();
+        // The payload declaration repeats the field name before the local binding, so each
+        // shape names its authored occurrences explicitly.
+        let previous_start = source
+            .match_indices(capture_name)
+            .nth(previous_occurrence)
+            .map(|(start, _)| start as u32)
+            .expect("the local must occur");
+        let capture_start = source
+            .match_indices(capture_name)
+            .nth(capture_occurrence)
+            .map(|(start, _)| start as u32)
+            .expect("the capture must occur");
+        let capture_span = LocalSpan::exact(capture_start, capture_name.len() as u32, &mut builder)
+            .expect("the capture span must fit");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, capture_span)),
+            "{source}: the capture location is primary",
+        );
+
+        let previous_span =
+            LocalSpan::exact(previous_start, capture_name.len() as u32, &mut builder)
+                .expect("the local span must fit");
+        assert_eq!(
+            ast_error_label_spans(diagnostic),
+            vec![Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                previous_span
+            ))],
+            "{source}: the earlier authored binding is the secondary label",
+        );
+    }
+}
+
+#[test]
+fn capture_collisions_without_an_authored_binding_omit_the_label() {
+    // The payload capture repeats its declared field name, so its authored position is the
+    // second occurrence; an option capture has no earlier source occurrence.
+    for (source, capture_name, capture_occurrence) in [
+        (
+            "holder |maybe I32?| -> I32:\n    return if maybe is |io| then 1 else 0\n;\n",
+            "io",
+            0,
+        ),
+        (
+            "Response :: Ready |io I32|;\n\nholder |subject Response| -> I32:\n    return if subject is:\n        Ready(io) => then io\n    ;\n;\n",
+            "io",
+            1,
+        ),
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
+        assert!(
+            diagnostic
+                .family_view::<DuplicateDeclarationView>()
+                .is_some(),
+            "{source}: the capture collision is a duplicate declaration",
+        );
+        let mut builder = ExtendedSpanBuilder::new();
+        let capture_start = source
+            .match_indices(capture_name)
+            .nth(capture_occurrence)
+            .map(|(start, _)| start as u32)
+            .expect("the capture must occur");
+        let capture_span = LocalSpan::exact(capture_start, capture_name.len() as u32, &mut builder)
+            .expect("the capture span must fit");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, capture_span)),
+            "{source}",
+        );
+        assert!(
+            ast_error_label_spans(diagnostic).is_empty(),
+            "{source}: a compiler-owned name has no authored binding location",
+        );
+    }
 }

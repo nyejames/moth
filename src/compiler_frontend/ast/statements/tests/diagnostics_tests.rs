@@ -129,10 +129,12 @@ fn assert_external_binding_collision(source: &str, name: &str) {
         .err()
         .expect("external binding collision should fail AST construction");
     let boundary_failure = freeze_ast_diagnostic_failure(failure);
-    let diagnostic = assert_ast_diagnostic(&boundary_failure, "MOTH-RULE-0038", None);
+    let diagnostic = assert_ast_diagnostic(&boundary_failure, "MOTH-RULE-0002", None);
     assert_eq!(
         ast_first_error_rendered_message(&boundary_failure),
-        format!("Shadowed name '{name}'"),
+        format!(
+            "Cannot declare '{name}' because that name is already visible in this scope. Moth does not allow duplicate names or shadowing."
+        ),
         "{source}",
     );
 

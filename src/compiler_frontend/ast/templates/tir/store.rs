@@ -50,6 +50,8 @@ use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_sets_ar
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::FxHashMap;
 
 pub(crate) use control_flow::ControlFlowBodyKind;
@@ -124,6 +126,13 @@ pub(crate) struct TemplateIrStore {
     /// WHY: every reference to one constant must share one TIR root, so the rebuild runs once per
     ///      `ConstValueId` per module build instead of once per reference.
     rebuilt_const_template_roots: FxHashMap<ConstValueId, TemplateIrId>,
+    /// Authored name of an `$insert(...)` contribution that came from a named constant.
+    ///
+    /// WHAT: maps one `InsertContribution` node to the source-visible name the author wrote.
+    /// WHY: a contribution references the reusable `$insert` helper template, so the authored
+    ///      name is not recoverable from the node or its helper. Diagnostics that reject an
+    ///      escaped insert name the authored constant instead of the helper definition.
+    insert_contribution_names: FxHashMap<TemplateIrNodeId, StringId>,
 }
 
 impl TemplateIrStore {
@@ -146,6 +155,7 @@ impl TemplateIrStore {
             retained_selector_patterns: Vec::new(),
             retained_collection_headers: Vec::new(),
             rebuilt_const_template_roots: FxHashMap::default(),
+            insert_contribution_names: FxHashMap::default(),
         }
     }
 
@@ -175,6 +185,7 @@ impl TemplateIrStore {
             retained_selector_patterns: Vec::new(),
             retained_collection_headers: Vec::new(),
             rebuilt_const_template_roots: FxHashMap::default(),
+            insert_contribution_names: FxHashMap::default(),
         }
     }
 
@@ -443,6 +454,33 @@ impl TemplateIrStore {
         let id = TemplateIrNodeId::new(self.nodes.len());
         self.nodes.push(node);
         id
+    }
+
+    /// Pushes an `$insert(...)` contribution node and records its authored name.
+    ///
+    /// WHAT: appends the contribution node, then stores the source-visible name when the
+    ///       contribution came from one named constant.
+    /// WHY: keeping the name beside the node lets any later copy or diagnostic find which
+    ///       authored insert a node represents without re-reading AST syntax.
+    pub(crate) fn push_insert_contribution(
+        &mut self,
+        template: TemplateIrId,
+        authored_name: Option<StringId>,
+        span: Option<SourceSpan>,
+    ) -> TemplateIrNodeId {
+        let node_id = self.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::InsertContribution { template },
+            span,
+        ));
+        if let Some(name) = authored_name {
+            self.insert_contribution_names.insert(node_id, name);
+        }
+        node_id
+    }
+
+    /// Returns the authored name recorded for one insert contribution node.
+    pub(crate) fn insert_contribution_name(&self, node_id: TemplateIrNodeId) -> Option<StringId> {
+        self.insert_contribution_names.get(&node_id).copied()
     }
 
     pub(crate) fn push_wrapper_set(

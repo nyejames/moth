@@ -1,8 +1,6 @@
 //! Per-scope local declaration mutation for AST scope contexts.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 
 impl ScopeContext {
     // --------------------------
@@ -25,16 +23,11 @@ impl ScopeContext {
                 continue;
             };
             if let Some(reference) = self.get_reference(&name) {
-                let diagnostic = names_declarations::shadowed_name(name, declaration.binding_span);
-                let diagnostic = if let Some(previous_span) = reference.binding_span() {
-                    diagnostic.with_label(
-                        Some(previous_span),
-                        Some(LabelDraftMessage::PreviousDeclaration),
-                    )
-                } else {
-                    diagnostic
-                };
-                return Err(diagnostic);
+                return Err(self.duplicate_declaration(
+                    name,
+                    declaration.binding_span,
+                    reference.binding_span(),
+                ));
             }
             if let Some(diagnostic) =
                 self.check_body_binding_visibility(name, declaration.binding_span, string_table)

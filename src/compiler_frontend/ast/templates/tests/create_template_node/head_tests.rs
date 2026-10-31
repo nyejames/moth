@@ -411,6 +411,7 @@ fn parse_runtime_template_without_validation(
         Some(token_stream.current_span()),
     );
 
+    let opening_span = Some(token_stream.current_span());
     let parsed_head = parse_template_head(
         &mut token_stream,
         TemplateHeadParseRequest {
@@ -423,6 +424,7 @@ fn parse_runtime_template_without_validation(
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
             path_fork: &mut path_fork,
+            opening_span,
         },
     )
     .expect("template head should parse");
@@ -444,6 +446,7 @@ fn parse_runtime_template_without_validation(
             path_fork: &mut path_fork,
             default_style: None,
             source_path,
+            opening_span,
         },
     )
     .expect("template body should parse");

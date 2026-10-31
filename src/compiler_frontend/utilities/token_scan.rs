@@ -11,9 +11,11 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
-    draft::DiagnosticDraft, families::token_lexical,
+    draft::DiagnosticDraft,
+    families::{templates, token_lexical},
 };
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::style_directives::DOC_DIRECTIVE_NAME;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRangeError, TokenRef, TokenTag,
@@ -275,6 +277,71 @@ impl NestingDepth {
     }
 }
 
+/// Count the remaining top-level positional items of a parenthesised list, from the
+/// cursor through the list's matching `)`.
+///
+/// WHAT: call arguments and choice payload captures report the total authored count when
+/// they reject the first extra item.
+/// WHY: the list's opening parenthesis is already consumed, so `NestingDepth` starts at zero.
+/// A named entry (`name = ...`) is reported by its own diagnostic, so the scan stops there
+/// and the count names positional items only.
+pub(crate) fn count_remaining_top_level_positional_items(token_stream: &AstCursor) -> usize {
+    let mut depth = NestingDepth::default();
+    let mut offset = 0usize;
+    let mut count = 0usize;
+    let mut in_item = false;
+    let remaining = token_stream
+        .length()
+        .saturating_sub(token_stream.position());
+
+    while offset < remaining {
+        let Some(token) = token_stream.token_ref_at_offset(offset) else {
+            break;
+        };
+        let tag = token.tag();
+        if tag == TokenTag::EOF {
+            break;
+        }
+
+        if depth.is_top_level() {
+            if tag == TokenTag::CLOSE_PARENTHESIS {
+                break;
+            }
+            if tag == TokenTag::COMMA {
+                in_item = false;
+                offset += 1;
+                continue;
+            }
+            if tag == TokenTag::NEWLINE {
+                offset += 1;
+                continue;
+            }
+            if !in_item {
+                if item_at_offset_is_named(token_stream, offset) {
+                    break;
+                }
+                count += 1;
+                in_item = true;
+            }
+        }
+
+        depth.step_tag(tag);
+        offset += 1;
+    }
+    count
+}
+
+fn item_at_offset_is_named(token_stream: &AstCursor, offset: usize) -> bool {
+    token_stream
+        .token_ref_at_offset(offset)
+        .map(|token| token.tag())
+        == Some(TokenTag::SYMBOL)
+        && token_stream
+            .token_ref_at_offset(offset.saturating_add(1))
+            .map(|token| token.tag())
+            == Some(TokenTag::ASSIGN)
+}
+
 /// The innermost open construct tracked by the declaration-initializer scanner.
 ///
 /// WHAT: models which construct owns the next expected closing delimiter at EOF.
@@ -517,6 +584,279 @@ impl TemplateBalance {
     }
 }
 
+/// Tracks template nesting for header-stage scans, where a `$doc` body keeps its brackets literal.
+///
+/// WHAT: balances `TEMPLATE_HEAD`/`TEMPLATE_CLOSE` tokens like [`TemplateBalance`], except that
+/// while a `$doc` body is open a `[` opens a literal bracket and a `]` closes one. Only a `]` with
+/// no literal bracket left closes the documentation template.
+/// WHY: the AST body parser suppresses child templates in `$doc` bodies. Header-stage scanners run
+/// before it, so they must apply the same rule or they report a literal bracket as the innermost
+/// unclosed template.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TemplateNestingTracker {
+    open_templates: usize,
+    /// Literal bracket depth of the active `$doc` body, once its head has opened.
+    doc_literal_brackets: Option<usize>,
+}
+
+impl TemplateNestingTracker {
+    /// Starts a scan whose authored opening token is `opening`.
+    pub(crate) fn with_opening_template(
+        source: &SourceTokens,
+        opening: TokenIndex,
+        string_table: &StringTable,
+    ) -> Self {
+        Self {
+            open_templates: 1,
+            doc_literal_brackets: template_head_opens_doc_body(source, opening, string_table)
+                .then_some(0),
+        }
+    }
+
+    pub(crate) fn has_unclosed_templates(self) -> bool {
+        self.open_templates > 0
+    }
+
+    /// Steps over one token, naming the directive that follows a new template head.
+    pub(crate) fn step_token(
+        &mut self,
+        source: &SourceTokens,
+        token: TokenRef<'_>,
+        string_table: &StringTable,
+    ) {
+        match token.tag() {
+            TokenTag::TEMPLATE_HEAD => {
+                if let Some(literal_brackets) = &mut self.doc_literal_brackets {
+                    *literal_brackets = literal_brackets.saturating_add(1);
+                    return;
+                }
+                self.open_templates = self.open_templates.saturating_add(1);
+                if template_head_opens_doc_body(source, token.index(), string_table) {
+                    self.doc_literal_brackets = Some(0);
+                }
+            }
+            TokenTag::TEMPLATE_CLOSE => match self.doc_literal_brackets {
+                Some(0) => {
+                    self.doc_literal_brackets = None;
+                    self.open_templates = self.open_templates.saturating_sub(1);
+                }
+                Some(literal_brackets) => {
+                    self.doc_literal_brackets = Some(literal_brackets - 1);
+                }
+                None => {
+                    self.open_templates = self.open_templates.saturating_sub(1);
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
+/// Whether the template head at `head` opens a core `$doc` body.
+///
+/// `$doc` takes no directive arguments, so its body begins at the token after the directive. A
+/// malformed head with other tokens keeps the ordinary nesting rules and reports its own error
+/// once the AST parses it.
+fn template_head_opens_doc_body(
+    source: &SourceTokens,
+    head: TokenIndex,
+    string_table: &StringTable,
+) -> bool {
+    let Some(directive_index) = TokenIndex::try_from_index(head.index().saturating_add(1)) else {
+        return false;
+    };
+    let Ok(directive) = source.token(directive_index) else {
+        return false;
+    };
+    if directive.tag() != TokenTag::STYLE_DIRECTIVE {
+        return false;
+    }
+    let Some(name) = directive.string_id() else {
+        return false;
+    };
+    if string_table.resolve(name) != DOC_DIRECTIVE_NAME {
+        return false;
+    }
+
+    let Some(body_index) = TokenIndex::try_from_index(directive_index.index().saturating_add(1))
+    else {
+        return false;
+    };
+    source
+        .token(body_index)
+        .is_ok_and(|token| token.tag() == TokenTag::START_TEMPLATE_BODY)
+}
+
+/// One still-open delimiter found by the EOF scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UnclosedDelimiter {
+    Template(SourceSpan),
+    Parenthesis(SourceSpan),
+    Collection(SourceSpan),
+}
+
+impl UnclosedDelimiter {
+    /// The delimiter EOF is missing.
+    pub(crate) const fn expected_delimiter(self) -> &'static str {
+        match self {
+            Self::Template(_) => "]",
+            Self::Parenthesis(_) => ")",
+            Self::Collection(_) => "}",
+        }
+    }
+}
+
+/// Which kind of opener the forward EOF scan found.
+#[derive(Clone, Copy, Debug)]
+enum UnclosedDelimiterKind {
+    Template,
+    Parenthesis,
+    Collection,
+}
+
+/// The innermost opener still unclosed when `eof` truncates a token region.
+///
+/// WHAT: forward-scans from `start` to `eof`, balancing templates, parentheses and braces
+/// independently. The unmatched opener closest to `eof` has no matching close to its right, so it
+/// is the innermost unmatched opener.
+/// WHY: the scan must know that a `$doc` body's brackets are literal text. A backward pass over
+/// bare tags cannot tell those brackets from authored template heads, so it would label a bracket
+/// inside documentation instead of the documentation template. The scan only runs on the EOF
+/// diagnostic path.
+pub(crate) fn innermost_unclosed_delimiter(
+    source: &SourceTokens,
+    start: TokenIndex,
+    eof: TokenIndex,
+    string_table: &StringTable,
+) -> Option<UnclosedDelimiter> {
+    walk_to_unclosed_delimiter(source, start, eof, true, string_table)
+}
+
+/// The innermost unclosed template opener, for scanners that only diagnose missing `]`.
+///
+/// Parentheses and braces are ignored, so an open `(` inside a nested template head still
+/// labels that nested template rather than an outer one.
+pub(crate) fn innermost_unclosed_template_opening(
+    source: &SourceTokens,
+    start: TokenIndex,
+    eof: TokenIndex,
+    string_table: &StringTable,
+) -> Option<SourceSpan> {
+    match walk_to_unclosed_delimiter(source, start, eof, false, string_table) {
+        Some(UnclosedDelimiter::Template(span)) => Some(span),
+        Some(UnclosedDelimiter::Parenthesis(_) | UnclosedDelimiter::Collection(_)) | None => None,
+    }
+}
+
+/// Builds the EOF diagnostic for the innermost delimiter left open by a truncated scan.
+///
+/// WHAT: names a missing template bracket or the innermost unmatched `)`/`}`, falling back to
+/// the caller's expected delimiter (or a bare EOF) when the region balances.
+/// WHY: header function-body capture and signature-member default scanning share one EOF rule;
+/// keeping it here makes their template-vs-delimiter precedence and wording identical.
+pub(crate) fn unclosed_delimiter_eof_diagnostic(
+    source: &SourceTokens,
+    start: TokenIndex,
+    eof: TokenIndex,
+    eof_span: Option<SourceSpan>,
+    fallback_expected_delimiter: Option<&'static str>,
+    string_table: &mut StringTable,
+) -> DiagnosticDraft {
+    match innermost_unclosed_delimiter(source, start, eof, string_table) {
+        Some(UnclosedDelimiter::Template(opening)) => {
+            templates::missing_closing_bracket(eof_span, Some(opening))
+        }
+        Some(delimiter) => token_lexical::unexpected_end_of_file(
+            Some(string_table.intern(delimiter.expected_delimiter())),
+            eof_span,
+        ),
+        None => token_lexical::unexpected_end_of_file(
+            fallback_expected_delimiter.map(|delimiter| string_table.intern(delimiter)),
+            eof_span,
+        ),
+    }
+}
+
+fn walk_to_unclosed_delimiter(
+    source: &SourceTokens,
+    start: TokenIndex,
+    eof: TokenIndex,
+    track_groups: bool,
+    string_table: &StringTable,
+) -> Option<UnclosedDelimiter> {
+    let mut templates = Vec::new();
+    let mut doc_literal_brackets = None;
+    let mut parentheses = Vec::new();
+    let mut collections = Vec::new();
+
+    let end = eof.index().min(source.len());
+    for index in start.index()..end {
+        let token_index = TokenIndex::try_from_index(index)?;
+        let token = source.token(token_index).ok()?;
+        match token.tag() {
+            TokenTag::TEMPLATE_HEAD => {
+                if let Some(literal_brackets) = &mut doc_literal_brackets {
+                    *literal_brackets += 1;
+                } else {
+                    templates.push(token_index);
+                    if template_head_opens_doc_body(source, token_index, string_table) {
+                        doc_literal_brackets = Some(0);
+                    }
+                }
+            }
+            TokenTag::TEMPLATE_CLOSE => match doc_literal_brackets {
+                Some(0) => {
+                    doc_literal_brackets = None;
+                    templates.pop();
+                }
+                Some(literal_brackets) => doc_literal_brackets = Some(literal_brackets - 1),
+                None => {
+                    templates.pop();
+                }
+            },
+            _ if !track_groups => {}
+            TokenTag::OPEN_PARENTHESIS => parentheses.push(token_index),
+            TokenTag::CLOSE_PARENTHESIS => {
+                parentheses.pop();
+            }
+            TokenTag::OPEN_CURLY => collections.push(token_index),
+            TokenTag::CLOSE_CURLY => {
+                collections.pop();
+            }
+            _ => {}
+        }
+    }
+
+    let mut candidates = Vec::new();
+    candidates.extend(
+        templates
+            .last()
+            .copied()
+            .map(|index| (index, UnclosedDelimiterKind::Template)),
+    );
+    candidates.extend(
+        parentheses
+            .last()
+            .copied()
+            .map(|index| (index, UnclosedDelimiterKind::Parenthesis)),
+    );
+    candidates.extend(
+        collections
+            .last()
+            .copied()
+            .map(|index| (index, UnclosedDelimiterKind::Collection)),
+    );
+    let (index, kind) = candidates
+        .into_iter()
+        .max_by_key(|(index, _)| index.index())?;
+    let span = source.token(index).ok()?.source_span();
+    Some(match kind {
+        UnclosedDelimiterKind::Template => UnclosedDelimiter::Template(span),
+        UnclosedDelimiterKind::Parenthesis => UnclosedDelimiter::Parenthesis(span),
+        UnclosedDelimiterKind::Collection => UnclosedDelimiter::Collection(span),
+    })
+}
+
 /// Result type for declaration-initializer token scanning.
 ///
 /// Structured unexpected-EOF diagnostics stay in the diagnostic lane while impossible scanner
@@ -542,6 +882,9 @@ pub(crate) fn collect_declaration_initializer_range(
     let mut inline_catch_value_pending = false;
     let mut value_if_block_depth = 0usize;
     let mut value_if_header_pending = false;
+    // Loops open a statement block as well. Without their own pending flag a `loop:` inside a
+    // value-producing `if` leaves the nested `;` to close the outer block.
+    let mut loop_header_pending = false;
     let mut inline_value_if_missing_else_depth = 0usize;
     let mut initializer_closed_by_statement_block = false;
     let mut open_constructs = Vec::new();
@@ -655,6 +998,22 @@ pub(crate) fn collect_declaration_initializer_range(
         }
 
         if current_tag == TokenTag::EOF && (!at_top_level || inside_record_region) {
+            if matches!(
+                innermost_open_construct(&open_constructs),
+                Some(OpenConstruct::Template)
+            ) {
+                return Err(TokenScanFailure::Diagnostic(
+                    templates::missing_closing_bracket(
+                        Some(current_ref.source_span()),
+                        innermost_unclosed_template_opening(
+                            source_tokens,
+                            start,
+                            current_ref.index(),
+                            string_table,
+                        ),
+                    ),
+                ));
+            }
             let expected_delimiter = match innermost_open_construct(&open_constructs) {
                 Some(open_construct) => {
                     Some(string_table.get_or_intern(open_construct.expected_delimiter().to_owned()))
@@ -682,25 +1041,33 @@ pub(crate) fn collect_declaration_initializer_range(
                     catch_header_pending = true;
                     inline_catch_value_pending = false;
                 }
-                TokenTag::IF if catch_block_depth == 0 => value_if_header_pending = true,
+                TokenTag::IF => value_if_header_pending = true,
+                TokenTag::LOOP => loop_header_pending = true,
                 TokenTag::COLON if catch_header_pending => {
                     catch_header_pending = false;
-                    catch_block_depth = catch_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::CatchBlock);
-                }
-                TokenTag::COLON if catch_block_depth > 0 => {
-                    catch_block_depth = catch_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::CatchBlock);
-                }
-                TokenTag::COLON if value_if_header_pending => {
                     value_if_header_pending = false;
+                    loop_header_pending = false;
+                    catch_block_depth = catch_block_depth.saturating_add(1);
+                    open_constructs.push(OpenConstruct::CatchBlock);
+                }
+                // Inside a catch, nested statement blocks remain catch-tagged so the closing
+                // `;` pairs with the same counter that opened it.
+                TokenTag::COLON if catch_block_depth > 0 => {
+                    value_if_header_pending = false;
+                    loop_header_pending = false;
+                    catch_block_depth = catch_block_depth.saturating_add(1);
+                    open_constructs.push(OpenConstruct::CatchBlock);
+                }
+                TokenTag::COLON if value_if_header_pending || loop_header_pending => {
+                    value_if_header_pending = false;
+                    loop_header_pending = false;
                     value_if_block_depth = value_if_block_depth.saturating_add(1);
                     open_constructs.push(OpenConstruct::ValueIfBlock);
                 }
-                TokenTag::COLON if value_if_block_depth > 0 => {
-                    value_if_block_depth = value_if_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::ValueIfBlock);
-                }
+                // A colon without an `if`, `loop` or `catch` header above it cannot open a
+                // block. Match-arm headers such as `1:` or `else:` stay arm syntax, and the arm
+                // parser reports the missing `=>` instead of the scanner swallowing the block's
+                // `;`.
                 TokenTag::THEN if catch_header_pending => {
                     catch_header_pending = false;
                     inline_catch_value_pending = true;
@@ -718,6 +1085,7 @@ pub(crate) fn collect_declaration_initializer_range(
                     let closing_outer_catch_block = catch_block_depth == 1;
                     catch_block_depth = catch_block_depth.saturating_sub(1);
                     catch_header_pending = false;
+                    loop_header_pending = false;
                     initializer_closed_by_statement_block = closing_outer_catch_block;
                     close_statement_construct(&mut open_constructs);
                 }
@@ -725,12 +1093,19 @@ pub(crate) fn collect_declaration_initializer_range(
                     let closing_outer_value_if_block = value_if_block_depth == 1;
                     value_if_block_depth = value_if_block_depth.saturating_sub(1);
                     value_if_header_pending = false;
+                    loop_header_pending = false;
                     initializer_closed_by_statement_block = closing_outer_value_if_block;
                     close_statement_construct(&mut open_constructs);
                 }
-                TokenTag::THEN | TokenTag::ARROW | TokenTag::NEWLINE | TokenTag::EOF => {
+                // A newline may continue an `if` or `loop` condition, so only the catch header
+                // clears here. `then` and `->` end an inline header, and EOF ends the scan.
+                TokenTag::NEWLINE => {
+                    catch_header_pending = false;
+                }
+                TokenTag::THEN | TokenTag::ARROW | TokenTag::EOF => {
                     catch_header_pending = false;
                     value_if_header_pending = false;
+                    loop_header_pending = false;
                 }
                 _ => {}
             }
@@ -913,8 +1288,9 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
 pub(crate) fn consume_balanced_template_region_from_source<E>(
     cursor: &mut TokenCursor<'_>,
     opening: TokenRef<'_>,
+    string_table: &StringTable,
     mut on_token: impl FnMut(TokenRef<'_>),
-    on_eof_error: impl Fn(SourceSpan) -> E,
+    on_eof_error: impl Fn(SourceSpan, SourceSpan) -> E,
     on_infrastructure_error: impl Fn(InfrastructureFailure) -> E,
 ) -> Result<TokenIndex, E> {
     let source_tokens = cursor.source_tokens();
@@ -950,7 +1326,8 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
         )));
     }
 
-    let mut balance = TemplateBalance::with_opening_template();
+    let mut balance =
+        TemplateNestingTracker::with_opening_template(source_tokens, opening.index(), string_table);
     while balance.has_unclosed_templates() {
         let token = cursor.current().ok_or_else(|| {
             on_infrastructure_error(InfrastructureFailure::internal(
@@ -965,9 +1342,18 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
             )));
         }
         if token.is_eof() {
-            return Err(on_eof_error(token.source_span()));
+            return Err(on_eof_error(
+                token.source_span(),
+                innermost_unclosed_template_opening(
+                    source_tokens,
+                    opening.index(),
+                    token.index(),
+                    string_table,
+                )
+                .unwrap_or_else(|| opening.source_span()),
+            ));
         }
-        balance.step_tag(token.tag());
+        balance.step_token(source_tokens, token, string_table);
         on_token(token);
         let _ = cursor.advance();
     }

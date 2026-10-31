@@ -840,6 +840,61 @@ fn malformed_nested_children_wrapper_constant_initializer_reports_eof_delimiter_
     );
 }
 
+/// A symbol-shaped malformed match arm must keep the function body scope balanced.
+///
+/// WHAT: captures the function body that contains a `Busy:` or `Ready:` arm instead of `=>`, and
+///       a real `request:` region after a preceding statement.
+/// WHY: the body scan runs before AST diagnostics, so a phantom declared-region scope would
+///      replace the arm's real diagnostic with an unexpected end-of-file report. The genuine
+///      region case proves the scan still recognises a region outside a match body.
+#[test]
+fn symbol_shaped_match_arms_keep_the_function_body_scope_balanced() {
+    let sources = [
+        (
+            "Status :: Ready, Busy;\nwork |s Status|:\n    if s is:\n        Ready => io.line(\"ready\")\n        Busy: io.line(\"busy\")\n        else => io.line(\"other\")\n    ;\n;\n",
+            2usize,
+        ),
+        (
+            "work ||:\n    value = 1\n    if value is:\n        1 => io.line(\"one\")\n        Ready: io.line(\"ready\")\n        else => io.line(\"other\")\n    ;\n;\n",
+            1usize,
+        ),
+        (
+            "work ||:\n    value = 1\n    request:\n        value = 2\n    ;\n;\n",
+            1usize,
+        ),
+    ];
+
+    for (source, final_semicolon_occurrence) in sources {
+        let headers = parse_single_file_headers(source);
+        let header = headers
+            .headers
+            .iter()
+            .find(|header| matches!(header.kind, HeaderKind::Function { .. }))
+            .expect("expected the function header");
+        let final_semicolon = source_span_for(source, ";", final_semicolon_occurrence);
+        // The body range ends just before its closing `;`, so the token at its end proves which
+        // `;` the scan matched.
+        let range = header_body_tokens(&headers, header).range();
+        let terminator = headers
+            .source_token_owners
+            .get(&range.source())
+            .expect("the function body range has a prepared source owner")
+            .tokens_ref()
+            .token(range.end())
+            .expect("the function body terminator should resolve");
+        assert_eq!(
+            terminator.tag(),
+            crate::compiler_frontend::tokenizer::tokens::TokenTag::END,
+            "the captured function body should end at a ';': {source:?}"
+        );
+        assert_eq!(
+            terminator.source_span(),
+            final_semicolon,
+            "the captured function body should end at its own closing ';': {source:?}"
+        );
+    }
+}
+
 /// Verifies that header preparation and binding correctly aggregate per-file outputs from multiple source files.
 ///
 /// WHAT: entry file contributes runtime templates, const templates, and a start function;

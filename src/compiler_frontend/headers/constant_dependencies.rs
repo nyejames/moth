@@ -253,7 +253,7 @@ fn classify_reference(
     imported_declarations: &FxHashMap<PathId, OriginDeclarationId>,
     imported_declarations_by_origin: &FxHashMap<OriginDeclarationId, PublicDeclarationRecord>,
 ) -> ConstantReferenceResolution {
-    // 1. External symbols: constants are valid references; non-constants are errors.
+    // External symbols: constants are valid references; non-constants are errors.
     if let Some(symbol_id) = visibility.visible_external_symbols.get(&reference.name) {
         return if matches!(symbol_id, ExternalSymbolId::Constant(_)) {
             ConstantReferenceResolution::ExternalConstant {
@@ -272,7 +272,7 @@ fn classify_reference(
         };
     }
 
-    // 3. Namespace records: a shallow `namespace.member` access can name a source constant that
+    // Namespace records: a shallow `namespace.member` access can name a source constant that
     // must be ordered before this initializer folds. Full member semantics stay in AST.
     if let Some(record) = visibility.visible_namespace_records.get(&reference.name) {
         let Some(member_name) = reference.dot_member else {
@@ -304,7 +304,7 @@ fn classify_reference(
         return ConstantReferenceResolution::NotVisible { name: member_name };
     };
 
-    // 4. Source-visible names: may be constants, constructors, or non-constants.
+    // Source-visible names: may be constants, constructors, or non-constants.
     let Some(target_path) = visibility.visible_source_names.get(&reference.name) else {
         return ConstantReferenceResolution::NotVisible {
             name: reference.name,

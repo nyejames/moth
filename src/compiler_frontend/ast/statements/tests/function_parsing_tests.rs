@@ -118,19 +118,29 @@ fn function_default_path_token_reports_structured_diagnostic_not_panic() {
 
 #[test]
 fn parameters_cannot_shadow_bound_external_symbols_or_namespaces() {
-    for (source, name) in [
-        ("read |io I32|:\n;\n", "io"),
-        ("read |io ~I32|:\n;\n", "io"),
-        ("read type T |io T|:\n;\n", "io"),
-        ("Point = |value I32|\nread |this Point, io I32|:\n;\n", "io"),
+    // Explicit dependency aliases keep an authored span; prelude symbols do not.
+    for (source, name, previous_label) in [
+        ("read |io I32|:\n;\n", "io", false),
+        ("read |io ~I32|:\n;\n", "io", false),
+        ("read type T |io T|:\n;\n", "io", false),
+        (
+            "Point = |value I32|\nread |this Point, io I32|:\n;\n",
+            "io",
+            false,
+        ),
         (
             "@core/io line as host_line\nread |host_line I32|:\n;\n",
             "host_line",
+            true,
         ),
-        ("@core/io as output\nread |output I32|:\n;\n", "output"),
+        (
+            "@core/io as output\nread |output I32|:\n;\n",
+            "output",
+            false,
+        ),
     ] {
         let failure = parse_single_file_ast_diagnostic(source);
-        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
         let start = source.rfind(name).expect("the parameter name must occur") as u32;
         let mut builder = ExtendedSpanBuilder::new();
         let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
@@ -140,7 +150,11 @@ fn parameters_cannot_shadow_bound_external_symbols_or_namespaces() {
             Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
             "{source}",
         );
-        assert!(ast_error_label_spans(diagnostic).is_empty(), "{source}");
+        assert_eq!(
+            ast_error_label_spans(diagnostic).len(),
+            usize::from(previous_label),
+            "{source}",
+        );
     }
 }
 
@@ -156,7 +170,7 @@ fn parameters_cannot_shadow_visible_source_declarations() {
         ),
     ] {
         let failure = parse_single_file_ast_diagnostic(source);
-        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
         let start = source.rfind(name).expect("the parameter name must occur") as u32;
         let mut builder = ExtendedSpanBuilder::new();
         let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
@@ -164,6 +178,19 @@ fn parameters_cannot_shadow_visible_source_declarations() {
         assert_eq!(
             ast_error_primary_span(diagnostic),
             Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            "{source}",
+        );
+        // The visible source declaration keeps its authored binding span, so the parameter
+        // collision labels the earlier top-level binding.
+        let previous_start = source.find(name).expect("the declaration name must occur") as u32;
+        let previous_span = LocalSpan::exact(previous_start, name.len() as u32, &mut builder)
+            .expect("the declaration name span must fit");
+        assert_eq!(
+            ast_error_label_spans(diagnostic),
+            vec![Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                previous_span
+            ))],
             "{source}",
         );
     }
@@ -1306,7 +1333,7 @@ fn rejects_empty_inline_option_present_capture() {
          return name\n\
      ;\n",
         "MOTH-RULE-0049",
-        Some("invalid_match_pattern.empty_option_present_capture"),
+        Some("invalid_match_pattern.empty_optional_present_capture"),
     );
 }
 
@@ -1318,7 +1345,7 @@ fn rejects_literal_inline_option_present_capture_binding() {
          return name\n\
      ;\n",
         "MOTH-RULE-0049",
-        Some("invalid_match_pattern.expected_binding_in_option_present_capture"),
+        Some("invalid_match_pattern.expected_binding_in_optional_present_capture"),
     );
 }
 #[test]

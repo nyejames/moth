@@ -303,6 +303,12 @@ struct FoldContext<'a, 'prefix, F> {
     expressions: &'a AstExpressionBuilder,
     refusal: Option<ConstantFoldRefusalReason>,
     external_calls: ExternalCallScratch,
+    /// Nesting depth inside the right operand of a `Dec` power.
+    ///
+    /// WHAT: incremented while the walk visits a `Dec` power's exponent subtree.
+    /// WHY: that subtree is `I32` arithmetic by the power row, so an integer overflow there
+    ///      needs the `Dec` exponent rule instead of a bare integer-overflow message.
+    dec_power_exponent_depth: u32,
 }
 
 /// One step of the explicit fold walk. Frames hold ids and a result base, so depth costs heap
@@ -319,6 +325,10 @@ enum FoldStep {
         base: usize,
         policy: BuiltinCastPolicyId,
     },
+    /// Enter the exponent subtree of a `Dec` power.
+    EnterDecPowerExponent,
+    /// Leave that exponent subtree after its result settles.
+    LeaveDecPowerExponent,
 }
 
 /// Entry can settle a root without allocating work or result slots.
@@ -415,6 +425,24 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     let value = self.complete_cast(view, policy, &walk.results[base..])?;
                     walk.results.truncate(base);
                     walk.results.push(value);
+                }
+                FoldStep::EnterDecPowerExponent => {
+                    let Some(depth) = self.dec_power_exponent_depth.checked_add(1) else {
+                        crate::compiler_bug!(
+                            CompilerStage::ConstantEvaluation,
+                            "Dec power exponent nesting depth overflowed its counter.",
+                        );
+                    };
+                    self.dec_power_exponent_depth = depth;
+                }
+                FoldStep::LeaveDecPowerExponent => {
+                    let Some(depth) = self.dec_power_exponent_depth.checked_sub(1) else {
+                        crate::compiler_bug!(
+                            CompilerStage::ConstantEvaluation,
+                            "Dec power exponent context ended without a matching entry.",
+                        );
+                    };
+                    self.dec_power_exponent_depth = depth;
                 }
             }
         }
@@ -548,6 +576,19 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     },
                     [operand.id()],
                 );
+            }
+            Operation::NumericBinary { left, right, facts } if facts.is_dec_power() => {
+                // A Dec power takes an I32 exponent, so the right operand is evaluated as I32
+                // arithmetic before the Dec power runs. Bracket that subtree so any integer
+                // overflow inside it reports the Dec exponent rule with its own explanation.
+                walk.steps.push(FoldStep::Complete {
+                    expression: expression.id(),
+                    base,
+                });
+                walk.steps.push(FoldStep::LeaveDecPowerExponent);
+                walk.steps.push(FoldStep::Enter(right.id()));
+                walk.steps.push(FoldStep::EnterDecPowerExponent);
+                walk.steps.push(FoldStep::Enter(left.id()));
             }
             Operation::NumericBinary { left, right, .. }
             | Operation::Compare { left, right, .. }
@@ -734,7 +775,13 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 let Some(value) = value else {
                     return Ok(None);
                 };
-                match numeric_negation_payload(self.values, self.strings, value, facts) {
+                match numeric_negation_payload(
+                    self.values,
+                    self.strings,
+                    value,
+                    facts,
+                    self.dec_power_exponent_depth > 0,
+                ) {
                     Ok(payload) => payload,
                     Err(error) => return Err(self.label_numeric_failure(error, &[value])),
                 }
@@ -762,6 +809,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     facts,
                     expression.span(),
                     self.strings,
+                    self.dec_power_exponent_depth > 0,
                 ) {
                     Ok(PayloadFoldOutcome::Folded(payload)) => payload,
                     Ok(PayloadFoldOutcome::NotConstant) => return Ok(None),
@@ -1076,21 +1124,24 @@ fn numeric_negation_payload(
     strings: &mut StringTable,
     value: ConstValueId,
     facts: &ResolvedOperation,
+    inside_dec_power_exponent: bool,
 ) -> Result<ConstValuePayload, ConstantFoldError> {
     let value = values
         .payload(value)
         .expect("staged fold returned an owned value");
-    let mut context = NumericFoldFailure {
-        operator: &facts.operator,
-        span: facts.span,
-        string_table: strings,
-    };
     let ResolvedOperationKind::Numeric(numeric) = facts.kind else {
         return Err(InfrastructureFailure::internal(
             CompilerStage::ConstantEvaluation,
             "Numeric unary operation lacks numeric facts.",
         )
         .into());
+    };
+    let mut context = NumericFoldFailure {
+        operator: &facts.operator,
+        span: facts.span,
+        string_table: strings,
+        domain: numeric.domain,
+        inside_dec_power_exponent,
     };
     match numeric.domain {
         NumericScalar::Number(_) => {
@@ -1146,12 +1197,15 @@ fn binary_payload(
     facts: &ResolvedOperation,
     span: Option<SourceSpan>,
     strings: &mut StringTable,
+    inside_dec_power_exponent: bool,
 ) -> Result<PayloadFoldOutcome, ConstantFoldError> {
     if let ResolvedOperationKind::Numeric(numeric) = &facts.kind {
         let mut context = NumericFoldFailure {
             operator: &facts.operator,
             span: facts.span,
             string_table: strings,
+            domain: numeric.domain,
+            inside_dec_power_exponent,
         };
         return Ok(PayloadFoldOutcome::Folded(fold_numeric_binary(
             left,
@@ -1326,6 +1380,23 @@ pub(crate) fn constant_fold(
     services: FoldServices<'_>,
     requirement: FoldRequirement,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
+    constant_fold_with_dec_power_exponent_depth(root, builder, constants, services, requirement, 0)
+}
+
+/// Fold a completed expression that is already known to sit inside a `Dec` power's exponent.
+///
+/// WHAT: starts the fold walk with the retained exponent nesting depth.
+/// WHY: expression construction folds each operator as soon as its operands are constant, so an
+///      `I32` exponent overflow is reported before any enclosing `Dec` power is completed. The
+///      caller supplies the structural depth it read from the authored power sequence.
+pub(crate) fn constant_fold_with_dec_power_exponent_depth(
+    root: ExprId,
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    services: FoldServices<'_>,
+    requirement: FoldRequirement,
+    initial_dec_power_exponent_depth: u32,
+) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusConstantFoldEntries);
     let outcome = fold_root(
@@ -1335,6 +1406,7 @@ pub(crate) fn constant_fold(
         services,
         FoldBoundary::Runtime { requirement },
         |_| None,
+        initial_dec_power_exponent_depth,
     )?;
     #[cfg(feature = "benchmark_counters")]
     match &outcome {
@@ -1556,6 +1628,7 @@ pub(crate) fn fold_expression_with_constants(
         services,
         FoldBoundary::Content { types, requirement },
         lookup,
+        0,
     )
 }
 /// Fold one constant-boundary expression (a declaration or signature default).
@@ -1579,6 +1652,7 @@ pub(crate) fn fold_constant_content(
             requirement: FoldRequirement::Required,
         },
         |_| None,
+        0,
     )
 }
 fn outcome_root(outcome: ConstantFoldOutcome) -> ExprId {
@@ -1613,6 +1687,7 @@ fn fold_root(
     services: FoldServices<'_>,
     boundary: FoldBoundary<'_>,
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
+    initial_dec_power_exponent_depth: u32,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     let FoldServices {
         string_table: strings,
@@ -1668,6 +1743,7 @@ fn fold_root(
                 expressions: &*builder,
                 refusal: None,
                 external_calls: ExternalCallScratch::default(),
+                dec_power_exponent_depth: initial_dec_power_exponent_depth,
             };
             let slots = context.fold_host_result_slots(operation, view)?;
             refusal = context.refusal;
@@ -1698,6 +1774,7 @@ fn fold_root(
             expressions: &*builder,
             refusal: None,
             external_calls: ExternalCallScratch::default(),
+            dec_power_exponent_depth: initial_dec_power_exponent_depth,
         };
         let value = context.fold_walk(view.id())?;
         refusal = context.refusal;
@@ -1790,25 +1867,60 @@ fn compile_time_evaluation_diagnostic(
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
 ) -> ConstantFoldError {
+    compile_time_evaluation_diagnostic_with_numeric_type(
+        reason,
+        operation,
+        None,
+        string_table,
+        span,
+    )
+}
+
+/// Builds a numeric failure that names the overflowing domain.
+///
+/// WHAT: interns the operation spelling and keeps the numeric domain as its typed value.
+/// WHY: overflow diagnostics must say which type overflowed, and the fold owns the exact
+///      `NumericScalar` domain while the diagnostic layer only renders typed facts.
+fn compile_time_evaluation_diagnostic_with_numeric_type(
+    reason: CompileTimeEvaluationErrorReason,
+    operation: Option<String>,
+    numeric_type: Option<NumericScalar>,
+    string_table: &mut StringTable,
+    span: Option<SourceSpan>,
+) -> ConstantFoldError {
     let operation = operation.map(|operation| string_table.get_or_intern(operation));
-    ConstantFoldError::NumericFailure(choices_control_flow::compile_time_evaluation_error(
-        reason, operation, span,
-    ))
+    ConstantFoldError::NumericFailure(
+        choices_control_flow::compile_time_evaluation_error_with_numeric_type(
+            reason,
+            operation,
+            numeric_type,
+            span,
+        ),
+    )
 }
 
 fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
-    Err(compile_time_evaluation_diagnostic(
-        CompileTimeEvaluationErrorReason::IntegerOverflow,
+    // An overflow inside a Dec power's exponent follows that power's I32 exponent rule, so it
+    // reports the dedicated reason instead of a bare integer overflow.
+    let reason = if ctx.inside_dec_power_exponent {
+        CompileTimeEvaluationErrorReason::DecExponentIntegerOverflow
+    } else {
+        CompileTimeEvaluationErrorReason::IntegerOverflow
+    };
+    Err(compile_time_evaluation_diagnostic_with_numeric_type(
+        reason,
         Some(ctx.operator.to_str().to_string()),
+        Some(ctx.domain),
         ctx.string_table,
         ctx.span,
     ))
 }
 
 fn float_non_finite_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
-    Err(compile_time_evaluation_diagnostic(
+    Err(compile_time_evaluation_diagnostic_with_numeric_type(
         CompileTimeEvaluationErrorReason::FloatOverflow,
         Some(ctx.operator.to_str().to_string()),
+        Some(ctx.domain),
         ctx.string_table,
         ctx.span,
     ))
@@ -1816,14 +1928,19 @@ fn float_non_finite_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, 
 
 /// Shared failure context for one numeric fold attempt.
 ///
-/// WHAT: carries the authored operator, its span and the shared string table so both helpers
-///       funnel typed numeric diagnostics through one value.
+/// WHAT: carries the authored operator, its span, the operation's numeric domain, the enclosing
+///       Dec power exponent state and the shared string table.
 /// WHY: keeps the fold-function argument lists short while failures retain the same span and
-///       operation identity that the standalone parameters provided.
+///       operation identity that the standalone parameters provided, and lets an overflow name
+///       the exact type that overflowed.
 struct NumericFoldFailure<'table, 'operator> {
     operator: &'operator Operator,
     span: Option<SourceSpan>,
     string_table: &'table mut StringTable,
+    /// Numeric domain the failing operation evaluated in.
+    domain: NumericScalar,
+    /// Whether the failure happened inside the exponent operand of a `Dec` power.
+    inside_dec_power_exponent: bool,
 }
 
 fn checked_float_result(

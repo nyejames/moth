@@ -120,12 +120,30 @@ pub(crate) struct BuildReceiverMethodCatalogInput<'a> {
     pub(crate) string_table: &'a StringTable,
 }
 
-/// Render a human-readable receiver name for diagnostics.
-pub(crate) fn receiver_kind_label(receiver: &ReceiverKey) -> String {
+/// Resolve a source-facing receiver name for diagnostics.
+///
+/// WHAT: returns the final source path component for a struct or choice receiver, and an interned
+///       spelling for compiler-owned external and builtin receivers.
+/// WHY: the receiver key's `Debug` form is an internal identity, so diagnostics must show the
+///      name the author declared instead of a path-table index.
+pub(crate) fn receiver_kind_label(
+    receiver: &ReceiverKey,
+    path_fork: &PathInternerFork,
+    string_table: &mut StringTable,
+) -> StringId {
     match receiver {
-        ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => format!("{path:?}"),
-        ReceiverKey::External(type_id) => format!("External({})", type_id.0),
-        ReceiverKey::BuiltinScalar(builtin) => format!("{builtin:?}"),
+        ReceiverKey::Struct(path) | ReceiverKey::Choice(path) => {
+            path_fork.try_component(*path).unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "source receiver key {path:?} has no final path component; this is a compiler bug",
+                )
+            })
+        }
+        ReceiverKey::External(type_id) => {
+            string_table.intern(&format!("External({})", type_id.0))
+        }
+        ReceiverKey::BuiltinScalar(builtin) => string_table.intern(&format!("{builtin:?}")),
     }
 }
 
@@ -134,10 +152,10 @@ pub(crate) fn free_function_receiver_method_call_error(
     method_name: StringId,
     method_entry: &ReceiverMethodEntry,
     span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
     string_table: &mut StringTable,
 ) -> DiagnosticDraft {
-    let receiver_label = receiver_kind_label(&method_entry.receiver);
-    let receiver_type_id = string_table.intern(&receiver_label);
+    let receiver_type_id = receiver_kind_label(&method_entry.receiver, path_fork, string_table);
 
     invalid_receiver_call(
         InvalidReceiverCallReason::CalledAsFreeFunction,

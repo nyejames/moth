@@ -1,0 +1,6 @@
+-- A region declared inside a function body keeps its own ';' before the deferred-feature report.
+work ||:
+    request:
+        value = 1
+    ;
+;

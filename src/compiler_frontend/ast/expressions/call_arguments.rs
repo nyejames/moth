@@ -70,11 +70,15 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::syntax_errors::expression_position::{
+    c_family_operator_mistake_at, c_family_operator_mistake_near,
+};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
     is_numeric_literal_destination_type_id,
 };
+use crate::compiler_frontend::utilities::token_scan::count_remaining_top_level_positional_items;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
@@ -110,6 +114,7 @@ pub(crate) enum CallArgumentValuePolicy {
 pub(crate) enum ParenthesizedExpressionKind {
     Empty,
     NamedEntries,
+    DoubledEquals { operator_start: usize },
     Group,
 }
 
@@ -135,7 +140,13 @@ pub(crate) fn classify_parenthesized_expression(
             if lookahead_tag_at(token_stream, first_index.saturating_add(1))
                 == Some(TokenTag::ASSIGN) =>
         {
-            ParenthesizedExpressionKind::NamedEntries
+            if c_family_operator_mistake_at(token_stream, first_index.saturating_add(1)).is_some() {
+                ParenthesizedExpressionKind::DoubledEquals {
+                    operator_start: first_index.saturating_add(1),
+                }
+            } else {
+                ParenthesizedExpressionKind::NamedEntries
+            }
         }
         _ => ParenthesizedExpressionKind::Group,
     }
@@ -758,6 +769,9 @@ fn parse_call_arguments_inner(
 
             // Standard named argument: `name = expr`.
             TokenTag::SYMBOL if next_token_tag(token_stream) == Some(TokenTag::ASSIGN) => {
+                if let Some(error) = c_family_operator_mistake_near(token_stream) {
+                    return Err(error.into());
+                }
                 let target_span = Some(token_stream.current_span());
                 let target_name = token_stream
                     .current_string_id_in(string_table)?
@@ -818,8 +832,12 @@ fn parse_call_arguments_inner(
             return Err(diagnostic.into());
         }
 
-        let parameter_slot =
-            slot_router.route(named_target.as_ref(), argument_span, string_table)?;
+        let parameter_slot = slot_router.route(
+            named_target.as_ref(),
+            argument_span,
+            token_stream,
+            string_table,
+        )?;
 
         let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
             let marker_span = Some(token_stream.current_span());
@@ -1666,6 +1684,7 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         named_target: Option<&(StringId, Option<SourceSpan>)>,
         argument_span: Option<SourceSpan>,
+        token_stream: &AstCursor,
         string_table: &mut StringTable,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
         if let Some(named_target_spans) = self.named_target_spans.as_mut()
@@ -1795,9 +1814,11 @@ impl<'a> ParameterSlotRouter<'a> {
         }
 
         if self.positional_cursor >= slot_count {
+            let remaining = count_remaining_top_level_positional_items(token_stream).max(1);
             return Err(calls_data::invalid_call_shape(
                 InvalidCallShapeReason::ExtraPositionalArgument {
-                    expected_count: expectations.len(),
+                    expected_count: slot_count,
+                    provided_count: self.positional_cursor + remaining,
                 },
                 self.callee_name(string_table),
                 argument_span,
@@ -1922,7 +1943,7 @@ fn reject_simple_generic_argument_type_ascription(
     )
     .into())
 }
-/// tries to parse the type keyword as another expression.
+/// True when the argument is one simple literal value followed by an attached builtin type keyword.
 ///
 /// This deliberately stays small: broader type-looking symbol recovery would be speculative in
 /// the shared call parser and could change ordinary call errors.

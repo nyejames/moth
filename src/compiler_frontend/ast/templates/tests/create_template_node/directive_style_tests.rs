@@ -1151,28 +1151,78 @@ fn note_and_todo_directives_reject_arguments() {
 
 #[test]
 fn slot_directive_must_be_alone_in_template_head() {
+    let expected = "`$slot` cannot be combined with an expression because a slot declaration must be the template head's only meaningful item.";
     let before_error = template_parse_error("[\"prefix\", $slot]");
     let after_error = template_parse_error("[$slot, \"suffix\"]");
 
-    assert!(before_error.contains("incompatible"));
-    assert!(after_error.contains("incompatible"));
+    assert!(
+        before_error.contains(expected),
+        "expected the slot-exclusivity reason for a later $slot, got: {before_error}"
+    );
+    assert!(
+        after_error.contains(expected),
+        "expected the slot-exclusivity reason for an earlier $slot, got: {after_error}"
+    );
+
+    let directive_error = template_parse_error("[$slot, $fresh]");
+    assert!(
+        directive_error.contains(
+            "`$slot` cannot be combined with `$fresh` because a slot declaration must be the template head's only meaningful item."
+        ),
+        "expected the slot-exclusivity reason for a later directive, got: {directive_error}"
+    );
 }
 
 #[test]
 fn comment_directives_must_be_alone_in_template_head() {
-    for directive in ["note", "todo", "doc"] {
+    for (directive, clause) in [
+        (
+            "note",
+            "a discarded comment directive must be the template's only meaningful head item",
+        ),
+        (
+            "todo",
+            "a discarded comment directive must be the template's only meaningful head item",
+        ),
+        (
+            "doc",
+            "a documentation directive must be the template's only meaningful head item",
+        ),
+    ] {
+        let expected =
+            format!("`${directive}` cannot be combined with an expression because {clause}.");
         let before = format!("[\"prefix\", ${directive}]");
         let after = format!("[${directive}, \"suffix\"]");
         let before_error = template_parse_error(&before);
         let after_error = template_parse_error(&after);
 
         assert!(
-            before_error.contains("incompatible"),
-            "expected mixed-head compatibility error for '{before}', got: {before_error}"
+            before_error.contains(&expected),
+            "expected the comment-directive reason for '{before}', got: {before_error}"
         );
         assert!(
-            after_error.contains("incompatible"),
-            "expected mixed-head compatibility error for '{after}', got: {after_error}"
+            after_error.contains(&expected),
+            "expected the comment-directive reason for '{after}', got: {after_error}"
+        );
+    }
+}
+
+#[test]
+fn comment_directive_conflict_with_another_directive_names_both() {
+    for (source, expected) in [
+        (
+            "[$note, $fresh]",
+            "`$note` cannot be combined with `$fresh` because a discarded comment directive must be the template's only meaningful head item.",
+        ),
+        (
+            "[$doc, $fresh]",
+            "`$doc` cannot be combined with `$fresh` because a documentation directive must be the template's only meaningful head item.",
+        ),
+    ] {
+        let error = template_parse_error(source);
+        assert!(
+            error.contains(expected),
+            "unexpected comment-directive pair reason for '{source}': {error}"
         );
     }
 }
@@ -1222,13 +1272,10 @@ fn insert_directive_can_coexist_with_other_meaningful_head_items() {
 #[test]
 fn duplicate_insert_directives_are_rejected_in_one_head() {
     let error = template_parse_error("[$insert(\"a\"), $insert(\"b\"):]");
-    assert!(error.contains("incompatible"));
-}
-
-#[test]
-fn formatter_directives_are_exclusive_per_template_head() {
-    let error = template_parse_error("[$md, $raw: body]");
-    assert!(error.contains("incompatible"));
+    assert!(
+        error.contains("`$insert` cannot appear more than once in a template head."),
+        "unexpected duplicate-insert reason: {error}"
+    );
 }
 
 #[test]
@@ -1236,7 +1283,12 @@ fn project_owned_formatter_directives_are_exclusive_per_template_head() {
     let style_directives = html_project_test_style_directives();
     let error =
         template_parse_error_with_style_directives("[$html, $css: body]", &style_directives);
-    assert!(error.contains("incompatible"));
+    assert!(
+        error.contains(
+            "`$html` and `$css` cannot be combined because both control template body formatting. Choose one formatter."
+        ),
+        "unexpected project formatter-conflict reason: {error}"
+    );
 }
 
 #[test]

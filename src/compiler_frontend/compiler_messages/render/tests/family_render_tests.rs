@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    self, InvalidAssignmentTargetView,
+    self, InvalidAssignmentTargetView, UnknownTypeNameView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
@@ -41,16 +41,18 @@ use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompileTimeEvaluationErrorReason,
     DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
     DiagnosticCompoundAssignmentOperator, DiagnosticOperator, DiagnosticSeverity,
-    GenericApplicationErrorReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-    InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
+    ExternalJsAnnotationDirective, ExternalJsDeclarationKind, GenericApplicationErrorReason,
+    InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
+    InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidReceiverCallReason,
     InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
     InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
     InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, TypeAnnotationContext,
-    TypeMismatchContext, ValueReceiverContext,
+    NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind, PathKind,
+    ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
@@ -484,6 +486,179 @@ fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
     assert!(message.contains("Status::Xyzzy"));
     assert!(!message.contains("Did you mean"));
     assert!(message.contains("Available variants: [Ready, Error]"));
+}
+
+#[test]
+fn unknown_type_name_non_annotation_sites_do_not_compare_builtins() {
+    let mut string_table = StringTable::new();
+    let misspelled = string_table.intern("Strng");
+    for site in [
+        UnknownTypeNameSite::NamespaceMember,
+        UnknownTypeNameSite::ConformanceTarget,
+    ] {
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(names_declarations::unknown_type_name(
+                misspelled,
+                site,
+                Vec::new(),
+                None,
+            )),
+            None,
+        );
+        let view = compact.first().expect("unknown type diagnostic compacts");
+        assert!(view.family_view::<UnknownTypeNameView>().is_some());
+        let guidance =
+            terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+        let message = guidance
+            .iter()
+            .find(|line| line.contains("Unknown type name"))
+            .expect("unknown-type message");
+        assert_eq!(
+            message, "Unknown type name 'Strng'.",
+            "{site:?} must not compare builtin spellings"
+        );
+        assert!(!message.contains("Did you mean"));
+    }
+}
+
+#[test]
+fn unknown_namespace_member_suggests_close_names_and_skips_unrelated() {
+    let mut string_table = StringTable::new();
+    let namespace = string_table.intern("math");
+    let pi = string_table.intern("PI");
+    let typo = string_table.intern("pi");
+    let unrelated = string_table.intern("nope");
+    let compact_typo = compact_bag_for_test(
+        DiagnosticBag::from(names_declarations::unknown_namespace_member(
+            namespace,
+            typo,
+            NamespaceRecordKind::ExternalPackage,
+            NamespaceMemberRole::Value,
+            vec![pi],
+            None,
+        )),
+        None,
+    );
+    let typo_view = compact_typo
+        .first()
+        .expect("unknown namespace member compact");
+    let typo_guidance =
+        terminal::format_guidance_view(typo_view, DiagnosticRenderContext::new(&string_table));
+    let typo_message = typo_guidance
+        .iter()
+        .find(|line| line.contains("Unknown member"))
+        .expect("unknown-member typo message");
+    assert_eq!(
+        typo_message,
+        "Unknown member 'pi' on namespace 'math'. Did you mean 'PI'?"
+    );
+
+    let compact_unrelated = compact_bag_for_test(
+        DiagnosticBag::from(names_declarations::unknown_namespace_member(
+            namespace,
+            unrelated,
+            NamespaceRecordKind::ExternalPackage,
+            NamespaceMemberRole::Value,
+            vec![pi],
+            None,
+        )),
+        None,
+    );
+    let unrelated_view = compact_unrelated
+        .first()
+        .expect("unknown namespace member compact");
+    let unrelated_guidance =
+        terminal::format_guidance_view(unrelated_view, DiagnosticRenderContext::new(&string_table));
+    let unrelated_message = unrelated_guidance
+        .iter()
+        .find(|line| line.contains("Unknown member"))
+        .expect("unknown-member unrelated message");
+    assert_eq!(
+        unrelated_message,
+        "Unknown member 'nope' on namespace 'math'."
+    );
+    assert!(!unrelated_message.contains("Did you mean"));
+}
+
+#[test]
+fn unknown_value_name_renders_unique_namespace_qualification() {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("PI");
+    let alias = string_table.intern("math");
+    let package_path = string_table.intern("@core/math");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(names_declarations::unknown_value_name_with_namespace(
+            name,
+            Some(alias),
+            Some(package_path),
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("unknown value compact");
+    let guidance =
+        terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+    let message = guidance
+        .iter()
+        .find(|line| line.contains("Unknown value"))
+        .expect("qualified unknown-value message");
+    assert_eq!(
+        message,
+        "Unknown value 'PI'. It is available as 'math.PI' from the '@core/math' namespace. Use '@core/math PI' if you want the bare name."
+    );
+}
+
+#[test]
+fn unknown_value_name_renders_source_namespace_without_package_path() {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("helper");
+    let alias = string_table.intern("a");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(names_declarations::unknown_value_name_with_namespace(
+            name,
+            Some(alias),
+            None,
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("unknown value compact");
+    let guidance =
+        terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+    let message = guidance
+        .iter()
+        .find(|line| line.contains("Unknown value"))
+        .expect("source-namespace unknown-value message");
+    assert_eq!(
+        message,
+        "Unknown value 'helper'. It is available as 'a.helper'."
+    );
+}
+
+#[test]
+fn unknown_namespace_member_renders_dotted_namespace_path() {
+    let mut string_table = StringTable::new();
+    let namespace = string_table.intern("io.input");
+    let member = string_table.intern("nwe");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(names_declarations::unknown_namespace_member(
+            namespace,
+            member,
+            NamespaceRecordKind::ExternalPackage,
+            NamespaceMemberRole::Value,
+            Vec::new(),
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("unknown namespace member compact");
+    let guidance =
+        terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+    let message = guidance
+        .iter()
+        .find(|line| line.contains("Unknown member"))
+        .expect("nested unknown-member message");
+    assert_eq!(message, "Unknown member 'nwe' on namespace 'io.input'.");
 }
 
 #[test]
@@ -1275,7 +1450,7 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
         "top-level generic declaration header",
         "`Box of String`",
         "compatible fallible function",
-        "`if ... is |present| ... else ...`",
+        "Inspect the optional value with an `if` present-value capture",
         "`!` propagates an `Error!` return, but this expression is not fallible",
         "Config declarations cannot depend on runtime evaluation",
         "User-defined cast evidence must be fully evaluable at compile time",
@@ -1396,6 +1571,83 @@ fn source_dependency_renderers_use_current_language_terminology() {
         assert!(
             !rendered.contains(stale),
             "stale dependency term '{stale}': {rendered}"
+        );
+    }
+}
+
+#[test]
+fn external_js_annotation_binding_messages_render_typed_facts() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let js_path = path_fork
+        .try_intern_portable_path("drawing.js", &mut string_table)
+        .expect("JS path fits");
+    let add = string_table.intern("add");
+    let add_impl = string_table.intern("addImpl");
+    let mode = string_table.intern("mode");
+    let mode_js = string_table.intern("MODE");
+
+    let drafts = vec![
+        imports::invalid_external_module(
+            js_path,
+            InvalidExternalModuleReason::MissingExportKeyword {
+                directive: ExternalJsAnnotationDirective::Sig,
+                declaration: ExternalJsDeclarationKind::Function,
+                moth_name: add,
+                js_name: add_impl,
+            },
+            imports::InvalidExternalModuleSites::default(),
+        ),
+        imports::invalid_external_module(
+            js_path,
+            InvalidExternalModuleReason::MissingExportKeyword {
+                directive: ExternalJsAnnotationDirective::Sig,
+                declaration: ExternalJsDeclarationKind::BlockArrow,
+                moth_name: add,
+                js_name: add_impl,
+            },
+            imports::InvalidExternalModuleSites::default(),
+        ),
+        imports::invalid_external_module(
+            js_path,
+            InvalidExternalModuleReason::MissingExportKeyword {
+                directive: ExternalJsAnnotationDirective::Const,
+                declaration: ExternalJsDeclarationKind::Constant,
+                moth_name: mode,
+                js_name: mode_js,
+            },
+            imports::InvalidExternalModuleSites::default(),
+        ),
+        imports::invalid_external_module(
+            js_path,
+            InvalidExternalModuleReason::OrphanedAnnotation {
+                directive: ExternalJsAnnotationDirective::Sig,
+                moth_name: add,
+            },
+            imports::InvalidExternalModuleSites::default(),
+        ),
+    ];
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(drafts), None);
+    let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
+    let rendered_lines = compact
+        .views()
+        .map(|view| terse::format_terse_diagnostic_view(view, context))
+        .collect::<Vec<_>>();
+    let rendered = rendered_lines.join("\n");
+    assert_eq!(
+        rendered_lines.len(),
+        4,
+        "one terse record per annotation-binding draft"
+    );
+    for expected in [
+        "`@moth.sig` for `add` applies to JavaScript function `addImpl`, but the function is not exported. Add `export` before `function` in `drawing.js`.",
+        "`@moth.sig` for `add` applies to JavaScript constant `addImpl`, but it is not exported. Add `export` before `const` in `drawing.js`.",
+        "`@moth.const` for `mode` applies to JavaScript constant `MODE`, but it is not exported. Add `export` before `const` in `drawing.js`.",
+        "`@moth.sig` for `add` is not followed by a supported declaration. `@moth.sig` must sit directly before an `export function` or block-bodied `export const` declaration.",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "expected typed external-JS message '{expected}' in: {rendered}"
         );
     }
 }
@@ -1944,6 +2196,71 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
         terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(&string_table));
     assert!(
         terse_line.contains("'I32' cast requires exactly one argument"),
+        "{terse_line}"
+    );
+}
+
+#[test]
+fn extra_positional_argument_renders_counts_and_removal_guidance() {
+    let mut string_table = StringTable::new();
+    let callee = string_table.intern("add");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(calls_data::invalid_call_shape(
+            InvalidCallShapeReason::ExtraPositionalArgument {
+                expected_count: 2,
+                provided_count: 3,
+            },
+            Some(callee),
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("extra-positional draft compacts");
+    assert!(view.family_view::<InvalidCallShapeView>().is_some());
+    let context = DiagnosticRenderContext::new(&string_table);
+    let guidance = terminal::format_guidance_view(view, context);
+    let message = guidance
+        .iter()
+        .find(|line| line.contains("positional arguments"))
+        .expect("extra-positional message");
+    assert!(
+        message.contains("Call to 'add' has 3 positional arguments, but accepts 2."),
+        "{message}"
+    );
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("Remove the extra argument starting here.")),
+        "{guidance:?}"
+    );
+}
+
+#[test]
+fn scalar_type_called_as_function_renders_cast_guidance() {
+    let mut string_table = StringTable::new();
+    let scalar_name = string_table.intern("I32");
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(calls_data::invalid_builtin_call(
+            InvalidBuiltinCallReason::ScalarTypeCalledAsFunction,
+            Some(scalar_name),
+            None,
+        )),
+        None,
+    );
+    let view = compact.first().expect("scalar type-call draft compacts");
+    assert!(
+        view.family_view::<calls_data::InvalidBuiltinCallView>()
+            .is_some()
+    );
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0046");
+    let terse_line =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(&string_table));
+    assert!(
+        terse_line.contains("`I32` is a type, not a conversion function"),
+        "{terse_line}"
+    );
+    assert!(
+        terse_line.contains("Use `cast` at an explicit typed receiving boundary"),
         "{terse_line}"
     );
 }

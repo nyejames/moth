@@ -25,9 +25,9 @@ struct HtmlValidationTemplateFormatter;
 
 pub(crate) fn html_validation_formatter() -> Formatter {
     Formatter {
-        pre_format_whitespace_passes: vec![TemplateWhitespacePassProfile::default_template_body()],
+        pre_format_whitespace_passes: Vec::new(),
         formatter: Arc::new(HtmlValidationTemplateFormatter),
-        post_format_whitespace_passes: Vec::new(),
+        post_format_whitespace_passes: vec![TemplateWhitespacePassProfile::default_template_body()],
     }
 }
 
@@ -93,8 +93,8 @@ fn push_literal_match_warnings(
         if chars[index..index + pattern_chars.len()] == *pattern_chars {
             warnings.push(SourceWarning {
                 reason: MalformedTemplateReason::Html(reason),
-                start_offset: index,
-                end_offset: index + pattern_chars.len(),
+                start_char: index,
+                end_char: index + pattern_chars.len(),
             });
         }
     }
@@ -134,8 +134,8 @@ fn scan_inline_event_handler_warnings(chars: &[char]) -> Vec<SourceWarning> {
         if cursor < chars.len() && chars[cursor] == '=' {
             warnings.push(SourceWarning {
                 reason: MalformedTemplateReason::Html(HtmlTemplateWarning::InlineEventHandler),
-                start_offset: index,
-                end_offset: cursor.saturating_add(1),
+                start_char: index,
+                end_char: cursor.saturating_add(1),
             });
             index = cursor.saturating_add(1);
             continue;

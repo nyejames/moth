@@ -32,7 +32,7 @@ impl<'a> ExportScanner<'a> {
                 JsDiagnosticKind::DynamicImport,
                 JsSourceSpan::range(import_start_byte, self.pos),
             );
-            self.skip_to_statement_end();
+            self.skip_to_statement_end_for_module_loading();
             return;
         }
 
@@ -51,7 +51,7 @@ impl<'a> ExportScanner<'a> {
                 JsDiagnosticKind::ArbitraryImport,
                 JsSourceSpan::range(import_start_byte, import_clause_start),
             );
-            self.skip_to_statement_end();
+            self.skip_to_statement_end_for_module_loading();
             return;
         };
 
@@ -102,7 +102,7 @@ impl<'a> ExportScanner<'a> {
             // the scanner. Nested findings discovered during the skip keep their own spans.
             let diagnostic_end = self.diagnostics.len();
             let runtime_import_end = self.runtime_imports.len();
-            self.skip_to_statement_end();
+            self.skip_to_statement_end_for_module_loading();
             let statement_span = JsSourceSpan::range(import_start_byte, self.pos);
 
             for diagnostic in &mut self.diagnostics[diagnostic_start..diagnostic_end] {
@@ -124,7 +124,7 @@ impl<'a> ExportScanner<'a> {
             JsDiagnosticKind::ArbitraryImport,
             JsSourceSpan::range(import_start_byte, import_clause_start),
         );
-        self.skip_to_statement_end();
+        self.skip_to_statement_end_for_module_loading();
     }
 
     fn parse_import_clause(&mut self) -> ImportClause {
@@ -311,7 +311,7 @@ impl<'a> ExportScanner<'a> {
             JsDiagnosticKind::CommonJsRequire,
             JsSourceSpan::range(require_start_byte, self.pos),
         );
-        self.skip_to_statement_end();
+        self.skip_to_statement_end_for_module_loading();
     }
 }
 

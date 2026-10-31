@@ -53,6 +53,7 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
+    reject_reserved_word_token,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -381,7 +382,6 @@ pub(crate) fn parse_loop_header_cursor(
     token_stream
         .set_position(header_start)
         .map_err(ExpressionParseError::from)?;
-    reject_removed_in_loop_syntax_cursor(token_stream, header_start, header_end, string_table)?;
 
     let loop_header = {
         let mut parser = LoopHeaderParser {
@@ -611,36 +611,6 @@ fn parse_non_range_loop_header_cursor(
     })
 }
 
-fn reject_removed_in_loop_syntax_cursor(
-    token_stream: &AstCursor,
-    header_start: usize,
-    header_end: usize,
-    string_table: &mut StringTable,
-) -> LoopHeaderResult<()> {
-    if header_end.saturating_sub(header_start) < 3 {
-        return Ok(());
-    }
-
-    if token_tag_at(token_stream, header_start) != Some(TokenTag::SYMBOL)
-        || token_tag_at(token_stream, header_start + 1) != Some(TokenTag::SYMBOL)
-    {
-        return Ok(());
-    }
-    let Some(second_symbol) = token_string_id_at(token_stream, header_start + 1, string_table)?
-    else {
-        return Ok(());
-    };
-
-    if string_table.resolve(second_symbol) != "in" {
-        return Ok(());
-    }
-
-    loop_header_error(
-        InvalidLoopHeaderReason::RemovedInSyntax,
-        token_stream.span_at(header_start + 1),
-    )
-}
-
 fn parse_pipe_binding_suffix_cursor(
     token_stream: &AstCursor,
     header_start: usize,
@@ -729,6 +699,16 @@ fn parse_binding_cursor(
             );
         }
         if token_tag != TokenTag::SYMBOL {
+            // A reserved word in a binding slot is an authored name attempt. Name the collision
+            // instead of reporting that the slot is not a symbol.
+            if let Some(diagnostic) = reject_reserved_word_token(
+                token_tag,
+                token_stream.span_at(token_index),
+                string_table,
+            ) {
+                return Err(diagnostic.into());
+            }
+
             return loop_header_error(
                 InvalidLoopHeaderReason::BindingMustBeSymbol,
                 token_stream.span_at(token_index),
@@ -1931,8 +1911,8 @@ fn declare_loop_bindings(
 
 /// Apply the ordinary loop-binding name rules to one authored binding name.
 ///
-/// WHAT: rejects reserved/removed keyword shadowing and names already visible in the loop's
-///       enclosing scopes, and emits the ordinary value-like naming warning.
+/// WHAT: applies keyword-shadow rejection, visible-name redeclaration rejection and the
+///       value-like naming warning to one loop binding name.
 /// WHY: a concrete loop binding and a retained pending counter are the same authored name in the
 ///      same frame, so both declaration paths must enforce exactly these rules.
 fn validate_loop_binding_name(
@@ -1941,14 +1921,11 @@ fn validate_loop_binding_name(
 ) -> LoopHeaderResult<()> {
     ensure_not_keyword_shadow_identifier(binding_name.id, binding_name.span, parser.string_table)?;
 
-    if parser
-        .scope_context
-        .has_visible_declaration(&binding_name.id)
-    {
-        return loop_header_error(
-            InvalidLoopHeaderReason::BindingAlreadyDeclared,
-            binding_name.span,
-        );
+    if let Some(existing) = parser.scope_context.get_reference(&binding_name.id) {
+        return Err(parser
+            .scope_context
+            .duplicate_declaration(binding_name.id, binding_name.span, existing.binding_span())
+            .into());
     }
 
     if let Some(diagnostic) = parser.scope_context.check_body_binding_visibility(

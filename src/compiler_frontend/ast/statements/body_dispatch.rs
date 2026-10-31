@@ -28,7 +28,8 @@ use crate::compiler_frontend::ast::statements::diagnostics::{
 };
 use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
-    current_line_contains_top_level_fat_arrow, current_token_starts_match_arm_header,
+    current_line_contains_top_level_fat_arrow, current_token_starts_colon_separated_arm_header,
+    current_token_starts_match_arm_header,
 };
 use crate::compiler_frontend::ast::statements::multi_bind::{
     MultiBindStatement, parse_multi_bind_statement,
@@ -54,6 +55,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidStandaloneStatementReason, ReservedNameOwner,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::identifier_policy;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
@@ -65,7 +67,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 ///
 /// The module emitter is the reporting boundary: it renders diagnostics and forwards
 /// `InfrastructureFailure` values unchanged. Nested statement parsers therefore must not collapse this
-/// result back into a diagnostic when a loop header meets a stream without canonical provenance.
+/// result back into a diagnostic when a nested header reads a stream without canonical provenance.
 type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
 
 /// One parsed statement body before its numeric-dependent positions resolve.
@@ -114,6 +116,58 @@ fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError
 
 fn reserved_keyword_as_name_error(keyword: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
     names_declarations::reserved_name_collision(keyword, ReservedNameOwner::Keyword, span)
+}
+
+/// Returns the reserved-name diagnostic when an unmatched keyword writes a binding.
+///
+/// WHAT: accepts a keyword or word-operator token followed by an assignment operator, a
+///       type-shaped token, a comma (first multi-bind target), or a symbol, with an assignment
+///       later on the same logical line.
+/// WHY: `by = 1`, `by I32 = 1` and `by, bx = pair()` are name attempts, so the reserved-word
+///      diagnostic explains the authored mistake. Other unmatched keyword forms keep their
+///      ordinary unexpected-token path.
+fn keyword_binding_name_error(
+    token_stream: &AstCursor,
+    string_table: &mut StringTable,
+) -> Option<DiagnosticDraft> {
+    let next = token_stream.peek_next_tag()?;
+    let name_shape = next.is_assignment_operator()
+        || next.is_builtin_scalar_type_name()
+        || matches!(
+            next,
+            TokenTag::SYMBOL | TokenTag::DATATYPE_NONE | TokenTag::OPEN_CURLY | TokenTag::COMMA
+        );
+    if !name_shape || !logical_line_has_assignment(token_stream) {
+        return None;
+    }
+
+    identifier_policy::reject_reserved_word_token(
+        token_stream.current_tag(),
+        Some(token_stream.current_span()),
+        string_table,
+    )
+}
+
+/// True when the current logical line contains a top-level assignment operator.
+///
+/// A binding writes `=` after its name, and a typed declaration writes it after the type. The scan
+/// stops at the line boundary so a keyword in a call or operator expression stays unexpected-token
+/// syntax rather than becoming a reserved-name report.
+fn logical_line_has_assignment(token_stream: &AstCursor) -> bool {
+    let mut depth = NestingDepth::default();
+    let mut index = token_stream.position();
+    while let Some(token) = token_stream.token_ref_at(index) {
+        let tag = token.tag();
+        if matches!(tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF) {
+            break;
+        }
+        if depth.is_top_level() && tag.is_assignment_operator() {
+            return true;
+        }
+        depth.step_tag(tag);
+        index += 1;
+    }
+    false
 }
 
 /// Produce a diagnostic for a deferred block keyword (`checked`, `async`).
@@ -217,6 +271,13 @@ pub(crate) fn parse_function_body_statements(
         if context.kind == ContextKind::MatchArm {
             if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
                 debug_assert_eq!(candidate.start_index, token_stream.position());
+                break;
+            }
+
+            // A `name:` header is either a declared region or an arm that used the wrong
+            // separator. This scan cannot tell them apart, and a match body accepts `=>` only,
+            // so stop here and let the match parser name the missing arm separator.
+            if current_token_starts_colon_separated_arm_header(token_stream) {
                 break;
             }
 
@@ -460,13 +521,15 @@ pub(crate) fn parse_function_body_statements(
                 token_stream.advance();
 
                 let Some(active_target) = &context.active_value_target else {
-                    let reason = if matches!(
-                        context.kind,
-                        ContextKind::Loop | ContextKind::CatchHandler | ContextKind::Template
-                    ) {
-                        InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct
-                    } else {
-                        InvalidFallibleHandlingReason::ThenWithNoActiveValueTarget
+                    let reason = match context.kind {
+                        ContextKind::Loop if context.loop_blocks_value_target => {
+                            InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct
+                        }
+                        ContextKind::Loop => InvalidFallibleHandlingReason::ThenInsideLoopBody,
+                        ContextKind::CatchHandler | ContextKind::Template => {
+                            InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct
+                        }
+                        _ => InvalidFallibleHandlingReason::ThenWithNoActiveValueTarget,
                     };
 
                     return Err(statement_dispatch_error(
@@ -640,6 +703,10 @@ pub(crate) fn parse_function_body_statements(
 
             // Unrecognized tokens
             _ => {
+                if let Some(diagnostic) = keyword_binding_name_error(token_stream, string_table) {
+                    return Err(statement_dispatch_error(diagnostic));
+                }
+
                 if let Some(diagnostic) =
                     check_statement_common_mistake(token_stream.current_tag(), token_stream)
                 {

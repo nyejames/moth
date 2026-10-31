@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0054"]
-message_contains = ["more positional arguments than expected"]
+message_contains = ["has 3 positional arguments, but accepts 2"]

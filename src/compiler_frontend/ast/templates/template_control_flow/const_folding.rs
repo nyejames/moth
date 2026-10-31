@@ -5,7 +5,7 @@
 //!       that template folding substitutes into body expressions.
 //!
 //! WHY: const-loop header and binding mechanics have a focused owner, leaving
-//! `template_folding.rs` responsible for render-plan emission orchestration.
+//! `template_folding.rs` responsible for fold orchestration and final value-boundary policy.
 
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,

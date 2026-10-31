@@ -1,3 +1,0 @@
--- Prove F64() constructor-style conversion is rejected with removed-constructor diagnostic.
-
-value = F64("3.14")

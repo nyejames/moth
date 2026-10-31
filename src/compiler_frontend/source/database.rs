@@ -777,7 +777,12 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<SourceId, SourceDatabaseError> {
-        let logical = logical_source_path(&canonical_path, entry_file_path, project_path_resolver)?;
+        let logical = logical_source_path(
+            &canonical_path,
+            entry_file_path,
+            project_path_resolver,
+            kind,
+        )?;
         let path_id = self
             .path_interner
             .try_intern_filesystem_path(&logical.path, string_table)
@@ -1613,7 +1618,7 @@ fn logical_rows_for_registration_index(
     let rows_iter = registration_index.rows();
     let mut rows = Vec::with_capacity(rows_iter.len());
     for (canonical, kind) in rows_iter {
-        let logical = logical_source_path(canonical, entry_file_path, project_path_resolver)?;
+        let logical = logical_source_path(canonical, entry_file_path, project_path_resolver, kind)?;
         rows.push((canonical.to_path_buf(), kind, logical));
     }
 
@@ -1625,8 +1630,12 @@ fn logical_source_path(
     canonical_file: &Path,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
+    kind: SourceKind,
 ) -> Result<LogicalSourcePath, InfrastructureFailure> {
     let logical = match project_path_resolver {
+        Some(resolver) if kind == SourceKind::ProviderOwned => {
+            resolver.provider_logical_path_for_canonical_file(canonical_file)?
+        }
         Some(resolver) => resolver.logical_path_for_canonical_file(canonical_file)?,
         None => {
             let fallback_root = entry_file_path

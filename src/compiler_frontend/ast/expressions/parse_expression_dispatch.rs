@@ -66,12 +66,14 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
     InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason,
+    InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
+use crate::compiler_frontend::syntax_errors::expression_position::{
+    c_family_operator_mistake_at, check_expression_common_mistake,
+};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
@@ -122,6 +124,8 @@ pub(super) struct ExpressionDispatchState<'a> {
     pub(super) expression_builder: &'a mut AstExpressionBuilder,
     pub(super) const_values: &'a mut ConstValueStore,
     pub(super) route_argument_context: Option<RouteArgumentContext>,
+    /// Semantic context for a final-result type mismatch at this expression boundary.
+    pub(super) mismatch_context: TypeMismatchContext,
 }
 
 impl ExpressionDispatchState<'_> {
@@ -269,20 +273,14 @@ fn push_expression_after_suffixes(
     // ----------------------------
     //  Common mistake: `!=`
     // ----------------------------
-    // Detect `!=` (Bang + Assign) before treating `!` as a result-handling suffix.
+    // Detect `!=` (Bang + Assign) before treating `!` as a result-handling suffix. The recogniser
+    // also proves both tokens are adjacent in the source, so a spaced `! =` falls through to the
+    // suffix rules below.
     if token_stream.position() < token_stream.length()
         && token_stream.current_tag() == TokenTag::BANG
-        && token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
+        && let Some(error) = c_family_operator_mistake_at(token_stream, token_stream.position())
     {
-        if let Some(error) = check_expression_common_mistake(token_stream, false) {
-            return Err(error.into());
-        }
-        // Invariant: the condition above guarantees Bang+Assign, which
-        // check_expression_common_mistake always matches. Reaching here is a compiler bug.
-        crate::compiler_bug!(
-            CompilerStage::AstConstruction,
-            "Bang+Assign pattern did not produce expected error",
-        );
+        return Err(error.into());
     }
 
     // ----------------------------
@@ -653,7 +651,7 @@ fn dispatch_non_group_expression_token(
                 let cast_name = builtin_scalar_type_name_for_tag(token)
                     .map(|spelling| string_table.intern(spelling));
                 return Err(calls_data::invalid_builtin_call(
-                    InvalidBuiltinCallReason::ScalarConstructorRemoved,
+                    InvalidBuiltinCallReason::ScalarTypeCalledAsFunction,
                     cast_name,
                     Some(token_stream.current_span()),
                 )
@@ -678,6 +676,7 @@ fn dispatch_non_group_expression_token(
                 expression_builder,
                 const_values,
                 state.expected_type,
+                state.mismatch_context,
                 state.value_mode,
                 state.retain_pending_numeric_fragment,
                 state.expression,
@@ -1085,6 +1084,16 @@ fn dispatch_parenthesized_expression(
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     let parenthesized_kind = classify_parenthesized_expression(token_stream);
+    if let ParenthesizedExpressionKind::DoubledEquals { operator_start } = parenthesized_kind {
+        let diagnostic =
+            c_family_operator_mistake_at(token_stream, operator_start).unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "doubled-equals classification did not produce its operator diagnostic",
+                )
+            });
+        return Err(diagnostic.into());
+    }
     if !matches!(parenthesized_kind, ParenthesizedExpressionKind::Group) {
         return dispatch_parenthesized_record(
             token_stream,
@@ -1281,6 +1290,7 @@ pub(super) fn close_innermost_group(
         &mut *state.expression_builder,
         &mut *state.const_values,
         &mut group_expected_type,
+        state.mismatch_context,
         state.value_mode,
         string_table,
         path_fork,
@@ -1557,6 +1567,7 @@ fn dispatch_is_token(
                 &mut *state.expression_builder,
                 &mut *state.const_values,
                 state.expected_type,
+                state.mismatch_context,
                 state.value_mode,
                 string_table,
                 path_fork,

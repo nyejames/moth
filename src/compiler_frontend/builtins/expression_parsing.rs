@@ -38,6 +38,7 @@ pub(crate) fn parse_curly_literal_expression(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     expected_type: &ExpectedType,
+    mismatch_context: TypeMismatchContext,
     value_mode: &ValueMode,
     retain_pending_numeric_fragment: bool,
     expression: &mut Vec<ExpressionRpnItem>,
@@ -64,7 +65,7 @@ pub(crate) fn parse_curly_literal_expression(
                 return Err(types_borrows_targets::type_mismatch(
                     *type_id,
                     type_environment.builtins().string,
-                    TypeMismatchContext::General,
+                    mismatch_context,
                     Some(token_stream.current_span()),
                 )
                 .into());
@@ -83,6 +84,7 @@ pub(crate) fn parse_curly_literal_expression(
         value_mode,
         string_table,
         path_fork,
+        mismatch_context,
         retain_pending_numeric_fragment,
     )? {
         CurlyLiteral::Ready(literal) => expression.push(ExpressionRpnItem::Operand(literal.id())),

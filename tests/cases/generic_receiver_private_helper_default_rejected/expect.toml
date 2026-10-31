@@ -2,6 +2,10 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0022"]
+message_contains = [
+    "`$insert(...)` is a template contribution helper, not a standalone value.",
+    "Keep it inside a template application that receives the contribution.",
+]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"

@@ -10,14 +10,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
     self, INVALID_MULTI_BIND, InvalidMultiBindCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
-    NON_EXHAUSTIVE_MATCH, UNREACHABLE_MATCH_ARM,
+    COMPILE_TIME_EVALUATION_ERROR, NON_EXHAUSTIVE_MATCH, UNREACHABLE_MATCH_ARM,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
-    self, INVALID_EXTERNAL_MODULE, InvalidExternalModuleCode, InvalidExternalModuleView,
-    MISSING_IMPORT_TARGET, UNUSED_IMPORT,
+    self, ExternalJsBindingShape, INVALID_EXTERNAL_MODULE, InvalidExternalModuleCode,
+    InvalidExternalModuleView, MISSING_IMPORT_TARGET, MISSING_PACKAGE_SYMBOL, UNUSED_IMPORT,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    self, InvalidDeclarationView, UnknownValueNameView,
+    self, InvalidDeclarationView, UNKNOWN_NAMESPACE_MEMBER, UNKNOWN_TYPE_NAME, UnknownValueNameView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     self, InvalidConfigView,
@@ -41,10 +41,11 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terminal, terse,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticSeverity, InvalidCollectionTypeReason, InvalidConfigReason,
-    InvalidDeclarationReason, InvalidExternalModuleReason, InvalidMapTypeReason,
-    InvalidMultiBindReason, InvalidOutputFolderReason, InvalidTypeAnnotationReason,
-    NonExhaustiveMatchReason, TypeAnnotationContext, UnsupportedBackendFeatureReason,
+    DiagnosticBag, DiagnosticSeverity, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
+    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
+    InvalidExternalModuleReason, InvalidMapTypeReason, InvalidMultiBindReason,
+    InvalidOutputFolderReason, InvalidTypeAnnotationReason, NonExhaustiveMatchReason,
+    TypeAnnotationContext, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -61,12 +62,22 @@ fn family_layouts_declare_their_word_counts() {
     assert_eq!(USE_OF_UNINITIALIZED_LOCAL.word_count(), 1);
     assert_eq!(COMPILER_CAPACITY_EXCEEDED.word_count(), 1);
     assert_eq!(UNREACHABLE_MATCH_ARM.word_count(), 0);
+    assert_eq!(COMPILE_TIME_EVALUATION_ERROR.word_count(), 3);
 }
 
 #[test]
 fn label_carrying_families_declare_their_extra_data_kind() {
     assert!(matches!(
         NON_EXHAUSTIVE_MATCH.extra,
+        ExtraDataKind::StringIds
+    ));
+    assert!(matches!(UNKNOWN_TYPE_NAME.extra, ExtraDataKind::StringIds));
+    assert!(matches!(
+        UNKNOWN_NAMESPACE_MEMBER.extra,
+        ExtraDataKind::StringIds
+    ));
+    assert!(matches!(
+        MISSING_PACKAGE_SYMBOL.extra,
         ExtraDataKind::StringIds
     ));
     assert!(matches!(UNREACHABLE_MATCH_ARM.extra, ExtraDataKind::None));
@@ -207,36 +218,72 @@ fn multi_bind_reason_keys_remain_stable() {
 #[test]
 fn invalid_external_module_reason_codec_and_key_are_stable() {
     let detail = StringId::from_index(7);
+    let js_name = StringId::from_index(8);
     let cases = [
         (
             InvalidExternalModuleReason::ReceiverMethod { moth_name: detail },
-            Some(detail),
+            vec![detail],
+            None,
         ),
         (
             InvalidExternalModuleReason::ParserDiagnostic {
                 parser_detail: detail,
             },
-            Some(detail),
+            vec![detail],
+            None,
         ),
         (
             InvalidExternalModuleReason::NonUtf8Source {
                 utf8_detail: detail,
             },
-            Some(detail),
+            vec![detail],
+            None,
         ),
         (
             InvalidExternalModuleReason::PathContainsPackageSeparator,
+            Vec::new(),
             None,
+        ),
+        (
+            InvalidExternalModuleReason::MissingExportKeyword {
+                directive: ExternalJsAnnotationDirective::Sig,
+                declaration: ExternalJsDeclarationKind::Function,
+                moth_name: detail,
+                js_name,
+            },
+            vec![detail, js_name],
+            Some(ExternalJsBindingShape::SigFunction),
+        ),
+        (
+            InvalidExternalModuleReason::MissingExportKeyword {
+                directive: ExternalJsAnnotationDirective::Sig,
+                declaration: ExternalJsDeclarationKind::BlockArrow,
+                moth_name: detail,
+                js_name,
+            },
+            vec![detail, js_name],
+            Some(ExternalJsBindingShape::SigConstant),
+        ),
+        (
+            InvalidExternalModuleReason::OrphanedAnnotation {
+                directive: ExternalJsAnnotationDirective::Const,
+                moth_name: detail,
+            },
+            vec![detail],
+            Some(ExternalJsBindingShape::ConstOrphaned),
         ),
     ];
 
     assert_eq!(INVALID_EXTERNAL_MODULE.word_count(), 3);
-    for (reason, expected_detail) in cases {
-        let code = InvalidExternalModuleCode::of(&reason);
-        let (split_code, detail) = InvalidExternalModuleCode::split(&reason);
-        assert_eq!(split_code, code);
-        assert_eq!(detail, expected_detail);
-        assert_eq!(code.to_reason(detail), Some(reason));
+    for (reason, expected_strings, expected_binding) in cases {
+        let columns = InvalidExternalModuleCode::split(&reason);
+        assert_eq!(columns.code, InvalidExternalModuleCode::of(&reason));
+        assert_eq!(columns.strings, expected_strings);
+        assert_eq!(columns.binding, expected_binding);
+        assert_eq!(
+            columns.code.to_reason(columns.binding, &columns.strings),
+            Some(reason)
+        );
     }
 
     let expected_key = "invalid_external_module.path_contains_package_separator";
@@ -245,18 +292,25 @@ fn invalid_external_module_reason_codec_and_key_are_stable() {
     assert_eq!(path_reason.stable_reason_key(), expected_key);
     assert_eq!(path_code.stable_reason_key(), expected_key);
     assert_eq!(
-        InvalidExternalModuleCode::ReceiverMethod.to_reason(None),
+        InvalidExternalModuleCode::ReceiverMethod.to_reason(None, &[]),
         None
     );
     assert_eq!(
-        InvalidExternalModuleCode::PathContainsPackageSeparator.to_reason(Some(detail)),
+        InvalidExternalModuleCode::PathContainsPackageSeparator.to_reason(None, &[detail]),
+        None
+    );
+    assert_eq!(
+        InvalidExternalModuleCode::MissingExportKeyword.to_reason(
+            Some(ExternalJsBindingShape::SigOrphaned),
+            &[detail, js_name],
+        ),
         None
     );
     let compact = compact_bag_for_test(
         DiagnosticBag::from(imports::invalid_external_module(
             PathId::ROOT,
             path_reason,
-            None,
+            imports::InvalidExternalModuleSites::default(),
         )),
         None,
     );
@@ -269,14 +323,14 @@ fn invalid_external_module_reason_codec_and_key_are_stable() {
         .family_view::<InvalidExternalModuleView>()
         .expect("external-module reason facts remain typed");
     assert_eq!(facts.reason_code, path_code);
-    assert_eq!(facts.reason_detail, None);
+    assert_eq!(facts.binding, None);
 }
 
 #[test]
-fn missing_option_patterns_reason_key_remains_stable() {
+fn missing_optional_patterns_reason_key_remains_stable() {
     assert_eq!(
-        NonExhaustiveMatchReason::MissingOptionPatterns.stable_reason_key(),
-        "non_exhaustive_match.missing_option_patterns"
+        NonExhaustiveMatchReason::MissingOptionalPatterns.stable_reason_key(),
+        "non_exhaustive_match.missing_optional_patterns"
     );
 }
 

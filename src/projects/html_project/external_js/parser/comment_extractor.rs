@@ -1,7 +1,7 @@
 //! Extracts Moth annotations from JSDoc-style `/** ... */` comment blocks.
 //!
-//! WHAT: scans raw JS source text, locates multi-line comment blocks that start with
-//!       `/**`, and extracts lines that begin with `@moth.`.
+//! WHAT: scans raw JS source text, locates `/** ... */` comment blocks and extracts
+//!       lines that begin with `@moth.`.
 //! WHY: `@moth.opaque`, `@moth.sig` and `@moth.const` annotations live inside these blocks.
 //!      Keeping extraction separate from signature parsing makes each module easier
 //!      to test and reason about.
@@ -20,7 +20,10 @@ use moth_lexical::identifier::is_identifier;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedAnnotation {
     pub kind: AnnotationKind,
-    pub span: JsSourceSpan,
+    /// The whole doc-comment block, which bounds where the declaration may start.
+    pub block_span: JsSourceSpan,
+    /// The authored `@moth.*` text, which diagnostics point at.
+    pub directive_span: JsSourceSpan,
 }
 
 /// Classification of extracted annotations.
@@ -111,26 +114,57 @@ impl<'a> CommentScanner<'a> {
         }
 
         let block_span = JsSourceSpan::range(block_start_byte, self.cursor.pos);
-        self.parse_block_content(&self.source[content_start..content_end], block_span);
+        self.parse_block_content(
+            &self.source[content_start..content_end],
+            content_start,
+            block_span,
+        );
     }
 
-    fn parse_block_content(&mut self, content: &str, block_span: JsSourceSpan) {
-        // Normalize line breaks and strip leading `*` from each line
-        for raw_line in content.lines() {
+    fn parse_block_content(
+        &mut self,
+        content: &str,
+        content_start: usize,
+        block_span: JsSourceSpan,
+    ) {
+        let mut line_offset = 0;
+        // Normalize line breaks and strip leading `*` from each line. Offsets stay in bytes so
+        // the directive span can point into the authored source without rescanning it later.
+        for raw_line_with_newline in content.split_inclusive('\n') {
+            let raw_line_start = line_offset;
+            line_offset += raw_line_with_newline.len();
+            let raw_line = raw_line_with_newline
+                .strip_suffix('\n')
+                .unwrap_or(raw_line_with_newline);
+            let raw_line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+
             let trimmed = raw_line.trim_start();
-            let after_star = if let Some(stripped) = trimmed.strip_prefix('*') {
-                stripped.trim_start()
+            let leading = raw_line.len() - trimmed.len();
+            let (after_star, directive_column) = if let Some(stripped) = trimmed.strip_prefix('*') {
+                let after_star = stripped.trim_start();
+                (after_star, leading + 1 + stripped.len() - after_star.len())
             } else {
-                trimmed
+                (trimmed, leading)
             };
 
             if after_star.starts_with("@moth.") {
-                self.parse_annotation_line(after_star, block_span.clone());
+                let directive_start = content_start + raw_line_start + directive_column;
+                let directive_end = directive_start + after_star.trim_end().len();
+                self.parse_annotation_line(
+                    after_star,
+                    block_span.clone(),
+                    JsSourceSpan::range(directive_start, directive_end),
+                );
             }
         }
     }
 
-    fn parse_annotation_line(&mut self, line: &str, block_span: JsSourceSpan) {
+    fn parse_annotation_line(
+        &mut self,
+        line: &str,
+        block_span: JsSourceSpan,
+        directive_span: JsSourceSpan,
+    ) {
         let mut tokens = line.split_whitespace();
         let directive = tokens.next().unwrap_or("");
 
@@ -140,7 +174,7 @@ impl<'a> CommentScanner<'a> {
                     if tokens.next() == Some("of") {
                         self.diagnostics.push(JsParserDiagnostic {
                             message: "External package types cannot be generic. Expose concrete opaque external types.".to_string(),
-                            span: block_span,
+                            span: directive_span.clone(),
                             kind: JsDiagnosticKind::GenericExternalType,
                         });
                         return;
@@ -150,7 +184,8 @@ impl<'a> CommentScanner<'a> {
                         kind: AnnotationKind::Opaque {
                             type_name: type_name.to_string(),
                         },
-                        span: block_span,
+                        block_span,
+                        directive_span,
                     });
                 }
             }
@@ -164,14 +199,15 @@ impl<'a> CommentScanner<'a> {
                             moth_name: moth_name.to_string(),
                             signature_text: signature_text.to_string(),
                         },
-                        span: block_span.clone(),
+                        block_span,
+                        directive_span,
                     });
                 } else {
                     self.diagnostics.push(JsParserDiagnostic {
                         message:
                             "`@moth.sig` must be followed by a Moth name and a signature body."
                                 .to_string(),
-                        span: block_span,
+                        span: directive_span,
                         kind: JsDiagnosticKind::UnsupportedTypeSyntax,
                     });
                 }
@@ -188,13 +224,14 @@ impl<'a> CommentScanner<'a> {
                             moth_name: moth_name.to_string(),
                             type_name: type_name.to_string(),
                         },
-                        span: block_span,
+                        block_span,
+                        directive_span,
                     });
                 } else {
                     self.diagnostics.push(JsParserDiagnostic {
                         message: "`@moth.const` requires one flat Moth name followed by `U32`."
                             .to_string(),
-                        span: block_span,
+                        span: directive_span,
                         kind: JsDiagnosticKind::InvalidConstant,
                     });
                 }
@@ -203,7 +240,7 @@ impl<'a> CommentScanner<'a> {
                 self.diagnostics.push(JsParserDiagnostic {
                     message: "`@moth.package` is not supported in Moth JS module comments."
                         .to_string(),
-                    span: block_span,
+                    span: directive_span,
                     kind: JsDiagnosticKind::UnsupportedPackageTag,
                 });
             }
@@ -212,7 +249,7 @@ impl<'a> CommentScanner<'a> {
                     message: format!(
                         "Unknown Moth JS annotation `{unknown}`. Supported annotations are `@moth.opaque`, `@moth.sig` and `@moth.const`."
                     ),
-                    span: block_span,
+                    span: directive_span,
                     kind: JsDiagnosticKind::UnknownMothDirective,
                 });
             }

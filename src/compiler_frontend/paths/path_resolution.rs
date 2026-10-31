@@ -186,6 +186,19 @@ impl ProjectPathResolver {
         self.module_roots.module_root_for_file(file)
     }
 
+    /// WHAT: derive the logical source path for a provider-owned physical file.
+    /// WHY: provider files are not modules under the entry root. Keeping their project-relative
+    ///      spelling in diagnostics points at the authored file the provider read.
+    pub(crate) fn provider_logical_path_for_canonical_file(
+        &self,
+        canonical_file: &Path,
+    ) -> Result<PathBuf, InfrastructureFailure> {
+        if let Ok(relative_to_project_root) = canonical_file.strip_prefix(&self.project_root) {
+            return Ok(relative_to_project_root.to_path_buf());
+        }
+        self.logical_path_for_canonical_file(canonical_file)
+    }
+
     /// WHAT: derive a portable logical source path from a canonical filesystem file path.
     /// WHY: frontend identity should preserve dependency semantics without leaking machine-local paths.
     ///

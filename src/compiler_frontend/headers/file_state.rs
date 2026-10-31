@@ -23,6 +23,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
 use crate::projects::settings::{
     MINIMUM_LIKELY_DECLARATIONS, TOKEN_TO_DECLARATION_RATIO, TOKEN_TO_HEADER_RATIO,
 };
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -35,7 +36,17 @@ pub(super) struct HeaderFileParseState {
     pub(super) warnings: DiagnosticBag,
     pub(super) headers: Vec<Header>,
     pub(super) encountered_symbols: HashMap<StringId, SourceSpan>,
+    /// Statement heads already seen in the implicit root `start` body.
+    ///
+    /// WHAT: every top-level executable statement head keeps its token run under one header.
+    /// WHY: repeated statements with the same head must not emit a second start header.
     pub(super) start_body_symbols: HashSet<StringId>,
+    /// Names and authored spans of bindings introduced by the implicit root `start` body.
+    ///
+    /// WHAT: only a top-level runtime assignment records an entry here.
+    /// WHY: constant contexts need to explain that such a name exists at runtime only, so the
+    ///      declaration span travels with the name into file visibility.
+    pub(super) start_body_binding_spans: FxHashMap<StringId, SourceSpan>,
     /// Source-local token runs retained for the active root's implicit `start` body.
     pub(super) start_body_ranges: Vec<TokenRange>,
     has_non_trivial_start_body: bool,
@@ -71,6 +82,7 @@ impl HeaderFileParseState {
                 MINIMUM_LIKELY_DECLARATIONS + (token_count / TOKEN_TO_DECLARATION_RATIO),
             ),
             start_body_symbols: HashSet::new(),
+            start_body_binding_spans: FxHashMap::default(),
             start_body_ranges: Vec::new(),
             has_non_trivial_start_body: false,
             first_executable_start_body_span: None,
@@ -170,8 +182,17 @@ impl HeaderFileParseState {
         self.first_executable_start_body_span
     }
 
+    /// Records one top-level executable statement head.
     pub(super) fn register_start_body_symbol(&mut self, name_id: StringId) {
         self.start_body_symbols.insert(name_id);
+    }
+
+    /// Records one top-level runtime binding name and its authored declaration span.
+    ///
+    /// The first authored binding keeps its span so a constant-context diagnostic labels the
+    /// declaration the reader originally wrote.
+    pub(super) fn register_start_body_binding(&mut self, name_id: StringId, span: SourceSpan) {
+        self.start_body_binding_spans.entry(name_id).or_insert(span);
     }
 
     pub(super) fn register_header(&mut self, header: Header) {
@@ -215,6 +236,7 @@ impl HeaderFileParseState {
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
+            start_body_binding_spans: self.start_body_binding_spans,
             warnings: self.warnings,
         }
     }
@@ -268,6 +290,7 @@ impl HeaderFileParseState {
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
             has_non_trivial_root_body,
+            start_body_binding_spans: self.start_body_binding_spans,
             warnings: self.warnings,
         })
     }

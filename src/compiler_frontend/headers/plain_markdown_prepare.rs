@@ -74,6 +74,7 @@ pub(crate) fn prepare_plain_markdown_file(
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
+        start_body_binding_spans: rustc_hash::FxHashMap::default(),
         warnings: DiagnosticBag::new(),
     })
 }

@@ -1,0 +1,8 @@
+-- A live mutable alias blocks a whole-binding write to its referent.
+data ~= 42
+first ~= data
+
+-- INVALID: first still observes the same binding cell.
+~data = 8
+
+io.line([:after first=[first]])

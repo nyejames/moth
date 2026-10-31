@@ -204,16 +204,36 @@ fn frontend_built_in_head_compatibility_profiles_match_contract() {
         slot.head_compatibility.blocks_future_tags,
         TemplateHeadTag::MEANINGFUL_ITEM
     );
+    assert_eq!(
+        slot.head_compatibility.conflict_reason,
+        Some(TemplateHeadConflictReason::SlotDirectiveMustBeExclusive)
+    );
 
     let insert = built_ins
         .find("insert")
         .expect("missing '$insert' directive");
     assert_eq!(
         insert.head_compatibility,
-        TemplateHeadCompatibility::blocks_same(TemplateHeadTag::INSERT_DIRECTIVE)
+        TemplateHeadCompatibility::blocks_same(
+            TemplateHeadTag::INSERT_DIRECTIVE,
+            TemplateHeadConflictReason::DuplicateExclusiveDirective,
+        )
     );
 
-    for comment_directive in ["note", "todo", "doc"] {
+    for (comment_directive, conflict_reason) in [
+        (
+            "note",
+            TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
+        ),
+        (
+            "todo",
+            TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
+        ),
+        (
+            "doc",
+            TemplateHeadConflictReason::DocumentationDirectiveMustBeOnlyMeaningfulItem,
+        ),
+    ] {
         let directive = built_ins
             .find(comment_directive)
             .unwrap_or_else(|| panic!("missing '${comment_directive}' directive"));
@@ -228,6 +248,10 @@ fn frontend_built_in_head_compatibility_profiles_match_contract() {
         assert_eq!(
             directive.head_compatibility.blocks_future_tags,
             TemplateHeadTag::MEANINGFUL_ITEM
+        );
+        assert_eq!(
+            directive.head_compatibility.conflict_reason,
+            Some(conflict_reason)
         );
     }
 
@@ -244,6 +268,45 @@ fn frontend_built_in_head_compatibility_profiles_match_contract() {
         assert_eq!(
             directive.head_compatibility.blocks_future_tags,
             TemplateHeadTag::FORMATTER_DIRECTIVE
+        );
+        assert_eq!(
+            directive.head_compatibility.conflict_reason,
+            Some(TemplateHeadConflictReason::MultipleFormatters)
+        );
+    }
+}
+
+#[test]
+fn builder_directive_that_can_reject_another_item_must_declare_conflict_reason() {
+    let rejecting_compatibilities = [
+        TemplateHeadCompatibility {
+            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::FORMATTER_DIRECTIVE,
+            required_absent_tags: TemplateHeadTag::empty(),
+            blocks_future_tags: TemplateHeadTag::FORMATTER_DIRECTIVE,
+            conflict_reason: None,
+        },
+        TemplateHeadCompatibility {
+            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM,
+            required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
+            blocks_future_tags: TemplateHeadTag::empty(),
+            conflict_reason: None,
+        },
+    ];
+
+    for compatibility in rejecting_compatibilities {
+        let builder_specs = vec![StyleDirectiveSpec::handler(
+            "brand",
+            TemplateBodyMode::Normal,
+            compatibility,
+            StyleDirectiveHandlerSpec::no_op(),
+        )];
+
+        let error = StyleDirectiveRegistry::merged(&builder_specs)
+            .expect_err("a rejecting builder rule without a conflict reason should fail");
+        assert!(
+            error.message.contains("no conflict reason"),
+            "unexpected error message: {}",
+            error.message
         );
     }
 }

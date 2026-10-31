@@ -12,9 +12,9 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    ABSENT_PLACE_WORD, CharFact, CountFact, FactCapacityError, FactCodec, FactCursor, OptCharFact,
-    OptCountFact, OptPlaceFact, OptStringFact, OptTokenFact, OptTypeFact, OptUnitFact, PathFact,
-    PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode, UnitFact,
+    ABSENT_PLACE_WORD, CharFact, CountFact, CountPair, FactCapacityError, FactCodec, FactCursor,
+    OptCharFact, OptCountFact, OptPlaceFact, OptStringFact, OptTokenFact, OptTypeFact, OptUnitFact,
+    PathFact, PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode, UnitFact,
     type_display_from_word, type_display_word,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
@@ -36,8 +36,11 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, GenericInferenceSubject, HirCapacityResource, TokenTag, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn assignment_reason_codec_rejects_retired_and_unknown_words() {
@@ -137,6 +140,43 @@ fn count_fact_rejects_counts_beyond_u32() {
 }
 
 #[test]
+fn count_pair_round_trips_boundary_u16_counts() {
+    let packed = CountPair {
+        expected: 65534,
+        provided: 65535,
+    }
+    .pack()
+    .expect("65534 and 65535 fit in a CountPair");
+    assert_eq!(
+        CountPair::unpack(packed),
+        CountPair {
+            expected: 65534,
+            provided: 65535,
+        }
+    );
+}
+
+#[test]
+fn count_pair_rejects_u16_overflow_and_absent_sentinel() {
+    assert_eq!(
+        CountPair {
+            expected: 65536,
+            provided: 1,
+        }
+        .pack(),
+        Err(FactCapacityError)
+    );
+    assert_eq!(
+        CountPair {
+            expected: 65535,
+            provided: 65535,
+        }
+        .pack(),
+        Err(FactCapacityError)
+    );
+}
+
+#[test]
 fn place_fact_round_trips_each_place_kind() {
     let mut word = [0u32; 1];
 
@@ -186,8 +226,8 @@ fn type_fact_stores_raw_ids_until_capture_and_reads_display_ids() {
 
 #[test]
 fn unit_fact_round_trips_every_type_mismatch_context() {
-    for code in 1..=17 {
-        let context = TypeMismatchContext::from_code(code).expect("codes 1 to 17 are assigned");
+    for code in 1..=23 {
+        let context = TypeMismatchContext::from_code(code).expect("codes 1 to 23 are assigned");
         assert_eq!(context.code(), code);
         let mut word = [0u32; 1];
         UnitFact::<TypeMismatchContext>::encode(&context, &mut word)
@@ -198,7 +238,7 @@ fn unit_fact_round_trips_every_type_mismatch_context() {
         );
     }
     assert!(TypeMismatchContext::from_code(0).is_none());
-    assert!(TypeMismatchContext::from_code(18).is_none());
+    assert!(TypeMismatchContext::from_code(24).is_none());
 }
 
 #[test]
@@ -222,13 +262,19 @@ fn capacity_resource_fact_round_trips_every_group() {
 #[test]
 fn secondary_label_packs_its_code_and_data_index() {
     let label = SecondaryDiagnosticLabel::pack(None, LabelMessageCode::CONFIG_INPUT_ORIGIN, 9);
-    assert_eq!(label.message_code(), LabelMessageCode::CONFIG_INPUT_ORIGIN);
-    assert_eq!(label.data_index(), Some(9));
+    assert_eq!(
+        label.message.message_code(),
+        LabelMessageCode::CONFIG_INPUT_ORIGIN
+    );
+    assert_eq!(label.message.data_index(), Some(9));
     assert!(label.span().is_none());
 
     let plain = SecondaryDiagnosticLabel::pack(None, LabelMessageCode::PREVIOUS_DECLARATION, 0);
-    assert_eq!(plain.message_code(), LabelMessageCode::PREVIOUS_DECLARATION);
-    assert_eq!(plain.data_index(), None);
+    assert_eq!(
+        plain.message.message_code(),
+        LabelMessageCode::PREVIOUS_DECLARATION
+    );
+    assert_eq!(plain.message.data_index(), None);
 }
 
 #[test]
@@ -268,6 +314,85 @@ fn message_less_labels_encode_to_none_and_keep_their_span() {
 }
 
 #[test]
+fn template_head_conflict_codec_round_trips_every_reason_and_kind() {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::OptTemplateHeadConflictFact;
+    use crate::compiler_frontend::compiler_messages::{
+        StoredTemplateHeadConflict, TemplateHeadConflictOwner, TemplateHeadConflictReason,
+        TemplateHeadItemKind,
+    };
+
+    use TemplateHeadConflictOwner::{EarlierItem, IncomingItem};
+    use TemplateHeadConflictReason::{
+        DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
+        DocumentationDirectiveMustBeOnlyMeaningfulItem, DuplicateExclusiveDirective,
+        MultipleFormatters, SlotDirectiveMustBeExclusive,
+    };
+    use TemplateHeadItemKind::{Directive, Expression};
+
+    let reasons = [
+        MultipleFormatters,
+        DuplicateExclusiveDirective,
+        DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
+        DocumentationDirectiveMustBeOnlyMeaningfulItem,
+        SlotDirectiveMustBeExclusive,
+    ];
+    for reason in reasons {
+        for owner in [EarlierItem, IncomingItem] {
+            for incoming_kind in [Directive, Expression] {
+                for earlier_kind in [Directive, Expression] {
+                    let conflict = StoredTemplateHeadConflict {
+                        reason,
+                        owner,
+                        incoming_kind,
+                        earlier_kind,
+                    };
+                    let mut words = [0];
+                    OptTemplateHeadConflictFact::encode(&Some(conflict), &mut words)
+                        .expect("one conflict word fits");
+                    assert_eq!(
+                        OptTemplateHeadConflictFact::decode(&words),
+                        Some(Some(conflict)),
+                        "{reason:?} {owner:?} {incoming_kind:?} {earlier_kind:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    let mut words = [u32::MAX];
+    OptTemplateHeadConflictFact::encode(&None, &mut words).expect("absence needs no space");
+    assert_eq!(words, [0]);
+    assert_eq!(OptTemplateHeadConflictFact::decode(&words), Some(None));
+}
+
+#[test]
+fn template_head_conflict_codec_rejects_reserved_and_malformed_words() {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::OptTemplateHeadConflictFact;
+
+    // Reason 1, incoming directive, earlier directive.
+    let valid = 1 | (1 << 4) | (1 << 6);
+    assert!(OptTemplateHeadConflictFact::decode(&[valid]).is_some());
+
+    for (word, why) in [
+        (valid | (1 << 8), "a bit above the packed fields"),
+        (valid | (1 << 31), "a high reserved bit"),
+        ((1 << 4) | (1 << 6), "reason zero"),
+        (6 | (1 << 4) | (1 << 6), "an unused reason code"),
+        (7 | (1 << 4) | (1 << 6), "an unused reason code"),
+        (3 << 4 | 1 | (1 << 6), "an unused incoming item kind"),
+        (1 | (1 << 4) | (3 << 6), "an unused earlier item kind"),
+        (1 | (1 << 4), "an absent earlier item kind"),
+        (1 | (1 << 6), "an absent incoming item kind"),
+    ] {
+        assert_eq!(
+            OptTemplateHeadConflictFact::decode(&[word]),
+            None,
+            "{why}: {word:#b}"
+        );
+    }
+}
+
+#[test]
 fn every_label_message_maps_to_its_code() {
     let name = StringId::from_index(1);
     let cases = [
@@ -297,6 +422,14 @@ fn every_label_message_maps_to_its_code() {
         (
             LabelDraftMessage::ReceiverMethodSite,
             LabelMessageCode::RECEIVER_METHOD_SITE,
+        ),
+        (
+            LabelDraftMessage::EarlierTemplateHeadItem,
+            LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
+        ),
+        (
+            LabelDraftMessage::TemplateStartsHere,
+            LabelMessageCode::TEMPLATE_STARTS_HERE,
         ),
         (
             LabelDraftMessage::GenericInstantiationBodySite,
@@ -344,8 +477,20 @@ fn every_label_message_maps_to_its_code() {
             },
             LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
         ),
+        (
+            LabelDraftMessage::ConflictsWithEarlierHeadItem,
+            LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
+        ),
+        (
+            LabelDraftMessage::MissingExportDeclaration,
+            LabelMessageCode::MISSING_EXPORT_DECLARATION,
+        ),
+        (
+            LabelDraftMessage::ExternalImportSite,
+            LabelMessageCode::EXTERNAL_IMPORT_SITE,
+        ),
     ];
-    assert_eq!(cases.len(), 16);
+    assert_eq!(cases.len(), 21);
     for (message, code) in cases {
         let (label, _) = encode(message);
         assert_eq!(label.message, code);
@@ -1037,6 +1182,33 @@ fn opt_unit_fact_round_trips_present_and_absent_values() {
     let absent = None;
     OptUnitFact::<TestCode>::encode(&absent, &mut words).expect("absence fits one fact word");
     assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(absent));
+}
+
+#[test]
+fn opt_unit_fact_round_trips_numeric_scalar_domains() {
+    let mut domains: Vec<NumericScalar> = FixedScalar::ALL
+        .into_iter()
+        .map(NumericScalar::Fixed)
+        .collect();
+    domains.extend([0, 1, NumberScale::MAX].into_iter().map(|scale| {
+        NumericScalar::Number(
+            NumberScale::new(scale).expect("codec test scales are within the supported range"),
+        )
+    }));
+
+    let mut words = [0];
+    for domain in domains {
+        let present = Some(domain);
+        OptUnitFact::<NumericScalar>::encode(&present, &mut words)
+            .expect("a numeric domain fits one fact word");
+        assert_eq!(OptUnitFact::<NumericScalar>::decode(&words), Some(present));
+    }
+
+    let absent = None;
+    OptUnitFact::<NumericScalar>::encode(&absent, &mut words).expect("absence fits one fact word");
+    assert_eq!(OptUnitFact::<NumericScalar>::decode(&words), Some(absent));
+    assert_eq!(NumericScalar::from_code(0), None);
+    assert_eq!(NumericScalar::from_code(270), None);
 }
 
 #[test]

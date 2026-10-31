@@ -1,4 +1,7 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
 
 #[test]
 fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
@@ -48,20 +51,25 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
                 .expect("expected one delimiter diagnostic");
             assert_eq!(
                 diagnostic.descriptor().code,
-                "MOTH-SYNTAX-0017",
+                "MOTH-SYNTAX-0022",
                 "the missing template delimiter keeps its stable diagnostic code"
             );
             let facts = diagnostic
-                .family_view::<token_lexical::UnexpectedEndOfFileView>()
-                .expect("expected a typed EOF diagnostic naming the missing template delimiter");
-            let expected_delimiter = facts
-                .expected_delimiter
-                .expect("the diagnostic should name the expected delimiter");
-            assert_eq!(errors.string_table.resolve(expected_delimiter), "]");
+                .family_view::<InvalidTemplateStructureView>()
+                .expect("expected typed template-structure facts for the missing delimiter");
+            assert_eq!(
+                facts.reason,
+                InvalidTemplateStructureCode::MissingClosingBracket
+            );
             assert_eq!(
                 diagnostic_primary_span(diagnostic),
                 Some(source_span_for(source, "", source.len())),
                 "the missing template delimiter must point at EOF for {file_path}: {source:?}"
+            );
+            assert_eq!(
+                diagnostic_label_span(diagnostic, 0),
+                Some(source_span_for(source, "[", 0)),
+                "the missing delimiter must label the opening bracket for {file_path}: {source:?}"
             );
         }
     }

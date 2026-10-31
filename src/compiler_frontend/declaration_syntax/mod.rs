@@ -132,6 +132,12 @@ impl<'a> DeclarationCursor<'a> {
         Some(token.tag())
     }
 
+    /// Borrow a token at a parser-coordinate offset without materialising its payload.
+    pub(crate) fn token_ref_at_offset(&self, offset: usize) -> Option<TokenRef<'a>> {
+        let index = self.cursor.parser_position().checked_add(offset)?;
+        self.cursor.parser_token_at(index)
+    }
+
     /// Borrow the current canonical token without materialising a wide payload.
     pub(crate) fn current_token_ref(&self) -> Option<TokenRef<'a>> {
         self.cursor.current()

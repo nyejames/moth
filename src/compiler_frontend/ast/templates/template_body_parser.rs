@@ -30,7 +30,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    templates, token_lexical,
+};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::keywords::token_tag_for_source_word;
 use crate::compiler_frontend::source::SourceSpan;
@@ -78,6 +80,7 @@ pub(crate) fn parse_template_body(
         source_path,
         path_fork,
         end_policy,
+        opening_span,
     } = input;
     let outer_end_policy = end_policy;
 
@@ -103,6 +106,7 @@ pub(crate) fn parse_template_body(
         source_path,
         path_fork,
         end_policy: outer_end_policy,
+        opening_span,
     };
 
     match body_mode {
@@ -143,6 +147,8 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
     pub(crate) default_style: Option<Style>,
     pub(crate) source_path: PathId,
     pub(crate) path_fork: &'a mut PathInternerFork,
+    /// The opening `[` of this template, when the stream owns an authored one.
+    pub(crate) opening_span: Option<SourceSpan>,
 }
 
 /// Options that stay stable for one template node while its head and body are parsed.
@@ -212,6 +218,7 @@ struct TemplateBodyParser<'a, 'cursor, 'types> {
     source_path: PathId,
     path_fork: &'a mut PathInternerFork,
     end_policy: TemplateBodyEndPolicy,
+    opening_span: Option<SourceSpan>,
 }
 
 impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
@@ -241,9 +248,9 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                     return Ok(());
                 }
                 TokenTag::EOF => {
-                    return Err(token_lexical::unexpected_end_of_file(
-                        Some(self.close_bracket_id),
-                        last_known_span,
+                    return Err(templates::missing_closing_bracket(
+                        Some(self.token_stream.current_span()),
+                        self.opening_span,
                     )
                     .into());
                 }
@@ -267,6 +274,8 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                                 open_bracket_id: self.open_bracket_id,
                                 close_bracket_id: self.close_bracket_id,
                             },
+                            self.opening_span,
+                            end_policy,
                         )?;
                         continue;
                     }
@@ -323,10 +332,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         if matches!(end_policy, TemplateBodyEndPolicy::DonorExhaustionIsClose) {
             Ok(())
         } else {
-            Err(
-                token_lexical::unexpected_end_of_file(Some(self.close_bracket_id), last_known_span)
-                    .into(),
-            )
+            Err(templates::missing_closing_bracket(last_known_span, self.opening_span).into())
         }
     }
 
@@ -526,8 +532,12 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             // A stored named insert is authored as a binding, then referenced
             // through a nested `[...]` body template. Flatten only the
             // insert-only carrier so the immediate wrapper owns routing.
-            for (template_id, span) in contributions {
-                construction_context.record_insert_contribution(template_id, span);
+            for contribution in contributions {
+                construction_context.record_insert_contribution(
+                    contribution.template,
+                    contribution.authored_name,
+                    contribution.span,
+                );
             }
         } else {
             match &child_kind {
@@ -596,7 +606,7 @@ fn record_parser_tir_insert_contribution(
 ) {
     let child_template_id = child_template.tir_reference.root;
 
-    construction_context.record_insert_contribution(child_template_id, child_template.span);
+    construction_context.record_insert_contribution(child_template_id, None, child_template.span);
 }
 #[derive(Clone, Copy)]
 enum InheritedChildWrapperPolicy {
@@ -659,6 +669,8 @@ fn consume_balanced_brackets_as_literal_text(
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
     text_ids: LiteralTemplateTextIds,
+    opening_span: Option<SourceSpan>,
+    end_policy: TemplateBodyEndPolicy,
 ) -> BodyParseResult<()> {
     // Emit the opening bracket as literal text.
     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
@@ -670,7 +682,14 @@ fn consume_balanced_brackets_as_literal_text(
     while balance.has_unclosed_templates() {
         let tag = token_stream.current_tag();
         if tag == TokenTag::EOF {
-            return Ok(());
+            if matches!(end_policy, TemplateBodyEndPolicy::DonorExhaustionIsClose) {
+                return Ok(());
+            }
+            return Err(templates::missing_closing_bracket(
+                Some(token_stream.current_span()),
+                opening_span,
+            )
+            .into());
         }
         let span = Some(token_stream.current_span());
         balance.step_tag(tag);

@@ -78,9 +78,13 @@ fn render_source_frame(
     let underline_length = primary_underline_length(&primary_position, source_line);
     let padding = " ".repeat(underline_start);
     let underlines = "^".repeat(underline_length);
+    let primary_label = subject
+        .primary_label_text(context)
+        .map(|label| format!(" {}", escape_html(&label)))
+        .unwrap_or_default();
 
     format!(
-        r#"<div class="source-frame">{location}<br><span class="source-line-number">{gutter_padding}{line_label} | </span><span class="source-line">{escaped_line}</span><br><span class="source-line-number">{gutter_padding}{empty_line_label} | </span><span class="source-caret">{padding}{underlines}</span></div>"#
+        r#"<div class="source-frame">{location}<br><span class="source-line-number">{gutter_padding}{line_label} | </span><span class="source-line">{escaped_line}</span><br><span class="source-line-number">{gutter_padding}{empty_line_label} | </span><span class="source-caret">{padding}{underlines}{primary_label}</span></div>"#
     )
 }
 

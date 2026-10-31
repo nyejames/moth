@@ -62,6 +62,7 @@ fn resolve_widget_via_provider(
         cache: &mut cache,
         path_fork: &mut path_fork,
         string_table,
+        provider_sources: None,
     };
 
     let resolved = JsExternalImportProvider

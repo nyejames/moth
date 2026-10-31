@@ -352,7 +352,8 @@ pub(crate) fn invalid_config_message(
 }
 
 /// WHAT: renders invalid configuration from its compact reason code and ordered string facts.
-/// WHY: only `invalid_config_message` needs the reconstructed `InvalidConfigReason`.
+/// WHY: `invalid_config_message` is the production consumer of the reconstructed
+///      `InvalidConfigReason`.
 pub(crate) fn render_invalid_config(
     diagnostic: &DiagnosticView<'_>,
     view: &InvalidConfigView,
@@ -520,7 +521,6 @@ pub(crate) fn invalid_import_path_message(
     }
 }
 
-/// Renders an invalid dependency path from compact reason and path facts.
 pub(crate) fn render_invalid_import_path(
     _diagnostic: &DiagnosticView<'_>,
     view: &InvalidImportPathView,
@@ -655,7 +655,6 @@ pub(crate) fn direct_symbol_path_import_message(
     )
 }
 
-/// Renders a direct-symbol dependency path from its compact path fact.
 pub(crate) fn render_direct_symbol_path_import(
     _diagnostic: &DiagnosticView<'_>,
     view: &DirectSymbolPathImportView,
@@ -681,7 +680,6 @@ pub(crate) fn invalid_namespace_default_name_message(
     )
 }
 
-/// Renders an invalid default dependency namespace name from its compact path fact.
 pub(crate) fn render_invalid_namespace_default_name(
     _diagnostic: &DiagnosticView<'_>,
     view: &InvalidNamespaceDefaultNameView,
@@ -707,7 +705,6 @@ pub(crate) fn duplicate_import_surface_member_message(
     )
 }
 
-/// Renders a duplicate dependency surface member from its compact facts.
 pub(crate) fn render_duplicate_import_surface_member(
     _diagnostic: &DiagnosticView<'_>,
     view: &DuplicateImportSurfaceMemberView,
@@ -735,7 +732,6 @@ pub(crate) fn explicit_moth_extension_message(
     )
 }
 
-/// Renders an explicit `.moth` dependency extension from its compact path fact.
 pub(crate) fn render_explicit_moth_extension(
     _diagnostic: &DiagnosticView<'_>,
     view: &ExplicitMothExtensionView,
@@ -762,7 +758,6 @@ pub(crate) fn explicit_source_extension_message(
     )
 }
 
-/// Renders an explicit source-file dependency extension from its compact facts.
 pub(crate) fn render_explicit_source_extension(
     _diagnostic: &DiagnosticView<'_>,
     view: &ExplicitSourceExtensionView,
@@ -787,7 +782,6 @@ pub(crate) fn unsupported_source_file_kind_message(
     )
 }
 
-/// Renders an unsupported source-file kind from its compact facts.
 pub(crate) fn render_unsupported_source_file_kind(
     _diagnostic: &DiagnosticView<'_>,
     view: &UnsupportedSourceFileKindView,
@@ -812,7 +806,6 @@ pub(crate) fn invalid_source_file_entry_message(
     )
 }
 
-/// Renders an invalid source entry from its compact facts.
 pub(crate) fn render_invalid_source_file_entry(
     _diagnostic: &DiagnosticView<'_>,
     view: &InvalidSourceFileEntryView,
@@ -834,7 +827,6 @@ pub(crate) fn duplicate_moth_template_input_path_message(
     )
 }
 
-/// Renders a duplicate Moth template input path from its compact path fact.
 pub(crate) fn render_duplicate_moth_template_input_path(
     _diagnostic: &DiagnosticView<'_>,
     view: &DuplicateMothTemplateInputPathView,
@@ -861,7 +853,6 @@ pub(crate) fn moth_template_inputs_share_no_common_ancestor_message(
     )
 }
 
-/// Renders Moth template inputs without a common ancestor from their compact path facts.
 pub(crate) fn render_moth_template_inputs_share_no_common_ancestor(
     _diagnostic: &DiagnosticView<'_>,
     view: &MothTemplateInputsShareNoCommonAncestorView,
@@ -890,7 +881,6 @@ pub(crate) fn unsupported_external_extension_message(
     )
 }
 
-/// Renders an unsupported external-file extension from its compact facts.
 pub(crate) fn render_unsupported_external_extension(
     _diagnostic: &DiagnosticView<'_>,
     view: &UnsupportedExternalExtensionView,
@@ -924,20 +914,64 @@ pub(crate) fn invalid_external_module_message(
             "Source is not valid UTF-8 ({}).",
             string_table.resolve(*utf8_detail)
         ),
+        InvalidExternalModuleReason::MissingExportKeyword {
+            directive,
+            declaration,
+            moth_name,
+            js_name,
+        } => {
+            let directive = match directive {
+                ExternalJsAnnotationDirective::Sig => "@moth.sig",
+                ExternalJsAnnotationDirective::Const => "@moth.const",
+            };
+            let moth_name = string_table.resolve(*moth_name);
+            let js_name = string_table.resolve(*js_name);
+            match declaration {
+                ExternalJsDeclarationKind::Function => format!(
+                    "`{directive}` for `{moth_name}` applies to JavaScript function `{js_name}`, but the function is not exported. Add `export` before `function` in `{path_text}`."
+                ),
+                ExternalJsDeclarationKind::BlockArrow | ExternalJsDeclarationKind::Constant => {
+                    format!(
+                        "`{directive}` for `{moth_name}` applies to JavaScript constant `{js_name}`, but it is not exported. Add `export` before `const` in `{path_text}`."
+                    )
+                }
+            }
+        }
+        InvalidExternalModuleReason::OrphanedAnnotation {
+            directive,
+            moth_name,
+        } => {
+            let (directive, supported_forms) = match directive {
+                ExternalJsAnnotationDirective::Sig => (
+                    "@moth.sig",
+                    "`@moth.sig` must sit directly before an `export function` or block-bodied `export const` declaration.",
+                ),
+                ExternalJsAnnotationDirective::Const => (
+                    "@moth.const",
+                    "`@moth.const` must sit directly before an `export const` declaration with an unsigned decimal integer initializer.",
+                ),
+            };
+            let moth_name = string_table.resolve(*moth_name);
+            format!(
+                "`{directive}` for `{moth_name}` is not followed by a supported declaration. {supported_forms}"
+            )
+        }
     };
     format!("External JS module `{path_text}` is invalid.\n{detail}")
 }
 
-/// Renders an invalid external module from its compact reason code and optional string fact.
 pub(crate) fn render_invalid_external_module(
-    _diagnostic: &DiagnosticView<'_>,
+    diagnostic: &DiagnosticView<'_>,
     view: &InvalidExternalModuleView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    let Some(reason) = view.reason_code.to_reason(view.reason_detail) else {
+    let Some(reason) = view
+        .reason_code
+        .to_reason(view.binding, diagnostic.string_ids())
+    else {
         crate::compiler_bug!(
             CompilerStage::DiagnosticReporting,
-            "invalid external-module reason code and optional detail agree"
+            "invalid external-module reason code and typed facts agree"
         );
     };
     RenderedPayload {
@@ -1149,8 +1183,6 @@ pub(crate) fn render_invalid_dependency_clause(
     }
 }
 
-/// WHAT: renders the message for an import target that cannot be resolved.
-/// WHY: the path is the record's only content, so the message needs no other facts.
 pub(crate) fn missing_import_target_message(
     path: PathId,
     context: DiagnosticRenderContext<'_>,

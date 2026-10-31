@@ -20,37 +20,64 @@ pub(super) type SourceIdentityMap = FxHashMap<SourceId, SourceId>;
 pub(super) fn build_source_identity_map(
     source_cache: &FxHashMap<PathBuf, PreparedDiscoverySource>,
     source_files: &SourceDatabase,
+    provider_sources: &super::provider_sources::ProviderOwnedSourceStaging,
 ) -> Result<SourceIdentityMap, InfrastructureFailure> {
     let mut source_ids = FxHashMap::default();
     source_ids.insert(SourceId::COMPILATION_ROOT, SourceId::COMPILATION_ROOT);
 
     for (canonical_path, prepared) in source_cache {
-        let final_source_id = source_files
-            .get_by_canonical_path(canonical_path)
-            .map(|source| source.id)
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                    "cached discovery source {} has no final registration",
-                    canonical_path.display()
-                ))
-            })?;
         let provisional_source_id = prepared.prepared_output.file_id;
-        if let Some(previous_source_id) = source_ids.insert(provisional_source_id, final_source_id)
-            && previous_source_id != final_source_id
-        {
-            return Err(InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-                format!(
-                    "provisional source identity {} maps to final identities {} and {}",
-                    provisional_source_id.index(),
-                    previous_source_id.index(),
-                    final_source_id.index()
-                ),
-            ));
-        }
+        let final_source_id = final_registration_for(source_files, canonical_path)?;
+        insert_discovery_identity(&mut source_ids, provisional_source_id, final_source_id)?;
+    }
+
+    // Provider-owned sources were registered after the traversal table was minted, so their
+    // provisional identities are rebased onto the same final registrations here.
+    for (provisional_source_id, canonical_path) in provider_sources.provisional_identities() {
+        let final_source_id = final_registration_for(source_files, canonical_path)?;
+        insert_discovery_identity(&mut source_ids, provisional_source_id, final_source_id)?;
     }
 
     Ok(source_ids)
+}
+
+fn final_registration_for(
+    source_files: &SourceDatabase,
+    canonical_path: &Path,
+) -> Result<SourceId, InfrastructureFailure> {
+    source_files
+        .get_by_canonical_path(canonical_path)
+        .map(|source| source.id)
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "discovery source {} has no final registration",
+                    canonical_path.display()
+                ),
+            )
+        })
+}
+
+fn insert_discovery_identity(
+    source_ids: &mut SourceIdentityMap,
+    provisional_source_id: SourceId,
+    final_source_id: SourceId,
+) -> Result<(), InfrastructureFailure> {
+    if let Some(previous_source_id) = source_ids.insert(provisional_source_id, final_source_id)
+        && previous_source_id != final_source_id
+    {
+        return Err(InfrastructureFailure::internal(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            format!(
+                "provisional source identity {} maps to final identities {} and {}",
+                provisional_source_id.index(),
+                previous_source_id.index(),
+                final_source_id.index()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn final_source_id(

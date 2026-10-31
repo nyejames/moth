@@ -59,7 +59,8 @@ pub(super) enum DiagnosticTypeTag {
 /// - `OrderedMap`, `OptionType`: `data_0` and `data_1` are the start and length of an argument range.
 /// - `External`: `data_0` is the raw external type id.
 /// - `GenericParameter`: `data_0` is the name's string id.
-/// - Every other tag leaves both words zero.
+/// - Every other tag leaves both words zero, except `UnresolvedTypeId`, whose `data_0` is the
+///   source `TypeId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DiagnosticTypeRecord {
     pub(super) tag: DiagnosticTypeTag,

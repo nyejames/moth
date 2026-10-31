@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0028"]
+message_contains = ["This is a statement match"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0028"
+reason = "invalid_match_arm.expression_body_in_statement_match"
+path = "input/@page.moth"
+line = 7
+column = 14

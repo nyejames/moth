@@ -8,7 +8,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldOutcome, ExplicitConstantPayload, FoldRequirement, FoldServices, constant_fold,
-    explicit_constant_operand,
+    constant_fold_with_dec_power_exponent_depth, explicit_constant_operand,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
@@ -63,6 +63,7 @@ pub fn evaluate_expression(
     expressions: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     expected_type: &mut ExpectedType,
+    mismatch_context: TypeMismatchContext,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
@@ -130,6 +131,7 @@ pub fn evaluate_expression(
         validate_expression_result_type(
             expected_type,
             value_type_id,
+            mismatch_context,
             ordered_nodes[0].source_span(expressions)?,
             type_interner.environment_mut_for_derived_types(),
         )?;
@@ -165,6 +167,7 @@ pub fn evaluate_expression(
     validate_expression_result_type(
         expected_type,
         resolved_type,
+        mismatch_context,
         span,
         type_interner.environment_mut_for_derived_types(),
     )?;
@@ -541,12 +544,23 @@ pub(crate) fn expression_from_resolved_items(
     value_mode: ValueMode,
 ) -> Result<OwnedExpr, ExpressionTypingError> {
     let mut stack: Vec<ExprId> = Vec::with_capacity(items.len());
-    for item in items {
+    // Eager folding must still know which operators contribute to a Dec power's I32 exponent,
+    // because the enclosing Dec power has not been constructed when the exponent folds. The
+    // analysis returns no entries, and allocates no buffer, when the expression holds no power.
+    let dec_exponent_depths = dec_power_exponent_depths(&items);
+    for (item_index, item) in items.into_iter().enumerate() {
+        let dec_exponent_depth = dec_exponent_depth_at(&dec_exponent_depths, item_index);
         match item {
             ExpressionRpnItem::Operand(id) => {
                 expressions.view(id)?;
-                let folded =
-                    fold_completed_node(id, expressions, const_values, string_table, scope)?;
+                let folded = fold_completed_node(
+                    id,
+                    expressions,
+                    const_values,
+                    string_table,
+                    scope,
+                    dec_exponent_depth,
+                )?;
                 stack.push(folded);
             }
             ExpressionRpnItem::ResolvedOperator(facts) => {
@@ -587,7 +601,14 @@ pub(crate) fn expression_from_resolved_items(
                     value_mode,
                 )?;
                 let node = if operands_constant {
-                    fold_completed_node(node.id(), expressions, const_values, string_table, scope)?
+                    fold_completed_node(
+                        node.id(),
+                        expressions,
+                        const_values,
+                        string_table,
+                        scope,
+                        dec_exponent_depth,
+                    )?
                 } else {
                     node.id()
                 };
@@ -606,16 +627,95 @@ pub(crate) fn expression_from_resolved_items(
     Ok(expressions.own(*root))
 }
 
+/// Structural Dec-exponent depth for every postfix item.
+///
+/// WHAT: returns one entry per item, or none when the expression holds no `Dec` power. A nonzero
+///       entry means the item's evaluation lies inside the right operand of a `Dec` power, whose
+///       exponent is `I32` arithmetic.
+/// WHY: construction folds an operator as soon as its operands are constant, so the enclosing
+///      `Dec` power does not exist yet when an exponent overflow is raised. One read of the
+///      authored postfix shape supplies the missing context. Subtree item counts come from a
+///      stack and ranges are marked through a difference array, so the pass is linear. An
+///      expression without a `Dec` power returns no entries. A shape that cannot be read also
+///      returns no entries, and the construction loop reports the malformed sequence itself.
+pub(super) fn dec_power_exponent_depths(items: &[ExpressionRpnItem]) -> Vec<u32> {
+    // Most expressions hold no `Dec` power, so the ordinary path must not pay for the structural
+    // pass or its three vectors.
+    if !items.iter().any(is_dec_power_item) {
+        return Vec::new();
+    }
+
+    let mut subtree_item_counts: Vec<usize> = Vec::with_capacity(items.len());
+    // Each `Dec` power closes its exponent range at its own index, so one delta entry per item
+    // covers every marked range.
+    let mut depth_deltas: Vec<i32> = vec![0; items.len()];
+
+    for (item_index, item) in items.iter().enumerate() {
+        let facts = match item {
+            ExpressionRpnItem::Operand(_) => {
+                subtree_item_counts.push(1);
+                continue;
+            }
+            ExpressionRpnItem::ResolvedOperator(facts) => facts,
+            _ => return Vec::new(),
+        };
+
+        let right_item_count = if facts.operator.required_values() == 2 {
+            let Some(right_item_count) = subtree_item_counts.pop() else {
+                return Vec::new();
+            };
+            right_item_count
+        } else {
+            0
+        };
+        let Some(left_item_count) = subtree_item_counts.pop() else {
+            return Vec::new();
+        };
+        if facts.is_dec_power() {
+            let Some(exponent_start) = item_index.checked_sub(right_item_count) else {
+                return Vec::new();
+            };
+            depth_deltas[exponent_start] += 1;
+            depth_deltas[item_index] -= 1;
+        }
+        subtree_item_counts.push(left_item_count + right_item_count + 1);
+    }
+
+    let mut depth = 0i32;
+    let mut depths = Vec::with_capacity(items.len());
+    for delta in &depth_deltas {
+        depth += delta;
+        depths.push(u32::try_from(depth).unwrap_or(0));
+    }
+    depths
+}
+
+/// Whether one postfix item is a resolved `Dec` power.
+fn is_dec_power_item(item: &ExpressionRpnItem) -> bool {
+    matches!(item, ExpressionRpnItem::ResolvedOperator(facts) if facts.is_dec_power())
+}
+
+/// The Dec exponent depth recorded for one postfix item.
+///
+/// WHY: an expression without a `Dec` power records no depths, so no item carries exponent
+///      context and the construction loop reads zero for each of them.
+fn dec_exponent_depth_at(depths: &[u32], item_index: usize) -> u32 {
+    depths.get(item_index).copied().unwrap_or(0)
+}
+
 /// Fold one completed node in place; an opportunistic refusal keeps the node.
 ///
 /// WHAT: `constant_fold` is the single folding owner. A refusal preserves the runtime expression
 /// here; a required receiver reports the refusal's owned diagnostic.
+/// WHY: `dec_power_exponent_depth` carries the structural Dec exponent context that eager
+///      construction cannot observe from the operator alone.
 fn fold_completed_node(
     node: ExprId,
     expressions: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     scope: Option<&ScopeContext>,
+    dec_power_exponent_depth: u32,
 ) -> Result<ExprId, ExpressionTypingError> {
     let registry = scope.map(|scope| scope.external_package_registry.as_ref());
     let requirement = if scope.is_some_and(|scope| scope.kind.is_constant_context()) {
@@ -623,12 +723,13 @@ fn fold_completed_node(
     } else {
         FoldRequirement::Opportunistic
     };
-    let outcome = constant_fold(
+    let outcome = constant_fold_with_dec_power_exponent_depth(
         node,
         expressions,
         const_values,
         FoldServices::new(string_table, scope, registry),
         requirement,
+        dec_power_exponent_depth,
     )?;
     match outcome {
         ConstantFoldOutcome::Folded(folded) | ConstantFoldOutcome::NotConstant(folded) => {
@@ -663,6 +764,7 @@ fn is_constant_node(
 fn validate_expression_result_type(
     expected_type: &mut ExpectedType,
     actual_type_id: TypeId,
+    mismatch_context: TypeMismatchContext,
     span: Option<SourceSpan>,
     type_environment: &mut TypeEnvironment,
 ) -> Result<(), ExpressionTypingError> {
@@ -677,7 +779,7 @@ fn validate_expression_result_type(
     Err(types_borrows_targets::type_mismatch(
         expected_type_id,
         actual_type_id,
-        TypeMismatchContext::General,
+        mismatch_context,
         span,
     )
     .into())

@@ -5,10 +5,10 @@
 //! in its independent Stage 0 boundary. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
-//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `DiagnosticDraft`
-//! for diagnosed input and a typed `InfrastructureFailure` for infrastructure failures, plus a finalized
-//! form pairing a `PreparedFailure` with its finished `SourceDatabase`. The final boundary appends
-//! that failure with its source owner directly to the accumulator.
+//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a `DiagnosticDraft`, a
+//! producer-captured `PreparedFailure` (including provider imports), a finalized form pairing a
+//! `PreparedFailure` with its `SourceDatabase` and an `InfrastructureFailure`. The
+//! `source_discovery_error` module owns the reporting rules.
 
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
@@ -82,10 +82,15 @@ mod discovery_owned_source;
 mod discovery_provider_imports;
 #[path = "discovery_traversal.rs"]
 mod discovery_traversal;
+#[path = "provider_sources.rs"]
+mod provider_sources;
 
 pub(super) use discovery_owned_source::prepare_owned_source_input;
 pub(super) use discovery_traversal::resolve_structural_provider_reference;
 pub(super) use discovery_traversal::{ReachableTraversalOutcome, discover_reachable_source_files};
+#[cfg(test)]
+pub(super) use provider_sources::PROVIDER_SOURCE_ID_BASE;
+pub(crate) use provider_sources::{BoundaryProviderSources, ProviderOwnedSourceStaging};
 
 /// Minimum cache-miss count before Stage 0 uses Rayon for raw source loading.
 ///
@@ -157,13 +162,8 @@ pub(super) struct CollectedReachableInputs {
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
     pub(super) source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
 }
-/// Stage 0 boundary error preserving the finished source owner for the final tail.
-///
-/// WHAT: carries the typed premerge failure plus the finished source database when
-///       discovery finalization already finalized its owner before failing. Plain
-///       pre-finalization failures carry `None` because no finished owner exists yet.
-/// WHY: the single-file terminal boundary pairs the typed failure with its finalized source
-///      database exactly once, preserving snapshots for diagnosed discovery failures.
+/// Stage 0 boundary error for the single-file tail: the failure plus the finished source
+/// database when finalization had already produced one. See `FinalizedDiscoveryFailure`.
 #[derive(Debug)]
 pub(super) struct CollectReachableInputsError {
     failure: PreparedFailure,
@@ -256,12 +256,14 @@ pub(super) fn collect_reachable_input_files(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<CollectedReachableInputs, CollectReachableInputsError> {
+    let mut provider_sources = ProviderOwnedSourceStaging::new();
     let discovery = match discover_reachable_source_files(
         entry_path,
         namespace_set,
         project_path_resolver,
         style_directives,
         external_imports,
+        &mut provider_sources,
         source_file_kinds,
         resource_inputs,
         path_fork,

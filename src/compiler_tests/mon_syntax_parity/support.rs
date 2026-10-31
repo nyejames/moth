@@ -25,7 +25,7 @@
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
     InvalidCallShapeCode, InvalidCallShapeView, InvalidMapLiteralView, InvalidMapTypeCode,
-    InvalidMapTypeView,
+    InvalidMapTypeView, invalid_call_shape_reason,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     CompileTimeEvaluationErrorView, InvalidChoiceVariantView, InvalidControlFlowStatementView,
@@ -43,8 +43,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::reason_keys::Stabl
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompileTimeEvaluationErrorReason, DiagnosticToken,
-    InvalidChoiceVariantReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidMapLiteralReason, InvalidStringEscapeReason, ReservedNameOwner, TypeMismatchContext,
+    InvalidCallShapeReason, InvalidChoiceVariantReason, InvalidControlFlowStatementReason,
+    InvalidExpressionReason, InvalidMapLiteralReason, InvalidStringEscapeReason, ReservedNameOwner,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::tests::parse_support::{
@@ -903,11 +904,38 @@ fn assert_source_payload_facts(
                 }
             };
             assert_eq!(facts.reason, expected_code);
-            assert_eq!(
-                facts.count,
-                Some(expected_count),
-                "source diagnostic for '{fixture_name}' lost its call-shape count/index"
-            );
+            let observed_count = match expectation {
+                CallShapeExpectation::ExtraPositional { expected_count } => {
+                    let reason = invalid_call_shape_reason(
+                        facts.reason,
+                        facts.parameter_name,
+                        facts.count,
+                        diagnostic.string_ids(),
+                    );
+                    let InvalidCallShapeReason::ExtraPositionalArgument {
+                        expected_count: unpacked,
+                        ..
+                    } = reason
+                    else {
+                        panic!("extra-positional code should rebuild ExtraPositionalArgument");
+                    };
+                    assert_eq!(
+                        unpacked, *expected_count,
+                        "source diagnostic for '{fixture_name}' lost its expected count"
+                    );
+                    unpacked
+                }
+                _ => facts
+                    .count
+                    .expect("call-shape diagnostic stores a count/index"),
+            };
+            if !matches!(expectation, CallShapeExpectation::ExtraPositional { .. }) {
+                assert_eq!(
+                    Some(observed_count),
+                    Some(expected_count),
+                    "source diagnostic for '{fixture_name}' lost its call-shape count/index"
+                );
+            }
             let expected_parameter_name = match expectation {
                 CallShapeExpectation::ExtraPositional { .. } => None,
                 CallShapeExpectation::DuplicateArgument { .. } => Some(site.text.as_str()),

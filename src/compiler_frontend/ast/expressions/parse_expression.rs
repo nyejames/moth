@@ -49,6 +49,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::syntax_errors::expression_position::c_family_operator_mistake_near;
 use crate::compiler_frontend::type_coercion::parse_context::is_numeric_literal_destination_type_id;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -85,6 +86,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
         deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
         deferred_input.route_argument_context = input.route_argument_context;
+        deferred_input.mismatch_context = input.mismatch_context;
         let expression = create_expression_with_trailing_newline_policy(deferred_input)?;
         validate_completed_typed_errors(input.expression_builder.view_owned(expression)?)?;
         return Ok(expression);
@@ -153,6 +155,7 @@ fn finish_collected_fragment(
         input.expression_builder,
         input.const_values,
         input.expected_type,
+        input.mismatch_context,
         input.value_mode,
         input.string_table,
         input.path_fork,
@@ -262,6 +265,7 @@ fn create_expression_until_with_seeded_items(
         deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
         deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
         deferred_input.route_argument_context = input.route_argument_context;
+        deferred_input.mismatch_context = input.mismatch_context;
         let expression = create_expression_until_with_seeded_items_inner(
             deferred_input,
             stop_tokens,
@@ -1148,6 +1152,9 @@ fn collect_expression_fragment_into(
             && token == TokenTag::SYMBOL
             && input.token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
         {
+            if let Some(error) = c_family_operator_mistake_near(input.token_stream) {
+                return Err(error.into());
+            }
             break;
         }
         ast_log!("Parsing expression: ", #token);
@@ -1167,6 +1174,7 @@ fn collect_expression_fragment_into(
             next_number_negative: &mut next_number_negative,
             retain_pending_numeric_fragment: input.retain_pending_numeric_fragment,
             route_argument_context: input.route_argument_context,
+            mismatch_context: input.mismatch_context,
             group_frames: &mut group_frames,
             expression_builder: &mut *input.expression_builder,
             const_values: &mut *input.const_values,

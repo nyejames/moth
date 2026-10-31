@@ -151,7 +151,7 @@ fn source_and_mon_reject_pre_separator_line_breaks_and_comments() {
         let diagnostic = crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
             &failure,
             "MOTH-RULE-0037",
-            None,
+            Some("type_used_as_value.bare_type_name"),
         );
         let facts = diagnostic
             .family_view::<TypeUsedAsValueView>()

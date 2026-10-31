@@ -20,11 +20,12 @@ use crate::compiler_frontend::builtins::error_type::is_reserved_parameter_contra
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    calls_data, generics_traits_api, names_declarations,
+    calls_data, choices_control_flow, generics_traits_api, names_declarations,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidThisUsageReason, NameNamespace,
-    ReservedNameOwner,
+    CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
+    InvalidThisUsageReason, NameNamespace, ReservedNameOwner,
 };
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
@@ -114,20 +115,26 @@ impl ValueDeclarationRef<'_> {
         match self {
             ValueDeclarationRef::Local { binding_span, .. }
             | ValueDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
-            ValueDeclarationRef::Shared(_) => None,
+            ValueDeclarationRef::Shared(declaration) => declaration.binding_span,
         }
     }
 }
 
 impl ScopeDeclarationRef<'_> {
+    /// The authored binding location of the referenced declaration, when it has one.
+    ///
+    /// WHAT: locals and pending bindings use their frame entry; shared declarations use the
+    ///       declaration row's own binding span.
+    /// WHY: duplicate-declaration diagnostics label the earlier authored binding, and an
+    ///      imported or projected declaration keeps that span on its row.
     pub(crate) fn binding_span(&self) -> Option<SourceSpan> {
         match self {
             ScopeDeclarationRef::Local { binding_span, .. }
             | ScopeDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
-            ScopeDeclarationRef::Shared(_) => None,
+            ScopeDeclarationRef::Shared(declaration) => declaration.binding_span,
             ScopeDeclarationRef::RouteParameter(reference) => match &reference.declaration {
                 RouteParameterDeclaration::Local { binding_span, .. } => *binding_span,
-                RouteParameterDeclaration::Shared(_) => None,
+                RouteParameterDeclaration::Shared(declaration) => declaration.binding_span,
             },
         }
     }
@@ -288,10 +295,46 @@ impl ScopeContext {
         }
     }
 
+    /// Source-visible spelling of a declaration, for diagnostic text.
+    ///
+    /// WHY: a dependency alias is the spelling the user imported under, so rendered names must
+    /// follow this file's visibility rather than the declaration's canonical name. The caller's
+    /// `preferred` spelling wins when it still resolves to `declaration`. Otherwise the
+    /// lexically smallest visible spelling is chosen, so the result never depends on hash order.
+    pub(crate) fn visible_name_for_declaration(
+        &self,
+        declaration: &PathId,
+        preferred: Option<StringId>,
+        string_table: &StringTable,
+    ) -> Option<StringId> {
+        let visibility = self.file_visibility.as_ref()?;
+        if let Some(name) = preferred {
+            let resolves_here = visibility
+                .visible_source_names
+                .get(&name)
+                .is_some_and(|target| target.local_path() == declaration);
+            if resolves_here {
+                return Some(name);
+            }
+        }
+        visibility
+            .visible_source_names
+            .iter()
+            .filter(|(_, target)| target.local_path() == declaration)
+            .map(|(name, _)| *name)
+            .min_by(|left, right| {
+                string_table
+                    .resolve(*left)
+                    .cmp(string_table.resolve(*right))
+            })
+    }
+
     /// Reject body bindings that would hide a bound or compiler-owned name.
     ///
     /// Declaration lookup can miss compile-time names and source declarations not yet emitted.
     /// Consume their existing visibility owners without changing value lookup or assignment.
+    /// A visible authored name is the ordinary duplicate-declaration rule, so the diagnostic
+    /// labels the earlier binding whenever the visibility record keeps its source span.
     pub(crate) fn check_body_binding_visibility(
         &self,
         name: StringId,
@@ -322,14 +365,91 @@ impl ScopeContext {
             ));
         }
 
-        if self.file_visibility.as_ref().is_some_and(|visibility| {
+        let visible = self.file_visibility.as_ref().is_some_and(|visibility| {
             visibility.visible_source_names.contains_key(&name)
                 || visibility.visible_type_alias_names.contains_key(&name)
                 || visibility.visible_trait_names.contains_key(&name)
                 || visibility.visible_external_symbols.contains_key(&name)
                 || visibility.visible_namespace_records.contains_key(&name)
-        }) {
-            return Some(names_declarations::shadowed_name(name, span));
+        });
+        if visible {
+            return Some(self.duplicate_declaration(
+                name,
+                span,
+                self.declaration_binding_span(name),
+            ));
+        }
+        None
+    }
+
+    /// Build the ordinary duplicate-declaration diagnostic for a new binding.
+    ///
+    /// WHAT: builds `DuplicateDeclaration` and labels the earlier authored binding when one
+    ///       exists.
+    /// WHY: every redeclaration site shares the dependency-first span preference and the same
+    ///      label, so the diagnostic shape lives with the scope instead of at each owner.
+    pub(crate) fn duplicate_declaration(
+        &self,
+        name: StringId,
+        span: Option<SourceSpan>,
+        fallback_previous_span: Option<SourceSpan>,
+    ) -> DiagnosticDraft {
+        let diagnostic = names_declarations::duplicate_declaration(name, span);
+        match self.previous_declaration_span(name, fallback_previous_span) {
+            Some(previous) => {
+                diagnostic.with_label(Some(previous), Some(LabelDraftMessage::PreviousDeclaration))
+            }
+            None => diagnostic,
+        }
+    }
+
+    /// The earlier authored binding to label for a visible name.
+    ///
+    /// WHAT: prefers the dependency or external-import spelling authored in this file, then the
+    ///       fallback the caller resolved from the visible reference.
+    /// WHY: an aliased import's declaration lives in another file, so its own span would label
+    ///      the wrong file. Same-file declarations fall back to their own span, which already
+    ///      has a single owner.
+    pub(crate) fn previous_declaration_span(
+        &self,
+        name: StringId,
+        fallback: Option<SourceSpan>,
+    ) -> Option<SourceSpan> {
+        self.file_visibility
+            .as_ref()
+            .and_then(|visibility| visibility.dependency_binding_spans.get(&name).copied())
+            .or(fallback)
+    }
+
+    /// The authored binding location a same-file visible owner records, when any.
+    ///
+    /// WHAT: reads the declaration, alias or trait span behind the visible name.
+    /// WHY: a duplicate-declaration label must point at the earlier authored binding, never at an
+    ///      invented or reconstructed location. Namespace records and prelude symbols are
+    ///      compiler-owned or alias-only views, so they have no authored binding span.
+    fn declaration_binding_span(&self, name: StringId) -> Option<SourceSpan> {
+        let visibility = self.file_visibility.as_ref()?;
+        if let Some(target) = visibility.visible_source_names.get(&name) {
+            return self
+                .shared
+                .top_level_declarations
+                .get_by_path(target.local_path())
+                .and_then(|declaration| declaration.binding_span);
+        }
+        if let Some(target) = visibility.visible_type_alias_names.get(&name) {
+            return self
+                .shared
+                .resolved_type_aliases
+                .as_deref()?
+                .get(target.local_path())
+                .and_then(|alias| alias.declaration_span);
+        }
+        if let Some(target) = visibility.visible_trait_names.get(&name) {
+            let traits = &self.shared.trait_environment;
+            return traits
+                .id_for_path(target.local_path())
+                .and_then(|id| traits.get(id))
+                .and_then(|definition| definition.declaration_span);
         }
         None
     }
@@ -374,19 +494,54 @@ impl ScopeContext {
                     Some(span),
                 )
             } else {
-                names_declarations::unknown_value_name(name, Some(span))
+                self.unknown_unqualified_value_name(name, span)
             }
         })
     }
 
-    /// Check local and source-visible declarations before publishing a new binding.
+    /// Diagnose an unqualified unknown value, offering namespace qualification when unique.
     ///
-    /// Count no-shadowing queries separately while using the same visibility owner as expressions.
-    /// Other bound and compiler-owned names are checked by `check_body_binding_visibility`.
-    pub(crate) fn has_visible_declaration(&self, name: &StringId) -> bool {
-        increment_ast_counter(AstCounter::ScopeFrameRedeclarationAncestorChecks);
-        self.get_reference(name).is_some()
+    /// WHAT: scans visible namespace records only after ordinary value lookup has failed.
+    /// WHY: expression identifiers and place roots share this error path. A constant context
+    ///      additionally recognises a runtime-root binding, whose name is absent from ordinary
+    ///      visibility because the implicit start body is not a module declaration.
+    pub(crate) fn unknown_unqualified_value_name(
+        &self,
+        name: StringId,
+        span: SourceSpan,
+    ) -> DiagnosticDraft {
+        let visibility = self.shared.file_visibility.as_ref();
+        if self.kind.is_constant_context()
+            && let Some(declaration_span) = visibility
+                .and_then(|visibility| visibility.start_body_binding_spans.get(&name))
+                .copied()
+        {
+            return choices_control_flow::compile_time_evaluation_error(
+                CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                Some(name),
+                Some(span),
+            )
+            .with_label(
+                Some(declaration_span),
+                Some(LabelDraftMessage::PreviousDeclaration),
+            );
+        }
+
+        if let Some((alias, record)) =
+            visibility.and_then(|visibility| visibility.unique_namespace_with_value_member(name))
+        {
+            let package_path = record.authored_clause_path;
+            names_declarations::unknown_value_name_with_namespace(
+                name,
+                Some(alias),
+                package_path,
+                Some(span),
+            )
+        } else {
+            names_declarations::unknown_value_name(name, Some(span))
+        }
     }
+
     /// WHAT: accepts body-local constants recorded during scope growth plus top-level
     /// module constants from either seeded header contexts or completed module lookups.
     /// WHY: fixed-capacity type syntax must reject foldable runtime bindings while still
@@ -689,8 +844,6 @@ impl ScopeContext {
         &self,
         method_name: StringId,
     ) -> Option<&ReceiverMethodEntry> {
-        // Production contexts use the header-built file visibility to determine
-        // which receiver methods are visible.
         if let Some(file_visibility) = &self.file_visibility {
             let paths = file_visibility.visible_receiver_methods.get(&method_name)?;
             for visible_method in paths {
@@ -705,9 +858,7 @@ impl ScopeContext {
             return None;
         }
 
-        // Unit-test contexts can omit file visibility. Production calls always use
-        // header-built visibility, so the fallback keeps tests deterministic without
-        // reintroducing a separate receiver-method export flag.
+        // Unit-test contexts can omit file visibility.
         let current_source_file = self.source_file_scope.as_ref()?;
         let entries = self.receiver_methods.by_method_name.get(&method_name)?;
 

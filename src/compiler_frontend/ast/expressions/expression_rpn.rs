@@ -162,6 +162,23 @@ pub(crate) struct ResolvedNumericOperation {
     pub discharged: bool,
 }
 
+impl ResolvedOperation {
+    /// Whether this operation is `Dec` exponentiation, whose right operand is an `I32` exponent.
+    ///
+    /// WHY: the exponent domain is a property of this resolved row, so folding and expression
+    ///      construction share one predicate instead of re-matching the operator and domain.
+    pub(crate) fn is_dec_power(&self) -> bool {
+        matches!(
+            self.kind,
+            ResolvedOperationKind::Numeric(ResolvedNumericOperation {
+                operator: NumericOperator::Power,
+                domain: NumericScalar::Number(_),
+                ..
+            })
+        )
+    }
+}
+
 /// Exact source domains survive comparisons whose Bool result carries no numeric information.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ResolvedComparisonOperation {

@@ -10,8 +10,11 @@ use crate::compiler_frontend::compiler_messages::DiagnosticPlace;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::cell::Cell;
 use std::marker::PhantomData;
 
@@ -407,6 +410,39 @@ impl FactCodec for CountFact {
     }
 }
 
+/// Packed expected and provided counts sharing one `OptCountFact` word.
+///
+/// WHAT: ExtraPositionalArgument has no free schema word, so both arity counts
+/// share the existing `count` fact. Expected occupies the low 16 bits and
+/// provided the high 16 bits.
+/// WHY: `OptCountFact` treats `u32::MAX` as absence, so a pair of 65535s is
+/// rejected rather than compacting as a missing count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CountPair {
+    pub expected: usize,
+    pub provided: usize,
+}
+
+impl CountPair {
+    pub(crate) fn pack(self) -> Result<usize, FactCapacityError> {
+        let expected = u16::try_from(self.expected).map_err(|_| FactCapacityError)?;
+        let provided = u16::try_from(self.provided).map_err(|_| FactCapacityError)?;
+        let packed = (u32::from(provided) << 16) | u32::from(expected);
+        if packed == u32::MAX {
+            return Err(FactCapacityError);
+        }
+        Ok(packed as usize)
+    }
+
+    pub(crate) fn unpack(packed: usize) -> Self {
+        let word = packed as u32;
+        Self {
+            expected: (word & 0xFFFF) as usize,
+            provided: (word >> 16) as usize,
+        }
+    }
+}
+
 /// A character as one word. Decoding rejects words that are not Unicode scalar values.
 pub(crate) struct CharFact;
 
@@ -639,6 +675,44 @@ impl FactCodec for OptPlaceFact {
     }
     fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
         PlaceFact::append_path_ids(words, paths);
+    }
+}
+
+impl UnitCode for NumericScalar {
+    /// Codes fixed scalars from one in `FixedScalar::ALL` order, then `Dec` scales from zero.
+    ///
+    /// WHAT: non-zero codes reserve zero for `OptUnitFact` absence and cover every fixed scalar
+    ///       plus every supported `Dec` scale.
+    /// WHY: the fold owns a numeric domain rather than a display string, so the diagnostic keeps
+    ///      the typed domain and the renderer formats it at the payload boundary.
+    fn code(self) -> u32 {
+        const FIXED_SCALAR_CODES: u32 = FixedScalar::ALL.len() as u32;
+        match self {
+            NumericScalar::Fixed(scalar) => {
+                let index = FixedScalar::ALL
+                    .iter()
+                    .position(|candidate| *candidate == scalar)
+                    .expect("every fixed scalar is listed in FixedScalar::ALL");
+                u32::try_from(index + 1).expect("the fixed scalar list fits its code range")
+            }
+            NumericScalar::Number(scale) => FIXED_SCALAR_CODES + 1 + u32::from(scale.get()),
+        }
+    }
+
+    fn from_code(code: u32) -> Option<Self> {
+        const FIXED_SCALAR_CODES: u32 = FixedScalar::ALL.len() as u32;
+        if code == 0 {
+            return None;
+        }
+        if code <= FIXED_SCALAR_CODES {
+            let index = usize::try_from(code - 1).ok()?;
+            return FixedScalar::ALL
+                .get(index)
+                .copied()
+                .map(NumericScalar::Fixed);
+        }
+        let scale = u16::try_from(code - FIXED_SCALAR_CODES - 1).ok()?;
+        NumberScale::new(scale).map(NumericScalar::Number)
     }
 }
 

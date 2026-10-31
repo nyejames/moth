@@ -18,7 +18,7 @@ fn single_file_route_uses_exact_utf8_stem() {
 #[test]
 fn single_file_hash_prefix_strips_cosmetic_hash() {
     let route = derive_logical_html_path(Path::new("@about.moth"), None)
-        .expect("hash-prefixed single-file route should resolve");
+        .expect("root-file route (@about.moth) should resolve");
 
     assert_eq!(route.logical_html_path, PathBuf::from("about.html"));
     assert_eq!(route.route_base, PathBuf::from("about"));

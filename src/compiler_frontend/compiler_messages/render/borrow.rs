@@ -52,7 +52,6 @@ pub(crate) fn multiple_mutable_borrows_message(
     }
 }
 
-/// Renders a mutable-borrow conflict from its stored places.
 pub(crate) fn render_multiple_mutable_borrows(
     _diagnostic: &DiagnosticView<'_>,
     facts: &MultipleMutableBorrowsView,
@@ -98,7 +97,6 @@ pub(crate) fn shared_mutable_conflict_message(
     }
 }
 
-/// Renders a shared/mutable access conflict from its typed access and place facts.
 pub(crate) fn render_shared_mutable_conflict(
     _diagnostic: &DiagnosticView<'_>,
     facts: &SharedMutableConflictView,
@@ -148,7 +146,6 @@ pub(crate) fn invalid_mutable_access_message(
     }
 }
 
-/// Renders an invalid mutable access from its stored reason and places.
 pub(crate) fn render_invalid_mutable_access(
     _diagnostic: &DiagnosticView<'_>,
     facts: &InvalidMutableAccessView,

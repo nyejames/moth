@@ -319,6 +319,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let mut file_visibility = FileVisibility::default();
         let mut registry = VisibleNameRegistry::new();
 
+        // Runtime start-body bindings are not declarations, so they never pass through the
+        // visible-name registry. Carry their authored spans for constant-context diagnostics.
+        if let Some(binding_spans) = self
+            .module_symbols
+            .start_body_binding_spans_by_file
+            .get(source_file)
+        {
+            file_visibility.start_body_binding_spans = binding_spans.clone();
+        }
+
         // Reserve compiler-owned core cast trait names before any source
         // declarations or dependencies can claim them. This lets the normal visible-
         // name collision path reject aliases, namespace names, and dependency-bound
@@ -527,7 +537,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .visible_namespace_records
                     .contains_key(&prelude_name_id)
             {
-                let record = self.build_external_namespace_record(package_path_id, None)?;
+                let mut record = self.build_external_namespace_record(package_path_id, None)?;
+                record.authored_clause_path = Some(package_path_id);
                 file_visibility
                     .visible_namespace_records
                     .insert(prelude_name_id, record);
@@ -1712,10 +1723,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
                     package_path,
                     symbol_name,
+                    candidates,
                 } => {
                     return Err(super::diagnostics::missing_package_symbol(
                         symbol_name,
                         package_path,
+                        candidates,
                         Some(selection.source_span),
                     )
                     .into());

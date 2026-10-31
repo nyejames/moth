@@ -23,11 +23,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::datatypes::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
-    parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, first_ast_error_view,
+    parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -645,19 +645,6 @@ fn collection_index_binding_has_i32_type() {
 }
 
 // --------------------------
-//  Legacy syntax rejections
-// --------------------------
-
-#[test]
-fn rejects_old_in_loop_syntax_with_migration_error() {
-    assert_loop_fixture_diagnostic(
-        "loop i in 0 to 3:\n    io.line([: [i]])\n;",
-        "MOTH-SYNTAX-0029",
-        Some("invalid_loop_header.removed_in_syntax"),
-    );
-}
-
-// --------------------------
 //  Bare binding rejections
 // --------------------------
 
@@ -770,23 +757,78 @@ fn rejects_duplicate_loop_binding_names() {
 }
 
 #[test]
+fn rejects_reserved_keyword_as_loop_binding() {
+    let source =
+        loop_fixture_source("items = {1, 2, 3}\nloop items |by|:\n    io.line([: [items]])\n;");
+    let failure = parse_single_file_ast_diagnostic(&source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the loop binding must report a reserved name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+
+    let keyword_start = source.find("|by|").expect("the loop binding must occur") as u32 + 1;
+    let mut builder = ExtendedSpanBuilder::new();
+    let keyword_span = LocalSpan::exact(keyword_start, "by".len() as u32, &mut builder)
+        .expect("the keyword span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, keyword_span)),
+    );
+}
+
+#[test]
 fn rejects_loop_binding_shadowing_existing_name() {
-    assert_loop_fixture_diagnostic(
+    let source = loop_fixture_source(
         "items = {1, 2, 3}\nitem = 0\nloop items |item|:\n    io.line([: [item]])\n;",
-        "MOTH-SYNTAX-0029",
-        Some("invalid_loop_header.binding_already_declared"),
+    );
+    let failure = parse_single_file_ast_diagnostic(&source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
+    let duplicate_start = source.find("|item|").expect("the loop binding must occur") as u32 + 1;
+    let previous_start = source
+        .find("    item = 0")
+        .expect("the earlier local declaration must occur") as u32
+        + 4;
+    let mut builder = ExtendedSpanBuilder::new();
+    let duplicate_span = LocalSpan::exact(duplicate_start, "item".len() as u32, &mut builder)
+        .expect("the duplicate name span must fit");
+    let previous_span = LocalSpan::exact(previous_start, "item".len() as u32, &mut builder)
+        .expect("the previous name span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, duplicate_span)),
+    );
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            previous_span
+        ))],
     );
 }
 
 #[test]
 fn rejects_loop_binding_shadowing_visible_source_declaration() {
-    let failure = parse_single_file_ast_diagnostic(
-        "source_value || -> I32:\n    return 1\n;\nloop 0 to 2 |source_value|:\n;\n",
+    let source = "source_value || -> I32:\n    return 1\n;\nloop 0 to 2 |source_value|:\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0002", None);
+    let name = "source_value";
+    let mut builder = ExtendedSpanBuilder::new();
+    let previous_span = LocalSpan::exact(0, name.len() as u32, &mut builder)
+        .expect("the declaration name span must fit");
+    let duplicate_start = source.rfind(name).expect("the loop binding must occur") as u32;
+    let duplicate_span = LocalSpan::exact(duplicate_start, name.len() as u32, &mut builder)
+        .expect("the duplicate name span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, duplicate_span)),
     );
-    assert_ast_diagnostic(
-        &failure,
-        "MOTH-SYNTAX-0029",
-        Some("invalid_loop_header.binding_already_declared"),
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            previous_span
+        ))],
     );
 }
 
@@ -807,11 +849,19 @@ fn rejects_keyword_shadow_loop_binding_names() {
 // --------------------------
 
 #[test]
-fn rejects_collection_loop_on_non_collection_expression() {
-    assert_loop_fixture_diagnostic(
+fn collection_loop_on_unselected_number_names_no_type() {
+    let failure = parse_single_file_ast_diagnostic(&loop_fixture_source(
         "value = 3\nloop value |item|:\n    io.line([: [item]])\n;",
+    ));
+    assert_ast_diagnostic(
+        &failure,
         "MOTH-SYNTAX-0029",
         Some("invalid_loop_header.collection_source_not_collection"),
+    );
+    assert_eq!(
+        crate::compiler_frontend::tests::parse_support::ast_first_error_rendered_message(&failure),
+        "Collection loop source must be a collection. Use a collection after 'loop'. \
+         For numeric iteration, use range syntax such as 'loop 0 to 10 |i|:'."
     );
 }
 
@@ -992,5 +1042,27 @@ fn assert_missing_range_end_bound(source: &str) {
         source,
         "MOTH-SYNTAX-0029",
         Some("invalid_loop_header.missing_range_end_bound"),
+    );
+}
+
+#[test]
+fn rejects_then_inside_a_loop_body_with_loop_specific_reason() {
+    let failure = parse_single_file_ast_diagnostic("loop 0 to 3 |i|:\n    then i\n;\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.then_inside_loop_body"),
+    );
+}
+
+#[test]
+fn rejects_then_crossing_an_ordinary_loop_from_a_value_block() {
+    let failure = parse_single_file_ast_diagnostic(
+        "value = if true:\n    loop true:\n        then 1\n    ;\nelse\n    then 0\n;\n",
+    );
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.then_crosses_blocked_construct"),
     );
 }

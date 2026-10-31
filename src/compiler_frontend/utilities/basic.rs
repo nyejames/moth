@@ -1,7 +1,4 @@
-//! Shared frontend utility helpers.
-//!
-//! These are small cross-cutting helpers that predate some newer subsystem boundaries and are
-//! still reused in formatting code.
+//! Frontend path normalisation, portable path text and character classification.
 
 use std::path::{Path, PathBuf};
 

@@ -1,7 +1,7 @@
 //! Source-authored map type policy for type resolution.
 //!
 //! WHAT: owns the two policy checks that apply to map types written directly in
-//!       source code: inline nesting readability validation and V1 scalar-key validation.
+//!       source code: inline nesting readability validation and scalar-key validation.
 //! WHY: these rules are independent from alias expansion, generic instantiation,
 //!      and `TypeEnvironment` shape interning; keeping them in a focused module lets
 //!      `resolve_type.rs` concentrate on orchestrating those larger concerns while

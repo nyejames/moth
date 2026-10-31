@@ -135,7 +135,7 @@ pub(crate) fn parse_option_capture_binding(
     let name = match token_stream.current_tag() {
         TokenTag::TYPE_PARAMETER_BRACKET => {
             return Err(choices_control_flow::invalid_match_pattern(
-                InvalidMatchPatternReason::EmptyOptionPresentCapture,
+                InvalidMatchPatternReason::EmptyOptionalPresentCapture,
                 None,
                 None,
                 Some(token_stream.current_span()),
@@ -152,7 +152,7 @@ pub(crate) fn parse_option_capture_binding(
             })?,
         _ => {
             return Err(choices_control_flow::invalid_match_pattern(
-                InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
+                InvalidMatchPatternReason::ExpectedBindingInOptionalPresentCapture,
                 None,
                 None,
                 Some(token_stream.current_span()),
@@ -166,7 +166,7 @@ pub(crate) fn parse_option_capture_binding(
     // Reject type annotations such as `|name String|`.
     if token_stream.current_tag() == TokenTag::SYMBOL {
         return Err(choices_control_flow::invalid_match_pattern(
-            InvalidMatchPatternReason::OptionPresentCaptureTypeAnnotation,
+            InvalidMatchPatternReason::OptionalPresentCaptureTypeAnnotation,
             None,
             None,
             Some(token_stream.current_span()),
@@ -196,10 +196,9 @@ pub(crate) fn parse_option_capture_binding(
 
 /// Wrap a ready non-choice pattern as an option present-value arm.
 ///
-/// WHAT: a literal must support runtime equality on the inner type and becomes an `OptionValue`;
-///       a relational pattern is forwarded unchanged.
-/// WHY: the equality check depends on the selected inner type, so a pending literal reaches this
-///      check only once that type is known.
+/// WHAT: a literal becomes an `OptionValue`; a relational pattern is forwarded unchanged.
+/// WHY: literal patterns are scalar literals whose type must match the inner type, and every
+///      scalar supports runtime equality, so a failing equality check is a compiler invariant.
 /// MUST NOT: accept any other variant; the non-choice parser returns only these two for options.
 fn wrap_option_present_value(
     pattern: MatchPattern,
@@ -209,11 +208,9 @@ fn wrap_option_present_value(
     match pattern {
         MatchPattern::Literal(value) => {
             if !type_environment.supports_runtime_equality(inner_type_id) {
-                return Err(choices_control_flow::invalid_match_pattern(
-                    InvalidMatchPatternReason::OptionValuePatternRequiresEquality,
-                    None,
-                    None,
-                    value.span,
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "optional literal pattern reached an inner type without runtime equality",
                 )
                 .into());
             }

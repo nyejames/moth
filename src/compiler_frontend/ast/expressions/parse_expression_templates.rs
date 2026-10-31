@@ -180,6 +180,7 @@ pub(super) fn parse_template_expression(
             let diagnostic = templates::invalid_template_slot(
                 InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody,
                 None,
+                None,
                 Some(token_stream.current_span()),
             );
 

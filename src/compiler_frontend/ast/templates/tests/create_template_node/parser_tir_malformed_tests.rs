@@ -15,10 +15,14 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     ExpectedTokenView, UnexpectedEndOfFileView, UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -127,6 +131,27 @@ fn assert_span_is_meaningful(diagnostic: &CompactDiagnosticBagForTest) {
     );
 }
 
+/// Asserts a truncated template reports the structure reason and its opening-bracket label.
+fn assert_missing_closing_bracket(diagnostic: &CompactDiagnosticBagForTest) {
+    let view = diagnostic
+        .first()
+        .expect("truncated template should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("truncated template should retain structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::MissingClosingBracket
+    );
+    let labels: Vec<_> = view.durable_labels().collect();
+    assert_eq!(labels.len(), 1, "the opening bracket should carry a label");
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::TemplateStartsHere
+    ));
+    assert_span_is_meaningful(diagnostic);
+}
+
 #[test]
 fn unexpected_template_body_token_retains_exact_primary_span() {
     let source = "[:π]";
@@ -148,22 +173,6 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
     assert_eq!(range.end(), 4);
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
     assert_eq!(view.durable_labels().count(), 0);
-}
-
-#[test]
-fn truncated_nested_template_body_reports_eof_with_meaningful_span() {
-    let diagnostic = parse_template_diagnostic("[: outer [: inner]");
-
-    let unexpected_eof = diagnostic
-        .first()
-        .expect("truncated nested body should compact to one record")
-        .family_view::<UnexpectedEndOfFileView>()
-        .is_some();
-    assert!(
-        unexpected_eof,
-        "expected unexpected-end-of-file for truncated nested body"
-    );
-    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -190,48 +199,7 @@ fn children_directive_truncated_argument_template_reports_eof_with_meaningful_sp
 fn doc_suppressed_child_template_unclosed_bracket_reports_eof() {
     let diagnostic = parse_template_diagnostic("[$doc: [: unclosed");
 
-    let unexpected_eof = diagnostic
-        .first()
-        .expect("unclosed doc body should compact to one record")
-        .family_view::<UnexpectedEndOfFileView>()
-        .is_some();
-    assert!(
-        unexpected_eof,
-        "expected unexpected-end-of-file for unclosed bracket in $doc body"
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn insert_with_truncated_body_reports_eof_with_meaningful_span() {
-    let diagnostic = parse_template_diagnostic("[$insert(\"name\"): body");
-
-    let unexpected_eof = diagnostic
-        .first()
-        .expect("truncated insert body should compact to one record")
-        .family_view::<UnexpectedEndOfFileView>()
-        .is_some();
-    assert!(
-        unexpected_eof,
-        "expected unexpected-end-of-file for truncated $insert body"
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn insert_with_truncated_nested_body_in_helper_reports_eof() {
-    let diagnostic = parse_template_diagnostic("[$insert(\"name\"): [: inner]");
-
-    let unexpected_eof = diagnostic
-        .first()
-        .expect("$insert helper with truncated nested body should compact to one record")
-        .family_view::<UnexpectedEndOfFileView>()
-        .is_some();
-    assert!(
-        unexpected_eof,
-        "expected unexpected-end-of-file for $insert helper with truncated nested body"
-    );
-    assert_span_is_meaningful(&diagnostic);
+    assert_missing_closing_bracket(&diagnostic);
 }
 
 #[test]

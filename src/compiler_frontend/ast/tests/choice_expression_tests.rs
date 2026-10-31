@@ -8,7 +8,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOper
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     names_declarations::TypeUsedAsValueView, token_lexical::CommonSyntaxMistakeView,
 };
-use crate::compiler_frontend::compiler_messages::{ChoiceVariantSeparatorGap, NameNamespace};
+use crate::compiler_frontend::compiler_messages::{
+    ChoiceVariantSeparatorGap, NameNamespace, TypeUsedAsValueReason,
+};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
@@ -146,13 +148,44 @@ fn rejects_line_break_or_comment_before_choice_separator() {
     for reference in ["Status\n::Ready", "Status -- note\n::Ready"] {
         let source = format!("Status :: Ready;\nvalue = {reference}\n");
         let failure = parse_single_file_ast_diagnostic(&source);
-        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0037", None);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0037",
+            Some("type_used_as_value.bare_type_name"),
+        );
         let facts = diagnostic
             .family_view::<TypeUsedAsValueView>()
             .expect("line-separated qualifier retains its namespace facts");
         assert_eq!(facts.expected, NameNamespace::Value);
         assert_eq!(facts.found, NameNamespace::Type);
     }
+}
+
+#[test]
+fn generic_choice_application_in_value_position_is_a_type_annotation() {
+    let source = r#"
+Maybe type T ::
+    Some | value T |,
+    Empty,
+;
+
+value = Maybe of I32
+"#;
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0037",
+        Some("type_used_as_value.generic_choice_application"),
+    );
+    let facts = diagnostic
+        .family_view::<TypeUsedAsValueView>()
+        .expect("generic choice application retains its namespace facts");
+    assert_eq!(facts.expected, NameNamespace::Value);
+    assert_eq!(facts.found, NameNamespace::Type);
+    assert_eq!(
+        facts.reason,
+        TypeUsedAsValueReason::GenericChoiceApplication
+    );
 }
 
 fn assert_choice_separator_gap(source: &str, expected_gap: ChoiceVariantSeparatorGap) {

@@ -1,0 +1,5 @@
+@values helper as local_helper
+
+capture_binding |maybe I32?| -> I32:
+    return if maybe is |local_helper| then local_helper else 0
+;

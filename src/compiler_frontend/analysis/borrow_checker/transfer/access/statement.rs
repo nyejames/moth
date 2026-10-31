@@ -853,7 +853,7 @@ fn check_call_mutable_borrow(
             allow_prior_shared: false,
             require_root_mutable: true,
             strict_move_exclusivity: false,
-            check_alias_exclusivity: true,
+            alias_exclusivity: AliasExclusivity::All,
         },
     )
 }
@@ -910,7 +910,7 @@ fn check_call_may_consume(
                 allow_prior_shared: false,
                 require_root_mutable: false,
                 strict_move_exclusivity: true,
-                check_alias_exclusivity: true,
+                alias_exclusivity: AliasExclusivity::All,
             };
             if !probe_mutable_access(&check, mutable_roots, transfer_policy)? {
                 input.value_fact_buffer.record_optional_transfer(

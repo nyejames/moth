@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::template_body_parser::{
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBodyParseMode, TemplateControlFlowValidationMode,
+    TemplateBodyParseMode, TemplateControlFlowValidationMode, first_escaped_insert_site,
     validate_runtime_template_control_flow_slot_artifacts,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::{
@@ -39,7 +39,8 @@ use crate::compiler_frontend::ast::templates::template_render_units::{
     prepare_control_flow_render_units,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateConstructionContext, TemplatePreparation, TemplateTirPhase, TemplateTirReference,
+    RuntimeTemplateReason, TemplateConstructionContext, TemplatePreparation,
+    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TemplateTirReference,
     TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
     compose_tir_head_chain_from_root, prepare_tir_view_with_source_scope,
 };
@@ -52,6 +53,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
@@ -376,6 +378,9 @@ impl Template {
         // authoritative TIR identity exists, not mutated throughout parsing.
         let mut build_state = TemplateBuildState::new();
 
+        // A Moth-content donor has no authored `[`; ordinary and nested templates enter on one.
+        let opening_span = entry.is_none().then(|| token_stream.current_span());
+
         let construction_span = entry
             .as_ref()
             .and_then(|entry| entry.outer_span)
@@ -412,6 +417,7 @@ impl Template {
                     control_flow_validation,
                     string_table,
                     path_fork,
+                    opening_span,
                 },
             )?;
             apply_default_style_if_needed(&mut build_state, &parsed_head, default_style.as_ref());
@@ -444,6 +450,7 @@ impl Template {
                 default_style: default_style.clone(),
                 source_path,
                 path_fork,
+                opening_span,
             },
         )?;
 
@@ -618,6 +625,38 @@ impl Template {
                 construction_span,
             )
             .into());
+        }
+
+        // A compile-time template has no parent template to receive an escaped `$insert(...)`
+        // helper. Head-chain composition already ran, so a surviving contribution cannot be
+        // routed and the constant would otherwise fail later as a generic non-foldable value.
+        if matches!(preparation_mode, TemplatePreparationMode::ConstRequired)
+            && matches!(
+                template_preparation.outcome,
+                TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::SlotContribution)
+            )
+        {
+            let escaped_insert = {
+                let store = context.template_ir_store.borrow();
+                let view = TirView::with_minimum_phase(
+                    &store,
+                    tir_reference.root,
+                    tir_reference.phase,
+                    TemplateTirPhase::Composed,
+                    tir_reference.context,
+                )
+                .map_err(TemplateError::from)?;
+                first_escaped_insert_site(&view)?
+            };
+            if let Some(site) = escaped_insert {
+                return Err(templates::invalid_template_slot(
+                    InvalidTemplateSlotReason::NamedInsertOutsideParentSlot,
+                    site.slot_name,
+                    site.insert_name,
+                    site.span.or(construction_span),
+                )
+                .into());
+            }
         }
 
         // Write the parser-local classification through the store owner before

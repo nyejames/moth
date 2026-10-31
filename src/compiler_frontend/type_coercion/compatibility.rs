@@ -5,7 +5,7 @@
 //! WHY: this is the sole owner of compatibility policy. All call sites that
 //! need to check type compatibility must go through `is_type_compatible` so
 //! that structural compatibility rules are applied consistently.
-//! `datatypes.rs` owns type structure only and carries no compatibility logic.
+//! `datatypes` owns type structure only and carries no compatibility logic.
 
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -103,8 +103,7 @@ impl TypeCompatibilityCache {
 ///
 /// Rules:
 /// - `Option<T>` accepts `None`, `T`, and `Option<T>`.
-/// - `StringSlice` accepts `Template` and `TemplateWrapper` (all lower to the same HIR type).
-///   This is handled naturally because both map to the same `String` TypeId.
+/// - Struct types follow `struct_types_compatible` (const-record and generic-instance rules).
 /// - All other cases require `TypeId` equality.
 pub(crate) fn is_type_compatible(
     expected_id: TypeId,
@@ -150,9 +149,6 @@ pub(crate) fn is_type_compatible(
         }
     }
 
-    // Template and TemplateWrapper both map to the String builtin TypeId,
-    // so they are naturally compatible with String via TypeId equality.
-    // Everything else requires exact TypeId equality.
     expected_id == actual_id
 }
 

@@ -75,6 +75,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::syntax_errors::expression_position::separator_equality_mistake;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -220,6 +221,7 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
         expression_builder,
         const_values,
         &mut inferred,
+        TypeMismatchContext::Assignment,
         declaration_value_mode,
         string_table,
         path_fork,
@@ -271,6 +273,7 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
         expression_builder,
         const_values,
         &mut inferred,
+        TypeMismatchContext::Assignment,
         declaration_value_mode,
         string_table,
         path_fork,
@@ -450,6 +453,13 @@ fn build_mutation_from_target(
 
     let value = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
+            if let Some(diagnostic) = separator_equality_mistake(
+                token_stream.current(),
+                token_stream.token_ref_at_offset(1),
+                token_stream.token_ref_at_offset(2),
+            ) {
+                return Err(diagnostic.into());
+            }
             // Simple assignment keeps the receiver hint for context-sensitive values. Compound
             // RHSs peer numeric literals for fixed scalars and non-power Dec targets before
             // promoted evaluation.

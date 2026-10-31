@@ -626,11 +626,11 @@ fn no_shadowing_across_ancestor_frames() {
         .new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork)
         .expect("test path table should intern a child scope");
     assert!(
-        child.has_visible_declaration(&name),
+        child.get_reference(&name).is_some(),
         "ancestor declaration must be visible to child so redeclaration can be rejected"
     );
     assert!(
-        context.has_visible_declaration(&name),
+        context.get_reference(&name).is_some(),
         "declaration must be visible in the frame that owns it"
     );
 }

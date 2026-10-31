@@ -722,7 +722,7 @@ Each glue module is named by a stable hash of its final source and emitted under
 
 Direct builder bindings and provider-created bindings share stable binding identity and runtime asset policy. No per-entry scan recreates source dependencies.
 
-Imported JavaScript parser failures remain typed source diagnostics. They retain the Moth import request's source span and the JavaScript module path in their payload. Parser-local JavaScript byte ranges do not replace the importer's compiler source identity.
+Imported JavaScript parser failures remain typed source diagnostics. The provider registers the already-read JavaScript text with the boundary source owner through its provider context, so an annotation failure renders its exact range in the `.js` file. The Moth import request's span stays a related site, and a missing `export` also labels the declaration. The JavaScript module path and annotation-binding facts stay typed.
 
 Selected JavaScript module exports require a definition and applicable lowering in their issuing registry and matching entry metadata with a JavaScript runtime asset. Glue preparation checks these closed inputs before source emission. Missing candidates, absent assets and wrong asset kinds identify inconsistent validated metadata, while valid non-module helper lowerings need no wrapper or provider asset.
 

@@ -1,0 +1,25 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+message_contains = ["`$md` and `$raw` cannot be combined because both control template body formatting. Choose one formatter."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.incompatible_head_item"
+path = "input/@page.moth"
+line = 1
+column = 7
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 1
+column = 2
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]

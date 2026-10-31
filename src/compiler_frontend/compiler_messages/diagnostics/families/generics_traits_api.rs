@@ -1099,8 +1099,8 @@ impl InvalidTraitConformanceCode {
     }
 }
 
-/// Word 0 stores the reason code; words 1–2 hold counts, word 1 holds an index, and words 2–3
-/// hold the two types when the reason compares types.
+/// Word 0 stores the reason code, word 1 a count or index, word 2 a found count or the expected
+/// type and word 3 the found type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InvalidTraitConformanceShape<Type> {
     ImportedModuleRoot,

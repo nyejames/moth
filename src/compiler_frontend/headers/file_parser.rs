@@ -2,8 +2,9 @@
 //!
 //! WHAT: orchestrates one tokenized Moth file into top-level declaration headers, dependency
 //! records, const-fragment metadata, and the implicit entry `start` body.
-//! WHY: file-level control flow is different from declaration parsing, dependency recording, and hash
-//! item handling; this module keeps the high-level loop visible while delegated modules own details.
+//! WHY: file-level control flow is different from declaration parsing, dependency recording and
+//! const-template handling. This module keeps the high-level loop visible while delegated modules
+//! own details.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -275,7 +276,6 @@ fn reject_non_block_export(
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    // `export` is valid only as the module-root `export:` block.
     if !context.file_role.is_export_capable() || context.is_config_file {
         return Err(diagnostic_failure(
             generics_traits_api::export_outside_module_root(Some(export_span)),
@@ -1031,6 +1031,11 @@ fn handle_symbol_item_with_export_mode(
                 current_index,
             )?;
             state.register_start_body_symbol(name_id);
+            // Only an assignment introduces a runtime binding a constant context could name.
+            // A call or other executable statement head is not a value declaration.
+            if follower_tag.is_assignment_operator() {
+                state.register_start_body_binding(name_id, current_span);
+            }
         }
         HeaderKind::TraitConformance { .. } | HeaderKind::TraitIncompatibility { .. } => {
             state.register_header(header);

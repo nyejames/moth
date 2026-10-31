@@ -20,6 +20,10 @@ use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
 pub(crate) use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    normalize_source_build_config_contract_from_token,
+    normalize_source_build_config_contract_non_primitive,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
     BindingEnvironmentInput, prepare_binding_environment,
@@ -31,6 +35,8 @@ use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize
 use crate::compiler_frontend::headers::file_parser::{finish_file_output, parse_headers_in_file};
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
+#[cfg(test)]
+pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 pub(crate) use crate::compiler_frontend::headers::types::SourcePreparationDelta;
 pub use crate::compiler_frontend::headers::types::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
@@ -41,15 +47,6 @@ pub use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::headers::types::{
     HeaderParseContext, HeaderParseFailure, SourceTokenOwner,
 };
-// HeaderExportMode is re-exported for focused AST tests that construct Header values with
-// explicit export modes. Production code calls HeaderExportMode::is_public() through the
-// header field, so this re-export is only reached from test modules.
-use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    normalize_source_build_config_contract_from_token,
-    normalize_source_build_config_contract_non_primitive,
-};
-#[cfg(test)]
-pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;

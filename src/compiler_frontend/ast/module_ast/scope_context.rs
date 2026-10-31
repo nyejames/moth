@@ -442,7 +442,7 @@ pub struct ScopeShared {
     ///
     /// WHAT: the exact `SourceId` that owns this scope's token spans and path-table rows
     ///      (for materialised generics, the retained donor owner).
-    /// WHY: every live scope joins `Stage0` facts and builds spans against this identity,
+    /// WHY: every live scope joins `Stage0` facts and builds spans against this identity.
     pub(crate) declaring_file_id: SourceId,
     /// Required late-bound frozen identity for every source-owned scope chain.
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
@@ -498,6 +498,13 @@ pub struct ScopeContext {
     /// Preserves an enclosing match arm's line boundary in child expression contexts.
     pub(crate) match_arm_boundary: bool,
 
+    /// True only on a statement-match arm body. Nested children of that arm stay false.
+    ///
+    /// WHY: a statement match nested in a catch or value-producing branch still inherits
+    ///      `active_value_target` for `then`. Missing-body and expression-body diagnostics
+    ///      must follow the match's own receiving site, not that inherited target.
+    pub(crate) in_statement_match_arm: bool,
+
     /// Defers typed producer rejection until the complete root expression is known.
     /// This is parser control state, not an expression failure fact.
     pub(crate) defer_typed_error_validation: bool,
@@ -543,6 +550,13 @@ pub struct ScopeContext {
         crate::compiler_frontend::ast::statements::value_production::ActiveValueProductionTarget,
     >,
 
+    /// Whether an enclosing value-production target was blocked by an ordinary loop barrier.
+    ///
+    /// WHAT: true on the loop's descendants after loop entry cleared an enclosing target.
+    /// WHY: `then` inside such a loop crosses the loop barrier instead of merely sitting in a
+    /// non-producing loop body, so the two cases need different diagnostics.
+    pub(crate) loop_blocks_value_target: bool,
+
     active_generic_type_context: Option<ActiveGenericTypeContext>,
     pub(crate) generic_template_validation: bool,
     pub(crate) generic_function_instantiation_stack: Vec<GenericFunctionInstanceKey>,
@@ -586,6 +600,7 @@ impl Clone for ScopeContext {
             kind: self.kind.clone(),
             scope: self.scope,
             match_arm_boundary: self.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: self.defer_typed_error_validation,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -597,6 +612,7 @@ impl Clone for ScopeContext {
             expected_result_type_ids: self.expected_result_type_ids.clone(),
             enclosing_callable: self.enclosing_callable.clone(),
             active_value_target: self.active_value_target.clone(),
+            loop_blocks_value_target: self.loop_blocks_value_target,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
@@ -633,7 +649,7 @@ pub enum ContextKind {
 
     Function,
 
-    /// For loops and if statements.
+    /// Condition expressions: `if` conditions, match guards and scrutinees.
     Condition,
 
     Loop,
@@ -913,6 +929,7 @@ impl ScopeContext {
         ScopeContext {
             kind,
             match_arm_boundary: false,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
             shared,
@@ -925,6 +942,7 @@ impl ScopeContext {
             expected_result_type_ids: Vec::new(),
             enclosing_callable: None,
             active_value_target: None,
+            loop_blocks_value_target: false,
             active_generic_type_context: None,
             generic_template_validation: false,
             generic_function_instantiation_stack: Vec::new(),
@@ -963,6 +981,11 @@ impl ScopeContext {
         } else {
             None
         };
+        let loop_blocks_value_target = if matches!(kind, ContextKind::Loop) {
+            self.active_value_target.is_some() || self.loop_blocks_value_target
+        } else {
+            self.loop_blocks_value_target
+        };
         // Conditions are not receiving sites. They validate against Bool through
         // parse-context expectations, but they must not let a surrounding
         // declaration or return type solve a nested generic call.
@@ -976,6 +999,7 @@ impl ScopeContext {
         Ok(ScopeContext {
             kind,
             match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
             shared: Rc::clone(&self.shared),
@@ -992,6 +1016,7 @@ impl ScopeContext {
             // Barriers such as loops, functions, conditions, and templates keep
             // clearing the target by constructing non-branch child contexts.
             active_value_target,
+            loop_blocks_value_target,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
@@ -1014,6 +1039,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Expression,
             match_arm_boundary: self.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: self.defer_typed_error_validation,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
@@ -1026,6 +1052,7 @@ impl ScopeContext {
             expected_result_type_ids,
             enclosing_callable: self.enclosing_callable.clone(),
             active_value_target: None,
+            loop_blocks_value_target: self.loop_blocks_value_target,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
@@ -1076,6 +1103,7 @@ impl ScopeContext {
         ScopeContext {
             kind: template_kind,
             match_arm_boundary: self.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
@@ -1088,6 +1116,7 @@ impl ScopeContext {
             expected_result_type_ids: vec![],
             enclosing_callable: self.enclosing_callable.clone(),
             active_value_target: None,
+            loop_blocks_value_target: self.loop_blocks_value_target,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
@@ -1116,6 +1145,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Constant,
             match_arm_boundary: parent.match_arm_boundary,
+            in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
             shared: Rc::clone(&parent.shared),
@@ -1128,6 +1158,7 @@ impl ScopeContext {
             expected_result_type_ids: Vec::new(),
             enclosing_callable: parent.enclosing_callable.clone(),
             active_value_target: None,
+            loop_blocks_value_target: parent.loop_blocks_value_target,
             active_generic_type_context: parent.active_generic_type_context.clone(),
             generic_template_validation: parent.generic_template_validation,
             generic_function_instantiation_stack: parent

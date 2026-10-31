@@ -15,6 +15,11 @@ and exact types to expose.
 JavaScript export names are runtime details. Moth names come from
 annotations, not from the JavaScript export.
 
+Write each annotation directly above the declaration it describes, and make
+sure that declaration is exported. An annotation always belongs to the next
+declaration in the file. If that declaration lacks `export`, the compiler asks
+you to add it rather than looking further down the file.
+
 ### What JavaScript can export
 
 The builder accepts `export function name(...) { ... }` and block-bodied

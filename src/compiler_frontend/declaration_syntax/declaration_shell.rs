@@ -23,11 +23,12 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     starts_build_config_qualifier_at_cursor,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, parse_type_annotation_cursor,
+    TypeAnnotationContext, parse_type_annotation_cursor, token_can_start_type_specification,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::syntax_errors::expression_position::separator_equality_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::{
     TokenScanFailure, collect_declaration_initializer_range,
@@ -59,6 +60,17 @@ pub struct DeclarationSyntax {
     pub span: Option<SourceSpan>,
 }
 
+/// Whether a token can begin the tokens after a binding name.
+///
+/// WHAT: the authored starts `parse_binding_target_syntax` accepts: an inferred `=` or any token
+///       that can begin an explicit type annotation (binding markers included).
+/// WHY: statement dispatch must not speculate a declaration for ordinary expression statements.
+///      Keeping the start set beside the binding grammar means the dispatch gate and the parser
+///      cannot drift apart.
+pub(crate) fn binding_target_can_start(tag: TokenTag) -> bool {
+    matches!(tag, TokenTag::ASSIGN) || token_can_start_type_specification(tag)
+}
+
 #[derive(Clone, Debug)]
 pub struct BindingTargetSyntax {
     pub name: StringId,
@@ -66,6 +78,19 @@ pub struct BindingTargetSyntax {
     pub type_annotation: ParsedTypeRef,
     /// Exact source-qualified span of the binding target anchor.
     pub span: Option<SourceSpan>,
+}
+
+impl BindingTargetSyntax {
+    /// Whether the authored target began with an explicit marker or type annotation.
+    ///
+    /// WHAT: distinguishes the bare `name = value` shape from every other current binding-target
+    ///       spelling.
+    /// WHY: statement dispatch only needs to recognise declaration shapes after an existing name;
+    ///      reading the canonical target keeps that decision beside the binding grammar.
+    pub(crate) fn declares_explicitly(&self) -> bool {
+        self.binding_mode != BindingMode::ImmutableRuntime
+            || !matches!(self.type_annotation, ParsedTypeRef::Inferred)
+    }
 }
 
 impl DeclarationSyntax {
@@ -141,6 +166,13 @@ pub fn parse_declaration_syntax(
 
     match token_stream.current_tag() {
         TokenTag::ASSIGN => {
+            if let Some(diagnostic) = separator_equality_mistake(
+                token_stream.current_token_ref(),
+                token_stream.token_ref_at_offset(1),
+                token_stream.token_ref_at_offset(2),
+            ) {
+                return Err(diagnostic.into());
+            }
             token_stream.advance();
         }
         TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE => {

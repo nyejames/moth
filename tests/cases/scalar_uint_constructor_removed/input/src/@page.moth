@@ -1,3 +1,0 @@
--- Prove U32() constructor-style conversion is rejected with removed-constructor diagnostic.
-
-value = U32("42")

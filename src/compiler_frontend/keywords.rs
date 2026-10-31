@@ -5,7 +5,7 @@
 //! remain compiler-owned.
 
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use moth_lexical::words::{SourceWord, classify_source_word};
+use moth_lexical::words::{SourceWord, SourceWordClass, classify_source_word};
 
 /// Returns the compiler token identity for a shared exact source word.
 pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
@@ -66,4 +66,23 @@ pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
         SourceWord::Return => Some(TokenTag::RETURN_BANG),
         _ => None,
     }
+}
+
+/// Returns the authored spelling of a reserved source word token.
+///
+/// WHAT: reverse lookup over the shared source-word inventory for keyword and word-operator
+///       tokens, derived from `token_tag_for_source_word`.
+/// WHY: a name-position diagnostic must name the exact word the author wrote. Keeping the reverse
+///      lookup derived avoids a second hand-maintained keyword table that could drift.
+pub(crate) fn reserved_word_spelling(token_tag: TokenTag) -> Option<&'static str> {
+    SourceWord::ALL
+        .iter()
+        .copied()
+        .find(|word| {
+            matches!(
+                word.class(),
+                SourceWordClass::Keyword | SourceWordClass::WordOperator
+            ) && token_tag_for_source_word(*word) == token_tag
+        })
+        .map(SourceWord::spelling)
 }

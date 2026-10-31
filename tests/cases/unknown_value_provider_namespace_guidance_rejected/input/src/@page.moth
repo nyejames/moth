@@ -1,0 +1,6 @@
+@external_uint.js as ext
+
+foo || -> I32:
+    value = identity_uint(0)
+    return 1
+;

@@ -104,11 +104,19 @@ fn value_receiver_context(context: TypeMismatchContext) -> ValueReceiverContext 
         TypeMismatchContext::Operator => ValueReceiverContext::OperatorOperand,
         TypeMismatchContext::Condition => ValueReceiverContext::Condition,
         TypeMismatchContext::CollectionElement => ValueReceiverContext::CollectionElement,
+        TypeMismatchContext::MapKey => ValueReceiverContext::MapKey,
+        TypeMismatchContext::MapValue => ValueReceiverContext::MapValue,
+        TypeMismatchContext::CatchRecoveryCollectionElement => {
+            ValueReceiverContext::CollectionElement
+        }
+        TypeMismatchContext::CatchRecoveryMapKey => ValueReceiverContext::MapKey,
+        TypeMismatchContext::CatchRecoveryMapValue => ValueReceiverContext::MapValue,
         TypeMismatchContext::TemplateInterpolation => ValueReceiverContext::TemplateInterpolation,
         TypeMismatchContext::MatchScrutinee => ValueReceiverContext::MatchScrutinee,
         TypeMismatchContext::MatchPattern
         | TypeMismatchContext::Pattern
-        | TypeMismatchContext::General => ValueReceiverContext::General,
+        | TypeMismatchContext::General
+        | TypeMismatchContext::CatchRecovery => ValueReceiverContext::General,
     }
 }
 

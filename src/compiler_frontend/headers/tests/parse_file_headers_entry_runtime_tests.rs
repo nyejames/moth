@@ -23,7 +23,8 @@ fn entry_runtime_fragment_count_is_zero_for_const_only_templates() {
 
 #[test]
 fn entry_runtime_fragment_count_reflects_runtime_template_count() {
-    // [3] is a runtime template (no # prefix); one at top level should yield count 1.
+    // [3] is a runtime template ([...]), while top-level const-templates use #[...]. One at top
+    // level yields count 1.
     let headers = parse_single_file_headers("[3]\n");
     assert_eq!(
         headers.entry_runtime_fragment_count, 1,

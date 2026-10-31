@@ -5,7 +5,7 @@
 //! effective node lookup, child view construction, overlay-dimension entry
 //! accessors, and invariant errors for invalid refs.
 //!
-//! WHY: `TirView` is the central read API for all future template consumers.
+//! WHY: `TirView` is the central read API for every template consumer.
 //! These tests guard the invariants later phases depend on: invalid store
 //! IDs produce `InfrastructureFailure` instead of panics, minimum-phase checks reject
 //! unready roots, and overlay dimension accessors resolve entries through the

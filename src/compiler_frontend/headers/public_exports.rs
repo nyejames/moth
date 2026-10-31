@@ -773,11 +773,13 @@ fn resolve_public_export_dependency(
         ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
             package_path,
             symbol_name,
+            candidates,
         } => {
             return Err(HeaderParseFailure::Diagnostic(
                 imports::missing_package_symbol(
                     symbol_name,
                     package_path,
+                    candidates,
                     Some(selection.source_span),
                 ),
             ));
@@ -831,7 +833,7 @@ fn resolve_public_export_dependency(
                 if matches!(public_surface_type, PublicExportSurfaceType::ModuleRoot)
                     && public_surface_name.is_empty()
                 {
-                    // Fall through to direct source resolution.
+                    // Intentional fall-through.
                 } else {
                     let public_surface_name_id = string_table.intern(&public_surface_name);
                     let diagnostic_public_surface_type = match public_surface_type {

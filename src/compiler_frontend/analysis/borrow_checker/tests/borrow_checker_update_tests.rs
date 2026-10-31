@@ -32,7 +32,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_view, assert_invalid_mutable_access_reason,
+    assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
@@ -768,6 +768,84 @@ observed = copy observer\n\
         InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
         expected_span,
     );
+}
+
+// WHAT: a whole-binding write is a write through every direct alias of that binding cell.
+// WHY: a source mutable alias (`first ~= data`) shares data's cell, so a fresh-value rebinding
+// while first is still read afterwards is the same overlapping mutation as `~items.push(...)`.
+#[test]
+fn whole_binding_write_rejects_a_live_direct_alias() {
+    for source in [
+        r#"
+data ~= 42
+first ~= data
+~data = 8
+after = first
+"#,
+        r#"
+data ~= 42
+first = data
+second = first
+~data = 8
+after = second
+"#,
+    ] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let registry = default_external_package_registry(&mut string_table);
+        let (module, type_environment) =
+            lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+                .expect("fixture source should lower");
+        validate_hir_module(&module, &type_environment, &registry)
+            .expect("the complete fixture should be structurally valid HIR");
+
+        let error = run_borrow_checker(&module, &registry, &path_fork, &string_table)
+            .expect_err("a write through an aliased binding cell must be rejected");
+        assert_invalid_mutable_access_reason(
+            error,
+            InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+        );
+    }
+}
+
+// WHAT: the same write is legal once the alias can no longer observe it.
+// WHY: alias activity is non-lexical, and `copy` produces independent provenance rather than a
+// direct alias, so neither shape may turn the whole-binding write into a false conflict.
+#[test]
+fn whole_binding_write_allows_a_dead_or_copied_alias() {
+    for source in [
+        r#"
+data ~= 42
+first ~= data
+observed = first
+~data = 8
+"#,
+        r#"
+data ~= 42
+first ~= copy data
+~data = 8
+after = first
+"#,
+        r#"
+identity |value I32| -> I32:
+return value
+;
+original ~= 42
+returned = identity(original)
+~original = 8
+after = returned
+"#,
+    ] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let registry = default_external_package_registry(&mut string_table);
+        let (module, type_environment) =
+            lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+                .expect("fixture source should lower");
+        validate_hir_module(&module, &type_environment, &registry)
+            .expect("the complete fixture should be structurally valid HIR");
+
+        run_borrow_checker(&module, &registry, &path_fork, &string_table)
+            .expect("a dead or copied alias must not block the whole-binding write");
+    }
 }
 
 fn local_named(

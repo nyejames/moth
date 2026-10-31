@@ -28,6 +28,25 @@ use crate::compiler_frontend::tests::parse_support::{
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
+fn mutation_equality_spans_the_whole_operator() {
+    let source = "value ~= 1\n~value == 2\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0031",
+        Some("common_syntax_mistake.equality_operator"),
+    );
+    let operator_start = source.rfind("==").expect("equality should be present") as u32;
+    let operator_span = LocalSpan::exact(operator_start, 2, &mut ExtendedSpanBuilder::new())
+        .expect("the operator span should fit inline");
+
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operator_span))
+    );
+}
+
+#[test]
 fn rejects_assignment_value_type_mismatch_with_specific_details() {
     assert_assignment_type_mismatch("value ~= 1\n~value = true\n");
 }

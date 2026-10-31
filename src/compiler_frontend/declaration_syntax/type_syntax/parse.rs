@@ -1402,7 +1402,7 @@ fn comma_separates_signature_member(
 /// WHY: contract heads must report a second specification for every spelling the type grammar can
 ///      start with; a symbol-only test lets `Wire of String I32` or `Wire of String {I32}` fall
 ///      through to the generic unexpected-token error instead of the contract diagnostic.
-fn token_can_start_type_specification(tag: TokenTag) -> bool {
+pub(crate) fn token_can_start_type_specification(tag: TokenTag) -> bool {
     tag.is_builtin_scalar_type_name()
         || matches!(
             tag,

@@ -19,18 +19,19 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_declaration, render_invalid_signature_member,
     render_invalid_struct_default_value, render_invalid_type_annotation,
     render_missing_declaration_initializer, render_reserved_builtin_name,
-    render_reserved_name_collision, render_shadowed_name, render_title_only,
-    render_type_used_as_value, render_unknown_name, render_unknown_type_name,
+    render_reserved_name_collision, render_title_only, render_type_used_as_value,
+    render_unknown_name, render_unknown_namespace_member, render_unknown_type_name,
     render_unknown_value_name, render_value_used_as_type,
 };
 use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticCompoundAssignmentOperator, DiagnosticSeverity,
     DiagnosticToken, InvalidAssignmentTargetReason, InvalidDeclarationReason,
-    InvalidSignatureMemberReason, InvalidTypeAnnotationReason, NameNamespace, NamingConvention,
-    ReservedNameOwner, TypeAnnotationContext,
+    InvalidSignatureMemberReason, InvalidTypeAnnotationReason, NameNamespace, NamespaceMemberRole,
+    NamespaceRecordKind, NamingConvention, ReservedNameOwner, TypeAnnotationContext,
+    TypeUsedAsValueReason, UnknownTypeNameSite,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 unit_code! {
     impl NameNamespace {
@@ -43,6 +44,33 @@ unit_code! {
         Method = 7,
         TemplateSlot = 8,
         ConfigKey = 9,
+    }
+}
+unit_code! {
+    impl UnknownTypeNameSite {
+        TypeAnnotation = 1,
+        NamespaceMember = 2,
+        ConformanceTarget = 3,
+    }
+}
+unit_code! {
+    impl NamespaceRecordKind {
+        Source = 1,
+        ExternalPackage = 2,
+    }
+}
+unit_code! {
+    impl NamespaceMemberRole {
+        Value = 1,
+        Type = 2,
+        ChildNamespace = 3,
+    }
+}
+unit_code! {
+    impl TypeUsedAsValueReason {
+        BareTypeName = 1,
+        GenericStructApplication = 2,
+        GenericChoiceApplication = 3,
     }
 }
 unit_code! {
@@ -472,13 +500,37 @@ diagnostic_family! {
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
         title: "Unknown value name",
-        facts: [name: StringFact],
+        facts: [
+            name: StringFact,
+            namespace_alias: OptStringFact,
+            package_path: OptStringFact,
+        ],
         labels: [],
         extra: None,
-        ctor: generated unknown_value_name,
+        ctor: manual,
         view: UnknownValueNameView,
         render: render_unknown_value_name,
     }
+}
+
+/// Ordinary unknown-value draft with no namespace qualification guidance.
+pub(crate) fn unknown_value_name(name: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    unknown_value_name_with_namespace(name, None, None, span)
+}
+
+/// Unknown-value draft that names the one visible namespace exposing this member.
+pub(crate) fn unknown_value_name_with_namespace(
+    name: StringId,
+    namespace_alias: Option<StringId>,
+    package_path: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&UNKNOWN_VALUE_NAME, span, |cursor| {
+        cursor.push::<StringFact>(&name)?;
+        cursor.push::<OptStringFact>(&namespace_alias)?;
+        cursor.push::<OptStringFact>(&package_path)?;
+        Ok(())
+    })
 }
 
 diagnostic_family! {
@@ -488,13 +540,90 @@ diagnostic_family! {
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
         title: "Unknown type name",
-        facts: [name: StringFact],
+        facts: [name: StringFact, site: UnitFact<UnknownTypeNameSite>],
         labels: [],
-        extra: None,
-        ctor: generated unknown_type_name,
+        extra: StringIds,
+        ctor: manual,
         view: UnknownTypeNameView,
         render: render_unknown_type_name,
     }
+}
+
+/// Stores an unknown type-name draft, including visible candidate names as string ids.
+pub(crate) fn unknown_type_name(
+    name: StringId,
+    site: UnknownTypeNameSite,
+    candidates: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&UNKNOWN_TYPE_NAME, span, |cursor| {
+        cursor.push::<StringFact>(&name)?;
+        cursor.push::<UnitFact<UnknownTypeNameSite>>(&site)
+    })
+    .with_string_ids(candidates)
+}
+
+diagnostic_family! {
+    UNKNOWN_NAMESPACE_MEMBER {
+        internal: 3089,
+        stable: "MOTH-RULE-0089",
+        category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Unknown namespace member",
+        facts: [
+            namespace: StringFact,
+            member: StringFact,
+            namespace_kind: UnitFact<NamespaceRecordKind>,
+            member_role: UnitFact<NamespaceMemberRole>,
+        ],
+        labels: [],
+        extra: StringIds,
+        ctor: manual,
+        view: UnknownNamespaceMemberView,
+        render: render_unknown_namespace_member,
+    }
+}
+
+/// Stores an unknown namespace-member draft, including role-filtered candidate names.
+pub(crate) fn unknown_namespace_member(
+    namespace: StringId,
+    member: StringId,
+    namespace_kind: NamespaceRecordKind,
+    member_role: NamespaceMemberRole,
+    mut candidates: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    candidates.sort_unstable_by_key(|id| id.index());
+    candidates.dedup();
+    DiagnosticDraft::with_facts(&UNKNOWN_NAMESPACE_MEMBER, span, |cursor| {
+        cursor.push::<StringFact>(&namespace)?;
+        cursor.push::<StringFact>(&member)?;
+        cursor.push::<UnitFact<NamespaceRecordKind>>(&namespace_kind)?;
+        cursor.push::<UnitFact<NamespaceMemberRole>>(&member_role)?;
+        Ok(())
+    })
+    .with_string_ids(candidates)
+}
+
+/// Intern the source-visible dotted namespace path for an unknown-member diagnostic.
+///
+/// WHAT: one StringId for the root alias plus any walked child segments.
+/// WHY: PathFact renders with `/`, which is not the source-visible namespace spelling.
+/// A root-only path reuses the existing interned alias.
+pub(crate) fn intern_dotted_namespace_path(
+    root: StringId,
+    child_segments: &[StringId],
+    string_table: &mut StringTable,
+) -> StringId {
+    if child_segments.is_empty() {
+        return root;
+    }
+    let mut display = String::from(string_table.resolve(root));
+    for segment in child_segments {
+        display.push('.');
+        display.push_str(string_table.resolve(*segment));
+    }
+    string_table.intern(&display)
 }
 
 /// The duplicate-declaration draft uses the duplicate site as its primary location.
@@ -503,12 +632,6 @@ pub(crate) fn duplicate_declaration(
     duplicate_span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&DUPLICATE_DECLARATION, duplicate_span, |cursor| {
-        cursor.push::<StringFact>(&name)
-    })
-}
-
-pub(crate) fn shadowed_name(name: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
-    DiagnosticDraft::with_facts(&SHADOWED_NAME, span, |cursor| {
         cursor.push::<StringFact>(&name)
     })
 }
@@ -583,9 +706,13 @@ pub(crate) fn namespace_misuse(
         (NameNamespace::Type, NameNamespace::Value) => {
             value_used_as_type_row(name, expected, found, span)
         }
-        (NameNamespace::Value, NameNamespace::Type) => {
-            type_used_as_value_row(name, expected, found, span)
-        }
+        (NameNamespace::Value, NameNamespace::Type) => type_used_as_value_row(
+            name,
+            expected,
+            found,
+            TypeUsedAsValueReason::BareTypeName,
+            span,
+        ),
         _ => unknown_name_row(name, expected, found, span),
     }
 }
@@ -762,28 +889,14 @@ diagnostic_family! {
             name: StringFact,
             expected: UnitFact<NameNamespace>,
             found: UnitFact<NameNamespace>,
+            reason: UnitFact<TypeUsedAsValueReason>,
         ],
         labels: [],
         extra: None,
         ctor: generated type_used_as_value_row,
+        reason_key: reason,
         view: TypeUsedAsValueView,
         render: render_type_used_as_value,
-    }
-}
-
-diagnostic_family! {
-    SHADOWED_NAME {
-        internal: 3038,
-        stable: "MOTH-RULE-0038",
-        category: DiagnosticCategory::Rule,
-        severity: DiagnosticSeverity::Error,
-        title: "Shadowed name",
-        facts: [name: StringFact],
-        labels: [LabelMessageCode::PREVIOUS_DECLARATION],
-        extra: None,
-        ctor: manual,
-        view: ShadowedNameView,
-        render: render_shadowed_name,
     }
 }
 
@@ -891,6 +1004,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     DUPLICATE_DECLARATION,
     UNKNOWN_VALUE_NAME,
     UNKNOWN_TYPE_NAME,
+    UNKNOWN_NAMESPACE_MEMBER,
     INVALID_TYPE_ANNOTATION,
     UNKNOWN_NAME,
     IDENTIFIER_NAMING_CONVENTION,
@@ -901,7 +1015,6 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     MISSING_DECLARATION_INITIALIZER,
     VALUE_USED_AS_TYPE,
     TYPE_USED_AS_VALUE,
-    SHADOWED_NAME,
     RESERVED_NAME_COLLISION,
     INVALID_DECLARATION,
     INVALID_ASSIGNMENT_TARGET,

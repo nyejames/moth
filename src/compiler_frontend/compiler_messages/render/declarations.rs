@@ -5,8 +5,9 @@
 //! WHY: declarations are resolved before executable body parsing and form their own payload family.
 
 use super::{
-    DiagnosticRenderContext, RenderedPayload, duplicate_declaration_message,
-    namespace_misuse_message, token_kind_name, unknown_name_message,
+    DiagnosticRenderContext, RenderedPayload, closest_name_suggestion,
+    closest_name_suggestion_with_extra, duplicate_declaration_message, namespace_misuse_message,
+    token_kind_name, unknown_name_message,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     GenericInstantiationExtra, GenericInstantiationShape, InvalidFunctionSignatureView,
@@ -17,14 +18,16 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
     DuplicateDeclarationView, IdentifierNamingConventionView, InvalidDeclarationCode,
     InvalidDeclarationView, InvalidSignatureMemberView, InvalidStructDefaultValueView,
     MissingDeclarationInitializerView, ReservedBuiltinNameView, ReservedNameCollisionView,
-    ShadowedNameView, TypeUsedAsValueView, UnknownNameView, UnknownTypeNameView,
+    TypeUsedAsValueView, UnknownNameView, UnknownNamespaceMemberView, UnknownTypeNameView,
     UnknownValueNameView, ValueUsedAsTypeView, decode_invalid_declaration_reason,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, InvalidDeclarationReason, InvalidFunctionSignatureReason,
     InvalidSignatureMemberReason, NameNamespace, NamingConvention, ReservedNameOwner,
+    TypeUsedAsValueReason, UnknownTypeNameSite,
 };
+use crate::compiler_frontend::datatypes::display::builtin_type_annotation_spellings;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_signature_member_message(reason: InvalidSignatureMemberReason) -> String {
@@ -125,18 +128,13 @@ pub(crate) fn render_reserved_builtin_name(
     }
 }
 
-fn shadowed_name_message(name: StringId, string_table: &dyn StringTableResolver) -> String {
-    format!("Shadowed name '{}'", string_table.resolve(name))
-}
-
-pub(crate) fn render_shadowed_name(
-    _diagnostic: &DiagnosticView<'_>,
-    facts: &ShadowedNameView,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    RenderedPayload {
-        message: shadowed_name_message(facts.name, context.string_table),
-        guidance: Vec::new(),
+fn reserved_name_owner_label(reserved_by: ReservedNameOwner) -> &'static str {
+    match reserved_by {
+        ReservedNameOwner::BuiltinType => "builtin type",
+        ReservedNameOwner::Keyword => "keyword",
+        ReservedNameOwner::CoreTrait => "core trait",
+        ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
+        ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
     }
 }
 
@@ -145,17 +143,26 @@ fn reserved_name_collision_message(
     reserved_by: ReservedNameOwner,
     string_table: &dyn StringTableResolver,
 ) -> String {
-    let owner = match reserved_by {
-        ReservedNameOwner::BuiltinType => "builtin type",
-        ReservedNameOwner::Keyword => "keyword",
-        ReservedNameOwner::CoreTrait => "core trait",
-        ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
-        ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
-    };
     format!(
         "Reserved name collision: '{}' is a reserved {}",
         string_table.resolve(name),
-        owner
+        reserved_name_owner_label(reserved_by)
+    )
+}
+
+/// Suggests the repair for a name that collides with a reserved word.
+///
+/// WHAT: names the reserved owner and tells the author to choose another name.
+/// WHY: the message states the collision, so the guidance line must carry the practical fix.
+fn reserved_name_collision_guidance(
+    name: StringId,
+    reserved_by: ReservedNameOwner,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Choose a different name that does not reuse the {} '{}'.",
+        reserved_name_owner_label(reserved_by),
+        string_table.resolve(name)
     )
 }
 
@@ -170,7 +177,11 @@ pub(crate) fn render_reserved_name_collision(
             facts.reserved_by,
             context.string_table,
         ),
-        guidance: Vec::new(),
+        guidance: vec![reserved_name_collision_guidance(
+            facts.name,
+            facts.reserved_by,
+            context.string_table,
+        )],
     }
 }
 
@@ -657,28 +668,87 @@ pub(crate) fn render_duplicate_declaration(
     }
 }
 
-/// WHAT: renders an unknown value name from its compact facts.
-/// WHY: the family fixes the value namespace, so the record stores only the name.
+/// WHAT: renders an unknown value name, with namespace qualification when exactly one
+/// visible namespace exposes the name as a direct value member.
+/// WHY: the family stores optional alias and package-path facts rather than pre-rendered prose.
 pub(crate) fn render_unknown_value_name(
     _diagnostic: &DiagnosticView<'_>,
     facts: &UnknownValueNameView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
+    let message = match facts.namespace_alias {
+        Some(alias) => {
+            let name = context.string_table.resolve(facts.name);
+            let alias = context.string_table.resolve(alias);
+            match facts.package_path {
+                Some(package_path) => {
+                    let package_path = context.string_table.resolve(package_path);
+                    format!(
+                        "Unknown value '{name}'. It is available as '{alias}.{name}' from the '{package_path}' namespace. Use '{package_path} {name}' if you want the bare name."
+                    )
+                }
+                None => format!("Unknown value '{name}'. It is available as '{alias}.{name}'."),
+            }
+        }
+        None => unknown_name_message(facts.name, NameNamespace::Value, context.string_table),
+    };
     RenderedPayload {
-        message: unknown_name_message(facts.name, NameNamespace::Value, context.string_table),
+        message,
         guidance: Vec::new(),
     }
 }
 
-/// WHAT: renders an unknown type name from its compact facts.
-/// WHY: the family fixes the type namespace, so the record stores only the name.
+/// WHAT: renders an unknown member of an exact resolved namespace node.
+/// WHY: the family stores the source-visible namespace path, requested member, and
+/// role-filtered candidates; `closest_name_suggestion` is the only suggestion policy.
+pub(crate) fn render_unknown_namespace_member(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownNamespaceMemberView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    // Kind and role are stored for structured consumers; the source-visible
+    // message names the member and the exact namespace node.
+    let _ = (facts.namespace_kind, facts.member_role);
+    let member = context.string_table.resolve(facts.member);
+    let namespace = context.string_table.resolve(facts.namespace);
+    let mut message = format!("Unknown member '{member}' on namespace '{namespace}'.");
+    if let Some(suggested) =
+        closest_name_suggestion(member, diagnostic.string_ids(), context.string_table)
+    {
+        message.push_str(&format!(" Did you mean '{suggested}'?"));
+    }
+    RenderedPayload {
+        message,
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an unknown type name from its compact facts and optional close candidates.
+/// WHY: the family fixes the type namespace, so the record stores the name plus visible
+/// candidates; builtin spellings are compared only for type-annotation sites.
 pub(crate) fn render_unknown_type_name(
-    _diagnostic: &DiagnosticView<'_>,
+    diagnostic: &DiagnosticView<'_>,
     facts: &UnknownTypeNameView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
+    let mut message = unknown_name_message(facts.name, NameNamespace::Type, context.string_table);
+    let name_str = context.string_table.resolve(facts.name);
+    let suggested = match facts.site {
+        UnknownTypeNameSite::TypeAnnotation => closest_name_suggestion_with_extra(
+            name_str,
+            diagnostic.string_ids(),
+            builtin_type_annotation_spellings(),
+            context.string_table,
+        ),
+        UnknownTypeNameSite::NamespaceMember | UnknownTypeNameSite::ConformanceTarget => {
+            closest_name_suggestion(name_str, diagnostic.string_ids(), context.string_table)
+        }
+    };
+    if let Some(suggested) = suggested {
+        message.push_str(&format!(" Did you mean '{suggested}'?"));
+    }
     RenderedPayload {
-        message: unknown_name_message(facts.name, NameNamespace::Type, context.string_table),
+        message,
         guidance: Vec::new(),
     }
 }
@@ -720,13 +790,28 @@ pub(crate) fn render_type_used_as_value(
     facts: &TypeUsedAsValueView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    RenderedPayload {
-        message: namespace_misuse_message(
-            facts.name,
-            facts.expected,
-            facts.found,
-            context.string_table,
-        ),
-        guidance: Vec::new(),
+    let name = context.string_table.resolve(facts.name);
+    match facts.reason {
+        TypeUsedAsValueReason::GenericStructApplication => RenderedPayload {
+            message: format!(
+                "`{name} of ...` is a type annotation, not a value expression. Construct the value with `{name}(...)` and provide a concrete receiving type when inference needs it."
+            ),
+            guidance: Vec::new(),
+        },
+        TypeUsedAsValueReason::GenericChoiceApplication => RenderedPayload {
+            message: format!(
+                "`{name} of ...` is a type annotation, not a value expression. Construct one of the `{name}` variants instead and provide a concrete receiving type when inference needs it."
+            ),
+            guidance: Vec::new(),
+        },
+        TypeUsedAsValueReason::BareTypeName => RenderedPayload {
+            message: namespace_misuse_message(
+                facts.name,
+                facts.expected,
+                facts.found,
+                context.string_table,
+            ),
+            guidance: Vec::new(),
+        },
     }
 }

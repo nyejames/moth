@@ -8,14 +8,15 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    templates, token_lexical,
+    names_declarations, templates, token_lexical,
 };
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
-    MissingWhitespace, SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
+    MissingWhitespace, ReservedNameOwner, SourceSpanCapacityResource, SymbolicSpacingConstruct,
+    SymbolicSpacingError,
 };
 use crate::compiler_frontend::keywords::{
-    attached_bang_keyword_token_tag, token_tag_for_source_word,
+    attached_bang_keyword_token_tag, reserved_word_spelling, token_tag_for_source_word,
 };
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
 use crate::compiler_frontend::source::{
@@ -255,16 +256,19 @@ pub(crate) struct LexedSource {
 }
 /// Immediate lexical surroundings for the next token.
 ///
-/// WHAT: carries the tags of the previous emitted token and the previous non-newline token
-/// into token recognition.
+/// WHAT: carries the tags of the previous emitted token and the previous non-newline token,
+/// plus the previous token's exact end byte.
 /// WHY: signed literals and spacing diagnostics need a small amount of left context, but the
 /// tokenizer must not ask AST parsing whether a token is in expression position. Tags carry
-/// every fact those decisions read, so the loop keeps no token payload alive.
+/// every fact those decisions read, so the loop keeps no token payload alive. The end byte lets
+/// the reserved-keyword spacing check report at the keyword the author wrote instead of at the
+/// following operator.
 #[derive(Clone, Copy)]
 struct LexerTokenContext {
     previous_token_tag: Option<TokenTag>,
     last_meaningful_token_tag: Option<TokenTag>,
     meaningful_token_before_last_tag: Option<TokenTag>,
+    previous_token_end_byte: u32,
 }
 
 impl LexerTokenContext {
@@ -584,6 +588,105 @@ fn unary_negation_spacing_error(stream: &mut TokenStream<'_>) -> TokenizeResult<
     ))
 }
 
+/// Token tags that put a following word in value position.
+///
+/// WHAT: binary operators, `then`, `else`, `return`, a comma and `(`.
+/// WHY: `ay - by - ay` and `else by - ay` read the reserved word as a name followed by binary
+/// minus. A header keyword such as the step `by` in `loop 0 to 10 by - 1` follows an
+/// expression-ending bound instead, so it keeps the unary-negation diagnostic.
+fn keyword_name_position_predecessor(tag: TokenTag) -> bool {
+    matches!(
+        tag,
+        TokenTag::ADD
+            | TokenTag::SUBTRACT
+            | TokenTag::MULTIPLY
+            | TokenTag::DIVIDE
+            | TokenTag::INT_DIVIDE
+            | TokenTag::MODULUS
+            | TokenTag::EXPONENT
+            | TokenTag::LESS_THAN
+            | TokenTag::LESS_THAN_OR_EQUAL
+            | TokenTag::GREATER_THAN
+            | TokenTag::GREATER_THAN_OR_EQUAL
+            | TokenTag::AND
+            | TokenTag::OR
+            | TokenTag::IS
+            | TokenTag::THEN
+            | TokenTag::ELSE
+            | TokenTag::RETURN
+            | TokenTag::RETURN_BANG
+            | TokenTag::COMMA
+            | TokenTag::OPEN_PARENTHESIS
+    )
+}
+
+/// Words that read as operators rather than candidate binding names.
+///
+/// WHAT: excludes `not`, `is`, `and`, `or`, `copy` and `cast` from the reserved-name report.
+/// WHY: these words legitimately introduce or continue an operand, so `then not - 1` and
+/// `base + copy - delta` are unary spacing mistakes rather than attempts to name a binding.
+fn word_operator_token(tag: TokenTag) -> bool {
+    matches!(
+        tag,
+        TokenTag::NOT
+            | TokenTag::IS
+            | TokenTag::AND
+            | TokenTag::OR
+            | TokenTag::COPY
+            | TokenTag::CAST
+    )
+}
+
+/// Reports a reserved word read as a name before a spaced binary minus.
+///
+/// WHAT: when `-` has whitespace on both sides and directly follows a reserved keyword that sits
+///       in value position, returns the reserved-name diagnostic at the keyword.
+/// WHY: `else by - ay` would otherwise abort tokenization as malformed unary negation before the
+///      AST can explain that `by` is reserved. The predecessor check keeps the unary diagnostic
+///      for loop steps and other positions where the keyword introduces the operand itself.
+fn reserved_keyword_name_before_spaced_minus(
+    stream: &mut TokenStream<'_>,
+    context: LexerTokenContext,
+    whitespace_before_current: bool,
+    string_table: &mut StringTable,
+) -> TokenizeResult<Option<DiagnosticDraft>> {
+    // The pattern is `name -` only with whitespace before the minus and the keyword immediately
+    // before it, which also means the recorded token end byte is the keyword's end.
+    if !whitespace_before_current || context.previous_token_tag != context.last_meaningful_token_tag
+    {
+        return Ok(None);
+    }
+
+    let Some(keyword_tag) = context.last_meaningful_token_tag else {
+        return Ok(None);
+    };
+    if word_operator_token(keyword_tag)
+        || !context
+            .meaningful_token_before_last_tag
+            .is_some_and(keyword_name_position_predecessor)
+    {
+        return Ok(None);
+    }
+
+    let Some(spelling) = reserved_word_spelling(keyword_tag) else {
+        return Ok(None);
+    };
+    let Some(keyword_start) = context
+        .previous_token_end_byte
+        .checked_sub(spelling.len() as u32)
+    else {
+        return Ok(None);
+    };
+
+    let span = source_span_for_bytes(stream, keyword_start, context.previous_token_end_byte)?;
+    let keyword = string_table.intern(spelling);
+    Ok(Some(names_declarations::reserved_name_collision(
+        keyword,
+        ReservedNameOwner::Keyword,
+        Some(span),
+    )))
+}
+
 /// Enforce outer spacing when the current complete symbolic token follows an expression.
 ///
 /// WHAT: requires whitespace before and after binary operators and compound assignments.
@@ -680,6 +783,7 @@ pub(crate) fn tokenize(
             previous_token_tag,
             last_meaningful_token_tag,
             meaningful_token_before_last_tag,
+            previous_token_end_byte: stream.byte_offset,
         };
         current_tag = match get_token_tag(
             &mut stream,
@@ -1079,6 +1183,15 @@ fn get_token_tag(
 
             if !next_char_is_whitespace_or_end(stream) {
                 return emit_static(stream, TokenTag::NEGATIVE);
+            }
+
+            if let Some(diagnostic) = reserved_keyword_name_before_spaced_minus(
+                stream,
+                context,
+                whitespace_before_current,
+                string_table,
+            )? {
+                return Err(diagnostic.into());
             }
 
             return Err(unary_negation_spacing_error(stream)?.into());

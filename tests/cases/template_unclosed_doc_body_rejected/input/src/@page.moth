@@ -1,0 +1,2 @@
+show ||:
+    io.line([$doc: a [ b)

@@ -1,0 +1,20 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0022"]
+message_contains = ["is not followed by a supported declaration"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0022"
+reason = "invalid_external_module.orphaned_annotation"
+path = "input/src/broken.js"
+line = 2
+column = 4
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 1

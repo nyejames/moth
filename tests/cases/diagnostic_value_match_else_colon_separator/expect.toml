@@ -1,0 +1,10 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0042"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0042"
+reason = "invalid_control_flow_statement.expected_fat_arrow"
+path = "input/@page.moth"
+line = 5

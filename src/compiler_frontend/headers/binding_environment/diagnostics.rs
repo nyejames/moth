@@ -114,9 +114,10 @@ pub(super) fn ambiguous_dependency_target(
 pub(super) fn missing_package_symbol(
     symbol: StringId,
     package_path: StringId,
+    candidates: Vec<StringId>,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
-    imports::missing_package_symbol(symbol, package_path, span)
+    imports::missing_package_symbol(symbol, package_path, candidates, span)
 }
 
 /// Diagnostic when a module has no public export and an external consumer tries to bind from it.

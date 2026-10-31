@@ -97,7 +97,8 @@ fn parse_return_channel_expression(
         },
         false,
     )
-    .with_numeric_deferral_owner();
+    .with_numeric_deferral_owner()
+    .with_mismatch_context(TypeMismatchContext::ReturnValue);
     match create_expression_with_trailing_newline_policy(input) {
         Ok(expression) => Ok(StatementExpression::Built(expression.id())),
         Err(error) => {
@@ -270,9 +271,8 @@ pub(crate) fn parse_return_statement(
             }
         };
 
-        // For single-result returns, apply a final coercion guard to preserve
-        // existing behaviour (e.g. optional wrapping). For multi-result, the
-        // value-block parser already validated and coerced each slot.
+        // A single-result return still takes the declared boundary's coercion, which can apply an
+        // optional envelope. The multi-result value block already coerced each slot.
         let return_expr = if let &[expected_type_id] = function_return_type_ids {
             coerce_expression_to_explicit_type_boundary(
                 value_block_expr,

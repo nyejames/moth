@@ -8,6 +8,7 @@
 //!       separate filesystem-backed resolver. Both lanes finish before the mutable fork
 //!       is moved into the provider context.
 use super::*;
+use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, project_config};
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
@@ -31,6 +32,8 @@ pub(super) struct ProviderBackedImportRequest<'a> {
     pub(super) project_path_resolver: &'a ProjectPathResolver,
     /// The caller-owned discovery fork the provider must intern into.
     pub(super) path_fork: &'a mut PathInternerFork,
+    /// Boundary-owned registration for provider files whose diagnostics need exact spans.
+    pub(super) provider_sources: &'a mut dyn ProviderSourceRegistrar,
 }
 
 /// Resolves a provider-backed import prefix to a canonical filesystem path, checks the build cache,
@@ -41,10 +44,6 @@ pub(super) fn resolve_provider_backed_import(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
-    // Directory projects resolve provider-owned targets through the same boundary-aware
-    // namespace as compiler-semantic dependencies. Single-file synthetic compilation retains its
-    // separate filesystem-backed resolver. Both lanes finish before the mutable fork is moved
-    // into the provider context.
     let canonical_source_path = match directory_target {
         Some(canonical_source_path) => canonical_source_path,
         None => resolve_provider_target_via_filesystem(&request, string_table)?,
@@ -59,6 +58,7 @@ pub(super) fn resolve_provider_backed_import(
         provider,
         project_path_resolver,
         path_fork,
+        provider_sources,
     } = request;
 
     invoke_provider_and_record_resolution(
@@ -70,6 +70,7 @@ pub(super) fn resolve_provider_backed_import(
         provider,
         project_path_resolver,
         path_fork,
+        provider_sources,
         external_imports,
         string_table,
     )
@@ -118,6 +119,7 @@ fn invoke_provider_and_record_resolution(
     provider: &std::sync::Arc<dyn ExternalImportProvider>,
     project_path_resolver: &ProjectPathResolver,
     path_fork: &mut PathInternerFork,
+    provider_sources: &mut dyn ProviderSourceRegistrar,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
@@ -157,12 +159,15 @@ fn invoke_provider_and_record_resolution(
             cache: external_imports.cache,
             path_fork,
             string_table,
+            provider_sources: Some(&mut *provider_sources),
         };
 
-        provider
-            .resolve_external_import(provider_request, &mut context)
-            .map_err(SourceDiscoveryError::Premerge)?
+        provider.resolve_external_import(provider_request, &mut context)
     };
+    // The provider has returned every span builder it borrowed, even when it reported a source
+    // diagnostic, so the boundary can retain them ahead of diagnostic capture.
+    provider_sources.finish();
+    let result = result.map_err(SourceDiscoveryError::Premerge)?;
 
     if let Some(resolved) = result {
         external_imports.cache.insert(cache_key, resolved.clone());

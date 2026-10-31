@@ -33,11 +33,10 @@ pub struct HirConstFacts {
 pub struct HirConstDeclarationFact {
     pub declaration_path: PathId,
 
-    /// NOTE: currently advisory; only read in tests until optimization passes consume it.
+    /// NOTE: both fields are advisory and read only in tests.
     #[allow(dead_code)]
     pub scope: ConstBindingScope,
 
-    /// NOTE: currently advisory; only read in tests until optimization passes consume it.
     #[allow(dead_code)]
     pub source: ConstBindingSource,
 

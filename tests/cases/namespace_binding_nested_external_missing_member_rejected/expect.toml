@@ -3,4 +3,5 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0034"]
+diagnostic_codes = ["MOTH-RULE-0089"]
+message_contains = ["Unknown member 'unknown' on namespace 'nested.tools'."]

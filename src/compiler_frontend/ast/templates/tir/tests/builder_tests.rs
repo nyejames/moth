@@ -538,8 +538,8 @@ fn expression_site_ids_assigned_in_document_order() {
 /// as the first template. Because TIR nodes are store-owned and looked up by
 /// ID (not cloned per template), the occurrence/site IDs inside those nodes
 /// are inherently preserved: no re-allocation happens.
-/// WHY: the final TIR architecture uses append-only derived roots. Overlay and
-/// slot-resolution phases rely on shared nodes keeping their original IDs so
+/// WHY: derived roots are append-only, so shared nodes keep their original IDs.
+/// Overlay and slot-resolution phases rely on those IDs staying stable so
 /// contributions and wrappers remain unambiguous across derived roots.
 #[test]
 fn derived_root_preserves_existing_occurrence_and_site_ids() {

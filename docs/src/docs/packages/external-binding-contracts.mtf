@@ -41,6 +41,31 @@ The Moth dependency clause uses the annotation names, not the JavaScript export 
 
 `@moth.sig` annotations expose free functions and `@moth.const` annotations expose literal constants. `this` receiver-style signatures are rejected during registration. Runtime imports from builder-registered modules must be named static imports.
 
+#### Placing annotations
+
+Each annotation describes the declaration that comes right after its comment
+block. Only whitespace and other comments may sit between the two. The compiler
+never skips ahead looking for a declaration that fits, so moving code around
+can't quietly attach an annotation to the wrong function.
+
+That nearest declaration must be exported. In the following file, the
+annotation belongs to `emphasize`, which lacks `export`. The compiler reports
+the missing keyword and the line to add it on, rather than binding the
+annotation to some later export:
+
+[codeblock, $code("js"):
+    /**
+     * @moth.sig emphasize |text String| -> String
+     */
+    function emphasize(text) {
+        return `**${text}**`;
+    }
+]
+
+An annotation is also an error when no supported declaration follows it, for
+example when a statement, an unsupported export or the end of the file comes
+first.
+
 #### Exact signature subset
 
 - parameters are positional and typed

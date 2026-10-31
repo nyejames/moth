@@ -1,8 +1,8 @@
 //! Top-level `#` item handling for header parsing.
 //!
-//! WHAT: handles boundary `#` items, currently the active-root const-template form (`#[]`).
-//! WHY: the parser keeps hash-prefixed top-level forms in one place so `file_parser` can remain a
-//! high-level loop over classified items.
+//! WHAT: handles the top-level `#[]` const-template form for active roots.
+//! WHY: const-template parsing stays isolated so `file_parser` can remain a high-level loop over
+//! classified items.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;

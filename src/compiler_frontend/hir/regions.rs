@@ -1,7 +1,7 @@
 //! HIR lexical regions.
 //!
 //! WHAT: region nodes used by HIR locals, blocks, and later lifetime/ownership analysis.
-//! WHY: regions give borrow validation and future lowering passes a stable scope tree.
+//! WHY: regions give borrow validation and lowering a stable scope tree.
 
 use crate::compiler_frontend::hir::ids::RegionId;
 

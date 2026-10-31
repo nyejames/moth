@@ -9,7 +9,7 @@
 ## Status and placement
 
 - Status: queued. Implementation has not started.
-- Activation: explicit approval after the preceding diagnostic improvements. This entry must not silently pause or reactivate another plan.
+- Activation: explicit approval. This entry must not silently pause or reactivate another plan.
 - Current slice: Phase 0, refresh the live code and test baseline.
 - Closeout: retire this plan and its roadmap item after validation and durable documentation changes.
 

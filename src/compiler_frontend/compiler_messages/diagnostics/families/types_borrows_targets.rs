@@ -51,6 +51,12 @@ unit_code! {
         ErrorReturn = 15,
         Pattern = 16,
         General = 17,
+        CatchRecovery = 18,
+        MapKey = 19,
+        MapValue = 20,
+        CatchRecoveryCollectionElement = 21,
+        CatchRecoveryMapKey = 22,
+        CatchRecoveryMapValue = 23,
     }
 }
 

@@ -1485,6 +1485,7 @@ fn materialize_runtime_template_handoff_for_hir(
         return Err(templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertOutsideParentSlot,
             None,
+            None,
             template.span,
         )
         .into());

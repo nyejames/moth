@@ -2,3 +2,10 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0037"]
+message_contains = ["`Box of ...` is a type annotation, not a value expression"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0037"
+reason = "type_used_as_value.generic_struct_application"
+line = 5
+column = 9

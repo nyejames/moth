@@ -8,10 +8,12 @@
 //! ## Module layout
 //!
 //! - `provider`: the `ExternalImportProvider` trait and its input/output types.
+//! - `provider_sources`: the narrow source-registration service a provider receives.
 //! - `registry`: `ExternalImportProviderRegistry` with registration and lookup helpers.
 //! - `cache`: `ExternalImportProviderCache` keyed by canonical path + provider kind.
 
 pub mod cache;
 pub mod provider;
+pub mod provider_sources;
 pub mod registry;
 pub mod resolution_table;

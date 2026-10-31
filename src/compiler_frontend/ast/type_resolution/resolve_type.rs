@@ -173,7 +173,7 @@ fn resolve_parsed_type_ref(
             resolve_named_type_from_context(*name, span, context, string_table, failure_kind)
         }
         ParsedTypeRef::Qualified { path, .. } => {
-            resolve_namespaced_type_from_context(path, span, context, failure_kind)
+            resolve_namespaced_type_from_context(path, span, context, string_table, failure_kind)
         }
         ParsedTypeRef::Applied {
             base, arguments, ..

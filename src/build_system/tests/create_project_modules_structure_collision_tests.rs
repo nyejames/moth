@@ -276,12 +276,14 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
                 resolution_table: &mut resolution_table,
             };
 
+            let mut provider_sources = super::source_discovery::ProviderOwnedSourceStaging::new();
             let Err(error) = super::source_discovery::resolve_structural_provider_reference(
                 &provider,
                 DependencyClauseKind::Namespace,
                 &declaring_source,
                 &resolver,
                 path_fork,
+                &mut provider_sources,
                 &mut external_imports,
                 resolution,
                 string_table,

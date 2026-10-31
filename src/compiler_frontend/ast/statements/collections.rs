@@ -98,6 +98,7 @@ pub(crate) fn new_curly_literal(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    mismatch_context: TypeMismatchContext,
     retain_pending_numeric_fragment: bool,
 ) -> CollectionParseResult<CurlyLiteral> {
     match curly_context {
@@ -111,6 +112,7 @@ pub(crate) fn new_curly_literal(
             value_mode,
             string_table,
             path_fork,
+            mismatch_context,
             retain_pending_numeric_fragment,
         ),
         ExpectedCurlyLiteralContext::Map(map_context) => parse_map_literal(
@@ -123,6 +125,7 @@ pub(crate) fn new_curly_literal(
             value_mode,
             string_table,
             path_fork,
+            mismatch_context,
             retain_pending_numeric_fragment,
         ),
         ExpectedCurlyLiteralContext::Infer => parse_inferred_curly_literal(
@@ -134,6 +137,7 @@ pub(crate) fn new_curly_literal(
             value_mode,
             string_table,
             path_fork,
+            mismatch_context,
             retain_pending_numeric_fragment,
         ),
     }
@@ -155,9 +159,13 @@ pub(crate) fn complete_deferred_collection<'env>(
         element_shape,
         elements,
         collection_context,
+        mismatch_context,
         span,
         value_mode,
     } = literal;
+
+    let element_mismatch_context =
+        literal_entry_mismatch_context(mismatch_context, ValueReceiverContext::CollectionElement);
 
     let explicit_element = match &collection_context {
         Some(ExpectedCollectionContext::Explicit {
@@ -187,6 +195,7 @@ pub(crate) fn complete_deferred_collection<'env>(
                 element,
                 element_type_id,
                 ValueReceiverContext::CollectionElement,
+                element_mismatch_context,
             )?
             .id(),
         );
@@ -221,9 +230,15 @@ pub(crate) fn complete_deferred_map<'env>(
         value_shape,
         entries,
         map_context,
+        mismatch_context,
         span,
         value_mode,
     } = literal;
+
+    let key_mismatch_context =
+        literal_entry_mismatch_context(mismatch_context, ValueReceiverContext::MapKey);
+    let value_mismatch_context =
+        literal_entry_mismatch_context(mismatch_context, ValueReceiverContext::MapValue);
 
     let (explicit_key, explicit_value) = match &map_context {
         Some(context) => (Some(context.key_type_id), Some(context.value_type_id)),
@@ -262,12 +277,14 @@ pub(crate) fn complete_deferred_map<'env>(
             entry.key,
             key_type_id,
             ValueReceiverContext::MapKey,
+            key_mismatch_context,
         )?;
         let value = complete_entry_value(
             session,
             entry.value,
             value_type_id,
             ValueReceiverContext::MapValue,
+            value_mismatch_context,
         )?;
 
         let services = session.session_services();
@@ -446,14 +463,16 @@ struct EntryExpectation {
     expected_type: ExpectedType,
     cast_target_context: CastTargetContext,
     expected_types: Vec<TypeId>,
+    mismatch_context: TypeMismatchContext,
 }
 
 impl EntryExpectation {
-    fn infer() -> Self {
+    fn infer(mismatch_context: TypeMismatchContext) -> Self {
         Self {
             expected_type: ExpectedType::Infer,
             cast_target_context: CastTargetContext::None,
             expected_types: Vec::new(),
+            mismatch_context,
         }
     }
 }
@@ -461,6 +480,7 @@ impl EntryExpectation {
 /// Builds the expectation for one entry from its side's known type, if any.
 fn side_expectation(
     known_type: Option<TypeId>,
+    mismatch_context: TypeMismatchContext,
     type_interner: &AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
@@ -475,8 +495,9 @@ fn side_expectation(
                 path_fork,
             ),
             expected_types: vec![type_id],
+            mismatch_context,
         },
-        None => EntryExpectation::infer(),
+        None => EntryExpectation::infer(mismatch_context),
     }
 }
 
@@ -523,7 +544,8 @@ fn parse_curly_entry(
     let input = match end {
         CurlyEntryEnd::ItemOrKey => ExpressionParseInput::without_boundary_catch(resources, false),
         CurlyEntryEnd::Value => ExpressionParseInput::ordinary(resources, false),
-    };
+    }
+    .with_mismatch_context(expectation.mismatch_context);
     // The literal owns each complete entry. Nested producers must retain their own syntax before
     // the entry can retain the whole value, so a non-owning child deferral still propagates.
     let input = input.with_numeric_deferral_owner();
@@ -574,15 +596,46 @@ struct LiteralSide {
     known_type: Option<TypeId>,
     shape: Option<KnownShapeId>,
     receiver: ValueReceiverContext,
+    /// The mismatch context this side reports when an entry keeps the wrong type.
+    mismatch_context: TypeMismatchContext,
 }
 
 impl LiteralSide {
-    fn new(known_type: Option<TypeId>, receiver: ValueReceiverContext) -> Self {
+    fn new(
+        known_type: Option<TypeId>,
+        receiver: ValueReceiverContext,
+        enclosing_context: TypeMismatchContext,
+    ) -> Self {
         Self {
             known_type,
             shape: None,
             receiver,
+            mismatch_context: literal_entry_mismatch_context(enclosing_context, receiver),
         }
+    }
+}
+
+/// Refine an enclosing receiving context to the literal slot an entry occupies.
+///
+/// WHAT: gives collection elements, map keys and map values their own mismatch context, and keeps
+///       the enclosing `catch` recovery visible for every nested slot.
+/// WHY: the entry check runs before the literal reaches its receiver, so it must report the slot
+///      the author wrote and still name the recovery that owns the whole value.
+fn literal_entry_mismatch_context(
+    enclosing_context: TypeMismatchContext,
+    receiver: ValueReceiverContext,
+) -> TypeMismatchContext {
+    let recovered = enclosing_context.is_catch_recovery();
+    match receiver {
+        ValueReceiverContext::CollectionElement if recovered => {
+            TypeMismatchContext::CatchRecoveryCollectionElement
+        }
+        ValueReceiverContext::MapKey if recovered => TypeMismatchContext::CatchRecoveryMapKey,
+        ValueReceiverContext::MapValue if recovered => TypeMismatchContext::CatchRecoveryMapValue,
+        ValueReceiverContext::CollectionElement => TypeMismatchContext::CollectionElement,
+        ValueReceiverContext::MapKey => TypeMismatchContext::MapKey,
+        ValueReceiverContext::MapValue => TypeMismatchContext::MapValue,
+        _ => enclosing_context,
     }
 }
 
@@ -837,7 +890,7 @@ fn settle_side_value(
                     expression_builder.own(expression),
                     type_id,
                     type_interner.environment(),
-                    TypeMismatchContext::CollectionElement,
+                    side.mismatch_context,
                     expression_builder,
                 )?
                 .id(),
@@ -942,6 +995,7 @@ fn complete_entry_value<'env>(
     value: DeferredLiteralValue,
     side_type: TypeId,
     receiver: ValueReceiverContext,
+    mismatch_context: TypeMismatchContext,
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let expression = match value {
         DeferredLiteralValue::Ready(expression) => session
@@ -968,7 +1022,7 @@ fn complete_entry_value<'env>(
         expression,
         side_type,
         services.type_interner.environment(),
-        TypeMismatchContext::CollectionElement,
+        mismatch_context,
         services.expression_builder,
     )
     .map_err(ExpressionParseError::from)
@@ -1093,6 +1147,7 @@ fn parse_collection_literal(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    mismatch_context: TypeMismatchContext,
     retain: bool,
 ) -> CollectionParseResult<CurlyLiteral> {
     let collection_span = Some(token_stream.current_span());
@@ -1112,7 +1167,11 @@ fn parse_collection_literal(
     token_stream.advance();
 
     let mut build = CollectionBuild {
-        element: LiteralSide::new(known_element, ValueReceiverContext::CollectionElement),
+        element: LiteralSide::new(
+            known_element,
+            ValueReceiverContext::CollectionElement,
+            mismatch_context,
+        ),
         entries: CollectionEntries::Ready(Vec::new()),
     };
     let consumed_close_curly = parse_collection_entries(
@@ -1166,6 +1225,7 @@ fn parse_collection_literal(
                 element_shape,
                 elements: build.entries.into_deferred(),
                 collection_context: Some(collection_context),
+                mismatch_context,
                 span: collection_span,
                 value_mode: *value_mode,
             }),
@@ -1239,6 +1299,7 @@ fn parse_collection_entries(
                 }
                 let mut expectation = side_expectation(
                     build.element.known_type,
+                    build.element.mismatch_context,
                     type_interner,
                     string_table,
                     path_fork,
@@ -1471,6 +1532,7 @@ fn parse_map_literal(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    mismatch_context: TypeMismatchContext,
     retain: bool,
 ) -> CollectionParseResult<CurlyLiteral> {
     let map_span = Some(token_stream.current_span());
@@ -1481,8 +1543,16 @@ fn parse_map_literal(
     token_stream.advance();
 
     let mut build = MapBuild {
-        key: LiteralSide::new(Some(key_type_id), ValueReceiverContext::MapKey),
-        value: LiteralSide::new(Some(value_type_id), ValueReceiverContext::MapValue),
+        key: LiteralSide::new(
+            Some(key_type_id),
+            ValueReceiverContext::MapKey,
+            mismatch_context,
+        ),
+        value: LiteralSide::new(
+            Some(value_type_id),
+            ValueReceiverContext::MapValue,
+            mismatch_context,
+        ),
         known_keys: HashMap::new(),
         entries: MapEntries::Ready(Vec::new()),
     };
@@ -1514,6 +1584,7 @@ fn parse_map_literal(
                 value_shape,
                 entries: build.entries.into_deferred(),
                 map_context: Some(map_context),
+                mismatch_context,
                 span: map_span,
                 value_mode: *value_mode,
             },
@@ -1586,8 +1657,13 @@ fn parse_map_entries(
                 }
                 reject_missing_map_key_expression(token_stream)?;
 
-                let mut key_expectation =
-                    side_expectation(build.key.known_type, type_interner, string_table, path_fork);
+                let mut key_expectation = side_expectation(
+                    build.key.known_type,
+                    build.key.mismatch_context,
+                    type_interner,
+                    string_table,
+                    path_fork,
+                );
                 let parsed_key = parse_curly_entry(
                     token_stream,
                     context,
@@ -1603,6 +1679,7 @@ fn parse_map_entries(
 
                 let value_expectation = side_expectation(
                     build.value.known_type,
+                    build.value.mismatch_context,
                     type_interner,
                     string_table,
                     path_fork,
@@ -1715,6 +1792,7 @@ fn parse_inferred_curly_literal(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    mismatch_context: TypeMismatchContext,
     retain: bool,
 ) -> CollectionParseResult<CurlyLiteral> {
     let literal_span = Some(token_stream.current_span());
@@ -1731,7 +1809,7 @@ fn parse_inferred_curly_literal(
     }
     reject_missing_map_key_expression(token_stream)?;
 
-    let mut first_expectation = EntryExpectation::infer();
+    let mut first_expectation = EntryExpectation::infer(mismatch_context);
     let first_entry = parse_curly_entry(
         token_stream,
         context,
@@ -1749,8 +1827,8 @@ fn parse_inferred_curly_literal(
         // First entry has `=`  =>  this is a map literal.
         TokenTag::ASSIGN => {
             let mut build = MapBuild {
-                key: LiteralSide::new(None, ValueReceiverContext::MapKey),
-                value: LiteralSide::new(None, ValueReceiverContext::MapValue),
+                key: LiteralSide::new(None, ValueReceiverContext::MapKey, mismatch_context),
+                value: LiteralSide::new(None, ValueReceiverContext::MapValue, mismatch_context),
                 known_keys: HashMap::new(),
                 entries: MapEntries::Ready(Vec::new()),
             };
@@ -1760,6 +1838,7 @@ fn parse_inferred_curly_literal(
                 expected_type: ExpectedType::Infer,
                 cast_target_context: first_expectation.cast_target_context,
                 expected_types: Vec::new(),
+                mismatch_context: first_expectation.mismatch_context,
             };
             finish_map_entry(
                 token_stream,
@@ -1802,6 +1881,7 @@ fn parse_inferred_curly_literal(
                         value_shape,
                         entries: build.entries.into_deferred(),
                         map_context: None,
+                        mismatch_context,
                         span: literal_span,
                         value_mode: *value_mode,
                     },
@@ -1826,7 +1906,11 @@ fn parse_inferred_curly_literal(
         // First expression is followed by `,` or `}`  =>  collection literal.
         TokenTag::COMMA | TokenTag::CLOSE_CURLY => {
             let mut build = CollectionBuild {
-                element: LiteralSide::new(None, ValueReceiverContext::CollectionElement),
+                element: LiteralSide::new(
+                    None,
+                    ValueReceiverContext::CollectionElement,
+                    mismatch_context,
+                ),
                 entries: CollectionEntries::Ready(Vec::new()),
             };
             let settled_first = settle_side_value(
@@ -1864,6 +1948,7 @@ fn parse_inferred_curly_literal(
                         element_shape,
                         elements: build.entries.into_deferred(),
                         collection_context: None,
+                        mismatch_context,
                         span: literal_span,
                         value_mode: *value_mode,
                     }),

@@ -1,9 +1,7 @@
 //! String coercion policy for the Moth compiler frontend.
 //!
-//! WHAT: defines what expression types are renderable as string content and
-//! provides the coercion logic used at template boundaries.
-//! WHY: a shared policy keeps template-boundary conversion explicit and separate from template
-//! mechanics.
+//! WHAT: folds compile-time constant scalar and textual expressions to output text.
+//! WHY: template fold paths need text before final emission.
 
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,

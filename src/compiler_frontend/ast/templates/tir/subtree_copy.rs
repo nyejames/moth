@@ -224,12 +224,8 @@ fn copy_tir_node_with_active_slot_plan(
             )?;
             copy_state.record_insert_contribution();
 
-            let node_id = store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::InsertContribution {
-                    template: new_child_id,
-                },
-                span,
-            ));
+            let authored_name = store.insert_contribution_name(source_node_id);
+            let node_id = store.push_insert_contribution(new_child_id, authored_name, span);
             Ok(node_id)
         }
 

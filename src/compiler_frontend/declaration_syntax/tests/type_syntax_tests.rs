@@ -823,6 +823,8 @@ fn alias_expanded_nested_optional_type_is_rejected() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
 
     let error = resolve_parsed_type_annotation(
@@ -953,6 +955,8 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
     let unresolved = ParsedTypeRef::Applied {
         base: Box::new(ParsedTypeRef::Named {
@@ -1051,6 +1055,8 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
 
     let error = resolve_parsed_type_annotation(
@@ -1124,6 +1130,8 @@ fn bare_generic_type_name_requires_type_arguments() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
 
     let error = resolve_parsed_type_annotation(
@@ -1246,6 +1254,8 @@ fn unresolved_generic_argument_does_not_intern_instance() {
         trait_environment: None,
         trait_evidence_environment: None,
         visible_trait_names: None,
+        skip_unknown_type_name_candidates: false,
+        excluded_unknown_type_name: None,
     };
     let missing_type = string_table.intern("Missing");
     let unresolved = ParsedTypeRef::Applied {
@@ -1296,7 +1306,6 @@ fn unresolved_generic_argument_does_not_intern_instance() {
 
 #[test]
 fn parses_collection_with_capacity() {
-    // New pre-element syntax: {64 I32}
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let stream = stream_from_tokens(
@@ -1412,7 +1421,6 @@ fn rejects_old_post_element_collection_capacity_syntax() {
 
 #[test]
 fn parses_collection_with_generic_element_and_capacity() {
-    // New pre-element syntax: {16 Box of String}
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");

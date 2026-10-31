@@ -143,7 +143,7 @@ fn initializer_is_compile_time_constant(
 
 /// Body-local declaration plus syntax-origin facts that are not stored on `Declaration`.
 ///
-/// WHAT: carries whether the user authored the binding with `#`.
+/// WHAT: carries whether the binding used the postfix compile-time `#` marker.
 /// WHY: fixed-capacity type syntax accepts bare explicit constants only, so body
 ///      parsing must preserve the distinction between `#` constants and foldable
 ///      runtime immutable bindings while registering locals.
@@ -560,6 +560,7 @@ pub fn resolve_declaration_syntax(
             &value_mode,
             string_table,
             path_fork,
+            TypeMismatchContext::Declaration,
             retain_pending_origin,
         )?;
 
@@ -957,7 +958,8 @@ pub fn resolve_declaration_syntax(
                         path_fork,
                     },
                     false,
-                );
+                )
+                .with_mismatch_context(TypeMismatchContext::Declaration);
                 if retain_pending_origin {
                     // The initializer is the position's whole authored syntax and it owns its
                     // deferred fragment, so completion may splice it verbatim at the body root.

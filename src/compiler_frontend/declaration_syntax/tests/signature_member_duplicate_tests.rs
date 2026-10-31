@@ -1,18 +1,27 @@
-//! Focused duplicate-member tests for the shared `| ... |` signature-member parser.
+//! Focused member-name tests for the shared `| ... |` signature-member parser.
 //!
 //! WHAT: verifies that duplicate function parameters, struct fields, choice payload fields
-//! and trait-requirement parameters are all rejected by the shared signature-member parser
-//! with `DuplicateDeclaration` (`MOTH-RULE-0002`), before any HIR or infrastructure invariant
+//! and trait-requirement parameters are rejected with `DuplicateDeclaration`
+//! (`MOTH-RULE-0002`), and that reserved words in member position are rejected with
+//! `ReservedNameCollision` (`MOTH-RULE-0039`), before any HIR or infrastructure invariant
 //! can fire.
-//! WHY: the shared parser is the single owner of member-name uniqueness. Function-, struct-
-//! and choice-specific duplicate validators would duplicate that ownership.
+//! WHY: the shared parser is the single owner of member-name uniqueness and name-position
+//! validation. Function-, struct- and choice-specific validators would duplicate that ownership.
 
-use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DuplicateDeclarationView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    DuplicateDeclarationView, ReservedNameCollisionView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::UnexpectedEndOfFileView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticCategory};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticCategory, ReservedNameOwner,
+};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
@@ -365,5 +374,213 @@ fn distinct_members_parse_successfully_through_shared_parser() {
                 .expect("second field has a name"),
         ),
         "second",
+    );
+}
+
+fn token_span_with_tag(token_stream: &LexedSource, tag: TokenTag) -> SourceSpan {
+    (0..token_stream.tokens.len())
+        .find_map(|index| {
+            let index = TokenIndex::try_from_index(index)?;
+            let token = token_stream.tokens.token(index).ok()?;
+            (token.tag() == tag).then_some(SourceSpan::new(token_stream.file_id, token.span()))
+        })
+        .unwrap_or_else(|| panic!("test source should contain a {tag:?} token"))
+}
+
+#[test]
+fn parameter_default_unclosed_template_uses_missing_closing_bracket() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let token_stream = stream_positioned_at_open_bracket(
+        "fn |prefix String = [: hi",
+        &mut path_fork,
+        &mut string_table,
+        &mut span_builder,
+    );
+    let opening_span = token_span_with_tag(&token_stream, TokenTag::TEMPLATE_HEAD);
+    let eof_span = token_span_with_tag(&token_stream, TokenTag::EOF);
+    let function_path = owner_path(&mut path_fork, &mut string_table);
+    let mut warnings = DiagnosticBag::new();
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
+
+    let error = parse_function_signature_syntax(
+        &mut declaration_cursor,
+        &mut warnings,
+        &mut string_table,
+        function_path,
+        &mut path_fork,
+    )
+    .expect_err("an unclosed template default must fail signature parsing");
+
+    let draft = match error {
+        HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
+        HeaderParseFailure::Infrastructure(error) => {
+            panic!("unclosed-default parser infrastructure failure: {error:?}")
+        }
+    };
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("unclosed default diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0022");
+    let facts = diagnostic
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("unclosed default should retain template-structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::MissingClosingBracket
+    );
+    assert_eq!(
+        match diagnostic.primary_site() {
+            SiteRef::Local(span) => span,
+            site => panic!("unclosed-default primary must be local, got {site:?}"),
+        },
+        eof_span,
+        "the missing bracket must point at EOF"
+    );
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1, "the opening bracket should carry a label");
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::TemplateStartsHere
+    ));
+    assert_eq!(
+        match labels[0].site {
+            SiteRef::Local(span) => span,
+            site => panic!("opening-bracket label must be local, got {site:?}"),
+        },
+        opening_span,
+        "the label must point at the parameter default's opening bracket"
+    );
+}
+
+#[test]
+fn parameter_default_unclosed_parenthesis_reports_expected_delimiter() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let token_stream = stream_positioned_at_open_bracket(
+        "fn |prefix String = [$children(",
+        &mut path_fork,
+        &mut string_table,
+        &mut span_builder,
+    );
+    let eof_span = token_span_with_tag(&token_stream, TokenTag::EOF);
+    let function_path = owner_path(&mut path_fork, &mut string_table);
+    let mut warnings = DiagnosticBag::new();
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
+
+    let error = parse_function_signature_syntax(
+        &mut declaration_cursor,
+        &mut warnings,
+        &mut string_table,
+        function_path,
+        &mut path_fork,
+    )
+    .expect_err("an unclosed call in a default must fail signature parsing");
+
+    let draft = match error {
+        HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
+        HeaderParseFailure::Infrastructure(error) => {
+            panic!("unclosed-default parser infrastructure failure: {error:?}")
+        }
+    };
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("unclosed default diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0017");
+    let facts = diagnostic
+        .family_view::<UnexpectedEndOfFileView>()
+        .expect("the innermost missing delimiter is a parenthesis");
+    let expected = facts
+        .expected_delimiter
+        .expect("the diagnostic should name the expected delimiter");
+    assert_eq!(string_table.resolve(expected), ")");
+    assert_eq!(
+        match diagnostic.primary_site() {
+            SiteRef::Local(span) => span,
+            site => panic!("unexpected-EOF primary must be local, got {site:?}"),
+        },
+        eof_span,
+        "the missing parenthesis must point at EOF"
+    );
+}
+
+/// Returns the exact source span of the first token with `tag`.
+fn token_span(token_stream: &LexedSource, tag: TokenTag) -> SourceSpan {
+    for index in 0..token_stream.tokens.len() {
+        let Some(index) = TokenIndex::try_from_index(index) else {
+            continue;
+        };
+        let Some(token) = token_stream.tokens.token(index).ok() else {
+            continue;
+        };
+        if token.tag() == tag {
+            return SourceSpan::new(token_stream.file_id, token.span());
+        }
+    }
+    panic!("test source should contain {tag:?}");
+}
+
+#[test]
+fn reserved_keyword_parameter_rejected_by_shared_parser() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let token_stream = stream_positioned_at_open_bracket(
+        "fn | by I32 | -> I32 :",
+        &mut path_fork,
+        &mut string_table,
+        &mut span_builder,
+    );
+    let keyword_span = token_span(&token_stream, TokenTag::BY);
+    let function_path = owner_path(&mut path_fork, &mut string_table);
+    let mut warnings = DiagnosticBag::new();
+    let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
+
+    let error = parse_function_signature_syntax(
+        &mut declaration_cursor,
+        &mut warnings,
+        &mut string_table,
+        function_path,
+        &mut path_fork,
+    )
+    .expect_err("a reserved keyword parameter must be rejected by the shared parser");
+
+    let draft = match error {
+        HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
+        HeaderParseFailure::Infrastructure(error) => {
+            panic!("reserved-parameter parser infrastructure failure: {error:?}")
+        }
+    };
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("reserved-parameter diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0039");
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the reserved parameter must retain reserved-name facts");
+    assert_eq!(string_table.resolve(facts.name), "by");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+    assert_eq!(
+        match diagnostic.primary_site() {
+            SiteRef::Local(span) => span,
+            site => panic!("reserved-parameter primary must be local, got {site:?}"),
+        },
+        keyword_span,
+        "the collision must point at the keyword rather than the pipe or type",
+    );
+
+    let guidance =
+        terminal::format_guidance_view(diagnostic, DiagnosticRenderContext::new(&string_table));
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line
+                .contains("Choose a different name that does not reuse the keyword 'by'")),
+        "expected a rename suggestion, got {guidance:?}",
     );
 }

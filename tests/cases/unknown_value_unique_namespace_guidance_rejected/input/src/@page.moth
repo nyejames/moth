@@ -1,0 +1,6 @@
+@core/math
+
+foo || -> I32:
+    value = PI
+    return 1
+;

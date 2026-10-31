@@ -29,13 +29,11 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result-arity and narrow propagation-context work are delivered. Resume with Phase 4.2, catch-recovery type context, without rebuilding transferred fixes.
-
-- [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compiler diagnostics improvements: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
+- [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Next: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked only on five-run benchmark evidence (Slice 0); investigation before narrow success-path fix
 
-- [Synthetic entry function identity](./plans/synthetic-entry-function-identity-plan.md) - Queued: replace the named implicit `start` with a typed AST entry and HIR `FunctionId`, freeing `start` as an ordinary user name. Preserve module activation, config diagnostics and JS/Wasm ABI. Activate after diagnostic improvements.
+- [Synthetic entry function identity](./plans/synthetic-entry-function-identity-plan.md) - Queued: replace the named implicit `start` with a typed AST entry and HIR `FunctionId`, freeing `start` as an ordinary user name. Preserve module activation, config diagnostics and JS/Wasm ABI.
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
 
@@ -94,7 +92,7 @@ This is a bunch of notes for work that will likely be picked up in the future, b
 
 ## Compiler data-layout follow-ups
 
-Revisit these compiler representation and tooling capabilities only when their stated evidence or design prerequisite is met. Source-facing diagnostic wording and coverage remain owned by the sequenced diagnostics-improvement plan, which resumes immediately after data-layout work completes. The compiler-identity serialisation capability is distinct from persistent build artefact formats and precompiled package caches listed under genuinely deferred items below.
+Revisit these compiler representation and tooling capabilities only when their stated evidence or design prerequisite is met. Remaining source-facing diagnostic wording issues are collected in the bad-diagnostics log. The compiler-identity serialisation capability is distinct from persistent build artefact formats and precompiled package caches listed under genuinely deferred items below.
 
 | Capability | Re-entry criteria |
 |---|---|

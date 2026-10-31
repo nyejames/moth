@@ -1,4 +1,16 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0029"]
+diagnostic_codes = ["MOTH-RULE-0002"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0002"
+path = "input/@page.moth"
+line = 4
+column = 14
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 1
+column = 1

@@ -156,10 +156,10 @@ pub(crate) fn read_registered_source(
 /// Source snapshots selected by the directory module-discovery walk.
 ///
 /// Registration assigns every candidate a deterministic identity slot, but only sources reached
-/// by compiler selection are read. Keeping this small path-keyed cache beside the discovery pass
-/// lets that pass prepare a selected source before the final `SourceDatabaseBuilder` can retain
-/// the text. Entries are drained into the builder after selection; unselected and provider-owned
-/// slots remain pending and never allocate a snapshot.
+/// by compiler selection or by an external provider are read. Keeping this small path-keyed cache
+/// beside the discovery pass lets that pass prepare a selected source before the final
+/// `SourceDatabaseBuilder` can retain the text. Entries are drained into the builder after
+/// selection; unselected slots remain pending and never allocate a snapshot.
 #[derive(Debug, Default)]
 pub(crate) struct SelectedSourceTextMap {
     entries: BTreeMap<PathBuf, Result<String, SourceReadError>>,
@@ -185,6 +185,19 @@ impl SelectedSourceTextMap {
     /// Whether a selected read succeeded while its text is still waiting for database retention.
     pub(crate) fn contains_successful(&self, canonical_path: &Path) -> bool {
         matches!(self.entries.get(canonical_path), Some(Ok(_)))
+    }
+
+    /// Retain provider-read text for a provider-owned source.
+    ///
+    /// WHAT: stores the exact snapshot the external provider already read and parsed, keyed by the
+    ///       same canonical path the source database registered.
+    /// WHY: provider diagnostics reference spans in that file, so it must be loaded into the
+    ///      boundary source database without a second filesystem read. An existing successful
+    ///      read wins because it is the same physical file.
+    pub(crate) fn retain_provider_text(&mut self, canonical_path: &Path, source: String) {
+        self.entries
+            .entry(canonical_path.to_path_buf())
+            .or_insert(Ok(source));
     }
 
     /// Source identities whose cached reads succeeded and will become loaded records.

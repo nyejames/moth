@@ -58,12 +58,10 @@ pub(super) fn validate_catch_fallible_handler_conflict(
     span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> Result<(), ExpressionParseError> {
-    if context.get_reference(&handler_name).is_some() {
-        return Err(choices_control_flow::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::CatchHandlerConflicts,
-            span,
-        )
-        .into());
+    if let Some(existing) = context.get_reference(&handler_name) {
+        return Err(context
+            .duplicate_declaration(handler_name, span, existing.binding_span())
+            .into());
     }
 
     if let Some(diagnostic) =

@@ -1304,3 +1304,13 @@ fn map_builtin_wins_before_visible_value_name() {
 
     assert_eq!(handled_map_builtin_op(&ast, values[0]), MapBuiltinOp::Get);
 }
+
+#[test]
+fn rejects_map_value_that_does_not_match_explicit_map_type() {
+    let failure = parse_single_file_ast_diagnostic("values {String = I32} = {\"a\" = \"no\"}\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the diagnostic is a type mismatch");
+    assert_eq!(facts.context, TypeMismatchContext::MapValue);
+}

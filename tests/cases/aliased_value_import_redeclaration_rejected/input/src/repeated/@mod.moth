@@ -1,0 +1,7 @@
+@types AccountId
+@types AccountId
+
+local_binding || -> I32:
+    AccountId I32 = 1
+    return AccountId
+;

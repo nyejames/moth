@@ -1,0 +1,3 @@
+helper || -> I32:
+    return 1
+;

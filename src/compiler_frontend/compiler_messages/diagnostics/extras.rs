@@ -6,7 +6,7 @@
 
 use super::facts::{FactCapacityError, IdRemap};
 use super::foreign::ForeignSiteDraft;
-use super::labels::{DraftLabel, DraftSubstitution};
+use super::labels::{DraftLabel, DraftSubstitution, LabelWord};
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use std::num::NonZeroU32;
@@ -61,11 +61,13 @@ pub(super) struct DiagnosticExtraRecord {
     pub(super) labels: DiagnosticListRange,
     pub(super) foreign_sites: DiagnosticListRange,
     pub(super) data: ExtraDataRef,
+    /// The message attached to the record's primary span. `NONE` means the primary has no label.
+    pub(super) primary_label: LabelWord,
 }
 
 const _: () = assert!(
-    size_of::<DiagnosticExtraRecord>() == 28,
-    "extra records are locked at 28 bytes"
+    size_of::<DiagnosticExtraRecord>() == 32,
+    "extra records are locked at 32 bytes"
 );
 
 /// A one-based index into the extra-record arena. Records store it as an `Option`, so zero means no extra data.
@@ -97,6 +99,8 @@ pub(super) enum ExtraDataDraft {
 #[derive(Debug, Default)]
 pub(super) struct DiagnosticExtraDraft {
     pub(super) labels: Vec<DraftLabel>,
+    /// The message for the draft's primary span. Its encoded span is unused: the record owns the span.
+    pub(super) primary_label: Option<DraftLabel>,
     pub(super) foreign_sites: Vec<ForeignSiteDraft>,
     /// Owners retained when a capacity fault drops the diagnostic's foreign-site rows.
     pub(super) owner_handles: Vec<FrozenIdentityHandle>,
@@ -121,6 +125,9 @@ impl DiagnosticExtraDraft {
     /// Foreign sites are not remapped, since their identity belongs to another context.
     pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         for label in &mut self.labels {
+            label.remap_ids(remap)?;
+        }
+        if let Some(label) = &mut self.primary_label {
             label.remap_ids(remap)?;
         }
         for substitution in &mut self.substitutions {

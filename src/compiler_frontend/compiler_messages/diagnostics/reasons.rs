@@ -25,6 +25,56 @@ pub enum NameNamespace {
     TemplateSlot,
     ConfigKey,
 }
+
+/// Distinguishes unknown-type diagnostic sites so renderers can apply site-correct extras.
+///
+/// WHAT: type annotations compare builtin spellings; remaining namespace-member and
+/// conformance sites do not.
+/// WHY: `NamespaceMember` covers a missing namespace table, an unknown root, or a
+/// recorded type member whose source declaration is absent. Conformance targets
+/// cannot be builtin types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnknownTypeNameSite {
+    TypeAnnotation,
+    NamespaceMember,
+    ConformanceTarget,
+}
+
+/// Distinguishes a source-file namespace record from an external package namespace.
+///
+/// WHAT: unknown-member diagnostics keep the origin of the exact resolved node.
+/// WHY: source records stay shallow while external packages may expose child namespaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NamespaceRecordKind {
+    Source,
+    ExternalPackage,
+}
+
+/// Role of the failing segment on a namespace path.
+///
+/// WHAT: filters candidate members so an intermediate `.` only suggests child
+/// namespaces, a value-position leaf only suggests values, and a type-position
+/// leaf only suggests types.
+/// WHY: suggesting a type or child namespace as a value would teach invalid Moth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NamespaceMemberRole {
+    Value,
+    Type,
+    ChildNamespace,
+}
+
+/// Distinguishes a bare type name in value position from a generic type application.
+///
+/// WHAT: `TYPE_USED_AS_VALUE` keeps one family; this reason selects ordinary versus
+///       `of`-application wording without a second stable code.
+/// WHY: a generic application is still a type-as-value mistake, but the correction
+///      is constructor syntax for a struct or a variant for a choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TypeUsedAsValueReason {
+    BareTypeName,
+    GenericStructApplication,
+    GenericChoiceApplication,
+}
 /// Which compact source-owned table rejected an authored request.
 ///
 /// Span resources keep the source identity on the diagnostic's primary span; this fact records
@@ -163,6 +213,16 @@ pub enum TypeMismatchContext {
     Operator,
     Condition,
     CollectionElement,
+    /// A map literal key coerced to the map's key type.
+    MapKey,
+    /// A map literal value coerced to the map's value type.
+    MapValue,
+    /// A collection element inside a `catch` recovery value.
+    CatchRecoveryCollectionElement,
+    /// A map key inside a `catch` recovery value.
+    CatchRecoveryMapKey,
+    /// A map value inside a `catch` recovery value.
+    CatchRecoveryMapValue,
     StructFieldDefault,
     TemplateInterpolation,
     MatchScrutinee,
@@ -170,6 +230,24 @@ pub enum TypeMismatchContext {
     ErrorReturn,
     Pattern,
     General,
+    CatchRecovery,
+}
+
+impl TypeMismatchContext {
+    /// Whether this context names a value recovered by a `catch` handler.
+    ///
+    /// WHAT: recognises the direct recovery context and every literal slot nested inside it.
+    /// WHY: recovery wording and guidance apply to the nested collection and map slots too, and a
+    ///      ternary flag at each render or composition site would drift from the enum.
+    pub(crate) fn is_catch_recovery(self) -> bool {
+        matches!(
+            self,
+            Self::CatchRecovery
+                | Self::CatchRecoveryCollectionElement
+                | Self::CatchRecoveryMapKey
+                | Self::CatchRecoveryMapValue
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -448,11 +526,31 @@ pub enum InvalidOutputFolderReason {
     InsideOrEqualToEntryRoot,
     ResolvesOutsideProjectRoot,
 }
+
+/// The annotation directive that owns one external JavaScript binding site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExternalJsAnnotationDirective {
+    Sig,
+    Const,
+}
+
+/// The JavaScript declaration form an external annotation binds to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExternalJsDeclarationKind {
+    Function,
+    BlockArrow,
+    /// An initialiser that starts with an unsigned decimal digit.
+    Constant,
+}
+
 /// Structured facts for a malformed external JavaScript module.
 ///
 /// Compiler-authored receiver diagnostics carry the offending Moth name. Parser diagnostics keep
 /// their foreign tool detail opaque and interned so the compiler relays it without re-authoring it.
 /// A source file that is not valid UTF-8 carries the decoder's description of the invalid sequence.
+/// Annotation binding failures carry the directive and the nearest declaration form, so the
+/// provider never flattens them into prose. Their authored JavaScript ranges travel as exact
+/// source spans on the diagnostic rather than as line facts.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidExternalModuleReason {
     ReceiverMethod {
@@ -466,6 +564,18 @@ pub enum InvalidExternalModuleReason {
     },
     /// Package paths reserve `#`, so a logical source path containing it cannot be registered.
     PathContainsPackageSeparator,
+    /// An annotation binds to the nearest JavaScript declaration, which lacks `export`.
+    MissingExportKeyword {
+        directive: ExternalJsAnnotationDirective,
+        declaration: ExternalJsDeclarationKind,
+        moth_name: StringId,
+        js_name: StringId,
+    },
+    /// No supported JavaScript declaration directly follows the annotation.
+    OrphanedAnnotation {
+        directive: ExternalJsAnnotationDirective,
+        moth_name: StringId,
+    },
 }
 
 /// WHAT: structured reason for an invalid quoted-string escape.
@@ -809,6 +919,104 @@ pub enum MalformedTemplateReason {
     Html(HtmlTemplateWarning),
 }
 
+/// Why two meaningful items cannot share one template head.
+///
+/// Each variant names one registered compatibility rule, so the diagnostic can explain the
+/// semantic conflict instead of repeating the directive-list policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TemplateHeadConflictReason {
+    /// Two formatter directives, including the same formatter twice, control how the template
+    /// body is formatted.
+    MultipleFormatters,
+    /// A directive may appear at most once in one head.
+    DuplicateExclusiveDirective,
+    /// `$note` and `$todo` discard their body, so nothing else may be rendered in the head.
+    DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
+    /// `$doc` marks the template as documentation, so nothing else may be rendered in the head.
+    DocumentationDirectiveMustBeOnlyMeaningfulItem,
+    /// A slot declaration must be the only meaningful item in its template head.
+    SlotDirectiveMustBeExclusive,
+}
+
+/// Which item declared the compatibility rule that rejected the pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TemplateHeadConflictOwner {
+    /// The rule that fires when an earlier item blocks a later one.
+    EarlierItem,
+    /// The rule that fires when the incoming item requires something to be absent.
+    IncomingItem,
+}
+
+/// The kind of a meaningful template-head item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TemplateHeadItemKind {
+    Directive,
+    Expression,
+}
+
+/// One meaningful template-head item as a diagnostic names it.
+///
+/// Directive names stay interned identities; renderers add the `$` marker. Expressions cover
+/// every non-directive item the head grammar accepts (values, paths, `this`, literals and
+/// inlined template references).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TemplateHeadItemName {
+    Directive(StringId),
+    Expression,
+}
+
+impl TemplateHeadItemName {
+    pub(crate) const fn kind(self) -> TemplateHeadItemKind {
+        match self {
+            Self::Directive(_) => TemplateHeadItemKind::Directive,
+            Self::Expression => TemplateHeadItemKind::Expression,
+        }
+    }
+}
+
+/// Both sides of one rejected template-head item pair.
+///
+/// `owner` names the item whose registered rule rejected the pair, so the renderer can lead with
+/// the directive that owns the restriction. The name list passed to the family constructor is
+/// ordered incoming first, then earlier; each kind says whether its name is present.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TemplateHeadConflict {
+    pub reason: TemplateHeadConflictReason,
+    pub owner: TemplateHeadConflictOwner,
+    pub earlier: TemplateHeadItemName,
+    pub earlier_span: SourceSpan,
+    pub incoming: TemplateHeadItemName,
+    pub incoming_span: SourceSpan,
+}
+
+impl TemplateHeadConflict {
+    /// The interned directive names in family storage order: incoming, then earlier.
+    ///
+    /// Expression items contribute no name. The stored conflict's kinds record which entries the
+    /// family string list holds.
+    pub(crate) fn head_item_names(self) -> Vec<StringId> {
+        let mut names = Vec::with_capacity(2);
+        if let TemplateHeadItemName::Directive(name) = self.incoming {
+            names.push(name);
+        }
+        if let TemplateHeadItemName::Directive(name) = self.earlier {
+            names.push(name);
+        }
+        names
+    }
+}
+
+/// The compact shape of one template-head conflict: rule identity and both item kinds.
+///
+/// Directive names live in the family's string-id list; the kinds say which entries it holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoredTemplateHeadConflict {
+    pub reason: TemplateHeadConflictReason,
+    pub owner: TemplateHeadConflictOwner,
+    pub incoming_kind: TemplateHeadItemKind,
+    pub earlier_kind: TemplateHeadItemKind,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateStructureReason {
     MissingClosingBracket,
@@ -824,7 +1032,7 @@ pub enum InvalidTemplateStructureReason {
     RuntimeTemplateInConst,
     RuntimeValueInConstTemplateHead,
     EmptyPathInTemplateHead,
-    IncompatibleHeadItem,
+    IncompatibleHeadItem { conflict: TemplateHeadConflict },
     HelperOutsideWrapperSlot,
     RuntimeControlFlowUnresolvedInsert,
     MissingCommaBeforeControlFlowSuffix,
@@ -1110,7 +1318,7 @@ pub enum InvalidBuiltinCallReason {
     TooManyArguments,
     ExpressionPositionNotAllowed,
     MapLengthIsProperty,
-    ScalarConstructorRemoved,
+    ScalarTypeCalledAsFunction,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1123,7 +1331,6 @@ pub enum InvalidCastReason {
     OperandArityMismatch,
     TargetArityMismatch,
     CastPropagationRemoved,
-    ScalarConstructorRemoved,
     NoEvidence,
     BuiltinEvidenceNotConstFoldable,
     UserDefinedEvidenceNotConstFoldable,
@@ -1212,15 +1419,13 @@ pub enum InvalidMatchPatternReason {
     MustUseVariantNamesNotLiterals,
     MustStartWithVariantName,
     UnknownVariant,
-    CaptureBindingShadowsVariable,
     NonePatternRequiresOptionalScrutinee,
-    OptionValuePatternRequiresEquality,
     BareCaptureOnOptionalScrutinee,
-    OptionPresentCaptureOnNonOptional,
-    EmptyOptionPresentCapture,
-    OptionPresentCaptureTypeAnnotation,
+    OptionalPresentCaptureOnNonOptional,
+    EmptyOptionalPresentCapture,
+    OptionalPresentCaptureTypeAnnotation,
     MissingClosingPipe,
-    ExpectedBindingInOptionPresentCapture,
+    ExpectedBindingInOptionalPresentCapture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1228,7 +1433,7 @@ pub enum NonExhaustiveMatchReason {
     MissingElseArm,
     MissingVariants,
     GuardedArmsRequireElse,
-    MissingOptionPatterns,
+    MissingOptionalPatterns,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1246,6 +1451,7 @@ pub enum InvalidFallibleHandlingReason {
     CatchOnOptional,
     BangOnNonFallible,
     BangOnOptional,
+    FallibleSuffixOnAssertion,
     FunctionHasNoErrorSlot,
     EntryHasIncompatibleError {
         produced_error_type: TypeId,
@@ -1259,12 +1465,12 @@ pub enum InvalidFallibleHandlingReason {
     OptionPropagationReturnTypeMismatch,
     OptionPropagationCatchConflict,
     ExplicitPropagationCatchConflict,
-    CatchHandlerConflicts,
     CatchHandlerCanFallThrough,
     InlineCatchMultiline,
     AssertionMessageCannotEscape,
     ThenWithNoActiveValueTarget,
     ThenCrossesBlockedConstruct,
+    ThenInsideLoopBody,
     ThenRequiresValues,
     DirectOptionFallbackSyntax,
     UnhandledErrorReturn,
@@ -1373,12 +1579,13 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOnNonFallible => {
-                "`catch` needs a compatible recoverable failure or an authored cast, arithmetic operation or \
-                 multiple calls at this expression level; this expression has none."
+                "`catch` has nothing to recover here. This expression has no compatible recoverable \
+                 failure, and it is not an authored safety-catch site such as a cast, arithmetic \
+                 operation or more than one call at this expression level."
             }
 
             InvalidFallibleHandlingReason::CatchOnOptional => {
-                "`catch` does not recover an optional value. Inspect the optional value with an `if ... is |present| ... else ...` expression."
+                "`catch` does not recover an optional value. Inspect the optional value with an `if` present-value capture."
             }
 
             InvalidFallibleHandlingReason::BangOnNonFallible => {
@@ -1386,7 +1593,11 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::BangOnOptional => {
-                "Postfix `!` propagates an `Error!` return, but this expression is optional. Use postfix `?` only inside a compatible optional-returning function, or inspect the option explicitly."
+                "Postfix `!` propagates an `Error!` return, but this expression is an optional value. Use postfix `?` only inside a compatible optional-returning function, or inspect the optional value explicitly."
+            }
+
+            InvalidFallibleHandlingReason::FallibleSuffixOnAssertion => {
+                "An assertion statement cannot take a `catch` handler or a `!` propagation suffix. Assertions report invariants rather than fallible values, so remove the suffix."
             }
 
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot => {
@@ -1421,10 +1632,6 @@ impl InvalidFallibleHandlingReason {
                 "Explicit propagation leaves the enclosing function and cannot target a surrounding catch. Split the work into statements before recovering locally."
             }
 
-            InvalidFallibleHandlingReason::CatchHandlerConflicts => {
-                "Catch handler conflicts with an existing visible declaration."
-            }
-
             InvalidFallibleHandlingReason::CatchHandlerCanFallThrough => {
                 "Catch handler without fallback can fall through while success values are required."
             }
@@ -1438,11 +1645,15 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::ThenWithNoActiveValueTarget => {
-                "`then` is only valid inside a value-producing block."
+                "`then` is only valid inside a value-producing `if`, full match or `catch` recovery that has an active receiving site."
             }
 
             InvalidFallibleHandlingReason::ThenCrossesBlockedConstruct => {
-                "`then` cannot target a value-producing block across this construct."
+                "`then` cannot cross a loop, catch handler or template to target a value-producing block."
+            }
+
+            InvalidFallibleHandlingReason::ThenInsideLoopBody => {
+                "This loop is not a value-producing loop, so its body cannot produce a value with `then`. Assign the value or return it instead."
             }
 
             InvalidFallibleHandlingReason::ThenRequiresValues => "Expected a value after 'then'.",
@@ -1465,6 +1676,7 @@ impl InvalidFallibleHandlingReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateSlotReason {
     InsertOutsideParentSlot,
+    NamedInsertOutsideParentSlot,
     ExtraLooseContentWithoutDefaultSlot,
     LooseContentWithoutDefaultSlot,
     InsertCannotTargetDefaultSlot,
@@ -1492,6 +1704,14 @@ pub enum CompileTimeEvaluationErrorReason {
     StructFieldDefaultNotFoldable,
     EvaluationOutputBoundExceeded,
     StructuralStringRequiresFinalText,
+    /// Integer overflow inside the `I32` exponent operand of a `Dec` power.
+    ///
+    /// WHAT: distinguishes the exponent's own `I32` arithmetic from an ordinary integer
+    ///       overflow in the surrounding expression.
+    /// WHY: a `Dec` power takes an `I32` exponent, so the exponent subtree is evaluated at
+    ///      `I32` width before the `Dec` operation runs. The reader needs that rule, not a bare
+    ///      integer overflow.
+    DecExponentIntegerOverflow,
 }
 
 /// Diagnostic-owned exact source operator for unsupported-operand diagnostics.
@@ -1601,8 +1821,14 @@ pub enum InvalidCallShapeReason {
         parameter_index: usize,
     },
 
+    /// Extra positional argument past the declared slot count.
+    ///
+    /// Compacted as a `CountPair` in the call-shape `count` word: expected in
+    /// the low 16 bits, provided in the high 16 bits. The unused `parameter_name`
+    /// slot stays an `OptStringFact` for other reasons.
     ExtraPositionalArgument {
         expected_count: usize,
+        provided_count: usize,
     },
 
     DuplicateArgument {
@@ -1746,6 +1972,7 @@ pub enum InvalidExpressionReason {
 pub enum InvalidStandaloneStatementReason {
     FieldRead,
     Expression,
+    Comparison,
     StandaloneTemplate,
 }
 
@@ -1759,11 +1986,11 @@ pub enum NamespaceTypeValueMisuseKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidMatchArmReason {
     SemicolonDelimiter,
-    LegacyColonSyntax,
-    LegacyElseSyntax,
     InvalidArrow,
     ArmMustStartNewLine,
     ExpectedArmHeader,
+    MissingBody,
+    ExpressionBodyInStatementMatch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1774,7 +2001,6 @@ pub enum InvalidMatchGuardReason {
 pub enum InvalidLoopHeaderReason {
     EmptyHeader,
     MissingColon,
-    RemovedInSyntax,
     MissingClosingPipe,
     MalformedBindingPipes,
     MissingSourceBeforeBindings,
@@ -1787,7 +2013,6 @@ pub enum InvalidLoopHeaderReason {
     BareDualBinding,
     TooManyBindings,
     DuplicateBindingName,
-    BindingAlreadyDeclared,
     CollectionSourceNotCollection { found_type: Option<TypeId> },
     MissingRangeSeparator,
     MissingRangeEndBound,

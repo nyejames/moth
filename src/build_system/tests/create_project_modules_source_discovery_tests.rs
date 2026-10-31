@@ -711,6 +711,32 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
 }
 
 #[test]
+fn staging_identities_stay_outside_the_traversal_range() {
+    use super::source_discovery::{PROVIDER_SOURCE_ID_BASE, ProviderOwnedSourceStaging};
+    use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
+
+    let mut staging = ProviderOwnedSourceStaging::new();
+    let canonical = PathBuf::from("/fixture/drawing.js");
+    let first = staging
+        .register_provider_source(&canonical, "drawing.js", "export const x = 1;\n".to_owned())
+        .expect("first provider source registers");
+    let first_id = first.source();
+    drop(first);
+    let second = staging
+        .register_provider_source(
+            Path::new("/fixture/other.js"),
+            "other.js",
+            "export const y = 2;\n".to_owned(),
+        )
+        .expect("second provider source registers");
+    assert_ne!(first_id, second.source());
+    assert!(first_id.index() >= PROVIDER_SOURCE_ID_BASE);
+    assert!(second.source().index() >= PROVIDER_SOURCE_ID_BASE);
+    assert_eq!(staging.provisional_identities().count(), 2);
+    assert_eq!(staging.registration_rows().count(), 2);
+}
+
+#[test]
 fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

@@ -40,8 +40,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::path::Path;
 
-/// A test-only family that declares every label role needed to carry all fifteen label kinds in one draft.
-/// The universal roles need no declaration. It is never registered, so no render path can reach it.
+/// A test-only family that declares every non-universal label role so one draft can carry every
+/// label kind. The universal roles need no declaration. It is never registered, so no render path
+/// can reach it.
 static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
     code: DiagnosticCode::new(9002),
     category: DiagnosticCategory::Rule,
@@ -60,6 +61,9 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::CONFIG_INPUT_ORIGIN,
         LabelMessageCode::TRAIT_REQUIREMENT_SITE,
         LabelMessageCode::RECEIVER_METHOD_SITE,
+        LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
+        LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
+        LabelMessageCode::TEMPLATE_STARTS_HERE,
         LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE,
         LabelMessageCode::IMMUTABLE_BINDING_DECLARATION,
         LabelMessageCode::TYPED_FAILURE_PRODUCER,
@@ -67,6 +71,8 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::BUILTIN_FAILURE_CALL,
         LabelMessageCode::BUILTIN_FAILURE_ORIGIN,
         LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
+        LabelMessageCode::MISSING_EXPORT_DECLARATION,
+        LabelMessageCode::EXTERNAL_IMPORT_SITE,
     ],
     render: None,
     reason_key: |_| None,
@@ -110,6 +116,18 @@ fn label_cases(
         (
             LabelDraftMessage::ReceiverMethodSite,
             "receiver method".to_owned(),
+        ),
+        (
+            LabelDraftMessage::EarlierTemplateHeadItem,
+            "earlier conflicting head item here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ConflictsWithEarlierHeadItem,
+            "conflicts with the earlier head item".to_owned(),
+        ),
+        (
+            LabelDraftMessage::TemplateStartsHere,
+            "Template starts here".to_owned(),
         ),
         (
             LabelDraftMessage::GenericInstantiationBodySite,
@@ -165,6 +183,14 @@ fn label_cases(
                 target_type_id: string_type,
             },
             "write-back into `String` here after the compound update".to_owned(),
+        ),
+        (
+            LabelDraftMessage::MissingExportDeclaration,
+            "declaration has no `export` here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ExternalImportSite,
+            "imported here".to_owned(),
         ),
     ]
 }

@@ -1,0 +1,12 @@
+-- A reserved word used as a value name must not be reported as unary negation.
+to_coords |value Int| -> Int, Int:
+    return value, value
+;
+
+taxicab |left Int, right Int| -> Int:
+    ax, ay = to_coords(left)
+    bx, by = to_coords(right)
+    dx = if ax > bx then ax - bx else bx - ax
+    dy = if ay > by then ay - by else by - ay
+    return dx + dy
+;

@@ -5,7 +5,9 @@
 //! indices, so this logic must stay in the header stage.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    templates, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, CompilerStage, SourceSpanCapacityResource,
 };
@@ -82,14 +84,16 @@ pub(super) fn create_top_level_const_template(
         "const-template first body token",
     )?
     .source_span();
-    let closing_bracket = context.string_table.intern("]");
     let post_close = crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region_from_source(
         cursor,
         opening,
+        context.string_table,
         |_token| {},
-        |span| {
-            HeaderParseFailure::Diagnostic(token_lexical::unexpected_end_of_file(Some(closing_bracket),
-            Some(span),))
+        |span, innermost_opening| {
+            HeaderParseFailure::Diagnostic(templates::missing_closing_bracket(
+                Some(span),
+                Some(innermost_opening),
+            ))
         },
         HeaderParseFailure::Infrastructure,
     )?;

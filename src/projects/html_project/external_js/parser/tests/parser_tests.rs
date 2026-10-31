@@ -1,5 +1,9 @@
+use crate::compiler_frontend::compiler_messages::{
+    ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
+};
 use crate::projects::html_project::external_js::parser::{
-    parse_js_module, parsed_js_module::JsDiagnosticKind, scan_exports,
+    parse_js_module, parsed_js_module::JsDiagnosticKind, parsed_js_module::JsSourceSpan,
+    scan_exports,
 };
 use crate::projects::html_project::external_js::runtime_module_registry::{
     RUNTIME_ERROR_CODE_EXPORTS, RuntimeModuleRegistry,
@@ -51,6 +55,22 @@ fn assert_receiver_methods(
         .map(|f| f.moth_name.as_str())
         .collect();
     assert_eq!(names, expected, "receiver methods mismatch");
+}
+
+/// The declaration keyword through its name, matching the retained binding span.
+fn declaration_span(source: &str, keyword: &str, name: &str) -> JsSourceSpan {
+    let declaration_region = source
+        .find("*/")
+        .map_or(source, |comment_end| &source[comment_end + 2..]);
+    let region_start = source.len() - declaration_region.len();
+    let start = region_start
+        + declaration_region
+            .find(keyword)
+            .expect("fixture declares its keyword");
+    let name_offset = source[start..]
+        .find(name)
+        .expect("fixture declares its bound name");
+    JsSourceSpan::range(start, start + name_offset + name.len())
 }
 
 fn assert_diagnostic_kinds(
@@ -482,11 +502,11 @@ export function fillRect(ctx, x, y) {
 }
 
 // ------------------------
-//  Missing export after @moth.sig
+//  Annotation binding sites
 // ------------------------
 
 #[test]
-fn missing_export_after_sig_reported() {
+fn orphaned_sig_annotation_reported() {
     let source = r#"
 /**
  * @moth.sig orphaned |id String| -> String
@@ -494,8 +514,344 @@ fn missing_export_after_sig_reported() {
 // no export here
 "#;
     let parsed = parse(source);
-    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::MissingExportAfterSig]);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::OrphanedAnnotation {
+            directive: ExternalJsAnnotationDirective::Sig,
+            moth_name: "orphaned".to_string(),
+        }],
+    );
+    assert!(
+        parsed.diagnostics[0].message.is_empty(),
+        "typed annotation diagnostics carry no prose: {}",
+        parsed.diagnostics[0].message
+    );
     assert!(parsed.free_functions.is_empty());
+}
+
+#[test]
+fn annotation_without_a_supported_declaration_is_orphaned() {
+    for source in [
+        "/** @moth.sig add |a I32, b I32| -> I32 */\nlet value = 1;",
+        "/** @moth.sig add |a I32, b I32| -> I32 */\n// only a comment follows",
+    ] {
+        let parsed = parse(source);
+        assert_diagnostic_kinds(
+            &parsed,
+            &[JsDiagnosticKind::OrphanedAnnotation {
+                directive: ExternalJsAnnotationDirective::Sig,
+                moth_name: "add".to_string(),
+            }],
+        );
+        assert!(parsed.free_functions.is_empty());
+    }
+}
+
+#[test]
+fn unexported_function_annotation_reports_missing_export_keyword() {
+    let source =
+        "/** @moth.sig add |a I32, b I32| -> I32 */\nfunction add(a, b) {\n    return a + b;\n}\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::Function,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "function", "add"),
+        }],
+    );
+    assert!(
+        parsed.diagnostics[0].message.is_empty(),
+        "typed annotation diagnostics carry no prose: {}",
+        parsed.diagnostics[0].message
+    );
+    assert!(parsed.free_functions.is_empty());
+}
+
+#[test]
+fn unexported_block_arrow_annotation_reports_missing_export_keyword() {
+    let source = "/** @moth.sig add |a I32, b I32| -> I32 */\nconst add = (a, b) => {\n    return a + b;\n};\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::BlockArrow,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "const", "add"),
+        }],
+    );
+    assert!(parsed.free_functions.is_empty());
+    assert!(parsed.constants.is_empty());
+}
+
+#[test]
+fn unexported_literal_constant_annotation_reports_missing_export_keyword() {
+    let source = "/** @moth.const mode U32 */\nconst MODE = 4;\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Const,
+            declaration: ExternalJsDeclarationKind::Constant,
+            moth_name: "mode".to_string(),
+            js_name: "MODE".to_string(),
+            declaration_span: declaration_span(source, "const", "MODE"),
+        }],
+    );
+    assert!(parsed.constants.is_empty());
+}
+
+#[test]
+fn missing_export_declaration_does_not_drift_to_a_later_annotated_export() {
+    let source = "/** @moth.sig add |a I32, b I32| -> I32 */\n\
+                  function add(a, b) {\n    return a + b;\n}\n\
+                  /** @moth.sig subtract |a I32, b I32| -> I32 */\n\
+                  export function subtract(a, b) {\n    return a - b;\n}\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::Function,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "function", "add"),
+        }],
+    );
+    assert_free_functions(&parsed, &["subtract"]);
+}
+
+#[test]
+fn private_helper_between_annotation_and_export_prevents_distant_binding() {
+    let source = "/** @moth.sig add |a I32, b I32| -> I32 */\n\
+                  function helper(a, b) {\n    return a + b;\n}\n\
+                  export function add(a, b) {\n    return helper(a, b);\n}\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[
+            JsDiagnosticKind::MissingExportKeyword {
+                directive: ExternalJsAnnotationDirective::Sig,
+                declaration: ExternalJsDeclarationKind::Function,
+                moth_name: "add".to_string(),
+                js_name: "helper".to_string(),
+                declaration_span: declaration_span(source, "function", "helper"),
+            },
+            JsDiagnosticKind::UnannotatedExport,
+        ],
+    );
+    assert!(parsed.free_functions.is_empty());
+}
+
+#[test]
+fn annotation_directive_mismatch_does_not_advise_export() {
+    for source in [
+        "/** @moth.const mode U32 */\nfunction mode() { return 4; }",
+        "/** @moth.sig mode || -> U32 */\nconst MODE = 4;",
+        "/** @moth.const mode U32 */\nconst mode = () => { return 4; };",
+    ] {
+        let parsed = parse(source);
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::AnnotationExportKindMismatch]);
+        assert!(
+            !parsed.diagnostics.iter().any(|diagnostic| matches!(
+                diagnostic.kind,
+                JsDiagnosticKind::MissingExportKeyword { .. }
+            )),
+            "a directive that does not fit the declaration must not advise `export`: {:?}",
+            parsed.diagnostics
+        );
+    }
+}
+
+#[test]
+fn block_arrow_opening_brace_on_the_next_line_is_a_binding_site() {
+    let source = "/** @moth.sig add |a I32, b I32| -> I32 */\nconst add = (a, b) =>\n{\n    return a + b;\n};";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::BlockArrow,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "const", "add"),
+        }],
+    );
+}
+
+#[test]
+fn crlf_source_lines_are_counted_once() {
+    let source = "/** @moth.sig add |a I32, b I32| -> I32 */\r\nfunction add(a, b) {\r\n    return a + b;\r\n}\r\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::Function,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "function", "add"),
+        }],
+    );
+}
+
+#[test]
+fn commonjs_exports_inside_private_helpers_are_rejected() {
+    for source in [
+        "function helper() {\n    module.exports = 1;\n}",
+        "function helper() {\n    exports.value = 1;\n}",
+    ] {
+        let parsed = parse(source);
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsExport]);
+    }
+}
+
+#[test]
+fn annotation_before_an_unsupported_const_initialiser_reports_orphaned() {
+    for (source, directive, moth_name) in [
+        (
+            "/** @moth.sig inc |a I32| -> I32 */\nconst inc = (a) => a + 1;",
+            ExternalJsAnnotationDirective::Sig,
+            "inc",
+        ),
+        (
+            "/** @moth.sig dec |a I32| -> I32 */\nconst dec = a => { return a - 1; };",
+            ExternalJsAnnotationDirective::Sig,
+            "dec",
+        ),
+        (
+            "/** @moth.sig f || -> I32 */\nconst f = function () { return 1; };",
+            ExternalJsAnnotationDirective::Sig,
+            "f",
+        ),
+        (
+            "/** @moth.const mode U32 */\nconst MODE = readMode();",
+            ExternalJsAnnotationDirective::Const,
+            "mode",
+        ),
+    ] {
+        let parsed = parse(source);
+        assert_diagnostic_kinds(
+            &parsed,
+            &[JsDiagnosticKind::OrphanedAnnotation {
+                directive,
+                moth_name: moth_name.to_string(),
+            }],
+        );
+        assert!(parsed.free_functions.is_empty());
+        assert!(parsed.constants.is_empty());
+    }
+}
+
+#[test]
+fn commonjs_without_semicolon_does_not_consume_the_helper_close() {
+    let source = "function install() {\n    module.exports = ok\n}\n\
+                  /** @moth.sig ok || -> I32 */\nexport function ok() { return 1; }";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsExport]);
+    assert_free_functions(&parsed, &["ok"]);
+}
+
+#[test]
+fn require_in_helper_return_does_not_consume_the_helper_close() {
+    let source = "function helper() { return foo(require(\"fs\")); }\n\
+                  /** @moth.sig ok || -> I32 */\nexport function ok() { return 1; }";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsRequire]);
+    assert_free_functions(&parsed, &["ok"]);
+}
+
+#[test]
+fn require_in_unexported_const_initializer_does_not_consume_the_export() {
+    let source = "const other = (a = require(\"fs\")) + 1;\n\
+                  /** @moth.sig ok || -> I32 */\nexport function ok() { return 1; }";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsRequire]);
+    assert_free_functions(&parsed, &["ok"]);
+}
+
+#[test]
+fn dynamic_import_in_default_parameter_is_reported() {
+    let source = "const load = (a = import(\"fs\")) => { return a; };\n\
+                  /** @moth.sig ok || -> I32 */\nexport function ok() { return 1; }";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DynamicImport]);
+    assert_free_functions(&parsed, &["ok"]);
+}
+
+#[test]
+fn regex_brackets_do_not_hide_a_same_line_export() {
+    for pattern in [r"/\(/", "/[(]/"] {
+        let source = format!(
+            "/** @moth.sig a |s String| -> String */ export function a(s) {{ return s.split({pattern}).join(\"\"); }} \
+             /** @moth.sig b || -> I32 */ export function b() {{ return 1; }}"
+        );
+        let parsed = parse(&source);
+        assert_no_diagnostics(&parsed);
+        assert_free_functions(&parsed, &["a", "b"]);
+    }
+}
+
+#[test]
+fn bare_cr_source_lines_are_counted() {
+    let source =
+        "/** @moth.sig add |a I32, b I32| -> I32 */\rfunction add(a, b) {\r    return a + b;\r}\r";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::Function,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "function", "add"),
+        }],
+    );
+}
+
+#[test]
+fn declarations_inside_function_bodies_are_not_binding_sites() {
+    let source = "/** @moth.sig add || -> I32 */\nexport function add() {\n    const inner = 1;\n    return inner;\n}\n";
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+    assert_free_functions(&parsed, &["add"]);
+}
+
+#[test]
+fn same_line_declaration_after_a_function_body_is_a_binding_site() {
+    let source = "function first() { return 1; } /** @moth.sig second || -> I32 */ function second() { return 2; }";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::Function,
+            moth_name: "second".to_string(),
+            js_name: "second".to_string(),
+            declaration_span: declaration_span(source, "function second", "second"),
+        }],
+    );
+}
+
+#[test]
+fn private_helper_regex_braces_do_not_hide_the_next_declaration() {
+    let source =
+        "const pattern = /{/;\n/** @moth.sig add || -> I32 */\nfunction add() { return 1; }\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Sig,
+            declaration: ExternalJsDeclarationKind::Function,
+            moth_name: "add".to_string(),
+            js_name: "add".to_string(),
+            declaration_span: declaration_span(source, "function", "add"),
+        }],
+    );
 }
 
 #[test]
@@ -1327,7 +1683,10 @@ export const add = (a, b) => a + b;
         &parsed,
         &[
             JsDiagnosticKind::ExpressionBodiedArrowExport,
-            JsDiagnosticKind::MissingExportAfterSig,
+            JsDiagnosticKind::OrphanedAnnotation {
+                directive: ExternalJsAnnotationDirective::Sig,
+                moth_name: "add".to_string(),
+            },
         ],
     );
     assert!(parsed.free_functions.is_empty());
@@ -1647,7 +2006,7 @@ fn literal_constants_keep_exact_u32_values_names_and_source_spans() {
             );
             assert_eq!(
                 &source[constant.annotation_span.byte_start..constant.annotation_span.byte_end],
-                "/** @moth.const primitive_triangles U32 */"
+                "@moth.const primitive_triangles U32"
             );
             assert!(
                 source[constant.export_span.byte_start..constant.export_span.byte_end]
@@ -1770,7 +2129,13 @@ fn constant_annotation_cannot_bind_callable_exports() {
         assert!(parsed.free_functions.is_empty());
     }
     let missing = parse("/** @moth.const mode U32 */");
-    assert_diagnostic_kinds(&missing, &[JsDiagnosticKind::MissingExportAfterConst]);
+    assert_diagnostic_kinds(
+        &missing,
+        &[JsDiagnosticKind::OrphanedAnnotation {
+            directive: ExternalJsAnnotationDirective::Const,
+            moth_name: "mode".to_string(),
+        }],
+    );
 }
 
 #[test]
@@ -1946,15 +2311,34 @@ fn unterminated_constant_trivia_cannot_publish_a_literal() {
 
 #[test]
 fn constant_annotation_does_not_skip_an_intervening_source_item() {
-    for intervening in ["const privateMode = 4;", "export let unsupported = 4;"] {
-        let parsed = parse(&format!(
-            "/** @moth.const first U32 */\n{intervening}\n\
-             /** @moth.const actual U32 */\nexport const ACTUAL = 5;"
-        ));
-        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::MissingExportAfterConst]);
-        assert_eq!(parsed.constants.len(), 1);
-        assert_eq!(parsed.constants[0].moth_name, "actual");
-    }
+    let private_source = "/** @moth.const first U32 */\nconst privateMode = 4;\n\
+                          /** @moth.const actual U32 */\nexport const ACTUAL = 5;";
+    let parsed = parse(private_source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::MissingExportKeyword {
+            directive: ExternalJsAnnotationDirective::Const,
+            declaration: ExternalJsDeclarationKind::Constant,
+            moth_name: "first".to_string(),
+            js_name: "privateMode".to_string(),
+            declaration_span: declaration_span(private_source, "const", "privateMode"),
+        }],
+    );
+    assert_eq!(parsed.constants.len(), 1);
+    assert_eq!(parsed.constants[0].moth_name, "actual");
+
+    let unsupported_source = "/** @moth.const first U32 */\nexport let unsupported = 4;\n\
+                              /** @moth.const actual U32 */\nexport const ACTUAL = 5;";
+    let parsed = parse(unsupported_source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[JsDiagnosticKind::OrphanedAnnotation {
+            directive: ExternalJsAnnotationDirective::Const,
+            moth_name: "first".to_string(),
+        }],
+    );
+    assert_eq!(parsed.constants.len(), 1);
+    assert_eq!(parsed.constants[0].moth_name, "actual");
 }
 
 #[test]

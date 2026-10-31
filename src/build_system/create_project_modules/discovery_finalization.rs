@@ -394,16 +394,22 @@ pub(super) fn finalize_reachable_files(
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    provider_sources: &mut ProviderOwnedSourceStaging,
     failure: Option<TraversalFailure>,
     resolved_file_references: &mut [SingleFileResolvedReference],
     source_package_dependencies: &mut [ResolvedSourcePackageDependency],
 ) -> Result<(SourceDatabaseBuilder, Vec<PreparedSourceInput>), SourceDiscoveryError> {
-    let registration_index = SourceRegistrationIndex::from_rows(files.iter().map(|source_file| {
-        (
-            source_file.path.as_path(),
-            SourceKind::Compiler(source_file.kind),
-        )
-    }));
+    let mut registration_rows = files
+        .iter()
+        .map(|source_file| {
+            (
+                source_file.path.as_path(),
+                SourceKind::Compiler(source_file.kind),
+            )
+        })
+        .collect::<Vec<_>>();
+    registration_rows.extend(provider_sources.registration_rows());
+    let registration_index = SourceRegistrationIndex::from_rows(registration_rows);
     let source_files =
         SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
             &registration_index,
@@ -414,16 +420,21 @@ pub(super) fn finalize_reachable_files(
         )?;
     let mut source_files = SourceDatabaseBuilder::new(source_files);
 
+    if let Err(error) = provider_sources.retain_into(&mut source_files) {
+        return Err(discovery_finalization_error(error, source_files));
+    }
+
     if let Err(error) =
         retain_known_discovery_sources(&files, &mut source_cache, &mut source_files, path_fork)
     {
         let failure = error.into_failure(string_table, Arc::new(path_fork.shared_table()));
         return Err(finish_discovery_source_owner(failure, source_files));
     }
-    let source_ids = match build_source_identity_map(&source_cache, source_files.sources()) {
-        Ok(source_ids) => source_ids,
-        Err(error) => return Err(discovery_finalization_error(error, source_files)),
-    };
+    let source_ids =
+        match build_source_identity_map(&source_cache, source_files.sources(), provider_sources) {
+            Ok(source_ids) => source_ids,
+            Err(error) => return Err(discovery_finalization_error(error, source_files)),
+        };
 
     // Every cached preparation delta has a final source identity, including the root sentinel.
     if failure.is_some()

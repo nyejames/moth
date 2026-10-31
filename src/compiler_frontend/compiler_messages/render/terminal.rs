@@ -77,7 +77,12 @@ pub(crate) fn print_diagnostic_view(
                 Reset frame.line_text.as_str()
             );
             print!("{}", frame.caret_padding);
-            say!(Red frame.carets.as_str());
+            match subject.primary_label_text(context) {
+                Some(primary_label) => {
+                    say!(Red frame.carets.as_str(), " ", primary_label.as_str());
+                }
+                None => say!(Red frame.carets.as_str()),
+            }
         }
     }
 
@@ -132,15 +137,20 @@ pub(crate) fn format_terminal_source_frame_for_test(
     let subject = DiagnosticSubject::new(view);
     let position = subject.primary_position(context)?;
     let frame = terminal_source_frame(&position)?;
+    let primary_label = subject
+        .primary_label_text(context)
+        .map(|label| format!(" {label}"))
+        .unwrap_or_default();
 
     Some(format!(
-        "{}|\n{}{} | {}\n{}{}",
+        "{}|\n{}{} | {}\n{}{}{}",
         frame.gutter_marker,
         frame.line_padding,
         frame.line_label,
         frame.line_text,
         frame.caret_padding,
         frame.carets,
+        primary_label,
     ))
 }
 

@@ -175,6 +175,7 @@ fn hash_in_expression_position_rejected() {
         const_values: &mut const_values,
         group_frames: &mut group_frames,
         route_argument_context: None,
+        mismatch_context: crate::compiler_frontend::compiler_messages::TypeMismatchContext::General,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -244,6 +245,7 @@ fn hash_before_template_head_allowed() {
         const_values: &mut const_values,
         group_frames: &mut group_frames,
         route_argument_context: None,
+        mismatch_context: crate::compiler_frontend::compiler_messages::TypeMismatchContext::General,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -303,6 +305,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         const_values: &mut const_values,
         group_frames: &mut group_frames,
         route_argument_context: None,
+        mismatch_context: crate::compiler_frontend::compiler_messages::TypeMismatchContext::General,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();

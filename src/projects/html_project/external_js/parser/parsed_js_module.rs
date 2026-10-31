@@ -2,16 +2,19 @@
 //!
 //! WHAT: defines the structures that the `@moth.*` annotation parser produces before
 //!       any conversion into compiler frontend types such as `ExternalFunctionDef`.
-//! WHY: keeps the JS scanner isolated from compiler-stage boundaries so later phases
-//!      (provider wiring, registry insertion) can decide how to map parsed data.
+//! WHY: keeps the JS scanner independent of compiler frontend structures, sharing only the
+//!      compiler-owned directive and declaration enums its diagnostics carry.
 
+use crate::compiler_frontend::compiler_messages::{
+    ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
+};
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 /// A byte range inside a JS file.
 ///
-/// Parser-owned spans deliberately retain only byte offsets. The provider layer
-/// decides whether a parsed construct can be associated with a compiler source
-/// span; parser-local line/column state is not durable provenance.
+/// Parser-owned spans retain only byte offsets. The provider mints exact
+/// `SourceSpan`s in the provider-owned source record, so diagnostics point at the
+/// authored JavaScript range without a separate line fact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsSourceSpan {
     pub byte_start: usize,
@@ -36,19 +39,48 @@ impl JsSourceSpan {
     }
 }
 
+/// The JavaScript declaration form a scanner records for binding.
+///
+/// `BlockArrow` is the parenthesised block-bodied arrow form the builder supports. A
+/// `LiteralConstant` starts with an unsigned decimal digit and is the only initialiser form
+/// `@moth.const` can describe. Every other initialiser shape is unsupported and is reported with
+/// the unsupported-form wording rather than a missing-export correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsDeclarationKind {
+    Function,
+    BlockArrow,
+    LiteralConstant,
+    UnsupportedInitializer,
+}
+
 /// Classification for parser-local diagnostics.
 ///
 /// WHAT: each variant maps to a specific user-facing error or warning produced by
 ///       the JS annotation scanner.
 /// WHY: structured kinds let the provider layer convert these into stable
 ///      diagnostic-family codes later.
+///
+/// Typed annotation-binding kinds carry no prose: their `message` is empty and the provider
+/// renders the user-facing text from these facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsDiagnosticKind {
     UnsupportedPackageTag,
     UnknownMothDirective,
     UnannotatedExport,
-    MissingExportAfterSig,
-    MissingExportAfterConst,
+    /// An annotation binds to the nearest supported declaration, which lacks `export`.
+    MissingExportKeyword {
+        directive: ExternalJsAnnotationDirective,
+        declaration: ExternalJsDeclarationKind,
+        moth_name: String,
+        js_name: String,
+        /// The declaration keyword through its name, where `export` belongs.
+        declaration_span: JsSourceSpan,
+    },
+    /// No supported declaration directly follows an annotation.
+    OrphanedAnnotation {
+        directive: ExternalJsAnnotationDirective,
+        moth_name: String,
+    },
     AnnotationExportKindMismatch,
     InvalidConstant,
     DuplicateMothName,
@@ -81,7 +113,8 @@ pub enum JsDiagnosticKind {
 
 /// A diagnostic emitted by the JS parser before conversion to compiler diagnostics.
 ///
-/// WHAT: carries a human-readable message, the offending span, and a structured kind.
+/// WHAT: carries the offending span, a structured kind and a message that is empty for the
+///       typed annotation-binding kinds the provider renders from facts.
 /// WHY: the provider layer can transform these into stable diagnostic-family codes while
 ///      the parser itself stays independent of diagnostic draft construction.
 #[derive(Debug, Clone, PartialEq, Eq)]

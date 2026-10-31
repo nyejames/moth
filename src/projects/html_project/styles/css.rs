@@ -436,8 +436,8 @@ fn push_warning(
     let end_offset = end_offset.max(start_offset.saturating_add(1));
     warnings.push(SourceWarning {
         reason: MalformedTemplateReason::Css(reason),
-        start_offset,
-        end_offset,
+        start_char: start_offset,
+        end_char: end_offset,
     });
 }
 
@@ -445,8 +445,15 @@ fn trimmed_segment(chars: &[char], start: usize, end: usize) -> Option<(String, 
     let mut trimmed_start = start.min(chars.len());
     let mut trimmed_end = end.min(chars.len());
 
-    while trimmed_start < trimmed_end && chars[trimmed_start].is_whitespace() {
-        trimmed_start += 1;
+    // Leading comments are analysis-only, so warnings start at the first authored statement text.
+    loop {
+        while trimmed_start < trimmed_end && chars[trimmed_start].is_whitespace() {
+            trimmed_start += 1;
+        }
+        let Some(after_comment) = leading_comment_end(chars, trimmed_start, trimmed_end) else {
+            break;
+        };
+        trimmed_start = after_comment;
     }
     while trimmed_end > trimmed_start && chars[trimmed_end - 1].is_whitespace() {
         trimmed_end -= 1;
@@ -461,6 +468,16 @@ fn trimmed_segment(chars: &[char], start: usize, end: usize) -> Option<(String, 
         trimmed_start,
         trimmed_end,
     ))
+}
+
+/// End index (exclusive) of a closed `/* ... */` comment starting at `start`, if one does.
+fn leading_comment_end(chars: &[char], start: usize, end: usize) -> Option<usize> {
+    if end.saturating_sub(start) < 4 || chars[start] != '/' || chars[start + 1] != '*' {
+        return None;
+    }
+    (start + 2..end - 1)
+        .find(|&index| chars[index] == '*' && chars[index + 1] == '/')
+        .map(|close| close + 2)
 }
 
 fn matching_closer(open: char) -> char {

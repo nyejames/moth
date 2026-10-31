@@ -38,6 +38,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -133,6 +134,7 @@ pub(super) fn handle_template_value_in_template_head(
     value: &Template,
     context: &ScopeContext,
     construction_context: &mut TemplateConstructionContext,
+    authored_name: Option<StringId>,
     span: Option<SourceSpan>,
 ) -> HeadExpressionResult<()> {
     let template_kind = {
@@ -180,7 +182,7 @@ pub(super) fn handle_template_value_in_template_head(
     // TIR-native slot routing bucket them by the helper's target slot key
     // rather than treating them as loose fill content.
     if matches!(&template_kind, TemplateType::SlotInsert(_)) {
-        construction_context.record_insert_contribution(child_reference.root, span);
+        construction_context.record_insert_contribution(child_reference.root, authored_name, span);
     } else {
         construction_context.record_child_template(
             child_reference,
@@ -253,6 +255,7 @@ pub(super) fn push_template_head_expression(
             template_value,
             target.context,
             target.construction_context,
+            None,
             span,
         );
     }

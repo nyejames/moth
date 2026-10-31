@@ -848,7 +848,7 @@ fn rejects_fallback_type_mismatch_before_hir_lowering() {
     let mismatch = diagnostic
         .family_view::<TypeMismatchView>()
         .expect("the first error is a type mismatch");
-    assert_eq!(mismatch.context, TypeMismatchContext::General);
+    assert_eq!(mismatch.context, TypeMismatchContext::CatchRecovery);
 }
 
 #[test]
@@ -1187,4 +1187,31 @@ fn preserves_multiple_success_slots_through_catch() {
             .success_types(),
         ast.expressions.view(*expression).unwrap().success_types()
     );
+}
+
+#[test]
+fn catch_recovery_collection_element_mismatch_keeps_recovery_context() {
+    let failure = parse_single_file_ast_diagnostic(
+        "f || -> {I32}, Error!:\n    return {1}\n;\n\nvalues {I32} = f() catch:\n    then {\"no\"}\n;\n",
+    );
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(
+        mismatch.context,
+        TypeMismatchContext::CatchRecoveryCollectionElement
+    );
+}
+
+#[test]
+fn catch_recovery_map_value_mismatch_names_the_map_slot() {
+    let failure = parse_single_file_ast_diagnostic(
+        "f || -> {String = I32}, Error!:\n    return {\"a\" = 1}\n;\n\nvalues {String = I32} = f() catch:\n    then {\"a\" = \"no\"}\n;\n",
+    );
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::CatchRecoveryMapValue);
 }

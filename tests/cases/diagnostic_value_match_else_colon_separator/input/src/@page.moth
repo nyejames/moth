@@ -1,0 +1,7 @@
+-- A value-match 'else:' arm must report the missing '=>' instead of an end-of-file error.
+value = 1
+label = if value is:
+    1 => then "one"
+    else: then "other"
+;
+io.line([: [label]])

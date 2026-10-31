@@ -8,7 +8,9 @@
 use super::extras::{DiagnosticExtraRecord, ExtraDataKind};
 use super::facts::FactReader;
 use super::foreign::{ForeignSiteRecord, SiteRef};
-use super::labels::{DurableLabel, GenericSubstitutionRecord, SecondaryDiagnosticLabel};
+use super::labels::{
+    DurableLabel, DurableLabelMessage, GenericSubstitutionRecord, SecondaryDiagnosticLabel,
+};
 use super::record::{DiagnosticCode, DiagnosticRecord, SeverityOverride};
 use super::resource::DiagnosticLimits;
 use crate::compiler_frontend::compiler_messages::DiagnosticCapacityResource;
@@ -187,6 +189,15 @@ impl<'a> RecordRef<'a> {
     /// in the record either way, so a foreign primary reads its span from the record.
     pub(super) fn primary(self) -> SiteRef<'a> {
         self.site(self.record.primary, PRIMARY_SELECTOR)
+    }
+
+    /// The message attached to the primary span, when the record carries one.
+    pub(super) fn primary_label_message(self) -> Option<DurableLabelMessage<'a>> {
+        let extra = self.extra()?;
+        if extra.primary_label.is_none() {
+            return None;
+        }
+        Some(extra.primary_label.message(self.store))
     }
 
     /// The site of secondary label `index`: foreign when a foreign-site row names the label, otherwise local. The span

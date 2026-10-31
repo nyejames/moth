@@ -22,7 +22,6 @@ pub(crate) enum AstCounter {
     ScopeContextsCreated,
     ScopeMaxFrameDepth,
     ScopeFrameLookupAncestorSteps,
-    ScopeFrameRedeclarationAncestorChecks,
     ScopeLocalDeclarationsInserted,
 
     // Expression parser pressure.
@@ -352,7 +351,6 @@ mod detailed {
             AstCounter::ScopeContextsCreated,
             AstCounter::ScopeMaxFrameDepth,
             AstCounter::ScopeFrameLookupAncestorSteps,
-            AstCounter::ScopeFrameRedeclarationAncestorChecks,
             AstCounter::ScopeLocalDeclarationsInserted,
             AstCounter::BoundedExpressionTokenWindows,
             AstCounter::BoundedExpressionTokenCopiesAvoided,
@@ -457,9 +455,6 @@ mod detailed {
             AstCounter::ScopeContextsCreated => "ast_scope_contexts_created",
             AstCounter::ScopeMaxFrameDepth => "ast_scope_max_frame_depth",
             AstCounter::ScopeFrameLookupAncestorSteps => "ast_scope_frame_lookup_ancestor_steps",
-            AstCounter::ScopeFrameRedeclarationAncestorChecks => {
-                "ast_scope_frame_redeclaration_ancestor_checks"
-            }
             AstCounter::ScopeLocalDeclarationsInserted => "ast_scope_local_declarations_inserted",
             AstCounter::BoundedExpressionTokenWindows => "ast_bounded_expression_token_windows",
             AstCounter::BoundedExpressionTokenCopiesAvoided => {

@@ -4,3 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0047"]
+message_contains = ["receiver method for 'Wrapper'"]

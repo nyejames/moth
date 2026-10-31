@@ -5,7 +5,9 @@ use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::MalformedHtmlTemplateView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
-use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -270,32 +272,134 @@ fn const_html_template_emits_sanitation_warnings() {
     );
 }
 
+/// Exact authored span for the `occurrence`-th appearance of `needle` in `source`.
+fn authored_span(source: &str, needle: &str, occurrence: usize) -> SourceSpan {
+    assert!(occurrence > 0, "occurrences are one-based");
+    let mut search_from = 0;
+    let mut start = None;
+    for _ in 0..occurrence {
+        let found = source[search_from..]
+            .find(needle)
+            .unwrap_or_else(|| panic!("source should contain `{needle}`"));
+        start = Some(search_from + found);
+        search_from += found + needle.len();
+    }
+    let start = start.expect("at least one occurrence was searched");
+    let length = needle.len();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(start as u32, length as u32, &mut ExtendedSpanBuilder::new())
+            .expect("test fixture span should fit compact encoding"),
+    )
+}
+
+/// Primary spans of every malformed HTML warning in push order.
+fn html_warning_spans(warnings: &CompactDiagnosticBagForTest) -> Vec<SourceSpan> {
+    warnings
+        .views()
+        .map(|warning| {
+            assert!(
+                warning.family_view::<MalformedHtmlTemplateView>().is_some(),
+                "fixture should emit only malformed HTML template warnings"
+            );
+            match warning.primary_site() {
+                SiteRef::Local(span) => span,
+                other => panic!("HTML warning should own a local authored span, got {other:?}"),
+            }
+        })
+        .collect()
+}
+
 #[test]
 fn html_validation_warnings_keep_authored_spans() {
     let style_directives = html_project_test_style_directives();
-    let warnings = template_warnings_with_style_directives(
-        "[$html:\n<script>alert(1)</script>\n<a href=\"javascript:bad()\">x</a>\n<div onclick=\"run()\"></div>\n]",
-        false,
-        &style_directives,
-    );
+    let source = "[$html:\n<script>alert(1)</script>\n<a href=\"javascript:bad()\">x</a>\n<div onclick=\"run()\"></div>\n]";
+    let warnings = template_warnings_with_style_directives(source, false, &style_directives);
     let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
-    let expected_span = SourceSpan::new(
-        SourceId::COMPILATION_ROOT,
-        LocalSpan::exact(7, 88, &mut ExtendedSpanBuilder::new())
-            .expect("HTML body literal span should fit"),
-    );
+    let spans = html_warning_spans(&warnings);
 
-    assert!(!warnings.is_empty());
-    assert!(
-        warnings.views().all(|warning| {
-            warning.family_view::<MalformedHtmlTemplateView>().is_some()
-                && matches!(warning.primary_site(), SiteRef::Local(span) if span == expected_span)
-        }),
-        "html warnings should keep their exact authored source span: {:?}",
-        warnings
-            .views()
-            .map(|warning| warning.primary_site())
-            .collect::<Vec<_>>(),
+    let expected = [
+        authored_span(source, "<script", 1),
+        authored_span(source, "javascript:", 1),
+        authored_span(source, "onclick=", 1),
+    ];
+    assert_eq!(
+        spans.len(),
+        expected.len(),
+        "every violation site should emit one warning: {spans:?}"
+    );
+    for span in expected {
+        assert!(
+            spans.contains(&span),
+            "warning should narrow to its authored literal {span:?}, got {spans:?}"
+        );
+    }
+}
+
+#[test]
+fn html_warning_spans_survive_multiline_and_repeated_markup() {
+    let style_directives = html_project_test_style_directives();
+    let source = "[$html:\n    <div>safe</div>\n    <script>one()</script>\n    <p>middle</p>\n    <script>two()</script>\n    <div onclick=\"run()\"></div>\n]";
+    let warnings = template_warnings_with_style_directives(source, false, &style_directives);
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let spans = html_warning_spans(&warnings);
+
+    let expected = [
+        authored_span(source, "<script", 1),
+        authored_span(source, "<script", 2),
+        authored_span(source, "onclick=", 1),
+    ];
+    assert_eq!(spans.len(), expected.len(), "warning sites: {spans:?}");
+    for span in expected {
+        assert!(
+            spans.contains(&span),
+            "repeated and multiline markup should keep each authored site: {spans:?}"
+        );
+    }
+}
+
+#[test]
+fn html_warning_spans_measure_bytes_in_non_ascii_templates() {
+    let style_directives = html_project_test_style_directives();
+    let source = "[$html:\n    <p>caf\u{e9} \u{1f600}</p>\n    <a href=\"javascript:bad()\">na\u{ef}ve</a>\n    <div onclick=\"run()\">\u{1f980}</div>\n]";
+    let warnings = template_warnings_with_style_directives(source, false, &style_directives);
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let spans = html_warning_spans(&warnings);
+
+    let expected = [
+        authored_span(source, "javascript:", 1),
+        authored_span(source, "onclick=", 1),
+    ];
+    assert_eq!(
+        spans.len(),
+        expected.len(),
+        "non-ASCII text should not shift or add warning sites: {spans:?}"
+    );
+    for span in expected {
+        assert!(
+            spans.contains(&span),
+            "character offsets must not be mistaken for source bytes: {spans:?}"
+        );
+    }
+}
+
+#[test]
+fn html_warning_spans_survive_composed_templates() {
+    let style_directives = html_project_test_style_directives();
+    let source = "[$md:\n# before\n[$html:\n<div>start</div>\n[$md: **bold**]\n<script>alert(1)</script>\n]\n]";
+    let warnings = template_warnings_with_style_directives(source, false, &style_directives);
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let spans = html_warning_spans(&warnings);
+
+    assert_eq!(
+        spans.len(),
+        1,
+        "one nested violation should emit one warning: {spans:?}"
+    );
+    assert_eq!(
+        spans[0],
+        authored_span(source, "<script", 1),
+        "a nested formatter run must keep the child body's authored span"
     );
 }
 

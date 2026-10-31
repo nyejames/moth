@@ -1,17 +1,23 @@
-//! Binds JavaScript export declarations to their Moth annotations.
+//! Binds Moth annotations to the nearest JavaScript declaration.
 //!
 //! WHAT: produces parsed Moth-facing signatures, constants and opaque types from the
-//!       annotations and export facts collected by the neighbouring scanners.
+//!       annotations and declaration facts collected by the neighbouring scanners.
 //! WHY: annotation binding owns signature/type validation, literal materialisation and
 //!      runtime-import deduplication while leaving source scanning to its dedicated modules.
 
 use super::comment_extractor::{AnnotationKind, CommentExtractionResult};
-use super::export_scanner::{ExportScanResult, JsExport, JsExportKind, annotation_precedes_export};
+use super::export_scanner::{
+    DeclarationSite, ExportScanResult, JsDeclaration, JsExport, JsExportKind,
+    annotation_precedes_declaration,
+};
 use super::parsed_js_module::{
-    JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedJsConstant, ParsedJsFunction,
-    ParsedJsModule, ParsedOpaqueType, ParsedRuntimeImport,
+    JsDeclarationKind, JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedJsConstant,
+    ParsedJsFunction, ParsedJsModule, ParsedOpaqueType, ParsedRuntimeImport,
 };
 use super::signature_parser::{SignatureParseInput, parse_signature};
+use crate::compiler_frontend::compiler_messages::{
+    ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
+};
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::parse::{
@@ -32,6 +38,7 @@ pub(super) fn bind_js_module(
     } = comment_result;
     let ExportScanResult {
         exports,
+        declarations,
         runtime_imports,
         diagnostics: export_diagnostics,
     } = export_result;
@@ -50,7 +57,7 @@ pub(super) fn bind_js_module(
             if seen_moth_names.contains(type_name) {
                 diagnostics.push(JsParserDiagnostic {
                     message: format!("Duplicate Moth-facing name `{type_name}` in JS module."),
-                    span: annotation.span.clone(),
+                    span: annotation.directive_span.clone(),
                     kind: JsDiagnosticKind::DuplicateMothName,
                 });
             } else {
@@ -59,7 +66,7 @@ pub(super) fn bind_js_module(
 
             parsed.opaque_types.push(ParsedOpaqueType {
                 name: type_name.clone(),
-                span: annotation.span.clone(),
+                span: annotation.directive_span.clone(),
             });
         }
     }
@@ -81,142 +88,202 @@ pub(super) fn bind_js_module(
     }
 
     let mut annotated_exports = vec![false; exports.len()];
-    let mut export_index = 0;
+    let mut declaration_cursor = 0;
     for annotation in annotations {
-        let moth_name = match &annotation.kind {
-            AnnotationKind::Sig { moth_name, .. } | AnnotationKind::Const { moth_name, .. } => {
-                moth_name
+        let (moth_name, directive) = match &annotation.kind {
+            AnnotationKind::Sig { moth_name, .. } => {
+                (moth_name, ExternalJsAnnotationDirective::Sig)
+            }
+            AnnotationKind::Const { moth_name, .. } => {
+                (moth_name, ExternalJsAnnotationDirective::Const)
             }
             AnnotationKind::Opaque { .. } => continue,
         };
         if seen_moth_names.contains(moth_name) {
             diagnostics.push(JsParserDiagnostic {
                 message: format!("Duplicate Moth-facing name `{moth_name}` in JS module."),
-                span: annotation.span.clone(),
+                span: annotation.directive_span.clone(),
                 kind: JsDiagnosticKind::DuplicateMothName,
             });
         } else {
             seen_moth_names.push(moth_name.clone());
         }
 
-        let matched_index =
-            find_next_export_after(&exports, annotation.span.byte_end, export_index).filter(
-                |index| {
-                    annotation_precedes_export(
-                        source,
-                        registry,
-                        annotation.span.byte_end,
-                        exports[*index].span.byte_start,
-                    )
-                },
-            );
+        let matched_index = find_next_declaration_after(
+            &declarations,
+            &exports,
+            annotation.block_span.byte_end,
+            declaration_cursor,
+        )
+        .filter(|index| {
+            annotation_precedes_declaration(
+                source,
+                registry,
+                annotation.block_span.byte_end,
+                declarations[*index].site.start(&exports),
+            )
+        });
         let Some(index) = matched_index else {
-            let (directive, kind) = match &annotation.kind {
-                AnnotationKind::Const { .. } => {
-                    ("@moth.const", JsDiagnosticKind::MissingExportAfterConst)
-                }
-                _ => ("@moth.sig", JsDiagnosticKind::MissingExportAfterSig),
-            };
             diagnostics.push(JsParserDiagnostic {
-                message: format!(
-                    "`{directive}` for `{moth_name}` is not followed by a supported JS export declaration."
-                ),
-                span: annotation.span,
-                kind,
+                message: String::new(),
+                span: annotation.directive_span,
+                kind: JsDiagnosticKind::OrphanedAnnotation {
+                    directive,
+                    moth_name: moth_name.clone(),
+                },
             });
             continue;
         };
-        export_index = index;
-        let export = &exports[index];
-        if annotated_exports[index] {
-            diagnostics.push(JsParserDiagnostic {
-                message: format!(
-                    "JS export `{}` has more than one binding annotation.",
-                    export.js_name
-                ),
-                span: annotation.span,
-                kind: JsDiagnosticKind::AnnotationExportKindMismatch,
-            });
-            continue;
-        }
-        annotated_exports[index] = true;
-
-        match (&annotation.kind, &export.kind) {
-            (
-                AnnotationKind::Sig { signature_text, .. },
-                JsExportKind::Callable { parameter_count },
-            ) => {
-                let signature_result = parse_signature(SignatureParseInput {
-                    text: signature_text.clone(),
-                    base_byte: annotation.span.byte_start,
-                });
-                diagnostics.extend(signature_result.diagnostics);
-
-                let abi_count = signature_result.signature.abi_parameter_count();
-                if abi_count != *parameter_count {
+        declaration_cursor = index;
+        let declaration = &declarations[index];
+        match &declaration.site {
+            DeclarationSite::Unexported {
+                start,
+                name_span,
+                kind,
+            } => {
+                // The annotation binds to this declaration, so it must not also reach a later
+                // export. An initialiser outside the supported forms is not a missing `export`;
+                // name the supported forms instead and consume the annotation here.
+                let supported_kind = match kind {
+                    JsDeclarationKind::UnsupportedInitializer => {
+                        diagnostics.push(JsParserDiagnostic {
+                            message: String::new(),
+                            span: annotation.directive_span,
+                            kind: JsDiagnosticKind::OrphanedAnnotation {
+                                directive,
+                                moth_name: moth_name.clone(),
+                            },
+                        });
+                        continue;
+                    }
+                    JsDeclarationKind::Function => ExternalJsDeclarationKind::Function,
+                    JsDeclarationKind::BlockArrow => ExternalJsDeclarationKind::BlockArrow,
+                    JsDeclarationKind::LiteralConstant => ExternalJsDeclarationKind::Constant,
+                };
+                let js_name = &source[name_span.byte_start..name_span.byte_end];
+                if !annotation_fits_declaration(directive, supported_kind) {
                     diagnostics.push(JsParserDiagnostic {
                         message: format!(
-                            "Annotated JS export `{}` has {} Moth ABI parameter(s) but {} JS parameter(s). \
-                             Receiver `this` counts as the first JS parameter. Moth JS module exports must use one plain JS parameter per Moth ABI parameter.",
-                            export.js_name, abi_count, parameter_count
+                            "Binding annotation for `{moth_name}` does not match JavaScript declaration `{js_name}`. \
+                             Use `@moth.sig` for callable declarations and `@moth.const` for literal constants."
                         ),
-                        span: export.span.clone(),
-                        kind: JsDiagnosticKind::ArityMismatch,
-                    });
-                }
-
-                let parsed_function = ParsedJsFunction {
-                    moth_name: moth_name.clone(),
-                    js_name: export.js_name.clone(),
-                    signature: signature_result.signature,
-                    annotation_span: annotation.span,
-                    export_span: export.span.clone(),
-                };
-                if parsed_function.signature.has_receiver() {
-                    parsed.receiver_methods.push(parsed_function);
-                } else {
-                    parsed.free_functions.push(parsed_function);
-                }
-            }
-            (AnnotationKind::Const { type_name, .. }, JsExportKind::Constant { literal_span }) => {
-                if type_name != "U32" {
-                    diagnostics.push(JsParserDiagnostic {
-                        message: "`@moth.const` supports only the fixed `U32` type.".to_string(),
-                        span: annotation.span,
-                        kind: JsDiagnosticKind::InvalidConstant,
+                        span: annotation.directive_span,
+                        kind: JsDiagnosticKind::AnnotationExportKindMismatch,
                     });
                     continue;
                 }
-                let Some(literal_span) = literal_span else {
-                    // The scanner has already diagnosed an invalid declaration boundary.
-                    continue;
-                };
-                let spelling = &source[literal_span.byte_start..literal_span.byte_end];
-                match materialize_u32_constant(spelling) {
-                    Ok(value) => parsed.constants.push(ParsedJsConstant {
+                diagnostics.push(JsParserDiagnostic {
+                    message: String::new(),
+                    span: annotation.directive_span,
+                    kind: JsDiagnosticKind::MissingExportKeyword {
+                        directive,
+                        declaration: supported_kind,
                         moth_name: moth_name.clone(),
-                        js_name: export.js_name.clone(),
-                        value,
-                        annotation_span: annotation.span,
-                        export_span: export.span.clone(),
-                        literal_span: literal_span.clone(),
-                    }),
-                    Err(message) => diagnostics.push(JsParserDiagnostic {
-                        message,
-                        span: literal_span.clone(),
-                        kind: JsDiagnosticKind::InvalidConstant,
+                        js_name: js_name.to_string(),
+                        declaration_span: JsSourceSpan::range(*start, name_span.byte_end),
+                    },
+                });
+                continue;
+            }
+            DeclarationSite::Exported { export_index } => {
+                let export_index = *export_index;
+                let export = &exports[export_index];
+                if annotated_exports[export_index] {
+                    diagnostics.push(JsParserDiagnostic {
+                        message: format!(
+                            "JS export `{}` has more than one binding annotation.",
+                            export.js_name
+                        ),
+                        span: annotation.directive_span,
+                        kind: JsDiagnosticKind::AnnotationExportKindMismatch,
+                    });
+                    continue;
+                }
+                annotated_exports[export_index] = true;
+
+                match (&annotation.kind, &export.kind) {
+                    (
+                        AnnotationKind::Sig { signature_text, .. },
+                        JsExportKind::Callable { parameter_count },
+                    ) => {
+                        let signature_result = parse_signature(SignatureParseInput {
+                            text: signature_text.clone(),
+                            base_byte: annotation.directive_span.byte_start,
+                        });
+                        diagnostics.extend(signature_result.diagnostics);
+
+                        let abi_count = signature_result.signature.abi_parameter_count();
+                        if abi_count != *parameter_count {
+                            diagnostics.push(JsParserDiagnostic {
+                                message: format!(
+                                    "Annotated JS export `{}` has {} Moth ABI parameter(s) but {} JS parameter(s). \
+                                     Receiver `this` counts as the first JS parameter. Moth JS module exports must use one plain JS parameter per Moth ABI parameter.",
+                                    export.js_name, abi_count, parameter_count
+                                ),
+                                span: export.span.clone(),
+                                kind: JsDiagnosticKind::ArityMismatch,
+                            });
+                        }
+
+                        let parsed_function = ParsedJsFunction {
+                            moth_name: moth_name.clone(),
+                            js_name: export.js_name.clone(),
+                            signature: signature_result.signature,
+                            annotation_span: annotation.directive_span,
+                            export_span: export.span.clone(),
+                        };
+                        if parsed_function.signature.has_receiver() {
+                            parsed.receiver_methods.push(parsed_function);
+                        } else {
+                            parsed.free_functions.push(parsed_function);
+                        }
+                    }
+                    (
+                        AnnotationKind::Const { type_name, .. },
+                        JsExportKind::Constant { literal_span },
+                    ) => {
+                        if type_name != "U32" {
+                            diagnostics.push(JsParserDiagnostic {
+                                message: "`@moth.const` supports only the fixed `U32` type."
+                                    .to_string(),
+                                span: annotation.directive_span,
+                                kind: JsDiagnosticKind::InvalidConstant,
+                            });
+                            continue;
+                        }
+                        let Some(literal_span) = literal_span else {
+                            // The scanner has already diagnosed an invalid declaration boundary.
+                            continue;
+                        };
+                        let spelling = &source[literal_span.byte_start..literal_span.byte_end];
+                        match materialize_u32_constant(spelling) {
+                            Ok(value) => parsed.constants.push(ParsedJsConstant {
+                                moth_name: moth_name.clone(),
+                                js_name: export.js_name.clone(),
+                                value,
+                                annotation_span: annotation.directive_span,
+                                export_span: export.span.clone(),
+                                literal_span: literal_span.clone(),
+                            }),
+                            Err(message) => diagnostics.push(JsParserDiagnostic {
+                                message,
+                                span: literal_span.clone(),
+                                kind: JsDiagnosticKind::InvalidConstant,
+                            }),
+                        }
+                    }
+                    _ => diagnostics.push(JsParserDiagnostic {
+                        message: format!(
+                            "Binding annotation for `{moth_name}` does not match JS export `{}`. \
+                             Use `@moth.sig` for callable exports and `@moth.const` for literal constants.",
+                            export.js_name
+                        ),
+                        span: annotation.directive_span,
+                        kind: JsDiagnosticKind::AnnotationExportKindMismatch,
                     }),
                 }
             }
-            _ => diagnostics.push(JsParserDiagnostic {
-                message: format!(
-                    "Binding annotation for `{moth_name}` does not match JS export `{}`. \
-                     Use `@moth.sig` for callable exports and `@moth.const` for literal constants.",
-                    export.js_name
-                ),
-                span: annotation.span,
-                kind: JsDiagnosticKind::AnnotationExportKindMismatch,
-            }),
         }
     }
 
@@ -240,18 +307,37 @@ pub(super) fn bind_js_module(
     parsed
 }
 
-/// Finds the next export at or after the end of an annotation's comment block.
-fn find_next_export_after(
+/// Finds the nearest declaration at or after the end of an annotation's comment block.
+fn find_next_declaration_after(
+    declarations: &[JsDeclaration],
     exports: &[JsExport],
     byte_offset: usize,
     start_index: usize,
 ) -> Option<usize> {
-    for (index, export) in exports.iter().enumerate().skip(start_index) {
-        if export.span.byte_start >= byte_offset {
+    for (index, declaration) in declarations.iter().enumerate().skip(start_index) {
+        if declaration.site.start(exports) >= byte_offset {
             return Some(index);
         }
     }
     None
+}
+
+/// Whether an annotation directive can describe a declaration form.
+///
+/// `@moth.sig` describes callables; `@moth.const` describes literal-backed constants. A
+/// mismatch reports the same kind error as the exported form instead of advising `export`.
+/// Unsupported initialisers are reported as unsupported forms before this check.
+fn annotation_fits_declaration(
+    directive: ExternalJsAnnotationDirective,
+    declaration: ExternalJsDeclarationKind,
+) -> bool {
+    match directive {
+        ExternalJsAnnotationDirective::Sig => matches!(
+            declaration,
+            ExternalJsDeclarationKind::Function | ExternalJsDeclarationKind::BlockArrow
+        ),
+        ExternalJsAnnotationDirective::Const => declaration == ExternalJsDeclarationKind::Constant,
+    }
 }
 
 fn validate_signature_type_names(

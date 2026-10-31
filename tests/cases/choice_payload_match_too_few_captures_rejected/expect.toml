@@ -2,3 +2,12 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["Variant 'Pending' has 2 payload fields, 'retry_count' and 'message', but this pattern captures 1."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.too_few_capture_bindings"
+path = "input/@page.moth"
+line = 12
+column = 24
+count = 1

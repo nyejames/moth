@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -149,6 +150,14 @@ pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
     ///      is known — the early default the bounded inference contract forbids.
     pub(crate) retain_pending_numeric_fragment: bool,
     pub(crate) route_argument_context: Option<RouteArgumentContext>,
+    /// The receiving boundary this expression position reports for its own result.
+    ///
+    /// WHAT: a semantic mismatch context used only when the evaluator compares this expression's
+    ///       final result with its expected type.
+    /// WHY: the boundary already knows whether the value feeds a declaration, assignment, return or
+    ///      `catch` recovery. Nested operands keep their own contexts, so this never labels an
+    ///      operator or argument error as a receiving-boundary error.
+    pub(crate) mismatch_context: TypeMismatchContext,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -177,6 +186,7 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             numeric_deferral_owner: false,
             retain_pending_numeric_fragment: false,
             route_argument_context: None,
+            mismatch_context: TypeMismatchContext::General,
             string_table: resources.string_table,
             path_fork: resources.path_fork,
         }
@@ -207,6 +217,18 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
         route_argument_context: RouteArgumentContext,
     ) -> Self {
         self.route_argument_context = Some(route_argument_context);
+        self
+    }
+
+    /// Mark the receiving boundary this expression position reports for its result.
+    ///
+    /// WHAT: the semantic context used when the evaluator rejects this expression's final result
+    ///       against its expected type.
+    /// WHY: nested parses build their own input, so a declaration or `catch` boundary context is
+    ///      never inherited by an operand, argument or collection entry that has a more precise
+    ///      owner.
+    pub(crate) fn with_mismatch_context(mut self, mismatch_context: TypeMismatchContext) -> Self {
+        self.mismatch_context = mismatch_context;
         self
     }
 

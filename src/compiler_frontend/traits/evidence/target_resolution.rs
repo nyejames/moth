@@ -8,12 +8,15 @@
 use super::diagnostics::invalid_conformance;
 use super::environment::TraitEvidenceKind;
 
+use crate::compiler_frontend::ast::type_resolution::{
+    VisibleTypeNameSources, collect_visible_type_name_candidates,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     draft::DiagnosticDraft,
     families::{generics_traits_api, names_declarations},
 };
 use crate::compiler_frontend::compiler_messages::{
-    DeferredFeatureReason, InvalidTraitConformanceReason,
+    DeferredFeatureReason, InvalidTraitConformanceReason, UnknownTypeNameSite,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -110,7 +113,25 @@ pub(super) fn resolve_conformance_target(
     }
 
     let Some(target_path) = context.visibility.visible_source_names.get(&target.name) else {
-        return Err(names_declarations::unknown_type_name(target.name, None));
+        return Err(names_declarations::unknown_type_name(
+            target.name,
+            UnknownTypeNameSite::ConformanceTarget,
+            collect_visible_type_name_candidates(
+                target.name,
+                VisibleTypeNameSources::same_file_nominal_types(context.visibility),
+                |path| {
+                    context
+                        .struct_source_by_path
+                        .get(path)
+                        .is_some_and(|source| source == context.conformance_source_file)
+                        || context
+                            .choice_source_by_path
+                            .get(path)
+                            .is_some_and(|source| source == context.conformance_source_file)
+                },
+            ),
+            None,
+        ));
     };
     let Some(type_id) = context.nominal_type_ids_by_path.get(target_path).copied() else {
         return Err(invalid_conformance(

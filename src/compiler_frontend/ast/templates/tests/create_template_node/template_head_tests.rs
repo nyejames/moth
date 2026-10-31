@@ -3,8 +3,10 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidExpressionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidExpressionReason, InvalidTemplateStructureReason,
+    InvalidExpressionReason, InvalidTemplateStructureReason, TemplateHeadConflictOwner,
+    TemplateHeadConflictReason, TemplateHeadItemKind,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
@@ -83,7 +85,10 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     let long_directive = StyleDirectiveSpec::handler(
         long_directive_name.clone(),
         TemplateBodyMode::Normal,
-        TemplateHeadCompatibility::blocks_same(TemplateHeadTag::FORMATTER_DIRECTIVE),
+        TemplateHeadCompatibility::blocks_same(
+            TemplateHeadTag::FORMATTER_DIRECTIVE,
+            TemplateHeadConflictReason::MultipleFormatters,
+        ),
         StyleDirectiveHandlerSpec::no_op(),
     );
     let style_directives = StyleDirectiveRegistry::merged(&[long_directive])
@@ -127,17 +132,62 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
         )
         .expect_err("incompatible formatter directives should fail"),
     );
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::IncompatibleHeadItem,
-    );
-    let SiteRef::Local(primary_span) = diagnostic
+    let view = diagnostic
         .first()
-        .expect("incompatible head item should compact to one record")
-        .primary_site()
-    else {
+        .expect("incompatible head item should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("incompatible head item should retain typed structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::IncompatibleHeadItem
+    );
+    let conflict = facts
+        .head_conflict
+        .expect("incompatible head item should retain its typed conflict");
+    assert_eq!(
+        conflict.reason,
+        TemplateHeadConflictReason::MultipleFormatters
+    );
+    assert_eq!(conflict.owner, TemplateHeadConflictOwner::EarlierItem);
+    assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(
+        view.string_ids(),
+        [
+            string_table.intern(&long_directive_name),
+            string_table.intern("raw"),
+        ]
+        .as_slice()
+    );
+    let label = view
+        .durable_labels()
+        .next()
+        .expect("the earlier conflicting item should carry a secondary label");
+    assert!(matches!(
+        label.message,
+        DurableLabelMessage::EarlierTemplateHeadItem
+    ));
+    let SiteRef::Local(earlier_span) = label.site else {
+        panic!("the earlier head item label should retain its local source span");
+    };
+    let earlier_range =
+        earlier_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[earlier_range.start() as usize..earlier_range.end() as usize],
+        "$raw"
+    );
+
+    let SiteRef::Local(primary_span) = view.primary_site() else {
         panic!("incompatible head item should retain its local source span");
     };
+    assert!(
+        matches!(
+            view.primary_label_message(),
+            Some(DurableLabelMessage::ConflictsWithEarlierHeadItem)
+        ),
+        "the rejected head item should say why it was rejected",
+    );
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let target = format!("${long_directive_name}");
@@ -219,6 +269,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
         Some(token_stream.current_span()),
     );
 
+    let opening_span = Some(token_stream.current_span());
     let error = match parse_template_head(
         &mut token_stream,
         TemplateHeadParseRequest {
@@ -231,6 +282,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
             path_fork: &mut path_fork,
+            opening_span,
         },
     ) {
         Err(error) => error,
@@ -302,6 +354,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
         Some(token_stream.current_span()),
     );
 
+    let opening_span = Some(token_stream.current_span());
     let error = match parse_template_head(
         &mut token_stream,
         TemplateHeadParseRequest {
@@ -314,6 +367,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             string_table: &mut string_table,
             path_fork: &mut path_fork,
+            opening_span,
         },
     ) {
         Err(error) => error,
@@ -828,4 +882,268 @@ fn template_loop_suffix_requires_header() {
         &diagnostic,
         InvalidTemplateStructureReason::MissingTemplateLoopHeader,
     );
+}
+
+/// Parses one template with `style_directives` and returns the compacted failure, the string table
+/// that interned names, and the span builder that owns the source spans.
+fn parse_template_failure(
+    source: &str,
+    style_directives: &StyleDirectiveRegistry,
+) -> (
+    CompactDiagnosticBagForTest,
+    StringTable,
+    ExtendedSpanBuilder,
+) {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let file_tokens = template_tokens_from_source_with_style_directives(
+        source,
+        style_directives,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context =
+        new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
+    let canonical_owner = file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+
+    let diagnostic = expect_template_diagnostic(
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            &mut expression_builder,
+            &mut const_values,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("the template source should fail"),
+    );
+    (diagnostic, string_table, span_builder)
+}
+
+/// The message field of the terse record for one compacted diagnostic.
+fn rendered_diagnostic_message(
+    diagnostic: &CompactDiagnosticBagForTest,
+    string_table: &StringTable,
+) -> String {
+    let view = diagnostic
+        .first()
+        .expect("template source diagnostic should compact to one record");
+    terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(string_table))
+        .splitn(5, '|')
+        .nth(4)
+        .expect("terse rendering keeps the message field")
+        .to_owned()
+}
+
+#[test]
+fn template_head_formatter_conflict_keeps_the_reversed_order() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, mut string_table, _) =
+        parse_template_failure("[$raw, $md: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("formatter conflict should compact to one record");
+    assert_eq!(
+        view.string_ids(),
+        [string_table.intern("md"), string_table.intern("raw"),].as_slice()
+    );
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$raw` and `$md` cannot be combined because both control template body formatting. Choose one formatter."
+    );
+}
+
+#[test]
+fn duplicate_formatter_directive_names_the_repeated_directive() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$md, $md: body]", &style_directives);
+
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$md` cannot appear more than once in a template head because each formatter controls template body formatting. Choose one formatter."
+    );
+}
+
+#[test]
+fn repeated_comment_directive_uses_duplicate_wording() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$note, $note: ignored]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("duplicate comment directive should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("duplicate comment directive should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("duplicate note should retain its typed conflict")
+            .reason,
+        TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem
+    );
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$note` cannot appear more than once in a template head."
+    );
+}
+
+#[test]
+fn repeated_slot_directive_uses_duplicate_wording() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$slot, $slot: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("duplicate slot directive should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("duplicate slot directive should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("duplicate slot should retain its typed conflict")
+            .reason,
+        TemplateHeadConflictReason::SlotDirectiveMustBeExclusive
+    );
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$slot` cannot appear more than once in a template head."
+    );
+}
+
+#[test]
+fn required_absent_conflict_labels_the_earlier_expression() {
+    let style_directives = frontend_test_style_directives();
+    let source = "[\"x\", $slot]";
+    let (diagnostic, string_table, span_builder) =
+        parse_template_failure(source, &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("slot exclusivity should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("slot exclusivity should retain typed structure facts");
+    let conflict = facts
+        .head_conflict
+        .expect("slot exclusivity should retain its typed conflict");
+    assert_eq!(
+        conflict.reason,
+        TemplateHeadConflictReason::SlotDirectiveMustBeExclusive
+    );
+    assert_eq!(conflict.owner, TemplateHeadConflictOwner::IncomingItem);
+    assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Expression);
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$slot` cannot be combined with an expression because a slot declaration must be the template head's only meaningful item."
+    );
+
+    let mut labels = view.durable_labels();
+    let earlier = labels
+        .next()
+        .expect("the earlier expression should carry a secondary label");
+    assert!(matches!(
+        earlier.message,
+        DurableLabelMessage::EarlierTemplateHeadItem
+    ));
+    assert!(labels.next().is_none());
+
+    let SiteRef::Local(earlier_span) = earlier.site else {
+        panic!("the earlier expression label should retain its authored local span");
+    };
+    let range = earlier_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "\"x\""
+    );
+}
+
+#[test]
+fn compatible_head_items_still_parse_together() {
+    assert_eq!(folded_template_output("[$fresh, \"x\"]"), "x");
+}
+
+/// Asserts one truncated template reports `MissingClosingBracket` at EOF and labels its opening.
+fn assert_truncated_template(source: &str, expected_opening: (u32, u32)) {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, span_builder) =
+        parse_template_failure(source, &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("a truncated template should compact to one record");
+    assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0022");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("a truncated template should retain typed structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::MissingClosingBracket
+    );
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "This template is not closed before the end of the file. Add `]`."
+    );
+
+    let SiteRef::Local(primary_span) = view.primary_site() else {
+        panic!("template truncation should retain its authored EOF span");
+    };
+    let primary_range =
+        primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    let source_end = source.len() as u32;
+    assert_eq!(
+        (primary_range.start(), primary_range.end()),
+        (source_end, source_end)
+    );
+
+    let labels: Vec<_> = view.durable_labels().collect();
+    assert_eq!(labels.len(), 1, "one opening-bracket label is expected");
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::TemplateStartsHere
+    ));
+    let SiteRef::Local(opening_span) = labels[0].site else {
+        panic!("the opening bracket label should retain its local span");
+    };
+    let opening_range =
+        opening_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        (opening_range.start(), opening_range.end()),
+        expected_opening
+    );
+    assert_eq!(
+        &source[opening_range.start() as usize..opening_range.end() as usize],
+        "["
+    );
+}
+
+#[test]
+fn truncated_template_head_reports_missing_closing_bracket() {
+    assert_truncated_template("[$md", (0, 1));
+}
+
+#[test]
+fn truncated_template_body_reports_missing_closing_bracket() {
+    assert_truncated_template("[: hello", (0, 1));
+}
+
+#[test]
+fn unclosed_nested_template_labels_its_own_opening() {
+    assert_truncated_template("[: a [: b", (5, 6));
 }

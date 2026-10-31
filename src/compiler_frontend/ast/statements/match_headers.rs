@@ -172,14 +172,10 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
 
-    if arm_scope.get_reference(&capture_name).is_some() {
-        return Err(choices_control_flow::invalid_match_pattern(
-            InvalidMatchPatternReason::CaptureBindingShadowsVariable,
-            None,
-            None,
-            binding_span,
-        )
-        .into());
+    if let Some(existing) = arm_scope.get_reference(&capture_name) {
+        return Err(arm_scope
+            .duplicate_declaration(capture_name, binding_span, existing.binding_span())
+            .into());
     }
 
     if let Some(diagnostic) =
@@ -308,8 +304,7 @@ pub(crate) fn parse_single_predicate_match_pattern(
         path_fork,
     )?;
 
-    // Colon starts the block body of a single-predicate value match. Full match
-    // arms still reject it as legacy `pattern:` syntax through `parse_match_arm_header`.
+    // Colon starts the block body of a single-predicate value match.
     if token_stream.current_tag() != TokenTag::COLON {
         reject_invalid_pattern_suffix(token_stream)?;
     }
@@ -592,13 +587,6 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
         .into());
     }
 
-    if token_stream.current_tag() == TokenTag::COLON {
-        return Err(choices_control_flow::invalid_match_arm(
-            InvalidMatchArmReason::LegacyColonSyntax,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
     if token_stream.current_tag() == TokenTag::ARROW {
         return Err(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
@@ -625,7 +613,7 @@ fn option_pattern_constructor_like(token_stream: &AstCursor) -> bool {
 /// WHY: captures must be visible in both the guard and the body, but must not leak to other arms.
 ///
 /// Validates:
-/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
+/// - No capture name reuses a visible value name or visible declaration (Moth no-shadowing rule).
 fn build_arm_scope_with_choice_captures(
     match_context: &ScopeContext,
     parsed_pattern: ParsedChoicePattern,
@@ -638,15 +626,11 @@ fn build_arm_scope_with_choice_captures(
     for capture in parsed_pattern.captures {
         let binding_name = capture.binding_name;
 
-        // Enforce no-shadowing: the local binding name must not collide with any visible local.
-        if let Some(_existing) = arm_scope.get_reference(&binding_name) {
-            return Err(choices_control_flow::invalid_match_pattern(
-                InvalidMatchPatternReason::CaptureBindingShadowsVariable,
-                None,
-                None,
-                capture.binding_span,
-            )
-            .into());
+        // A capture may not reuse any visible value name.
+        if let Some(existing) = arm_scope.get_reference(&binding_name) {
+            return Err(arm_scope
+                .duplicate_declaration(binding_name, capture.binding_span, existing.binding_span())
+                .into());
         }
 
         if let Some(diagnostic) = arm_scope.check_body_binding_visibility(
@@ -793,7 +777,7 @@ fn parse_pending_choice_pattern_header(
 ///      root knows, so a capture must not pin the origin's width while the arm is parsed.
 ///
 /// Validates:
-/// - No capture name shadows an existing visible local (Moth no-shadowing rule).
+/// - No capture name reuses a visible value name or visible declaration (Moth no-shadowing rule).
 fn build_pending_choice_arm_scope(
     match_context: &ScopeContext,
     subject: DeclaredChoiceSubject,
@@ -808,14 +792,10 @@ fn build_pending_choice_arm_scope(
     for capture in parsed_pattern.captures {
         let binding_name = capture.binding_name;
 
-        if arm_scope.get_reference(&binding_name).is_some() {
-            return Err(choices_control_flow::invalid_match_pattern(
-                InvalidMatchPatternReason::CaptureBindingShadowsVariable,
-                None,
-                None,
-                capture.binding_span,
-            )
-            .into());
+        if let Some(existing) = arm_scope.get_reference(&binding_name) {
+            return Err(arm_scope
+                .duplicate_declaration(binding_name, capture.binding_span, existing.binding_span())
+                .into());
         }
 
         if let Some(diagnostic) = arm_scope.check_body_binding_visibility(
@@ -921,7 +901,6 @@ fn parse_pending_option_pattern_header(
         });
     }
 
-    // Optional scrutinees must use option-specific patterns; `|name|` is the only capture form.
     if token_stream.current_tag() == TokenTag::SYMBOL
         && !option_pattern_constructor_like(token_stream)
     {
@@ -969,7 +948,7 @@ fn parse_pending_option_pattern_header(
 ///      root knows, so the capture must not pin the origin's width while the arm is parsed.
 ///
 /// Validates:
-/// - The capture name does not shadow an existing visible local (Moth no-shadowing rule).
+/// - No capture name reuses a visible value name or visible declaration (Moth no-shadowing rule).
 fn build_pending_option_capture_scope(
     match_context: &ScopeContext,
     inner: KnownShapeId,
@@ -979,14 +958,10 @@ fn build_pending_option_capture_scope(
 ) -> MatchHeaderResult<(ScopeContext, PendingOptionCapture)> {
     let arm_scope = match_context.clone();
 
-    if arm_scope.get_reference(&binding.name).is_some() {
-        return Err(choices_control_flow::invalid_match_pattern(
-            InvalidMatchPatternReason::CaptureBindingShadowsVariable,
-            None,
-            None,
-            binding.binding_span,
-        )
-        .into());
+    if let Some(existing) = arm_scope.get_reference(&binding.name) {
+        return Err(arm_scope
+            .duplicate_declaration(binding.name, binding.binding_span, existing.binding_span())
+            .into());
     }
 
     if let Some(diagnostic) =

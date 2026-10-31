@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0049"]
+message_contains = ["An optional-present capture cannot be empty. Use `|name|` to capture the present value."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0049"
+reason = "invalid_match_pattern.empty_optional_present_capture"
+path = "input/@page.moth"
+line = 3
+count = 1

@@ -85,12 +85,13 @@ impl SourceDiscoveryError {
     /// WHY: inventory preparation aborts on the first discovery failure and discards its
     ///      discovery owner, so the batch becomes the sole table owner. The finalized boundary
     ///      later pairs that failure with its source row and freezes one report.
-    /// A finalized failure already owns a finished source database this lane cannot carry:
-    /// [`PreparedFailure`] has no source owner, so converting here would drop the finished owner.
-    /// Finalized failures must be matched explicitly and split with
-    /// [`FinalizedDiscoveryFailure::into_parts`] (see `collect_reachable_input_files`);
-    /// reaching this converter with one is a caller bug and fails loudly in all builds
-    /// instead of dropping the finished owner.
+    ///
+    /// # Panics
+    ///
+    /// Panics when given a finalized failure. It already owns a finished source database that
+    /// this lane cannot carry, because [`PreparedFailure`] has no source owner and converting
+    /// would drop the finished owner. Match finalized failures explicitly and split them with
+    /// [`FinalizedDiscoveryFailure::into_parts`] (see `collect_reachable_input_files`).
     pub(crate) fn into_failure(
         self,
         string_table: &mut StringTable,

@@ -8,8 +8,10 @@
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{NamingConvention, ReservedNameOwner};
+use crate::compiler_frontend::keywords;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use moth_lexical::identifier::is_reserved_user_name;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,4 +142,25 @@ pub(crate) fn ensure_not_keyword_shadow_identifier(
     }
 
     Ok(())
+}
+
+/// Reports a reserved word used where a binding or declaration name belongs.
+///
+/// WHAT: derives the authored spelling from a keyword or word-operator token and builds the
+///       shared reserved-name diagnostic at that token's span.
+/// WHY: name-position parsers often receive a reserved token instead of a symbol token. Naming the
+///      reserved word explains the authored mistake, while a generic unexpected-token diagnostic
+///      makes a valid-looking binding read as unrelated syntax noise.
+pub(crate) fn reject_reserved_word_token(
+    token_tag: TokenTag,
+    span: Option<SourceSpan>,
+    string_table: &mut StringTable,
+) -> Option<DiagnosticDraft> {
+    let spelling = keywords::reserved_word_spelling(token_tag)?;
+    let name = string_table.intern(spelling);
+    Some(names_declarations::reserved_name_collision(
+        name,
+        ReservedNameOwner::Keyword,
+        span,
+    ))
 }

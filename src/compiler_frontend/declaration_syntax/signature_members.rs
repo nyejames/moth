@@ -29,11 +29,15 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
+    reject_reserved_word_token,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::syntax_errors::expression_position::separator_equality_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
-use crate::compiler_frontend::utilities::token_scan::NestingDepth;
+use crate::compiler_frontend::utilities::token_scan::{
+    NestingDepth, unclosed_delimiter_eof_diagnostic,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
@@ -533,6 +537,18 @@ pub fn parse_signature_members_syntax(
                     .into());
                 }
 
+                // A reserved word where a member name belongs is an authored name attempt.
+                // Report the collision at the word instead of a generic unexpected token.
+                if expecting_member
+                    && let Some(diagnostic) = reject_reserved_word_token(
+                        token_stream.current_tag(),
+                        current_source_span(token_stream),
+                        string_table,
+                    )
+                {
+                    return Err(diagnostic.into());
+                }
+
                 let span = current_source_span(token_stream);
                 let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                     return Err(token_lexical::unexpected_end_of_file(None, span).into());
@@ -668,6 +684,13 @@ fn parse_signature_member_syntax(
     }
     let default_range = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
+            if let Some(diagnostic) = separator_equality_mistake(
+                token_stream.current_token_ref(),
+                token_stream.token_ref_at_offset(1),
+                token_stream.token_ref_at_offset(2),
+            ) {
+                return Err(diagnostic.into());
+            }
             let default_span = current_source_span(token_stream);
             if let Some(contract_kind) = contract.kind() {
                 return Err(generics_traits_api::invalid_parameter_contract(
@@ -833,9 +856,15 @@ fn collect_member_default_range(
         }
 
         if matches!(tag, TokenTag::EOF) {
-            return Err(token_lexical::unexpected_end_of_file(
+            let eof_span = current_source_span(token_stream);
+            let cursor = token_stream.canonical_cursor();
+            return Err(unclosed_delimiter_eof_diagnostic(
+                cursor.source_tokens(),
+                start,
+                cursor.position(),
+                eof_span,
                 None,
-                current_source_span(token_stream),
+                string_table,
             )
             .into());
         }

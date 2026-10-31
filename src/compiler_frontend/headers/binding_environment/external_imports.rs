@@ -64,8 +64,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         if let Some(span) = local_name_span {
             file_visibility
-                .visible_external_symbol_spans
-                .insert(local_name, span);
+                .dependency_binding_spans
+                .entry(local_name)
+                .or_insert(span);
         }
 
         Ok(())

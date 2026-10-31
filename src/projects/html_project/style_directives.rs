@@ -9,7 +9,7 @@
 
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
-    StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
+    StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadConflictReason, TemplateHeadTag,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 use crate::projects::html_project::styles::code::code_formatter_factory;
@@ -23,7 +23,10 @@ pub(crate) fn html_project_style_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "html",
             TemplateBodyMode::Normal,
-            TemplateHeadCompatibility::blocks_same(TemplateHeadTag::FORMATTER_DIRECTIVE),
+            TemplateHeadCompatibility::blocks_same(
+                TemplateHeadTag::FORMATTER_DIRECTIVE,
+                TemplateHeadConflictReason::MultipleFormatters,
+            ),
             StyleDirectiveHandlerSpec::new(
                 None,
                 StyleDirectiveEffects {
@@ -36,7 +39,10 @@ pub(crate) fn html_project_style_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "css",
             TemplateBodyMode::Balanced,
-            TemplateHeadCompatibility::blocks_same(TemplateHeadTag::FORMATTER_DIRECTIVE),
+            TemplateHeadCompatibility::blocks_same(
+                TemplateHeadTag::FORMATTER_DIRECTIVE,
+                TemplateHeadConflictReason::MultipleFormatters,
+            ),
             StyleDirectiveHandlerSpec::new(
                 Some(StyleDirectiveArgumentType::String),
                 StyleDirectiveEffects {
@@ -49,7 +55,10 @@ pub(crate) fn html_project_style_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "escape_html",
             TemplateBodyMode::Normal,
-            TemplateHeadCompatibility::blocks_same(TemplateHeadTag::FORMATTER_DIRECTIVE),
+            TemplateHeadCompatibility::blocks_same(
+                TemplateHeadTag::FORMATTER_DIRECTIVE,
+                TemplateHeadConflictReason::MultipleFormatters,
+            ),
             StyleDirectiveHandlerSpec::new(
                 None,
                 StyleDirectiveEffects {
@@ -68,6 +77,7 @@ pub(crate) fn html_project_style_directives() -> Vec<StyleDirectiveSpec> {
                     | TemplateHeadTag::CODE_DIRECTIVE,
                 required_absent_tags: TemplateHeadTag::empty(),
                 blocks_future_tags: TemplateHeadTag::FORMATTER_DIRECTIVE,
+                conflict_reason: Some(TemplateHeadConflictReason::MultipleFormatters),
             },
             StyleDirectiveHandlerSpec::new(
                 Some(StyleDirectiveArgumentType::String),

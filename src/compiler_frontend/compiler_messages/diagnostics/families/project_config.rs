@@ -301,7 +301,7 @@ diagnostic_family! {
     }
 }
 
-/// Encodes a compile-time-path reason and its optional case-mismatch labels.
+/// Encodes a compile-time-path reason and its optional provided and expected case-mismatch names.
 pub(crate) fn invalid_compile_time_path(
     path: PathId,
     reason: InvalidCompileTimePathReason,

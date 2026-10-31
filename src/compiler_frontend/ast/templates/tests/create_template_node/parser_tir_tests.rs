@@ -2259,6 +2259,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         Some(parent_tokens.current_span()),
     );
 
+    let opening_span = Some(parent_tokens.current_span());
     let _parsed_head = parse_template_head(
         &mut parent_tokens,
         TemplateHeadParseRequest {
@@ -2271,6 +2272,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
             path_fork: &mut path_fork,
             expression_builder: &mut expression_builder,
             const_values: &mut const_values,
+            opening_span,
         },
     )
     .expect("template-valued head should parse");

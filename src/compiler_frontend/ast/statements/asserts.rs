@@ -335,14 +335,15 @@ pub(crate) fn parse_assert_statement(
 
 /// Reject the authored fallible suffix of an assertion statement.
 ///
-/// WHAT: reports the same non-fallible handling diagnostics the completed path has always
-///       reported for `!` and `catch` after an assertion.
+/// WHAT: reports the assertion-specific suffix diagnostic for `!` and `catch` after an assertion.
 /// WHY: only the authored parse site can still see the suffix tokens, and a retained statement
 ///      must reject them before it records a continuation instead of re-reading tokens later.
+///      Assertions are not fallible expressions, so the shared non-fallible handling reasons would
+///      describe a safety-catch eligibility rule that does not apply to them.
 fn reject_assert_fallible_suffix(token_stream: &AstCursor) -> Result<(), ExpressionParseError> {
     if token_stream.current_tag() == TokenTag::BANG {
         return Err(choices_control_flow::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::BangOnNonFallible,
+            InvalidFallibleHandlingReason::FallibleSuffixOnAssertion,
             Some(token_stream.current_span()),
         )
         .into());
@@ -350,7 +351,7 @@ fn reject_assert_fallible_suffix(token_stream: &AstCursor) -> Result<(), Express
 
     if token_stream.current_tag() == TokenTag::CATCH {
         return Err(choices_control_flow::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::CatchOnNonFallible,
+            InvalidFallibleHandlingReason::FallibleSuffixOnAssertion,
             Some(token_stream.current_span()),
         )
         .into());

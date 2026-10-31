@@ -89,7 +89,7 @@ Each prerequisite below is a capability of the shared binding boundary, not a gr
 Unresolved. Context creation needs the canonical `CanvasElement` owned by `@web/canvas`.
 
 - An opaque external type's identity is its package, symbol path and origin (`CanonicalBindingSymbolIdentity` in `src/compiler_frontend/external_packages/ids.rs`). Compiler type equality uses the registered `ExternalTypeId`.
-- Annotated JavaScript resolves a signature type name only against built-in scalars and `@moth.opaque` declarations in the same file (`validate_type_name` in `src/projects/html_project/external_js/parser/mod.rs`). A second `@moth.opaque CanvasElement` in `graphics.js` would mint a different, incompatible type.
+- Annotated JavaScript resolves a signature type name only against built-in scalars and `@moth.opaque` declarations in the same file (`validate_type_name` in `src/projects/html_project/external_js/parser/binding.rs`). A second `@moth.opaque CanvasElement` in `graphics.js` would mint a different, incompatible type.
 - Moth source already crosses this boundary. `packages/html/@mod.moth` names `@web/canvas` handle types in its own signatures, and source re-exports preserve canonical identity.
 
 Candidate routes, tentative:

@@ -286,6 +286,17 @@ pub(crate) fn compact_label_message_text(
         }
         DurableLabelMessage::TraitRequirementSite => "trait requirement".to_owned(),
         DurableLabelMessage::ReceiverMethodSite => "receiver method".to_owned(),
+        DurableLabelMessage::EarlierTemplateHeadItem => {
+            "earlier conflicting head item here".to_owned()
+        }
+        DurableLabelMessage::ConflictsWithEarlierHeadItem => {
+            "conflicts with the earlier head item".to_owned()
+        }
+        DurableLabelMessage::TemplateStartsHere => "Template starts here".to_owned(),
+        DurableLabelMessage::MissingExportDeclaration => {
+            "declaration has no `export` here".to_owned()
+        }
+        DurableLabelMessage::ExternalImportSite => "imported here".to_owned(),
         DurableLabelMessage::GenericInstantiationBodySite => {
             "generic body operation failed here".to_owned()
         }
@@ -501,6 +512,17 @@ pub(crate) fn type_mismatch_context_name(
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::CollectionElement => {
             "collection element"
         }
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::MapKey => "map key",
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::MapValue => "map value",
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::CatchRecoveryCollectionElement => {
+            "collection element in catch recovery"
+        }
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::CatchRecoveryMapKey => {
+            "map key in catch recovery"
+        }
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::CatchRecoveryMapValue => {
+            "map value in catch recovery"
+        }
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::StructFieldDefault => {
             "struct field default"
         }
@@ -518,6 +540,9 @@ pub(crate) fn type_mismatch_context_name(
         }
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::Pattern => "pattern",
         crate::compiler_frontend::compiler_messages::TypeMismatchContext::General => "general",
+        crate::compiler_frontend::compiler_messages::TypeMismatchContext::CatchRecovery => {
+            "catch recovery"
+        }
     }
 }
 

@@ -100,7 +100,11 @@ fn check_local_update_access(
                 allow_prior_shared: true,
                 require_root_mutable: true,
                 strict_move_exclusivity: false,
-                check_alias_exclusivity: !replaces_definite_slot,
+                alias_exclusivity: if replaces_definite_slot {
+                    AliasExclusivity::Direct
+                } else {
+                    AliasExclusivity::All
+                },
             },
         )?;
     }
@@ -141,17 +145,28 @@ struct AccessCheckContext<'a, 'module> {
     current_order: i32,
 }
 
+/// Which overlapping aliases block an exclusive access to a written root.
+///
+/// WHAT: a definite-slot rebinding to a fresh value replaces the slot's value provenance, so only
+/// aliases of the binding cell itself observe that write. A value alias stored in the slot keeps
+/// the older allocation alive without being rebound.
+/// WHY: rebinding a result binding to a fresh allocation is legal while an alias of the old
+/// allocation is live, but writing a fresh value through a source alias of the binding cell is an
+/// overlapping mutation that must still be rejected.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AliasExclusivity {
+    /// Only direct aliases of the written root conflict.
+    Direct,
+    /// Every active alias of the written root conflicts.
+    All,
+}
+
 #[derive(Clone, Copy)]
 struct MutableAccessPolicy {
     allow_prior_shared: bool,
     require_root_mutable: bool,
     strict_move_exclusivity: bool,
-    /// Whether to check alias exclusivity for the written roots.
-    /// WHAT: local-target rebinding to a fresh value releases the old allocation without
-    /// mutating it, so aliases of the old allocation should not block the rebinding.
-    /// WHY: a binding-versus-allocation modelling fix. Without this flag, the alias count
-    /// check rejects rebinding when a returned alias of the old allocation is live.
-    check_alias_exclusivity: bool,
+    alias_exclusivity: AliasExclusivity,
 }
 
 /// Shared assignment-transfer environment for one statement.
@@ -346,7 +361,7 @@ fn transfer_assign_target(
                                     allow_prior_shared: true,
                                     require_root_mutable: false,
                                     strict_move_exclusivity: false,
-                                    check_alias_exclusivity: true,
+                                    alias_exclusivity: AliasExclusivity::All,
                                 },
                             )?;
                         }
@@ -424,7 +439,7 @@ fn transfer_assign_target(
                             allow_prior_shared: true,
                             require_root_mutable: true,
                             strict_move_exclusivity: false,
-                            check_alias_exclusivity: true,
+                            alias_exclusivity: AliasExclusivity::All,
                         },
                     )?;
                 }
@@ -514,7 +529,7 @@ fn transfer_assign_target(
                     allow_prior_shared: true,
                     require_root_mutable: true,
                     strict_move_exclusivity: false,
-                    check_alias_exclusivity: true,
+                    alias_exclusivity: AliasExclusivity::All,
                 },
             )?;
         }
@@ -667,6 +682,12 @@ fn direct_root_aliases_from_expression(
     let source_state = state.local_state(source_index);
     if source_state.mode.contains(LocalMode::SLOT) && rhs_roots.contains(source_index) {
         direct_roots.insert(source_index);
+    }
+    if source_state.mode.contains(LocalMode::ALIAS) {
+        // An alias source carries the referent cells through to the new binding. Chained aliases
+        // must keep observing the same cells, while a slot-backed value alias contributes no
+        // direct roots and keeps only its allocation provenance.
+        direct_roots.union_with(&source_state.direct_alias_roots);
     }
 
     direct_roots

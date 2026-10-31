@@ -8,8 +8,9 @@
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, DiagnosticBag, NamespaceMemberRole, NamespaceRecordKind,
+};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
@@ -22,13 +23,6 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-/// Per-file visible-name environment.
-///
-/// WHAT: maps the names visible in one source file to their resolved targets.
-/// WHY: AST `ScopeContext` consumes this directly instead of rebuilding binding visibility.
-///
-/// Includes same-file declarations, source dependencies, external symbols, type aliases, and
-/// builtin/prelude reservations. Name collision policy is enforced during construction.
 /// A member of a namespace record that is valid in value/expression context.
 #[derive(Clone, Debug)]
 pub(crate) enum NamespaceValueMember {
@@ -84,6 +78,11 @@ pub(crate) struct NamespaceRecord {
     /// value-position traversal respect the source/public export shallow boundary without
     /// rebuilding binding visibility in the expression parser.
     pub(crate) record_source: NamespaceRecordSource,
+    /// Authored `@path` from the dependency clause that bound this record.
+    ///
+    /// WHAT: the source-visible clause path, not the internal registry path.
+    /// WHY: qualification guidance must suggest a clause that can actually resolve.
+    pub(crate) authored_clause_path: Option<StringId>,
 }
 
 impl NamespaceRecord {
@@ -98,6 +97,28 @@ impl NamespaceRecord {
             type_members: FxHashMap::default(),
             child_namespaces: FxHashMap::default(),
             record_source,
+            authored_clause_path: None,
+        }
+    }
+
+    /// Direct member names of this exact node for one diagnostic role.
+    ///
+    /// WHAT: plain collect of the matching map keys. Sorting and dedup live in the
+    /// diagnostic constructors.
+    /// WHY: value, type, and nested producers share one candidate source.
+    pub(crate) fn member_names_for_role(&self, role: NamespaceMemberRole) -> Vec<StringId> {
+        match role {
+            NamespaceMemberRole::Value => self.value_members.keys().copied().collect(),
+            NamespaceMemberRole::Type => self.type_members.keys().copied().collect(),
+            NamespaceMemberRole::ChildNamespace => self.child_namespaces.keys().copied().collect(),
+        }
+    }
+
+    /// Origin kind of this exact namespace node.
+    pub(crate) fn kind(&self) -> NamespaceRecordKind {
+        match self.record_source {
+            NamespaceRecordSource::SourceFile(_) => NamespaceRecordKind::Source,
+            NamespaceRecordSource::ExternalPackage(_) => NamespaceRecordKind::ExternalPackage,
         }
     }
 }
@@ -231,6 +252,13 @@ impl std::ops::Deref for SourceFunctionTarget {
     }
 }
 
+/// Per-file visible-name environment.
+///
+/// WHAT: maps the names visible in one source file to their resolved targets.
+/// WHY: AST `ScopeContext` consumes this directly instead of rebuilding binding visibility.
+///
+/// Includes same-file declarations, source dependencies, external symbols, type aliases, and
+/// builtin/prelude reservations. Name collision policy is enforced during construction.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FileVisibility {
     /// Declaration paths that are visible in this file (including builtins).
@@ -259,12 +287,21 @@ pub(crate) struct FileVisibility {
     /// Populated by explicit virtual-package dependencies and prelude symbols.
     pub(crate) visible_external_symbols: FxHashMap<StringId, ExternalSymbolId>,
 
-    /// Authored source spans that made explicit external symbols visible in this file.
+    /// Authored spans in this file for names bound to a dependency or external declaration.
     ///
-    /// WHY: AST needs the authored local-binding span for duplicate-declaration diagnostics so
-    /// the secondary label can point to the selected name or alias. Prelude symbols have no
-    /// authored span and therefore have no entry in this map.
-    pub(crate) visible_external_symbol_spans: FxHashMap<StringId, SourceSpan>,
+    /// WHY: a duplicate-declaration label must point at the spelling the user wrote here, which
+    /// may be an alias whose declaration lives in another file. Same-file declarations keep
+    /// their spans on their own owners and must not be duplicated into this map; prelude symbols
+    /// and namespace aliases have no authored span and therefore have no entry.
+    pub(crate) dependency_binding_spans: FxHashMap<StringId, SourceSpan>,
+
+    /// Authored declaration spans for this file's implicit start-body runtime bindings.
+    ///
+    /// WHAT: records top-level runtime assignment names, which are not module declarations and
+    ///       therefore never enter `visible_source_names`.
+    /// WHY: a constant context that names one of them reports a non-constant reference with a
+    ///      label at the authored binding instead of an unknown-name diagnostic.
+    pub(crate) start_body_binding_spans: FxHashMap<StringId, SourceSpan>,
 
     /// Namespace namespace binding records visible in this file.
     /// Populated by bare `@path` and `@path as alias` syntax.
@@ -282,6 +319,30 @@ pub(crate) struct FileVisibility {
     ///      Only same-file nominal receiver types contribute source-authored methods;
     ///      builtins, external types, and types declared in other files do not.
     pub(crate) visible_receiver_methods: FxHashMap<StringId, Vec<ReceiverMethodVisibility>>,
+}
+
+impl FileVisibility {
+    /// The one visible namespace that has this name as a direct value member.
+    ///
+    /// WHAT: used only after an unqualified value lookup has already failed.
+    /// Returns `None` when zero or several namespaces expose the name.
+    /// WHY: qualification guidance must not choose arbitrarily among colliding aliases.
+    pub(crate) fn unique_namespace_with_value_member(
+        &self,
+        name: StringId,
+    ) -> Option<(StringId, &NamespaceRecord)> {
+        let mut found = None;
+        for (alias, record) in &self.visible_namespace_records {
+            if !record.value_members.contains_key(&name) {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some((*alias, record));
+        }
+        found
+    }
 }
 
 /// Header-built binding environment for the entire module.

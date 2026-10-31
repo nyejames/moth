@@ -6,7 +6,7 @@
 //! every compact-rendered diagnostic. The view owns no data and is built per render call.
 
 use super::foreign::SiteRef;
-use super::labels::DurableLabel;
+use super::labels::{DurableLabel, DurableLabelMessage};
 use super::registry::family_for_code;
 use super::schema::FamilyRow;
 use super::store::{DiagnosticId, DiagnosticStore, RecordRef};
@@ -81,6 +81,11 @@ impl<'a> DiagnosticView<'a> {
     /// The primary site: foreign when the record names a foreign primary, otherwise local.
     pub(crate) fn primary_site(&self) -> SiteRef<'a> {
         self.record.primary()
+    }
+
+    /// The message attached to the primary span, when the record carries one.
+    pub(crate) fn primary_label_message(&self) -> Option<DurableLabelMessage<'a>> {
+        self.record.primary_label_message()
     }
 
     /// The secondary labels in the order the draft added them, each with its site and decoded message.

@@ -1,8 +1,9 @@
 //! Scans JavaScript source text for supported export declarations.
 //!
-//! WHAT: identifies callable and literal-backed `export const` declarations, counts plain
-//!       JS parameters and provides shared JS lexical skipping used by import scanning.
-//! WHY: the binder matches each annotation to the declaration's kind, while
+//! WHAT: identifies callable and literal-backed `export const` declarations, records supported
+//!       top-level declarations without `export`, counts plain JS parameters and provides shared
+//!       JS lexical skipping used by import scanning.
+//! WHY: the binder matches each annotation to the nearest declaration's kind, while
 //!      import scanning reuses this module's cursor and lexical boundaries.
 //!      Keeping export scanning separate from comment extraction lets each stage stay focused
 //!      and testable.
@@ -11,6 +12,10 @@
 //! - `export function jsName(param1, param2) { ... }`
 //! - `export const jsName = (param1, param2) => { ... }`
 //! - `export const jsName = <unsigned decimal integer literal>`
+//!
+//! Supported unexported forms (recorded only as annotation binding sites):
+//! - `function jsName(...) { ... }`
+//! - `const jsName = ...`
 //!
 //! Rejected forms:
 //! - `export default ...`
@@ -21,7 +26,7 @@
 //! - `exports.name = ...` (CommonJS)
 
 use super::parsed_js_module::{
-    JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedRuntimeImport,
+    JsDeclarationKind, JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedRuntimeImport,
 };
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 
@@ -33,6 +38,44 @@ pub struct JsExport {
     pub span: JsSourceSpan,
 }
 
+/// One ordered top-level declaration an annotation may bind to.
+///
+/// WHAT: records supported exports together with supported-looking unexported declarations.
+/// WHY: an annotation must bind to the nearest declaration even when that declaration lacks
+///      `export`, so a later export cannot capture it by drift.
+///
+/// Exported declarations keep only the export index: [`JsExport`] already owns their name and
+/// span. Unexported declarations keep the keyword offset and a source range for the name, so the
+/// success path allocates no per-declaration `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsDeclaration {
+    pub site: DeclarationSite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeclarationSite {
+    /// An exported declaration; the export record owns its name and span.
+    Exported { export_index: usize },
+    /// A supported-looking unexported declaration.
+    Unexported {
+        /// Byte offset of the declaration keyword: the point where `export` belongs.
+        start: usize,
+        /// Byte range of the declared name, sliced only when a diagnostic needs it.
+        name_span: JsSourceSpan,
+        kind: JsDeclarationKind,
+    },
+}
+
+impl DeclarationSite {
+    /// Byte offset of the declaration keyword.
+    pub fn start(&self, exports: &[JsExport]) -> usize {
+        match self {
+            Self::Exported { export_index } => exports[*export_index].span.byte_start,
+            Self::Unexported { start, .. } => *start,
+        }
+    }
+}
+
 /// Retained declaration facts, not evaluated JavaScript values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsExportKind {
@@ -40,9 +83,11 @@ pub enum JsExportKind {
     Constant { literal_span: Option<JsSourceSpan> },
 }
 
-/// Result of scanning a JS file for exports.
+/// Result of scanning a JS file for exports and their binding sites.
 pub struct ExportScanResult {
     pub exports: Vec<JsExport>,
+    /// Supported declarations in source order, exported or not.
+    pub declarations: Vec<JsDeclaration>,
     pub runtime_imports: Vec<ParsedRuntimeImport>,
     pub diagnostics: Vec<JsParserDiagnostic>,
 }
@@ -60,15 +105,15 @@ pub fn scan_exports(source: &str, registry: &RuntimeModuleRegistry) -> ExportSca
 
 /// Binding annotations attach across trivia only, not across a private statement or an
 /// unsupported export. Reuse the scanner's lexical boundary instead of a second comment lexer.
-pub(super) fn annotation_precedes_export(
+pub(super) fn annotation_precedes_declaration(
     source: &str,
     registry: &RuntimeModuleRegistry,
     annotation_end: usize,
-    export_start: usize,
+    declaration_start: usize,
 ) -> bool {
     let mut scanner = ExportScanner::new(source, registry);
     scanner.pos = annotation_end;
-    scanner.skip_whitespace_and_comments() && scanner.pos == export_start
+    scanner.skip_whitespace_and_comments() && scanner.pos == declaration_start
 }
 
 pub(super) struct ExportScanner<'a> {
@@ -76,9 +121,13 @@ pub(super) struct ExportScanner<'a> {
     bytes: &'a [u8],
     pub(super) pos: usize,
     exports: Vec<JsExport>,
+    declarations: Vec<JsDeclaration>,
     pub(super) runtime_imports: Vec<ParsedRuntimeImport>,
     pub(super) diagnostics: Vec<JsParserDiagnostic>,
     pub(super) registry: &'a RuntimeModuleRegistry,
+    /// Set while skipping a declaration body: nested recovery must leave the delimiter that
+    /// closes an enclosing expression or body for the body skipper to account for.
+    stop_before_unmatched_close: bool,
 }
 
 impl<'a> ExportScanner<'a> {
@@ -88,13 +137,21 @@ impl<'a> ExportScanner<'a> {
             bytes: source.as_bytes(),
             pos: 0,
             exports: Vec::new(),
+            declarations: Vec::new(),
             runtime_imports: Vec::new(),
             diagnostics: Vec::new(),
             registry,
+            stop_before_unmatched_close: false,
         }
     }
 
     fn scan(&mut self) -> ExportScanResult {
+        // Top-level declaration recognition needs statement boundaries. A keyword inside a
+        // function body, object literal or parameter list is not a binding site, and a keyword
+        // in the middle of an expression is never a declaration.
+        let mut nesting = 0usize;
+        let mut at_statement_start = true;
+
         while !self.is_at_end() {
             if self.peek_str("//") {
                 self.skip_line_comment();
@@ -102,25 +159,17 @@ impl<'a> ExportScanner<'a> {
                 self.skip_block_comment();
             } else if matches!(self.current_char_opt(), Some('"') | Some('\'')) {
                 self.skip_string_literal();
+                at_statement_start = false;
             } else if self.current_char_opt() == Some('`') {
                 self.skip_template_literal();
+                at_statement_start = false;
             } else if self.peek_str("export") && self.is_word_boundary_around("export".len()) {
                 self.read_export_statement();
-            } else if self.peek_str("module.exports")
-                && self.is_word_boundary_around("module.exports".len())
+                at_statement_start = true;
+            } else if self.read_commonjs_export_at_current(false)
+                || self.read_module_loading_at_current()
             {
-                self.emit_diagnostic_at_current(
-                    "CommonJS `module.exports` is not supported in Moth JS modules.",
-                    JsDiagnosticKind::CommonJsExport,
-                );
-                self.skip_to_statement_end();
-            } else if self.peek_str("exports.") && self.is_word_boundary_around("exports".len()) {
-                self.emit_diagnostic_at_current(
-                    "CommonJS `exports.name` is not supported in Moth JS modules.",
-                    JsDiagnosticKind::CommonJsExport,
-                );
-                self.skip_to_statement_end();
-            } else if self.read_module_loading_at_current() {
+                at_statement_start = true;
                 continue;
             } else if self.current_char_opt() == Some('/')
                 && !self.peek_str("//")
@@ -131,16 +180,66 @@ impl<'a> ExportScanner<'a> {
                 } else {
                     self.advance_char();
                 }
+                at_statement_start = false;
+            } else if nesting == 0
+                && at_statement_start
+                && self.peek_str("function")
+                && self.is_word_boundary_around("function".len())
+            {
+                self.read_unexported_function();
+                at_statement_start = true;
+            } else if nesting == 0
+                && at_statement_start
+                && self.peek_str("const")
+                && self.is_word_boundary_around("const".len())
+            {
+                self.read_unexported_const();
+                at_statement_start = true;
             } else {
+                let character = self.current_char();
+                if is_js_line_terminator(character) {
+                    if nesting == 0 {
+                        at_statement_start = true;
+                    }
+                } else if !character.is_whitespace() {
+                    match character {
+                        '(' | '[' | '{' => nesting += 1,
+                        ')' | ']' | '}' => nesting = nesting.saturating_sub(1),
+                        _ => {}
+                    }
+                    at_statement_start = nesting == 0 && matches!(character, ';' | '}');
+                }
                 self.advance_char();
             }
         }
 
         ExportScanResult {
             exports: std::mem::take(&mut self.exports),
+            declarations: std::mem::take(&mut self.declarations),
             runtime_imports: std::mem::take(&mut self.runtime_imports),
             diagnostics: std::mem::take(&mut self.diagnostics),
         }
+    }
+
+    /// Rejects a CommonJS export assignment at the cursor.
+    ///
+    /// Shared by the top-level scan and declaration-body skipping so a private helper cannot
+    /// smuggle an unsupported module-loading form past the scanner. The body skipper passes
+    /// `stop_before_unmatched_close` so a statement without `;` leaves the helper's closing brace
+    /// for the body skipper instead of consuming it. Returns whether one matched.
+    fn read_commonjs_export_at_current(&mut self, stop_before_unmatched_close: bool) -> bool {
+        let message = if self.peek_str("module.exports")
+            && self.is_word_boundary_around("module.exports".len())
+        {
+            "CommonJS `module.exports` is not supported in Moth JS modules."
+        } else if self.peek_str("exports.") && self.is_word_boundary_around("exports".len()) {
+            "CommonJS `exports.name` is not supported in Moth JS modules."
+        } else {
+            return false;
+        };
+        self.emit_diagnostic_at_current(message, JsDiagnosticKind::CommonJsExport);
+        self.skip_to_statement_end_with(stop_before_unmatched_close);
+        true
     }
 
     /// Every executable scanner context applies the same module-loading policy. Lexical
@@ -236,11 +335,7 @@ impl<'a> ExportScanner<'a> {
                 if self.consume_char('(') {
                     let parameter_count = self.count_plain_parameters();
                     let span = self.make_span(export_start_byte);
-                    self.exports.push(JsExport {
-                        js_name,
-                        kind: JsExportKind::Callable { parameter_count },
-                        span,
-                    });
+                    self.record_export(js_name, JsExportKind::Callable { parameter_count }, span);
                     self.skip_to_statement_end();
                     return;
                 }
@@ -283,11 +378,11 @@ impl<'a> ExportScanner<'a> {
                             return;
                         }
                         let span = self.make_span(export_start_byte);
-                        self.exports.push(JsExport {
+                        self.record_export(
                             js_name,
-                            kind: JsExportKind::Callable { parameter_count },
+                            JsExportKind::Callable { parameter_count },
                             span,
-                        });
+                        );
                         self.skip_to_statement_end();
                         return;
                     }
@@ -321,6 +416,190 @@ impl<'a> ExportScanner<'a> {
 
         // Unknown export form; skip it
         self.skip_to_statement_end();
+    }
+
+    // ------------------------
+    //  Unexported declarations
+    // ------------------------
+
+    /// Records a supported-looking top-level `function name(` declaration without `export`.
+    ///
+    /// WHY: the annotation binder must bind to the nearest declaration even when that declaration
+    ///      is a private helper. Without it, an annotation could drift to a later export.
+    fn read_unexported_function(&mut self) {
+        let start = self.pos;
+        self.advance_chars("function".len());
+        if !self.skip_whitespace_and_comments() {
+            return;
+        }
+        let name_start = self.pos;
+        if !self.skip_identifier() {
+            self.skip_declaration_body();
+            return;
+        }
+        let name_end = self.pos;
+        self.skip_whitespace_and_comments();
+        if self.current_char_opt() != Some('(') {
+            self.skip_declaration_body();
+            return;
+        }
+        self.declarations.push(JsDeclaration {
+            site: DeclarationSite::Unexported {
+                start,
+                name_span: JsSourceSpan::range(name_start, name_end),
+                kind: JsDeclarationKind::Function,
+            },
+        });
+        self.skip_declaration_body();
+    }
+
+    /// Records a supported-looking top-level `const name = ...` declaration without `export`.
+    ///
+    /// A parenthesised block-bodied arrow stays a callable shape, and an initialiser that starts
+    /// with an unsigned decimal digit stays a literal-looking constant. Every other initialiser
+    /// (expression-bodied or parenthesised-free arrows, function expressions, calls, objects and
+    /// so on) is an unsupported shape: an annotation directly before it reports the
+    /// unsupported-form wording rather than a misleading missing-export correction.
+    fn read_unexported_const(&mut self) {
+        let start = self.pos;
+        self.advance_chars("const".len());
+        if !self.skip_whitespace_and_comments() {
+            return;
+        }
+        let name_start = self.pos;
+        if !self.skip_identifier() {
+            self.skip_declaration_body();
+            return;
+        }
+        let name_end = self.pos;
+        self.skip_whitespace_and_comments();
+        if !self.consume_char('=') {
+            self.skip_declaration_body();
+            return;
+        }
+        self.skip_whitespace_and_comments();
+        let mut kind = if self
+            .current_char_opt()
+            .is_some_and(|ch| ch.is_ascii_digit())
+        {
+            JsDeclarationKind::LiteralConstant
+        } else {
+            JsDeclarationKind::UnsupportedInitializer
+        };
+        if self.current_char_opt() == Some('(') {
+            let initializer_start = self.pos;
+            self.skip_balanced_braces_and_parens();
+            self.skip_whitespace_and_comments();
+            if self.consume_str("=>") {
+                self.skip_whitespace_and_comments();
+                kind = if self.current_char_opt() == Some('{') {
+                    JsDeclarationKind::BlockArrow
+                } else {
+                    JsDeclarationKind::UnsupportedInitializer
+                };
+            }
+            // The balanced skip exists only to classify the initialiser shape. Rewind so the
+            // declaration-body scan sees the parameter list too and reports module loading
+            // hidden in default values or other expressions.
+            self.pos = initializer_start;
+        }
+        self.declarations.push(JsDeclaration {
+            site: DeclarationSite::Unexported {
+                start,
+                name_span: JsSourceSpan::range(name_start, name_end),
+                kind,
+            },
+        });
+        self.skip_declaration_body();
+    }
+
+    /// Skips the rest of one top-level declaration and stops before the next statement.
+    ///
+    /// Tracks every delimiter so a multiline parameter list or initialiser stays inside the
+    /// declaration. A top-level `export`, `function` or `const` keyword begins the next statement
+    /// even when the author omitted a semicolon.
+    fn skip_declaration_body(&mut self) {
+        let previous = self.stop_before_unmatched_close;
+        self.stop_before_unmatched_close = true;
+        self.skip_declaration_body_inner();
+        self.stop_before_unmatched_close = previous;
+    }
+
+    fn skip_declaration_body_inner(&mut self) {
+        let mut brace_depth = 0usize;
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        // A declaration keyword starts the next statement only after a top-level `}`. Any other
+        // top-level token means the keyword is continuing the current initialiser expression.
+        let mut after_top_level_close = false;
+
+        while !self.is_at_end() {
+            if self.skip_lexical_content_at_current() {
+                continue;
+            }
+            let at_top_level = brace_depth == 0 && paren_depth == 0 && bracket_depth == 0;
+            if at_top_level
+                && after_top_level_close
+                && ((self.peek_str("export") && self.is_word_boundary_around("export".len()))
+                    || (self.peek_str("function")
+                        && self.is_word_boundary_around("function".len()))
+                    || (self.peek_str("const") && self.is_word_boundary_around("const".len())))
+            {
+                return;
+            }
+            if self.read_commonjs_export_at_current(true) {
+                after_top_level_close = false;
+                continue;
+            }
+            if self.read_module_loading_at_current() {
+                after_top_level_close = false;
+                continue;
+            }
+            if self.current_char_opt() == Some('/')
+                && !self.peek_str("//")
+                && !self.peek_str("/*")
+                && self.slash_starts_regular_expression()
+            {
+                self.skip_regular_expression();
+                after_top_level_close = false;
+                continue;
+            }
+
+            let character = self.current_char();
+            match character {
+                '{' => brace_depth += 1,
+                '}' => {
+                    if brace_depth == 0 {
+                        self.advance_char();
+                        return;
+                    }
+                    brace_depth -= 1;
+                    after_top_level_close = brace_depth == 0;
+                }
+                '(' => paren_depth += 1,
+                ')' => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    after_top_level_close = false;
+                }
+                '[' => bracket_depth += 1,
+                ']' => {
+                    bracket_depth = bracket_depth.saturating_sub(1);
+                    after_top_level_close = false;
+                }
+                ';' if at_top_level => {
+                    self.advance_char();
+                    return;
+                }
+                character if is_js_line_terminator(character) && at_top_level => return,
+                character if character.is_whitespace() => {}
+                _ => {
+                    if at_top_level {
+                        after_top_level_close = false;
+                    }
+                }
+            }
+            self.advance_char();
+        }
     }
 
     /// Retain the authored token without interpreting its number. The binder owns numeric
@@ -429,10 +708,20 @@ impl<'a> ExportScanner<'a> {
         export_start: usize,
         literal_span: Option<JsSourceSpan>,
     ) {
+        let span = self.make_span(export_start);
+        self.record_export(js_name, JsExportKind::Constant { literal_span }, span);
+    }
+
+    /// Records one supported export and its position in the ordered declaration stream.
+    fn record_export(&mut self, js_name: String, kind: JsExportKind, span: JsSourceSpan) {
+        let export_index = self.exports.len();
+        self.declarations.push(JsDeclaration {
+            site: DeclarationSite::Exported { export_index },
+        });
         self.exports.push(JsExport {
             js_name,
-            kind: JsExportKind::Constant { literal_span },
-            span: self.make_span(export_start),
+            kind,
+            span,
         });
     }
 
@@ -690,6 +979,28 @@ impl<'a> ExportScanner<'a> {
     //  Helpers
     // ------------------------
 
+    /// Advances over an identifier without allocating its text.
+    ///
+    /// Declaration sites retain a source span instead of an owned name, so the unexported readers
+    /// validate the shape without paying for a `String` on the success path.
+    pub(super) fn skip_identifier(&mut self) -> bool {
+        self.skip_whitespace();
+        let Some(ch) = self.current_char_opt() else {
+            return false;
+        };
+        if !(ch.is_alphabetic() || ch == '_' || ch == '$') {
+            return false;
+        }
+        self.advance_char();
+        while self
+            .current_char_opt()
+            .is_some_and(is_identifier_continuation)
+        {
+            self.advance_char();
+        }
+        true
+    }
+
     pub(super) fn parse_identifier(&mut self) -> Option<String> {
         self.skip_whitespace();
 
@@ -715,12 +1026,34 @@ impl<'a> ExportScanner<'a> {
     }
 
     pub(super) fn skip_to_statement_end(&mut self) {
-        let mut brace_depth = 0;
+        self.skip_to_statement_end_with(false);
+    }
+
+    /// Skips a malformed module-loading statement in the ambient scan context.
+    ///
+    /// Declaration-body scanning sets [`Self::stop_before_unmatched_close`], so a nested
+    /// `import`/`require` recovery leaves the delimiter that closes the enclosing expression for
+    /// the body skipper.
+    pub(super) fn skip_to_statement_end_for_module_loading(&mut self) {
+        self.skip_to_statement_end_with(self.stop_before_unmatched_close);
+    }
+
+    /// Skips to the end of the current statement.
+    ///
+    /// With `stop_before_unmatched_close`, a `}` that closes the enclosing body is left in place;
+    /// the declaration-body skipper owns that brace. Without it, a depth-zero `}` is consumed like
+    /// any other malformed top-level input.
+    fn skip_to_statement_end_with(&mut self, stop_before_unmatched_close: bool) {
+        let mut brace_depth = 0usize;
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
         while !self.is_at_end() {
             if self.skip_lexical_content_at_current() {
                 continue;
             }
             if brace_depth == 0
+                && paren_depth == 0
+                && bracket_depth == 0
                 && self.peek_str("export")
                 && self.is_word_boundary_around("export".len())
             {
@@ -730,21 +1063,56 @@ impl<'a> ExportScanner<'a> {
             if self.read_module_loading_at_current() {
                 continue;
             }
+            if self.current_char_opt() == Some('/')
+                && !self.peek_str("//")
+                && !self.peek_str("/*")
+                && self.slash_starts_regular_expression()
+            {
+                self.skip_regular_expression();
+                continue;
+            }
 
             let ch = self.current_char();
-            if ch == '{' {
-                brace_depth += 1;
-            } else if ch == '}' {
-                if brace_depth == 0 {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => {
+                    if brace_depth == 0 {
+                        if stop_before_unmatched_close {
+                            return;
+                        }
+                        self.advance_char();
+                        return;
+                    }
+                    brace_depth -= 1;
+                }
+                '(' => paren_depth += 1,
+                ')' => {
+                    if paren_depth == 0 && bracket_depth == 0 {
+                        if stop_before_unmatched_close {
+                            return;
+                        }
+                        self.advance_char();
+                        return;
+                    }
+                    paren_depth = paren_depth.saturating_sub(1);
+                }
+                '[' => bracket_depth += 1,
+                ']' => {
+                    if bracket_depth == 0 {
+                        if stop_before_unmatched_close {
+                            return;
+                        }
+                        self.advance_char();
+                        return;
+                    }
+                    bracket_depth -= 1;
+                }
+                ';' if brace_depth == 0 => {
                     self.advance_char();
                     return;
                 }
-                brace_depth -= 1;
-            } else if ch == ';' && brace_depth == 0 {
-                self.advance_char();
-                return;
-            } else if is_js_line_terminator(ch) && brace_depth == 0 {
-                return;
+                ch if is_js_line_terminator(ch) && brace_depth == 0 => return,
+                _ => {}
             }
             self.advance_char();
         }

@@ -391,7 +391,7 @@ pub(crate) fn common_syntax_mistake_message(
             "Use `is` for comparison. `=` is for declarations and assignments.".to_string()
         }
         CommonSyntaxMistakeReason::RustBorrowPrefix => {
-            "`&` marks inclusive ranges in Moth. Borrowing is implicit; use `~` at call sites for mutation.".to_string()
+            "Moth has no `&` borrow prefix. Shared access is automatic. `&` after `to` marks an inclusive range bound.".to_string()
         }
         CommonSyntaxMistakeReason::InvalidAsOperator => {
             "`as` is not a cast operator. It is only valid in type aliases, dependency clauses, and choice payload patterns.".to_string()
@@ -503,7 +503,7 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
             "Replace `=` with `is` for equality, or move the assignment to statement position".to_owned()
         }
         CommonSyntaxMistakeReason::RustBorrowPrefix => {
-            "Remove `&`; shared borrows are automatic. For mutation, prefix the place with `~` at the call site.".to_owned()
+            "Remove `&`. Use `~` on an existing mutable place for a write, a mutable call argument or a mutable receiver, not on a fresh value or an immutable place.".to_owned()
         }
         CommonSyntaxMistakeReason::InvalidAsOperator => {
             "Use `cast` at an explicitly typed boundary for supported conversions, or use `as` only in a supported renaming context".to_owned()
@@ -619,6 +619,9 @@ pub(crate) fn invalid_standalone_statement_message(
         InvalidStandaloneStatementReason::Expression => {
             "Standalone expression is not a valid statement in this position.".to_string()
         }
+        InvalidStandaloneStatementReason::Comparison => {
+            "A comparison is not a valid statement because its result would be discarded. Use it as a condition or store it in a binding.".to_string()
+        }
         InvalidStandaloneStatementReason::StandaloneTemplate => {
             "A standalone template is not a valid statement here. Assign it, return it or pass it to a receiving expression.".to_string()
         }
@@ -677,12 +680,6 @@ pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String
         InvalidMatchArmReason::SemicolonDelimiter => {
             "Match arms are not closed with semicolons. Use the next line-initial arm, 'else', or the final match ';' to delimit arms.".to_string()
         }
-        InvalidMatchArmReason::LegacyColonSyntax => {
-            "Legacy match arm syntax is no longer supported. Use `<pattern> => <body>`.".to_string()
-        }
-        InvalidMatchArmReason::LegacyElseSyntax => {
-            "Legacy default-arm syntax 'else:' is no longer supported. Use 'else =>'.".to_string()
-        }
         InvalidMatchArmReason::InvalidArrow => {
             "Unexpected '->' in match arm. Match arms use '=>'.".to_string()
         }
@@ -691,6 +688,12 @@ pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String
         }
         InvalidMatchArmReason::ExpectedArmHeader => {
             "Expected a match arm like `<pattern> => <body>` or `else => <body>`.".to_string()
+        }
+        InvalidMatchArmReason::MissingBody => {
+            "This match arm has no body. Add a statement after `=>`. Only `else =>` may be bodyless.".to_string()
+        }
+        InvalidMatchArmReason::ExpressionBodyInStatementMatch => {
+            "This is a statement match, so this arm body must contain statements. To compute a value, place the match at a declaration, assignment, return or multi-bind receiver and use `then` in every producing arm.".to_string()
         }
     }
 }
@@ -715,9 +718,6 @@ pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> St
         }
         InvalidLoopHeaderReason::MissingColon => {
             "A loop must have ':' after the loop header.".to_string()
-        }
-        InvalidLoopHeaderReason::RemovedInSyntax => {
-            "Old loop syntax 'loop <binder> in ...' was removed. Use 'loop 0 to 10 |i|:' or 'loop items |item|:'.".to_string()
         }
         InvalidLoopHeaderReason::MissingClosingPipe => {
             "Missing closing pipe in loop bindings.".to_string()
@@ -755,9 +755,6 @@ pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> St
         InvalidLoopHeaderReason::DuplicateBindingName => {
             "Duplicate loop binding name in the same loop header.".to_string()
         }
-        InvalidLoopHeaderReason::BindingAlreadyDeclared => {
-            "Loop binding is already declared in this scope.".to_string()
-        }
         InvalidLoopHeaderReason::CollectionSourceNotCollection { .. } => {
             crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
@@ -785,14 +782,18 @@ pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> St
     }
 }
 
+/// WHAT: names the non-collection source and shows both valid loop forms.
+/// WHY: a non-collection source is not always a range attempt, so the range form is offered as
+///      the numeric alternative rather than as the assumed intent. An unselected numeric source
+///      has no type to name yet.
 fn invalid_loop_header_collection_source_message(found_type: Option<&str>) -> String {
+    const GUIDANCE: &str = "Use a collection after 'loop'. For numeric iteration, use range \
+                            syntax such as 'loop 0 to 10 |i|:'.";
     match found_type {
         Some(found_type) => {
-            format!("Collection loop source must be a collection. Found '{found_type}'.")
+            format!("Collection loop source must be a collection, found '{found_type}'. {GUIDANCE}")
         }
-        None => "Collection loop source must be a collection. Found an unresolved expression \
-                 whose exact type is selected at the end of the enclosing body."
-            .to_string(),
+        None => format!("Collection loop source must be a collection. {GUIDANCE}"),
     }
 }
 

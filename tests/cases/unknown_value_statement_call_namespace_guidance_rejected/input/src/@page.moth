@@ -1,0 +1,5 @@
+@core/math
+
+foo ||:
+    sin(1.0)
+;

@@ -346,7 +346,7 @@ struct NominalBindingEvidenceContext<'a> {
 /// Collect generic parameter bindings from every expected type in the surrounding context.
 ///
 /// WHAT: when the compiler already knows the nominal type being constructed (e.g. from a
-/// variable declaration or function return type), the concrete generic arguments in that
+/// binding declaration or function return type), the concrete generic arguments in that
 /// expected type can be used to infer some or all of the constructor's generic parameters.
 /// WHY: this is the primary inference source; constructor-argument inference only fills
 /// gaps that the expected type leaves ambiguous.

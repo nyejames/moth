@@ -209,6 +209,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         registry.register(local_name, binding, local_name_span)?;
 
+        // Keep the authored local spelling for duplicate-declaration labels; the declaration's
+        // own span may live in the provider file. A repeated import of the same name keeps the
+        // first authored binding.
+        if let Some(span) = local_name_span {
+            file_visibility
+                .dependency_binding_spans
+                .entry(local_name)
+                .or_insert(span);
+        }
+
         if is_type_alias {
             file_visibility
                 .visible_type_alias_names

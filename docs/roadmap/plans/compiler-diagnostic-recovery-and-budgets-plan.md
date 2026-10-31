@@ -12,10 +12,10 @@
 
 ## Status and activation
 
-- Status: queued after diagnostic improvements, design interview confirmed.
+- Status: next in the roadmap, design interview confirmed.
 - Current slice: not started.
-- Blockers: compiler diagnostics improvements are ahead in the roadmap. Compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
-- Next action: refresh the activation tree and run Phase 0 after diagnostic improvements complete.
+- Blockers: none. Compiler diagnostics improvements, compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
+- Next action: refresh the activation tree and run Phase 0.
 
 The main roadmap places this work after compiler source/token/diagnostic data layout and diagnostic improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 

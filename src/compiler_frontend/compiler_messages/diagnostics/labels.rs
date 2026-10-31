@@ -26,6 +26,8 @@ pub(crate) struct GenericSubstitutionDiagnostic {
 }
 
 /// A secondary label message supplied to a compact diagnostic draft.
+///
+/// A primary label reuses these messages; its span is the record's primary span.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LabelDraftMessage {
     PreviousDeclaration,
@@ -38,6 +40,11 @@ pub(crate) enum LabelDraftMessage {
     },
     TraitRequirementSite,
     ReceiverMethodSite,
+    EarlierTemplateHeadItem,
+    ConflictsWithEarlierHeadItem,
+    TemplateStartsHere,
+    MissingExportDeclaration,
+    ExternalImportSite,
     GenericInstantiationBodySite,
     GenericInstantiationDeclarationSite,
     GenericInstantiationSubstitutions {
@@ -80,6 +87,11 @@ impl LabelMessageCode {
     pub(super) const BUILTIN_FAILURE_ORIGIN: Self = Self(14);
     pub(super) const BUILTIN_WRITE_BACK_ORIGIN: Self = Self(15);
     pub(super) const RECEIVER_METHOD_SITE: Self = Self(16);
+    pub(super) const EARLIER_TEMPLATE_HEAD_ITEM: Self = Self(17);
+    pub(super) const TEMPLATE_STARTS_HERE: Self = Self(18);
+    pub(super) const CONFLICTS_WITH_EARLIER_HEAD_ITEM: Self = Self(19);
+    pub(super) const MISSING_EXPORT_DECLARATION: Self = Self(20);
+    pub(super) const EXTERNAL_IMPORT_SITE: Self = Self(21);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -122,6 +134,11 @@ impl LabelMessageCode {
             Self::BUILTIN_FAILURE_ORIGIN => "BUILTIN_FAILURE_ORIGIN",
             Self::BUILTIN_WRITE_BACK_ORIGIN => "BUILTIN_WRITE_BACK_ORIGIN",
             Self::RECEIVER_METHOD_SITE => "RECEIVER_METHOD_SITE",
+            Self::EARLIER_TEMPLATE_HEAD_ITEM => "EARLIER_TEMPLATE_HEAD_ITEM",
+            Self::TEMPLATE_STARTS_HERE => "TEMPLATE_STARTS_HERE",
+            Self::CONFLICTS_WITH_EARLIER_HEAD_ITEM => "CONFLICTS_WITH_EARLIER_HEAD_ITEM",
+            Self::MISSING_EXPORT_DECLARATION => "MISSING_EXPORT_DECLARATION",
+            Self::EXTERNAL_IMPORT_SITE => "EXTERNAL_IMPORT_SITE",
             _ => crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
                 "label codes are the constants above"
@@ -199,6 +216,17 @@ pub(super) fn encode_label(
         },
         LabelDraftMessage::TraitRequirementSite => plain(LabelMessageCode::TRAIT_REQUIREMENT_SITE),
         LabelDraftMessage::ReceiverMethodSite => plain(LabelMessageCode::RECEIVER_METHOD_SITE),
+        LabelDraftMessage::EarlierTemplateHeadItem => {
+            plain(LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM)
+        }
+        LabelDraftMessage::ConflictsWithEarlierHeadItem => {
+            plain(LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM)
+        }
+        LabelDraftMessage::TemplateStartsHere => plain(LabelMessageCode::TEMPLATE_STARTS_HERE),
+        LabelDraftMessage::MissingExportDeclaration => {
+            plain(LabelMessageCode::MISSING_EXPORT_DECLARATION)
+        }
+        LabelDraftMessage::ExternalImportSite => plain(LabelMessageCode::EXTERNAL_IMPORT_SITE),
         LabelDraftMessage::GenericInstantiationBodySite => {
             plain(LabelMessageCode::GENERIC_INSTANTIATION_BODY_SITE)
         }
@@ -273,56 +301,48 @@ fn word_index(value: usize) -> Result<u32, FactCapacityError> {
     u32::try_from(value).map_err(|_| FactCapacityError)
 }
 
-/// A secondary label as the store keeps it: a span plus one packed word.
+/// One packed label message: an 8-bit message code and a 24-bit `label_data` row index.
 ///
-/// Bits 24-31 hold the message code. Bits 0-23 hold the `label_data` row index, which is meaningful only when
-/// the code carries data.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct SecondaryDiagnosticLabel {
-    pub(super) span: Option<SourceSpan>,
-    pub(super) packed: u32,
-}
-
-const _: () = assert!(
-    size_of::<SecondaryDiagnosticLabel>() == 12,
-    "secondary labels are locked at 12 bytes"
-);
+/// Bits 24-31 hold the message code. Bits 0-23 hold the row index, which is meaningful only when
+/// the code carries data. Zero is `NONE`, so a stored primary label is present exactly when its
+/// word is not `NONE`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct LabelWord(u32);
 
 const CODE_SHIFT: u32 = 24;
 const DATA_INDEX_MASK: u32 = (1 << CODE_SHIFT) - 1;
 
-impl SecondaryDiagnosticLabel {
-    /// Packs a label. `data_index` is meaningful only for codes that carry data; compaction passes 0 otherwise.
-    pub(super) fn pack(span: Option<SourceSpan>, code: LabelMessageCode, data_index: u32) -> Self {
+impl LabelWord {
+    pub(super) const NONE: Self = Self(0);
+
+    /// Packs a message code with its data row. `data_index` is meaningful only for codes that carry
+    /// data; compaction passes 0 otherwise. A primary label never stores `NONE`.
+    pub(super) fn pack(code: LabelMessageCode, data_index: u32) -> Self {
         assert!(
             data_index <= DATA_INDEX_MASK,
             "label data rows fit in 24 bits; compaction checks the label_data limit first"
         );
-        Self {
-            span,
-            packed: (u32::from(code.0) << CODE_SHIFT) | data_index,
-        }
+        Self((u32::from(code.0) << CODE_SHIFT) | data_index)
     }
 
-    /// The span this label points at. `None` when the span belongs to a foreign site.
-    pub(super) fn span(self) -> Option<SourceSpan> {
-        self.span
+    pub(super) fn is_none(self) -> bool {
+        self == Self::NONE
     }
 
-    /// The message code of the label.
+    /// The message code of the stored word.
     pub(super) fn message_code(self) -> LabelMessageCode {
-        LabelMessageCode((self.packed >> CODE_SHIFT) as u8)
+        LabelMessageCode((self.0 >> CODE_SHIFT) as u8)
     }
 
     /// The `label_data` row of a code that carries data, or `None` for the others.
     pub(super) fn data_index(self) -> Option<usize> {
         self.message_code()
             .carries_data()
-            .then_some((self.packed & DATA_INDEX_MASK) as usize)
+            .then_some((self.0 & DATA_INDEX_MASK) as usize)
     }
 
-    /// The message of this label as a renderer reads it: the code's data, decoded from its `label_data` row or from
-    /// the substitution arena for the substitution code.
+    /// The message as a renderer reads it: the code's data, decoded from its `label_data` row or
+    /// from the substitution arena for the substitution code.
     pub(super) fn message<'a>(self, store: &'a DiagnosticStore) -> DurableLabelMessage<'a> {
         let row = || {
             let index = self
@@ -386,11 +406,54 @@ impl SecondaryDiagnosticLabel {
                 }
             }
             LabelMessageCode::RECEIVER_METHOD_SITE => DurableLabelMessage::ReceiverMethodSite,
+            LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM => {
+                DurableLabelMessage::EarlierTemplateHeadItem
+            }
+            LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM => {
+                DurableLabelMessage::ConflictsWithEarlierHeadItem
+            }
+            LabelMessageCode::TEMPLATE_STARTS_HERE => DurableLabelMessage::TemplateStartsHere,
+            LabelMessageCode::MISSING_EXPORT_DECLARATION => {
+                DurableLabelMessage::MissingExportDeclaration
+            }
+            LabelMessageCode::EXTERNAL_IMPORT_SITE => DurableLabelMessage::ExternalImportSite,
             _ => crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
                 "label codes are the constants in LabelMessageCode"
             ),
         }
+    }
+}
+
+/// A secondary label as the store keeps it: a span plus one packed message word.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SecondaryDiagnosticLabel {
+    pub(super) span: Option<SourceSpan>,
+    pub(super) message: LabelWord,
+}
+
+const _: () = assert!(
+    size_of::<SecondaryDiagnosticLabel>() == 12,
+    "secondary labels are locked at 12 bytes"
+);
+
+impl SecondaryDiagnosticLabel {
+    /// Packs a label. `data_index` is meaningful only for codes that carry data; compaction passes 0 otherwise.
+    pub(super) fn pack(span: Option<SourceSpan>, code: LabelMessageCode, data_index: u32) -> Self {
+        Self {
+            span,
+            message: LabelWord::pack(code, data_index),
+        }
+    }
+
+    /// The span this label points at. `None` when the span belongs to a foreign site.
+    pub(super) fn span(self) -> Option<SourceSpan> {
+        self.span
+    }
+
+    /// The message of this label as a renderer reads it.
+    pub(super) fn message<'a>(self, store: &'a DiagnosticStore) -> DurableLabelMessage<'a> {
+        self.message.message(store)
     }
 }
 
@@ -408,6 +471,11 @@ pub(crate) enum DurableLabelMessage<'a> {
     },
     TraitRequirementSite,
     ReceiverMethodSite,
+    EarlierTemplateHeadItem,
+    ConflictsWithEarlierHeadItem,
+    TemplateStartsHere,
+    MissingExportDeclaration,
+    ExternalImportSite,
     GenericInstantiationBodySite,
     GenericInstantiationDeclarationSite,
     GenericInstantiationSubstitutions(GenericSubstitutions<'a>),

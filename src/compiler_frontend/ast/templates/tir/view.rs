@@ -1,16 +1,14 @@
 //! Central AST-local read API over the TIR store.
 //!
-//! WHAT: `TirView` is the single borrowed read surface that all future template
+//! WHAT: `TirView` is the single borrowed read surface that template
 //! consumers use to inspect a structural root plus its overlay context inside a
 //! `TemplateIrStore`. It pairs a module-local root `TemplateIrId`, a
 //! `TemplateTirPhase`, and a `TemplateViewContext` so consumers never reach
 //! into raw stores or combine overlay maps ad hoc.
 //!
-//! WHY: the final TIR architecture requires one production read API. Without a
-//! central view, each consumer would re-implement store traversal, overlay
-//! resolution, and phase checking, creating duplicated logic and stage-boundary
-//! leaks. `TirView` keeps raw store traversal internal to the
-//! view/store/builder/transform modules and exposes only the narrow facts
+//! WHY: one production read API stops each consumer re-implementing store
+//! traversal, overlay resolution and phase checking. `TirView` keeps raw store traversal
+//! internal to the view/store/builder/transform modules and exposes only the narrow facts
 //! that composition, formatting, folding, and finalization need.
 //!
 //! ## Phase semantics

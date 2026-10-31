@@ -43,12 +43,13 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 };
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
 use crate::compiler_frontend::ast::statements::body_expr_stmt::{
-    is_expression_statement, push_statement_expression,
+    is_expression_statement, push_statement_expression, statement_match_expression_body_diagnostic,
 };
 use crate::compiler_frontend::ast::statements::declarations::ResolvedDeclarationStatementKind;
 use crate::compiler_frontend::ast::statements::declarations::{
     NewDeclarationOutcome, new_declaration,
 };
+use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_ends_match_arm_body;
 use crate::compiler_frontend::ast::statements::multi_bind::{
     MultiBindStatement, parse_multi_bind_statement,
 };
@@ -73,9 +74,14 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidThisUsageReason, ReservedNameOwner, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::declaration_syntax::declaration_shell::{
+    binding_target_can_start, parse_binding_target_syntax,
+};
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::syntax_errors::expression_position::c_family_operator_mistake_near;
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -179,6 +185,12 @@ fn push_accessed_symbol_statement(
         return Ok(());
     }
 
+    if let Some(diagnostic) =
+        statement_match_expression_body_diagnostic(context, token_stream, view.span())
+    {
+        return Err(diagnostic.into());
+    }
+
     // A bare field read (e.g., `obj.field`) does nothing, so it is rejected.
     if matches!(
         view.operation(),
@@ -236,6 +248,8 @@ fn push_retained_accessed_symbol_statement(
             expression,
             span,
             scope: context.scope,
+            in_statement_match_arm: context.in_statement_match_arm
+                && current_token_ends_match_arm_body(token_stream),
         }),
     )?;
     draft.push_pending(continuation);
@@ -314,6 +328,9 @@ pub(crate) fn parse_this_statement(
             };
 
             if token_stream.current_tag().is_assignment_operator() {
+                if let Some(diagnostic) = c_family_operator_mistake_near(token_stream) {
+                    return Err(diagnostic.into());
+                }
                 let Some(target) =
                     place_expression_from_expression(expression_builder, accessed_node)?
                 else {
@@ -981,6 +998,56 @@ pub(crate) fn reject_numeric_dependency_in_multi_bind(
     }
 }
 
+/// How the tokens after a visible symbol name classify for declaration dispatch.
+enum BindingDeclarationAttempt {
+    /// The authored target is a marked or annotated binding declaration.
+    Declaration,
+    /// A binding marker began the target and its own grammar rejected it.
+    Invalid(DiagnosticDraft),
+    /// The tokens do not begin a binding declaration.
+    Expression,
+}
+
+/// Classify the tokens after a symbol name as a binding declaration attempt.
+///
+/// WHAT: speculatively parses the canonical binding target at the position after the name when
+///       the next token can start one.
+/// WHY: a visible name followed by any current declaration shape is a redeclaration, so dispatch
+///      must reuse the binding-target grammar rather than enumerate type-token spellings. Ordinary
+///      call statements such as `name(...)` must not pay for a speculative parse that would build
+///      and discard a type diagnostic.
+///      Bare `name = value` stays with the write path because its target has no marker or
+///      annotation, while a target that begins with `~` or `#` is unambiguously a declaration
+///      attempt even when its spacing is wrong: a new name reports the same marker error.
+fn binding_declaration_attempt(
+    token_stream: &AstCursor,
+    name: StringId,
+    string_table: &mut StringTable,
+) -> BindingDeclarationAttempt {
+    let next_tag = token_stream.peek_next_tag();
+    if !next_tag.is_some_and(binding_target_can_start) {
+        return BindingDeclarationAttempt::Expression;
+    }
+    let starts_with_marker =
+        next_tag.is_some_and(|tag| matches!(tag, TokenTag::MUTABLE | TokenTag::HASH));
+    let mut declaration_cursor = token_stream.declaration_cursor();
+    // The binding-target parser expects the binding name already consumed.
+    declaration_cursor.advance();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    match parse_binding_target_syntax(
+        name,
+        &mut declaration_cursor,
+        string_table,
+        &mut span_builder,
+    ) {
+        Ok(target) if target.declares_explicitly() => BindingDeclarationAttempt::Declaration,
+        Err(HeaderParseFailure::Diagnostic(diagnostic)) if starts_with_marker => {
+            BindingDeclarationAttempt::Invalid(diagnostic)
+        }
+        _ => BindingDeclarationAttempt::Expression,
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "symbol statement keeps stream, body draft, scope and mutable parse resources apart"
@@ -1078,8 +1145,14 @@ pub(crate) fn parse_symbol_statement(
     {
         let reference_span = Some(token_stream.current_span());
         match token_stream.peek_next_tag() {
-            // Direct reassignment of an existing local variable.
+            // Direct reassignment of an existing binding.
             Some(next_tag) if next_tag.is_assignment_operator() => {
+                // `x == 1` is a comparison written with the C-family equality operator, not an
+                // update of `x`. Report the operator mistake before the mutation rules misread
+                // the first `=` as a write to an immutable binding.
+                if let Some(diagnostic) = c_family_operator_mistake_near(token_stream) {
+                    return Err(diagnostic.into());
+                }
                 if !prefixed {
                     let mutable = if let Some(declaration) = existing_reference.ready_declaration()
                     {
@@ -1193,6 +1266,9 @@ pub(crate) fn parse_symbol_statement(
                     if token_stream.current_tag().is_assignment_operator()
                         && let Some(member) = retained_member_target(&item)
                     {
+                        if let Some(diagnostic) = c_family_operator_mistake_near(token_stream) {
+                            return Err(diagnostic.into());
+                        }
                         let immutable_field_root = if member.field_name.is_some() {
                             !context.pending_numeric_is_mutable(binding).ok_or_else(|| {
                                 InfrastructureFailure::internal(
@@ -1271,6 +1347,9 @@ pub(crate) fn parse_symbol_statement(
                 };
 
                 if token_stream.current_tag().is_assignment_operator() {
+                    if let Some(diagnostic) = c_family_operator_mistake_near(token_stream) {
+                        return Err(diagnostic.into());
+                    }
                     let Some(target) =
                         place_expression_from_expression(expression_builder, accessed_node)?
                     else {
@@ -1321,33 +1400,37 @@ pub(crate) fn parse_symbol_statement(
                 return Ok(());
             }
 
-            // A type keyword after an existing symbol means the user is trying to
-            // redeclare it with an explicit type, which is a shadowing error.
-            Some(tag) if tag.is_builtin_scalar_type_name() || tag == TokenTag::MUTABLE => {
-                let diagnostic =
-                    names_declarations::shadowed_name(symbol_id, Some(token_stream.current_span()));
-                let diagnostic = if let Some(span) = existing_reference.binding_span() {
-                    diagnostic.with_label(Some(span), Some(LabelDraftMessage::PreviousDeclaration))
-                } else {
-                    diagnostic
-                };
-                return Err(diagnostic.into());
-            }
-
-            // Otherwise, parse the symbol as the start of a general expression statement.
-            _ => {
-                push_statement_expression(
-                    token_stream,
-                    draft,
-                    context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    string_table,
-                    path_fork,
-                )?;
-                return Ok(());
-            }
+            // A declaration shape after an existing name is a redeclaration. The authored shape
+            // decides, so nominal, alias, generic, qualified and collection annotations and both
+            // postfix markers all reach the ordinary duplicate rule. A marked target whose own
+            // grammar rejects it keeps that more specific diagnostic.
+            _ => match binding_declaration_attempt(token_stream, symbol_id, string_table) {
+                BindingDeclarationAttempt::Declaration => {
+                    return Err(context
+                        .duplicate_declaration(
+                            symbol_id,
+                            Some(token_stream.current_span()),
+                            existing_reference.binding_span(),
+                        )
+                        .into());
+                }
+                BindingDeclarationAttempt::Invalid(diagnostic) => {
+                    return Err(diagnostic.into());
+                }
+                BindingDeclarationAttempt::Expression => {
+                    push_statement_expression(
+                        token_stream,
+                        draft,
+                        context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        string_table,
+                        path_fork,
+                    )?;
+                    return Ok(());
+                }
+            },
         }
     }
 
@@ -1405,6 +1488,7 @@ pub(crate) fn parse_symbol_statement(
                 symbol_id,
                 receiver_method_entry,
                 Some(token_stream.current_span()),
+                path_fork,
                 string_table,
             )
             .into());
@@ -1419,11 +1503,9 @@ pub(crate) fn parse_symbol_statement(
             .into());
         }
 
-        return Err(names_declarations::unknown_value_name(
-            symbol_id,
-            Some(token_stream.current_span()),
-        )
-        .into());
+        return Err(context
+            .unknown_unqualified_value_name(symbol_id, token_stream.current_span())
+            .into());
     }
 
     // Namespace-record calls such as `canvas.fill_rect(...)` have no local binding for the
@@ -1471,7 +1553,7 @@ pub(crate) fn parse_symbol_statement(
     let is_compile_time_binding = resolved_declaration.is_compile_time_binding;
     let declaration_span = resolved_declaration.binding_span;
 
-    // Lift struct definitions to the statement level; ordinary bindings remain variables.
+    // Lift struct definitions to the statement level. Other bindings stay ordinary declarations.
     match statement_kind {
         ResolvedDeclarationStatementKind::StructDefinition(params) => {
             draft.push_node(AstNode {

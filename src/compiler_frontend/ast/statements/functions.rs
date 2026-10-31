@@ -772,7 +772,8 @@ fn resolve_signature_type_annotation(
                 .as_ref()
                 .map(|fv| &fv.visible_trait_names),
         })
-        .with_active_generic_type_context(expression_context.active_generic_type_context());
+        .with_active_generic_type_context(expression_context.active_generic_type_context())
+        .skip_unknown_type_name_candidates();
     let mut failure_kind = TypeResolutionFailureKind::Other;
 
     match resolve_parsed_type_annotation_with_failure_kind(

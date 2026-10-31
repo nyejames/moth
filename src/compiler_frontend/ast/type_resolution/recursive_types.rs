@@ -117,7 +117,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
 ) -> TypeResolutionResult<()> {
-    // WHY: V1 runtime structs do not support recursive layout semantics.
+    // WHY: runtime structs do not support recursive layout semantics.
     // These cycles must fail in AST construction with a targeted rule error.
     fn visit(
         current: &PathId,

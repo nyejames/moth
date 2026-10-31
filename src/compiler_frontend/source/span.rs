@@ -218,6 +218,28 @@ impl LocalSpan {
         Ok(Self(store_logical(logical)))
     }
 
+    /// Encode an exact range only when it fits the inline split.
+    ///
+    /// WHAT: packs a short span without borrowing a source's extended-span builder.
+    /// WHY: parsers occasionally widen one token's span into a short operator lexeme, but they do
+    /// not own the builder that would make an extended entry resolvable.
+    pub(crate) fn exact_inline(start: u32, length: u32) -> Option<Self> {
+        start
+            .checked_add(length)
+            .filter(|_| fits_inline(start, length))
+            .map(|_| Self(store_logical(encode_inline(start, length))))
+    }
+
+    /// Resolve a span packed inline, leaving extended spans to their owning builder.
+    pub(crate) fn inline_range(self) -> Option<ResolvedByteRange> {
+        match decode_logical(load_logical(self.0)) {
+            DecodedSpan::Inline { start, length } => {
+                Some(ResolvedByteRange::from_start_length(start, length))
+            }
+            DecodedSpan::Extended { .. } => None,
+        }
+    }
+
     /// Resolve with a producer's live builder or a frozen table resolver.
     pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
         match decode_logical(load_logical(self.0)) {
@@ -372,6 +394,49 @@ impl SourceSpan {
             .map_err(SpanJoinError::Capacity)?;
 
         Ok(Self {
+            source: self.source,
+            local,
+        })
+    }
+
+    /// Narrow an inline span to a byte range inside the authored text it covers.
+    ///
+    /// WHAT: offsets `byte_offset` into this span's start and returns the exact span for
+    ///       `[start + byte_offset, start + byte_offset + byte_length)`.
+    /// WHY: formatter-visible text pieces can only narrow their authored location in place,
+    ///      without a resolver or span builder. A span stored in an extended row has no readable
+    ///      start here, so this returns `None` and the caller keeps the broader authored span.
+    ///
+    /// `expected_parent_length` guards the byte mapping: the caller passes the byte length it
+    /// believes this span covers, and a mismatch (normalised text, a decode failure or a foreign
+    /// range) keeps the original span instead of pointing at the wrong bytes.
+    pub fn narrow_inline(
+        self,
+        byte_offset: u32,
+        byte_length: u32,
+        expected_parent_length: u32,
+    ) -> Option<Self> {
+        let DecodedSpan::Inline { start, length } = decode_logical(self.local.logical_word())
+        else {
+            return None;
+        };
+
+        if length != expected_parent_length {
+            return None;
+        }
+
+        let narrowed_end = byte_offset.checked_add(byte_length)?;
+        if narrowed_end > length {
+            return None;
+        }
+
+        let narrowed_start = start.checked_add(byte_offset)?;
+        if !fits_inline(narrowed_start, byte_length) {
+            return None;
+        }
+
+        let local = LocalSpan(store_logical(encode_inline(narrowed_start, byte_length)));
+        Some(Self {
             source: self.source,
             local,
         })

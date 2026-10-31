@@ -11,6 +11,10 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
 };
+use crate::builder_surface::external_import_providers::provider_sources::{
+    ProviderSourceHandle, ProviderSourceRegistrar, ProviderSourceRegistrationError,
+    ProviderSourceSpanError,
+};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -22,14 +26,14 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError};
 use crate::projects::html_project::external_js::package_registration::{
     JsModuleRegistrationError, register_parsed_js_module, required_runtime_imports_from_parsed,
 };
 use crate::projects::html_project::external_js::parser::parse_js_module;
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
-    JsParserDiagnostic, ParsedJsModule,
+    JsDiagnosticKind, JsParserDiagnostic, ParsedJsModule,
 };
 use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
@@ -129,7 +133,10 @@ impl ExternalImportProvider for JsExternalImportProvider {
                     imports::invalid_external_module(
                         js_source_path,
                         InvalidExternalModuleReason::NonUtf8Source { utf8_detail },
-                        request.source_span,
+                        imports::InvalidExternalModuleSites {
+                            primary: request.source_span,
+                            ..Default::default()
+                        },
                     ),
                 )));
             }
@@ -139,31 +146,59 @@ impl ExternalImportProvider for JsExternalImportProvider {
 
         let diagnostics = {
             let mut diagnostic_strings = DiagnosticStringBuilder::new(context.string_table);
-            let mut diagnostics = convert_js_parser_diagnostics(
-                &parsed.diagnostics,
-                js_source_path,
-                request.source_span,
-                &mut diagnostic_strings,
-            );
-            // Package paths reserve `#`, so diagnose the unregistrable logical path here.
-            if request.logical_source_path.as_str().contains('#') {
-                diagnostics.push(imports::invalid_external_module(
+            // Parser and annotation diagnostics carry JavaScript byte ranges. Registering the
+            // already-read text lets them render the authored range in the provider-owned file,
+            // while the importing clause stays a related site.
+            let needs_source_spans =
+                !parsed.diagnostics.is_empty() || !parsed.receiver_methods.is_empty();
+            let source_diagnostics = if needs_source_spans {
+                let Some(registrar) = context.provider_sources.as_deref_mut() else {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        "external JS diagnostics require the boundary provider-source registrar",
+                    )
+                    .into());
+                };
+                collect_js_source_diagnostics(
+                    registrar,
+                    &request,
+                    source,
+                    &parsed,
                     js_source_path,
-                    InvalidExternalModuleReason::PathContainsPackageSeparator,
-                    request.source_span,
-                ));
-            }
+                    &mut diagnostic_strings,
+                )
+            } else {
+                Ok(Vec::new())
+            };
 
-            // Reject project-local JS imports that declare receiver-style signatures.
-            // WHY: callable `@moth.sig` signatures must expose free functions rather than `this`
-            //      receiver parameters. The parser classifies receiver-shaped signatures so every
-            //      registration boundary can reject them.
-            diagnostics.extend(reject_receiver_methods_in_project_local_js(
-                &parsed,
-                js_source_path,
-                &mut diagnostic_strings,
-            ));
-            diagnostics
+            // Capacity and registration failures are mapped after the handle and the local string
+            // builder release their borrows of this context.
+            match source_diagnostics {
+                Ok(mut diagnostics) => {
+                    // Package paths reserve `#`, so diagnose the unregistrable logical path here.
+                    if request.logical_source_path.as_str().contains('#') {
+                        diagnostics.push(imports::invalid_external_module(
+                            js_source_path,
+                            InvalidExternalModuleReason::PathContainsPackageSeparator,
+                            imports::InvalidExternalModuleSites {
+                                primary: request.source_span,
+                                ..Default::default()
+                            },
+                        ));
+                    }
+                    diagnostics
+                }
+                Err(JsSourceDiagnosticFailure::Registration(error)) => {
+                    return Err(js_source_registration_failure(
+                        error,
+                        request.source_span,
+                        context,
+                    ));
+                }
+                Err(JsSourceDiagnosticFailure::Span { error, source }) => {
+                    return Err(js_source_span_failure(error, source, context));
+                }
+            }
         };
 
         // All diagnostics here are error severity, so a successful import carries none.
@@ -231,6 +266,10 @@ impl ExternalImportProvider for JsExternalImportProvider {
 ///       become `invalid_external_module` diagnostics anchored at the importing source.
 /// WHY: package-path and module-symbol registration reject the same user input, so one mapping keeps
 ///      their diagnostic identity identical.
+///
+/// Annotation-binding reasons are already typed and reported by `convert_js_parser_diagnostics`
+/// before registration starts, so a `ParserDiagnostic` here can only carry registry-admission
+/// detail. Re-interning that detail is the lossless option because the registry owns only prose.
 fn js_registration_failure(
     error: JsModuleRegistrationError,
     js_source_path: PathId,
@@ -245,7 +284,10 @@ fn js_registration_failure(
             let diagnostic = imports::invalid_external_module(
                 js_source_path,
                 InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
-                source_span,
+                imports::InvalidExternalModuleSites {
+                    primary: source_span,
+                    ..Default::default()
+                },
             );
             context.capture_diagnostic_failure(DiagnosticBag::from(diagnostic))
         }
@@ -266,26 +308,158 @@ pub(crate) fn js_provider_package_path(logical_source_path: &PortableResourcePat
 }
 
 // ------------------------------------------
+//  Provider source diagnostics
+// ------------------------------------------
+
+/// Registers the already-read JS text and converts parser and receiver-method findings into
+/// drafts whose primary spans sit in the provider-owned source.
+///
+/// WHY: span construction borrows the registrar's live builder, so every diagnostic that needs a
+///      JS range is built inside this one registration and capacity failures surface as typed
+///      failures for the caller to map once those borrows end.
+fn collect_js_source_diagnostics(
+    registrar: &mut dyn ProviderSourceRegistrar,
+    request: &ExternalImportRequest,
+    source: String,
+    parsed: &ParsedJsModule,
+    js_source_path: PathId,
+    diagnostic_strings: &mut DiagnosticStringBuilder,
+) -> Result<Vec<DiagnosticDraft>, JsSourceDiagnosticFailure> {
+    let mut source_handle = registrar
+        .register_provider_source(
+            request.canonical_source_path.as_path(),
+            request.logical_source_path.as_str(),
+            source,
+        )
+        .map_err(JsSourceDiagnosticFailure::Registration)?;
+    let mut diagnostics = convert_js_parser_diagnostics(
+        &parsed.diagnostics,
+        js_source_path,
+        request.source_span,
+        &mut source_handle,
+        diagnostic_strings,
+    )?;
+
+    // Callable `@moth.sig` signatures must expose free functions rather than `this` receiver
+    // parameters. The parser classifies receiver-shaped signatures so every registration boundary
+    // can reject them.
+    diagnostics.extend(reject_receiver_methods_in_project_local_js(
+        parsed,
+        js_source_path,
+        request.source_span,
+        &mut source_handle,
+        diagnostic_strings,
+    )?);
+    Ok(diagnostics)
+}
+
+/// A provider diagnostic that could not be completed inside the source-handle borrow.
+enum JsSourceDiagnosticFailure {
+    Registration(ProviderSourceRegistrationError),
+    Span {
+        error: ProviderSourceSpanError,
+        source: SourceId,
+    },
+}
+
+/// Map a provider-owned span failure after the source handle releases the registrar borrow.
+fn js_source_span_failure(
+    error: ProviderSourceSpanError,
+    source: SourceId,
+    context: &mut ExternalImportProviderContext,
+) -> PreparedFailure {
+    match error {
+        ProviderSourceSpanError::Capacity(capacity)
+            if capacity.reason().reports_as_source_diagnostic() =>
+        {
+            let source_start = SourceSpan::new(source, LocalSpan::source_start());
+            context.capture_diagnostic_failure(DiagnosticBag::from(
+                token_lexical::source_span_capacity(
+                    capacity.start(),
+                    capacity.length(),
+                    SourceSpanCapacityResource::ExtendedSpan,
+                    Some(source_start),
+                ),
+            ))
+        }
+        ProviderSourceSpanError::Capacity(capacity) => InfrastructureFailure::internal(
+            CompilerStage::SourceLoading,
+            format!(
+                "JavaScript source span at byte offset {} with length {} ends past u32::MAX",
+                capacity.start(),
+                capacity.length()
+            ),
+        )
+        .into(),
+        ProviderSourceSpanError::InvalidRange {
+            byte_start,
+            byte_end,
+            source_length,
+        } => InfrastructureFailure::internal(
+            CompilerStage::SourceLoading,
+            format!(
+                "JavaScript provider requested the invalid byte range {byte_start}..{byte_end} \
+                 for its {source_length}-byte registered source"
+            ),
+        )
+        .into(),
+    }
+}
+
+fn js_source_registration_failure(
+    error: ProviderSourceRegistrationError,
+    import_span: Option<SourceSpan>,
+    context: &mut ExternalImportProviderContext,
+) -> PreparedFailure {
+    match error {
+        ProviderSourceRegistrationError::Infrastructure(failure) => failure.into(),
+        ProviderSourceRegistrationError::SourceTooLarge => context.capture_diagnostic_failure(
+            DiagnosticBag::from(token_lexical::source_span_capacity(
+                0,
+                u32::MAX,
+                SourceSpanCapacityResource::SourceSnapshot,
+                import_span,
+            )),
+        ),
+    }
+}
+
+// ------------------------------------------
 //  Receiver method rejection
 // ------------------------------------------
 
 fn reject_receiver_methods_in_project_local_js(
     parsed: &ParsedJsModule,
     js_source_path: PathId,
+    import_span: Option<SourceSpan>,
+    source: &mut ProviderSourceHandle<'_>,
     string_table: &mut DiagnosticStringBuilder,
-) -> Vec<DiagnosticDraft> {
-    let mut diagnostics = Vec::new();
+) -> Result<Vec<DiagnosticDraft>, JsSourceDiagnosticFailure> {
+    let mut diagnostics = Vec::with_capacity(parsed.receiver_methods.len());
 
     for receiver_method in &parsed.receiver_methods {
+        let primary = source
+            .span(
+                receiver_method.annotation_span.byte_start,
+                receiver_method.annotation_span.byte_end,
+            )
+            .map_err(|error| JsSourceDiagnosticFailure::Span {
+                error,
+                source: source.source(),
+            })?;
         let moth_name = string_table.intern(&receiver_method.moth_name);
         diagnostics.push(imports::invalid_external_module(
             js_source_path,
             InvalidExternalModuleReason::ReceiverMethod { moth_name },
-            None,
+            imports::InvalidExternalModuleSites {
+                primary: Some(primary),
+                declaration: None,
+                import_site: import_span,
+            },
         ));
     }
 
-    diagnostics
+    Ok(diagnostics)
 }
 
 // ------------------------------------------
@@ -296,18 +470,81 @@ fn convert_js_parser_diagnostics(
     parser_diagnostics: &[JsParserDiagnostic],
     js_source_path: PathId,
     import_span: Option<SourceSpan>,
+    source: &mut ProviderSourceHandle<'_>,
     string_table: &mut DiagnosticStringBuilder,
-) -> Vec<DiagnosticDraft> {
+) -> Result<Vec<DiagnosticDraft>, JsSourceDiagnosticFailure> {
     let mut diagnostics = Vec::with_capacity(parser_diagnostics.len());
 
     for parser_diagnostic in parser_diagnostics {
-        let parser_detail = string_table.intern(&parser_diagnostic.message);
+        let primary = source
+            .span(
+                parser_diagnostic.span.byte_start,
+                parser_diagnostic.span.byte_end,
+            )
+            .map_err(|error| JsSourceDiagnosticFailure::Span {
+                error,
+                source: source.source(),
+            })?;
+        let declaration = match &parser_diagnostic.kind {
+            JsDiagnosticKind::MissingExportKeyword {
+                declaration_span, ..
+            } => Some(
+                source
+                    .span(declaration_span.byte_start, declaration_span.byte_end)
+                    .map_err(|error| JsSourceDiagnosticFailure::Span {
+                        error,
+                        source: source.source(),
+                    })?,
+            ),
+            _ => None,
+        };
+        let reason = external_module_reason(parser_diagnostic, string_table);
         diagnostics.push(imports::invalid_external_module(
             js_source_path,
-            InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
-            import_span,
+            reason,
+            imports::InvalidExternalModuleSites {
+                primary: Some(primary),
+                declaration,
+                import_site: import_span,
+            },
         ));
     }
 
-    diagnostics
+    Ok(diagnostics)
+}
+
+/// Converts one parser diagnostic into its typed external-module reason.
+///
+/// WHAT: missing-export and orphaned-annotation failures keep their directive and declaration
+///       form. Every other parser diagnostic keeps its interned detail.
+/// WHY: the provider contract is typed, so these facts must not flatten into prose.
+fn external_module_reason(
+    parser_diagnostic: &JsParserDiagnostic,
+    string_table: &mut DiagnosticStringBuilder,
+) -> InvalidExternalModuleReason {
+    match &parser_diagnostic.kind {
+        JsDiagnosticKind::MissingExportKeyword {
+            directive,
+            declaration,
+            moth_name,
+            js_name,
+            ..
+        } => InvalidExternalModuleReason::MissingExportKeyword {
+            directive: *directive,
+            declaration: *declaration,
+            moth_name: string_table.intern(moth_name),
+            js_name: string_table.intern(js_name),
+        },
+        JsDiagnosticKind::OrphanedAnnotation {
+            directive,
+            moth_name,
+        } => InvalidExternalModuleReason::OrphanedAnnotation {
+            directive: *directive,
+            moth_name: string_table.intern(moth_name),
+        },
+        _ => {
+            let parser_detail = string_table.intern(&parser_diagnostic.message);
+            InvalidExternalModuleReason::ParserDiagnostic { parser_detail }
+        }
+    }
 }
