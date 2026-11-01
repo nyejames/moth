@@ -228,7 +228,7 @@ pub(crate) fn transfer_statement(
             )?;
         }
 
-        HirStatementKind::RangeStepFailure { result, .. } => {
+        HirStatementKind::LoopStepFailure { result, .. } => {
             let location = context.diagnostics.statement_error_span(statement);
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
@@ -249,11 +249,10 @@ pub(crate) fn transfer_statement(
             )?;
         }
 
-        HirStatementKind::FloatRangeCandidate {
+        HirStatementKind::RangeCandidate {
             current,
             step,
             end,
-            ascending,
             candidate_result,
             in_range_result,
             ..
@@ -271,7 +270,7 @@ pub(crate) fn transfer_statement(
                     stats,
                     value_fact_buffer,
                 };
-                for operand in [current, step, end, ascending] {
+                for operand in [current, step, end] {
                     record_shared_reads_in_expression(
                         &mut read_env,
                         *operand,

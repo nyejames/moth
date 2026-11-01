@@ -12,18 +12,22 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::ast_nodes::{
-    Declaration, DeclarationValue, RangeEndKind, RangeLoopSpec,
+    Declaration, DeclarationValue, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression::CollectionExpressionType;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredExpressionSuffix, DeferredNumericExpression, DeferredRangeHeader, DeferredRangeSpec,
     NumericBindingId, NumericConstructionDomainId, NumericConstructionState, NumericFamily,
     NumericRecipe, RetainedRangeCounter, StatementExpression,
 };
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::template_render_units::{
@@ -31,16 +35,20 @@ use crate::compiler_frontend::ast::templates::template_render_units::{
 };
 use crate::compiler_frontend::ast::templates::tir::expression_constness::const_conditional_loop_condition_value;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateConstructionContext, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind,
-    TemplateIrStore,
+    NumericTemplateIntakePosition, TemplateConstructionContext, TemplateIrNode, TemplateIrNodeId,
+    TemplateIrNodeKind, TemplateIrStore,
 };
+use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -253,6 +261,43 @@ fn i32_expression(
             ValueMode::ImmutableOwned,
         )
         .expect("test i32 fits expression owner")
+        .id()
+}
+
+fn empty_i32_collection(
+    expressions: &mut AstExpressionBuilder,
+    environment: &mut TypeEnvironment,
+) -> ExprId {
+    expressions
+        .collection_with_type_id(
+            Vec::<OwnedExpr>::new(),
+            CollectionExpressionType {
+                element_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                fixed_capacity: None,
+                collection_type_id: None,
+            },
+            environment,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("empty I32 collection source fits")
+        .id()
+}
+
+fn float_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    scalar: FixedScalar,
+    value: f64,
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::binary_float(scalar, value).expect("test value fits the float"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("test float fits expression owner")
         .id()
 }
 
@@ -683,6 +728,118 @@ fn retained_range_operand_takes_one_slot_record_and_never_installs_singly() {
 }
 
 #[test]
+fn retained_range_step_keeps_built_bounds_and_installs_at_counter_precision() {
+    let mut body = IntakeBody::new();
+    let domain = body.domain();
+    let loop_body = body.empty_body_node();
+    let start = float_expression(
+        &mut body.expressions,
+        &mut body.constants,
+        FixedScalar::F32,
+        0.0,
+    );
+    let end = float_expression(
+        &mut body.expressions,
+        &mut body.constants,
+        FixedScalar::F32,
+        1.0,
+    );
+    let step = float_expression(
+        &mut body.expressions,
+        &mut body.constants,
+        FixedScalar::F16,
+        0.5,
+    );
+    let step_fragment = DeferredNumericExpression {
+        items: vec![body.pending_literal_item("0.5")],
+        expected: ExpectedType::Infer,
+        value_mode: ValueMode::ImmutableOwned,
+        span: None,
+        suffix: DeferredExpressionSuffix::None,
+    };
+    let header = DeferredRangeHeader::Unbound(Box::new(DeferredRangeSpec {
+        start: Some(StatementExpression::Built(start)),
+        end: StatementExpression::Built(end),
+        end_kind: RangeEndKind::Exclusive,
+        step: Some(StatementExpression::Retained(step_fragment)),
+        span: None,
+    }));
+
+    let mut construction = body.construction();
+    let position = construction
+        .record_retained_loop_range(domain, header, loop_body, None)
+        .expect("retained range registers");
+
+    let style = Style::default();
+    prepare_control_flow_render_units(
+        &construction,
+        ControlFlowRenderUnitRequest {
+            style: &style,
+            context: &body.context,
+            string_table: &mut body.string_table,
+            expression_builder: &mut body.expressions,
+            const_values: &mut body.constants,
+        },
+    )
+    .expect("range render unit is prepared");
+
+    let taken = body.store.borrow_mut().take_pending_numeric_intakes(domain);
+    assert_eq!(
+        taken.len(),
+        1,
+        "only the retained step owns an intake record"
+    );
+    assert_eq!(
+        taken[0].position,
+        NumericTemplateIntakePosition::LoopRangeStep(position)
+    );
+    let (header_id, _) = taken[0]
+        .range_header
+        .expect("the retained step names its containing header");
+    let built = body
+        .store
+        .borrow()
+        .retained_range_header_built_operands(header_id)
+        .expect("an operand-slot header keeps its parse-time built bounds");
+    assert_eq!(built, [Some(start), Some(end), None]);
+
+    let mut type_environment = TypeEnvironment::new();
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    body.store
+        .borrow_mut()
+        .install_completed_numeric_range_header(
+            header_id,
+            [None, None, Some(step)],
+            &mut type_interner,
+            &mut body.expressions,
+            &mut body.constants,
+        )
+        .expect("completed range header installs");
+
+    let store = body.store.borrow();
+    let node = store.get_node(position).expect("range position exists");
+    let TemplateIrNodeKind::Loop {
+        header: TemplateLoopHeader::Range { range, .. },
+        ..
+    } = &node.kind
+    else {
+        panic!("expected an installed range loop node");
+    };
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::F32));
+    let installed_step = range.step.expect("the explicit step stays present");
+    assert_eq!(
+        body.expressions
+            .view(installed_step)
+            .expect("installed step is stored")
+            .value_type_id()
+            .expect("installed step produces one value"),
+        builtin_type_ids::fixed_scalar(FixedScalar::F32),
+        "a narrower float step converts to the bounds-selected counter precision"
+    );
+}
+
+#[test]
 #[cfg(feature = "benchmark_counters")]
 fn bound_range_completion_inspects_each_pending_header_once() {
     use crate::compiler_frontend::instrumentation::{
@@ -912,4 +1069,295 @@ fn duplicate_numeric_intake_registration_preserves_the_original_record() {
     );
     assert_eq!(pending[0].site, first);
     assert_eq!(pending[0].position, position);
+}
+
+#[test]
+fn retained_collection_step_that_resolves_unsigned_is_rejected_at_its_span() {
+    let mut body = IntakeBody::new();
+    let domain = body.domain();
+    let loop_body = body.empty_body_node();
+    let mut type_environment = TypeEnvironment::new();
+    let iterable = empty_i32_collection(&mut body.expressions, &mut type_environment);
+    let step_binding = body.declare_pending_binding("pending_step", "2");
+    let step_fragment = body.pending_numeric_fragment(step_binding);
+    let step_span = Some(SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::source_start(),
+    ));
+    let unsigned_step = body
+        .expressions
+        .fixed_scalar(
+            &mut body.constants,
+            FixedScalarValue::unsigned(FixedScalar::U32, 2).expect("U32 step fits"),
+            step_span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("unsigned step expression fits")
+        .id();
+
+    let mut construction = body.construction();
+    let position = construction
+        .record_retained_loop_collection(
+            domain,
+            Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            None,
+            StatementExpression::Built(iterable),
+            Some(StatementExpression::Retained(step_fragment)),
+            None,
+            loop_body,
+            None,
+        )
+        .expect("retained collection header registers");
+    let style = Style::default();
+    prepare_control_flow_render_units(
+        &construction,
+        ControlFlowRenderUnitRequest {
+            style: &style,
+            context: &body.context,
+            string_table: &mut body.string_table,
+            expression_builder: &mut body.expressions,
+            const_values: &mut body.constants,
+        },
+    )
+    .expect("collection render unit is prepared");
+
+    let error = body
+        .store
+        .borrow_mut()
+        .install_completed_collection_header(
+            position,
+            None,
+            Some(unsigned_step),
+            &body.expressions,
+            &type_environment,
+            &body.constants,
+        )
+        .expect_err("an unsigned collection step is rejected at install");
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("expected the shared step diagnostic, not an infrastructure failure");
+    };
+    assert_eq!(diagnostic.code(), "MOTH-RULE-0059");
+    assert_eq!(
+        diagnostic.primary_span(),
+        step_span,
+        "the rejection keeps the step's authored span"
+    );
+}
+
+#[test]
+fn copied_collection_step_keeps_built_operands_and_installs_independently() {
+    let mut body = IntakeBody::new();
+    let domain = body.domain();
+    let loop_body = body.empty_body_node();
+    let mut type_environment = TypeEnvironment::new();
+    let iterable = empty_i32_collection(&mut body.expressions, &mut type_environment);
+    let step_binding = body.declare_pending_binding("pending_step", "2");
+    let step_fragment = body.pending_numeric_fragment(step_binding);
+
+    let mut construction = body.construction();
+    let source = construction
+        .record_retained_loop_collection(
+            domain,
+            Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            None,
+            StatementExpression::Built(iterable),
+            Some(StatementExpression::Retained(step_fragment)),
+            None,
+            loop_body,
+            None,
+        )
+        .expect("retained collection header registers");
+    let style = Style::default();
+    prepare_control_flow_render_units(
+        &construction,
+        ControlFlowRenderUnitRequest {
+            style: &style,
+            context: &body.context,
+            string_table: &mut body.string_table,
+            expression_builder: &mut body.expressions,
+            const_values: &mut body.constants,
+        },
+    )
+    .expect("collection render unit is prepared");
+    let copy = {
+        let copied = body
+            .store
+            .borrow()
+            .get_node(source)
+            .cloned()
+            .expect("retained collection source exists");
+        body.store.borrow_mut().push_node(copied)
+    };
+    body.store
+        .borrow_mut()
+        .replicate_pending_numeric_intakes_for_copied_node(source, copy)
+        .expect("a collection header with a retained step copies its rows");
+
+    let taken = body.store.borrow_mut().take_pending_numeric_intakes(domain);
+    assert_eq!(
+        taken.len(),
+        2,
+        "the source and its copy each register the retained step slot"
+    );
+    for row in &taken {
+        let expected = match row.position {
+            NumericTemplateIntakePosition::LoopCollectionStep(node) => node,
+            ref other => panic!("expected a collection step registration, got {other:?}"),
+        };
+        assert!(
+            expected == source || expected == copy,
+            "the step slot belongs to the source or its copy"
+        );
+        assert!(
+            row.collection_header.is_some(),
+            "the step slot groups into its containing header"
+        );
+    }
+
+    let step = i32_expression(&mut body.expressions, &mut body.constants, 2);
+    for node in [source, copy] {
+        body.store
+            .borrow_mut()
+            .install_completed_collection_header(
+                node,
+                None,
+                Some(step),
+                &body.expressions,
+                &type_environment,
+                &body.constants,
+            )
+            .expect("the built iterable and completed step install together");
+        let store = body.store.borrow();
+        let TemplateIrNodeKind::Loop {
+            header:
+                TemplateLoopHeader::Collection {
+                    bindings,
+                    iterable: installed_iterable,
+                    step: installed_step,
+                },
+            ..
+        } = &store
+            .get_node(node)
+            .expect("installed collection loop exists")
+            .kind
+        else {
+            panic!("expected an installed collection loop node");
+        };
+        assert!(bindings.item.is_none());
+        assert_eq!(*installed_iterable, iterable);
+        assert_eq!(*installed_step, Some(step));
+    }
+}
+
+#[test]
+fn copied_collection_header_keeps_its_built_step() {
+    let mut body = IntakeBody::new();
+    let domain = body.domain();
+    let loop_body = body.empty_body_node();
+    let mut type_environment = TypeEnvironment::new();
+    let pending_iterable = body.declare_pending_binding("pending_items", "1");
+    let iterable_fragment = body.pending_numeric_fragment(pending_iterable);
+    let built_step = i32_expression(&mut body.expressions, &mut body.constants, 2);
+
+    let mut construction = body.construction();
+    let source = construction
+        .record_retained_loop_collection(
+            domain,
+            Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            None,
+            StatementExpression::Retained(iterable_fragment),
+            Some(StatementExpression::Built(built_step)),
+            None,
+            loop_body,
+            None,
+        )
+        .expect("retained collection header registers");
+    let style = Style::default();
+    prepare_control_flow_render_units(
+        &construction,
+        ControlFlowRenderUnitRequest {
+            style: &style,
+            context: &body.context,
+            string_table: &mut body.string_table,
+            expression_builder: &mut body.expressions,
+            const_values: &mut body.constants,
+        },
+    )
+    .expect("collection render unit is prepared");
+    let copy = {
+        let copied = body
+            .store
+            .borrow()
+            .get_node(source)
+            .cloned()
+            .expect("retained collection source exists");
+        body.store.borrow_mut().push_node(copied)
+    };
+    body.store
+        .borrow_mut()
+        .replicate_pending_numeric_intakes_for_copied_node(source, copy)
+        .expect("a collection header with a built step copies its rows");
+
+    let taken = body.store.borrow_mut().take_pending_numeric_intakes(domain);
+    assert_eq!(
+        taken.len(),
+        2,
+        "the source and its copy each register the retained iterable slot"
+    );
+    for row in &taken {
+        let expected = match row.position {
+            NumericTemplateIntakePosition::LoopCollectionIterable(node) => node,
+            ref other => panic!("expected a collection iterable registration, got {other:?}"),
+        };
+        assert!(
+            expected == source || expected == copy,
+            "the iterable slot belongs to the source or its copy"
+        );
+    }
+
+    let completed_iterable = empty_i32_collection(&mut body.expressions, &mut type_environment);
+    for node in [source, copy] {
+        body.store
+            .borrow_mut()
+            .install_completed_collection_header(
+                node,
+                Some(completed_iterable),
+                None,
+                &body.expressions,
+                &type_environment,
+                &body.constants,
+            )
+            .expect("the retained iterable installs against the copied built step");
+        let store = body.store.borrow();
+        let TemplateIrNodeKind::Loop {
+            header:
+                TemplateLoopHeader::Collection {
+                    iterable,
+                    step: installed_step,
+                    ..
+                },
+            ..
+        } = &store
+            .get_node(node)
+            .expect("installed collection loop exists")
+            .kind
+        else {
+            panic!("expected an installed collection loop node");
+        };
+        assert_eq!(*iterable, completed_iterable);
+        assert_eq!(
+            *installed_step,
+            Some(built_step),
+            "the copy keeps the source header's built step"
+        );
+    }
 }

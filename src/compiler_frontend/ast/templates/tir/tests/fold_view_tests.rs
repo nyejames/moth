@@ -5,14 +5,16 @@
 // WHY: these tests cover the semantic fold invariants of the exact-view reducer.
 
 use crate::compiler_frontend::ast::ast_nodes::{
-    Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
+    Declaration, DeclarationValue, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValuePayload, ConstValueStore,
 };
+use crate::compiler_frontend::ast::expressions::expression::CollectionExpressionType;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -728,6 +730,267 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         context.bindings[0].value,
         9,
     ));
+}
+
+// -------------------------
+//  Const collection loop folding
+// -------------------------
+
+/// Builds one const collection-loop template over the exact `I32` source `items`.
+///
+/// WHAT: the body renders `index:item;` for every visited iteration, so the folded output exposes
+///       both the actual source index and the element.
+/// WHY: a numeric collection header with an item binding cannot reach the fold through source yet
+///      (retained pending-item headers install from the AST side), so the fold contract is driven
+///      through the same `Loop` node the parser produces.
+fn build_const_collection_loop_template(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    path_fork: &mut PathInternerFork,
+    items: &[i64],
+    step: Option<(FixedScalar, i64)>,
+) -> TemplateIrId {
+    let mut type_environment = TypeEnvironment::new();
+    let item_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let collection_items = items
+        .iter()
+        .map(|value| {
+            expressions
+                .fixed_scalar(
+                    const_values,
+                    FixedScalarValue::signed(FixedScalar::I32, *value)
+                        .expect("test literal fits I32"),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("i32 test literal should construct")
+        })
+        .collect::<Vec<_>>();
+    let iterable = expressions
+        .collection_with_type_id(
+            collection_items,
+            CollectionExpressionType {
+                element_type_id: item_type,
+                fixed_capacity: None,
+                collection_type_id: None,
+            },
+            &mut type_environment,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("const collection literal should construct")
+        .id();
+    let item_path = path_fork
+        .try_intern_portable_path("main.moth/#item", string_table)
+        .expect("test path fits");
+    let index_path = path_fork
+        .try_intern_portable_path("main.moth/#index", string_table)
+        .expect("test path fits");
+    let binding = |path| Declaration {
+        id: path,
+        type_id: item_type,
+        type_syntax: None,
+        value_mode: ValueMode::ImmutableReference,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_qualifier: None,
+    };
+    let step = step.map(|(scalar, value)| {
+        expressions
+            .fixed_scalar(
+                const_values,
+                FixedScalarValue::signed(scalar, value).expect("step literal fits its scalar"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("step literal should construct")
+            .id()
+    });
+    let binding_reference = |expressions: &mut AstExpressionBuilder, path| {
+        expressions
+            .reference_with_type_id(
+                path,
+                item_type,
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("binding reference should construct")
+            .id()
+    };
+    let index_reference = binding_reference(expressions, index_path);
+    let item_reference = binding_reference(expressions, item_path);
+
+    let mut builder = TemplateIrBuilder::new(store);
+    let colon = string_table.intern(":");
+    let semicolon = string_table.intern(";");
+    let index_node =
+        builder.push_dynamic_expression_node(index_reference, TemplateSegmentOrigin::Body, None);
+    let colon_node = builder.push_text_node(colon, 1, TemplateSegmentOrigin::Body, None);
+    let item_node =
+        builder.push_dynamic_expression_node(item_reference, TemplateSegmentOrigin::Body, None);
+    let semicolon_node = builder.push_text_node(semicolon, 1, TemplateSegmentOrigin::Body, None);
+    let body = builder.push_sequence_node(
+        vec![index_node, colon_node, item_node, semicolon_node],
+        None,
+    );
+    let loop_node = builder.push_loop_node(
+        TemplateLoopHeader::Collection {
+            bindings: Box::new(LoopBindings {
+                item: Some(binding(item_path)),
+                index: Some(binding(index_path)),
+            }),
+            iterable,
+            step,
+        },
+        body,
+        None,
+        None,
+    );
+    let root = builder.push_sequence_node(vec![loop_node], None);
+    builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    )
+}
+
+/// Folds one const collection-loop template and returns its rendered text.
+fn fold_const_collection_loop(
+    items: &[i64],
+    step: Option<(FixedScalar, i64)>,
+    limit: usize,
+) -> Result<Option<String>, TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let template_id = build_const_collection_loop_template(
+        &mut store,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+        &mut path_fork,
+        items,
+        step,
+    );
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("const collection-loop view should construct");
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
+    context.template_const_loop_iteration_limit = limit;
+    let emission = fold_prepared_view(&view, &mut context)?;
+    Ok(match emission {
+        TemplateEmission::Output(ConstStringValue::Text(output)) => {
+            Some(string_table.resolve(output).to_owned())
+        }
+        TemplateEmission::Output(ConstStringValue::Pieces(_)) => {
+            panic!("scalar collection output should fold to text")
+        }
+        TemplateEmission::NoOutput => None,
+    })
+}
+
+fn collection_loop_structure_reason(error: TemplateError) -> InvalidTemplateStructureView {
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("const collection-loop failures must remain source diagnostics");
+    };
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    diagnostic
+        .first()
+        .expect("const collection-loop diagnostic compacts to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("const collection-loop diagnostic retains typed structure facts")
+}
+
+#[test]
+fn fold_view_collection_loop_follows_signed_steps() {
+    // The second binding is the actual source index, so a stride reports the skipped positions
+    // and a negative step starts at the last element. `I64::MIN` overshoots without ever
+    // materialising an invalid index.
+    for (step, expected) in [
+        (None, "0:10;1:20;2:30;3:40;4:50;"),
+        (Some((FixedScalar::I32, 2)), "0:10;2:30;4:50;"),
+        (Some((FixedScalar::I32, -2)), "4:50;2:30;0:10;"),
+        (Some((FixedScalar::I32, 7)), "0:10;"),
+        (Some((FixedScalar::I32, -7)), "4:50;"),
+        (Some((FixedScalar::I64, i64::MIN)), "4:50;"),
+    ] {
+        assert_eq!(
+            fold_const_collection_loop(
+                &[10, 20, 30, 40, 50],
+                step,
+                DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            )
+            .expect("the const collection loop should fold")
+            .as_deref(),
+            Some(expected),
+            "collection loop with {step:?}"
+        );
+    }
+}
+
+#[test]
+fn fold_view_empty_collection_loop_visits_nothing() {
+    // A negative step seeds `length - 1`, which has no valid start for an empty source, and the
+    // positive default starts at index zero.
+    for step in [
+        None,
+        Some((FixedScalar::I32, -1)),
+        Some((FixedScalar::I32, 1)),
+    ] {
+        assert_eq!(
+            fold_const_collection_loop(&[], step, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS)
+                .expect("an empty const collection loop should fold to no output"),
+            None,
+            "empty collection loop with {step:?}"
+        );
+    }
+}
+
+#[test]
+fn fold_view_collection_zero_step_fails_on_empty_source() {
+    // A const-known zero step fails before the empty-source check, exactly like a range loop,
+    // and shares its step-level reason.
+    let error = fold_const_collection_loop(&[], Some((FixedScalar::I32, 0)), 10)
+        .expect_err("a const-known zero step must fail on an empty source");
+    let facts = collection_loop_structure_reason(error);
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::TemplateLoopStepIsZero
+    );
+}
+
+#[test]
+fn fold_view_collection_limit_counts_visited_iterations() {
+    let items = (0..100).collect::<Vec<i64>>();
+    // A stride over one hundred source indices visits two positions, so a limit of three
+    // succeeds; the limit applies to visited iterations, not source positions.
+    assert_eq!(
+        fold_const_collection_loop(&items, Some((FixedScalar::I32, 50)), 3)
+            .expect("two visited iterations must fit a limit of three")
+            .as_deref(),
+        Some("0:0;50:50;")
+    );
+
+    // The same source with the default step exceeds that limit on its fourth visit.
+    let error = fold_const_collection_loop(&items, None, 3)
+        .expect_err("one hundred visited iterations must exceed a limit of three");
+    let facts = collection_loop_structure_reason(error);
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::TemplateConstLoopExpansionLimitExceeded
+    );
+    assert_eq!(facts.limit, Some(3));
 }
 
 // -------------------------

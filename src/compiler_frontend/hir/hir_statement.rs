@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, LoopBindings, MultiBindTarget, MultiBindTargetKind, NodeKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExpressionOperationView, ExpressionStore, ExpressionView, PlaceView,
+    ExprId, ExpressionOperationView, ExpressionStore, ExpressionView, PlaceView,
 };
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -269,11 +269,12 @@ impl<'a> HirBuilder<'a> {
             NodeKind::CollectionLoop {
                 bindings,
                 iterable,
+                step,
                 body,
             } => self.lower_collection_loop_statement(
-                expressions,
                 bindings,
                 expressions.view(*iterable)?,
+                *step,
                 body,
                 &node.span,
                 node.span,
@@ -625,17 +626,17 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_collection_loop_statement(
         &mut self,
-        expressions: &ExpressionStore,
         bindings: &LoopBindings,
         iterable: ExpressionView<'_>,
+        step: Option<ExprId>,
         body: &[AstNode],
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         self.lower_collection_loop_statement_impl(
-            expressions,
             bindings,
             iterable,
+            step,
             body,
             span,
             statement_span,
@@ -666,7 +667,11 @@ impl<'a> HirBuilder<'a> {
             span: authored_span,
         };
 
-        self.side_table.map_statement(span.to_owned(), &statement);
+        // A generated statement becomes authored when the operation it realises names a source
+        // position, so that position is also its reversible AST origin. Authored statements keep
+        // their AST node span as the origin and carry the exact diagnostic span separately.
+        self.side_table
+            .map_statement((*span).or(authored_span), &statement);
         self.emit_statement_to_current_block(statement)
     }
 

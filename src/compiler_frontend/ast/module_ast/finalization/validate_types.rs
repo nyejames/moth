@@ -300,10 +300,14 @@ fn expand_node<'a>(
         NodeKind::CollectionLoop {
             bindings,
             iterable,
+            step,
             body,
         } => {
             expand_loop_bindings(bindings, context, out)?;
             push_expression(*iterable, context, out);
+            if let Some(step) = step {
+                push_expression(*step, context, out);
+            }
             push_nodes(body, context, out);
         }
 
@@ -732,9 +736,16 @@ fn expand_template_loop_header<'a>(
                 push_expression(*step, context, out);
             }
         }
-        TemplateLoopHeader::Collection { bindings, iterable } => {
+        TemplateLoopHeader::Collection {
+            bindings,
+            iterable,
+            step,
+        } => {
             expand_loop_bindings(bindings, context, out)?;
             push_expression(*iterable, context, out);
+            if let Some(step) = step {
+                push_expression(*step, context, out);
+            }
         }
     }
     Ok(())

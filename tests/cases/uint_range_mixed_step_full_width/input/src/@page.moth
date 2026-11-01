@@ -1,0 +1,139 @@
+-- U64 bounds pair with an independent signed I64 step. The full-width
+-- negative step descends from the U64 maximum to 9223372036854775807 and then
+-- stops, without narrowing the step or overflowing the distance. The same
+-- minimum step visits a narrow unsigned or signed counter once and exits.
+-- Body bookkeeping stays arithmetic-free so the same source runs on both
+-- backends and the candidate boundary stays the only numeric operation.
+
+u64_max U64 = 18446744073709551615
+u64_zero U64 = 0
+below_signed_max U64 = 9223372036854775807
+min_step I64 = -9223372036854775808
+u64_first_pending ~= true
+u64_first ~U64 = 0
+u64_second_seen ~= false
+u64_last ~U64 = 0
+loop u64_max to & u64_zero by min_step |value|:
+    if u64_first_pending:
+        ~u64_first = copy value
+        ~u64_first_pending = false
+    else
+        ~u64_second_seen = true
+    ;
+    ~u64_last = copy value
+;
+
+u8_start U8 = 200
+u8_zero U8 = 0
+u8_first_pending ~= true
+u8_first ~U8 = 0
+u8_second_seen ~= false
+u8_last ~U8 = 0
+loop u8_start to & u8_zero by min_step |value|:
+    if u8_first_pending:
+        ~u8_first = copy value
+        ~u8_first_pending = false
+    else
+        ~u8_second_seen = true
+    ;
+    ~u8_last = copy value
+;
+
+i8_start I8 = -5
+i8_min I8 = -128
+i8_first_pending ~= true
+i8_first ~I8 = 0
+i8_second_seen ~= false
+i8_last ~I8 = 0
+loop i8_start to & i8_min by min_step |value|:
+    if i8_first_pending:
+        ~i8_first = copy value
+        ~i8_first_pending = false
+    else
+        ~i8_second_seen = true
+    ;
+    ~i8_last = copy value
+;
+
+i64_start I64 = 0
+i64_first_pending ~= true
+i64_first ~I64 = 0
+i64_second_seen ~= false
+i64_last ~I64 = 0
+loop i64_start to & min_step by min_step |value|:
+    if i64_first_pending:
+        ~i64_first = copy value
+        ~i64_first_pending = false
+    else
+        ~i64_second_seen = true
+    ;
+    ~i64_last = copy value
+;
+
+wrong_seen ~= false
+loop u64_zero to & u64_max by min_step |value|:
+    ~wrong_seen = true
+;
+
+-- An I32 counter keeps an in-range I64 step. The first, second and last values pin the exact
+-- stride without adding body arithmetic.
+i32_start I32 = 0
+i32_end I32 = 10
+i32_step I64 = 3
+i32_first_pending ~= true
+i32_second_pending ~= false
+i32_first ~I32 = 0
+i32_second ~I32 = 0
+i32_last ~I32 = 0
+loop i32_start to i32_end by i32_step |value|:
+    ~i32_last = copy value
+    if i32_first_pending:
+        ~i32_first = copy value
+        ~i32_first_pending = false
+        ~i32_second_pending = true
+    else
+        if i32_second_pending:
+            ~i32_second = copy value
+            ~i32_second_pending = false
+        ;
+    ;
+;
+
+-- A U8 counter keeps an I64 step above the counter width and visits the inclusive endpoint.
+u8_max U8 = 255
+u8_step I64 = 100
+u8_step_first_pending ~= true
+u8_step_first ~U8 = 0
+u8_step_last ~U8 = 0
+loop u8_zero to & u8_max by u8_step |value|:
+    if u8_step_first_pending:
+        ~u8_step_first = copy value
+        ~u8_step_first_pending = false
+    ;
+    ~u8_step_last = copy value
+;
+
+assert(u64_first is u64_max)
+assert(u64_first_pending is false)
+assert(u64_second_seen is true)
+assert(u64_last is below_signed_max)
+assert(u8_first is 200)
+assert(u8_first_pending is false)
+assert(u8_second_seen is false)
+assert(u8_last is 200)
+assert(i8_first is -5)
+assert(i8_first_pending is false)
+assert(i8_second_seen is false)
+assert(i8_last is -5)
+assert(i64_first is 0)
+assert(i64_first_pending is false)
+assert(i64_second_seen is true)
+assert(i64_last is -9223372036854775808)
+assert(wrong_seen is false)
+assert(i32_first is 0)
+assert(i32_second is 3)
+assert(i32_last is 9)
+assert(u8_step_first is 0)
+assert(u8_step_last is 200)
+
+[: uint_range_mixed_step_full_width u64=[u64_first]/[u64_second_seen]/[u64_last] u8=[u8_first]/[u8_second_seen]/[u8_last] i8=[i8_first]/[i8_second_seen]/[i8_last] i64=[i64_first]/[i64_second_seen]/[i64_last] wrong=[wrong_seen] i32=[i32_first]/[i32_second]/[i32_last] u8_step=[u8_step_first]/[u8_step_last]]

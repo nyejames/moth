@@ -188,10 +188,23 @@ fn visit_loop_header<'expressions>(
             visitor(effective(view, expressions, site, *condition)?)?;
         }
         (
-            TemplateLoopHeader::Collection { iterable, .. },
-            TemplateLoopHeaderExpressionSites::Collection { iterable: site },
+            TemplateLoopHeader::Collection { iterable, step, .. },
+            TemplateLoopHeaderExpressionSites::Collection {
+                iterable: site,
+                step: step_site,
+            },
         ) => {
             visitor(effective(view, expressions, site, *iterable)?)?;
+            match (step, step_site) {
+                (Some(step), Some(site)) => visitor(effective(view, expressions, site, *step)?)?,
+                (None, None) => {}
+                _ => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "TIR expression walk found mismatched collection step site.",
+                    ));
+                }
+            }
         }
         (
             TemplateLoopHeader::Range { range, .. },

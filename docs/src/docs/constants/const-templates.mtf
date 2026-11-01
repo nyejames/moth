@@ -63,9 +63,15 @@ body contributes output.
     ]
 ]
 
-Const collection and range loops expand their body for each iteration until the
-ordinary loop header ends. Template loops have no `break` or `continue`
-controls. Their body must fold on every expansion.
+Const collection and range loops expand their body for each visited iteration
+until the ordinary loop header ends. Template loops have no `break` or
+`continue` controls. Their body must fold on every expansion.
+
+Const loops follow the ordinary loop header contract. An explicit step must be
+compile-time known. A runtime-only step is rejected with `MOTH-SYNTAX-0022`
+(`invalid_template_structure.template_loop_step_not_const`). The step's sign
+selects direction, a negative collection step starts at the last source item
+and a collection loop's second binding is the actual source index.
 
 The project config field `template_const_loop_iteration_limit` guards expansion:
 
@@ -79,6 +85,14 @@ The maximum accepted configured value is `1_000_000`.
 
 The configured value must be a positive folded `I32`. Zero, negative values and
 values above `1_000_000` are rejected.
+
+The limit counts visited iterations, not source positions. A literal zero step
+is rejected by the loop header with `MOTH-SYNTAX-0029`. A step that folds to
+zero is rejected with `MOTH-SYNTAX-0022`
+(`invalid_template_structure.template_loop_step_is_zero`), even when the source
+is empty or the range would visit nothing. A const float range step that rounds
+back to the current counter is rejected with `MOTH-SYNTAX-0022`
+(`invalid_template_structure.template_loop_step_no_progress`).
 
 A const conditional loop folds to no-output only when its condition is
 compile-time `false`.

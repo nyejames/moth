@@ -1144,6 +1144,60 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
 }
 
 #[test]
+fn wasm_feature_validation_rejects_f16_range_candidates() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let expressions = test_expression_store();
+    let authored_step_span = test_source_span(29);
+    let module = range_candidate_module(
+        expressions,
+        NumericScalar::Fixed(FixedScalar::F16),
+        Some(authored_step_span),
+    );
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should gate a reachable F16 range candidate rather than fail during lowering",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+    );
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(authored_step_span),
+        "the F16 rejection should report the candidate's authored step position"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_allows_f32_range_candidates() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let expressions = test_expression_store();
+    let module = range_candidate_module(expressions, NumericScalar::Fixed(FixedScalar::F32), None);
+
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Wasm should accept a reachable F32 range candidate"
+    );
+}
+
+#[test]
 fn wasm_feature_validation_rejects_integer_division_on_float_domains() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
@@ -2953,6 +3007,64 @@ fn block_with_locals(
         statements,
         terminator,
     }
+}
+
+/// Builds a module whose entry block contains one binary-float range candidate.
+///
+/// WHY: the Wasm range-candidate precision gate is a reachable-statement scan, so the test needs
+///      a well-formed candidate statement, not only a scalar domain.
+fn range_candidate_module(
+    mut expressions: HirExpressionStore,
+    scalar: NumericScalar,
+    span: Option<SourceSpan>,
+) -> HirModule {
+    let NumericScalar::Fixed(fixed_scalar) = scalar else {
+        unreachable!("range candidate test helper requires a fixed binary-float domain");
+    };
+    let scalar_type = builtin_type_ids::fixed_scalar(fixed_scalar);
+    let current = fixed_scalar_expression(&mut expressions, fixed_scalar);
+    let step = fixed_scalar_expression(&mut expressions, fixed_scalar);
+    let end = fixed_scalar_expression(&mut expressions, fixed_scalar);
+    let statement = HirStatement {
+        id: HirNodeId(10),
+        span,
+        kind: HirStatementKind::RangeCandidate {
+            current,
+            step,
+            end,
+            inclusive: false,
+            domain: scalar,
+            candidate_result: HirLocalDestination::Define(LocalId(0)),
+            in_range_result: HirLocalDestination::Define(LocalId(1)),
+        },
+    };
+
+    hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block_with_locals(
+            BlockId(0),
+            vec![
+                HirLocal {
+                    id: LocalId(0),
+                    ty: scalar_type,
+                    mutable: false,
+                    region: RegionId(0),
+                    span: None,
+                },
+                HirLocal {
+                    id: LocalId(1),
+                    ty: builtin_type_ids::BOOL,
+                    mutable: false,
+                    region: RegionId(0),
+                    span: None,
+                },
+            ],
+            vec![statement],
+            HirTerminator::Return(HirValueRange::empty()),
+        )],
+        expressions,
+    )
 }
 
 fn numeric_op_statement(

@@ -446,13 +446,17 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 domain,
                 bindings,
                 pending_item,
-                deferred,
+                iterable,
+                step,
+                step_marker_span,
             } => {
                 construction_context.record_retained_loop_collection(
                     domain,
                     bindings,
                     pending_item,
-                    *deferred,
+                    iterable,
+                    step,
+                    step_marker_span,
                     body_node_id,
                     input.span,
                 )?;

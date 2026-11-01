@@ -13,8 +13,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, TemplateBranchSelector, TemplateFoldBinding, TemplateLoopHeader,
-    build_collection_iteration_bindings, build_range_iteration_bindings, const_collection_items,
+    ConstCollectionCursor, ConstRangeCursor, TemplateBranchSelector, TemplateFoldBinding,
+    TemplateLoopHeader, build_collection_iteration_bindings, build_range_iteration_bindings,
+    const_collection_items, const_collection_step,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     FoldedCondition, TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -34,8 +35,8 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 
 use super::estimate::{
     FoldEstimateMode, estimate_loop_aggregate_bytes, estimate_tir_node_output_bytes,
-    estimated_range_iteration_count, record_tir_fold_output_estimate_miss,
-    record_tir_fold_output_intern,
+    estimated_collection_iteration_count, estimated_range_iteration_count,
+    record_tir_fold_output_estimate_miss, record_tir_fold_output_intern,
 };
 use super::reducer::{
     FoldInsertion, FoldOutputState, FoldTraversalInput, fold_tir_node, fold_tir_node_into_buffer,
@@ -82,23 +83,24 @@ fn resolve_range_constant_operands(
     range: &RangeLoopSpec,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<ResolvedRangeOperands, TemplateError> {
-    let start = resolve_range_constant_operand(range.start, fold_context)?;
-    let end = resolve_range_constant_operand(range.end, fold_context)?;
+    let start = resolve_loop_constant_operand(range.start, fold_context)?;
+    let end = resolve_loop_constant_operand(range.end, fold_context)?;
     let step = range
         .step
-        .map(|step| resolve_range_constant_operand(step, fold_context))
+        .map(|step| resolve_loop_constant_operand(step, fold_context))
         .transpose()?;
 
-    let ResolvedRangeOperand {
-        bound: start,
+    let ResolvedLoopOperand {
+        expression: start,
         refusal: start_refusal,
     } = start;
-    let ResolvedRangeOperand {
-        bound: end,
+    let ResolvedLoopOperand {
+        expression: end,
         refusal: end_refusal,
     } = end;
-    let (step, step_refusal) =
-        step.map_or((None, None), |resolved| (resolved.bound, resolved.refusal));
+    let (step, step_refusal) = step.map_or((None, None), |resolved| {
+        (resolved.expression, resolved.refusal)
+    });
     let refusal = start_refusal.or(end_refusal).or(step_refusal);
     if refusal.is_some() {
         return Ok(ResolvedRangeOperands {
@@ -137,33 +139,33 @@ fn resolve_range_constant_operands(
     })
 }
 
-/// One resolved range operand.
-struct ResolvedRangeOperand {
-    /// A replacement bound, or `None` when the operand is already the folded form it needs.
-    bound: Option<ExprId>,
+/// One resolved loop-header operand.
+struct ResolvedLoopOperand {
+    /// A replacement expression, or `None` when the operand is already the folded form it needs.
+    expression: Option<ExprId>,
     refusal: Option<ConstantFoldRefusalReason>,
 }
 
-fn resolve_range_constant_operand(
+fn resolve_loop_constant_operand(
     expression: ExprId,
     fold_context: &mut TirFoldContext<'_>,
-) -> Result<ResolvedRangeOperand, TemplateError> {
+) -> Result<ResolvedLoopOperand, TemplateError> {
     let resolved = resolve_fold_bindings_in_expression(expression, fold_context)?;
     if let Some(reason) = resolved.refusal {
-        return Ok(ResolvedRangeOperand {
-            bound: None,
+        return Ok(ResolvedLoopOperand {
+            expression: None,
             refusal: Some(reason),
         });
     }
     let resolved = resolved.expression;
     if let Some(substituted) = resolve_source_constant_references(resolved, fold_context)? {
-        return Ok(ResolvedRangeOperand {
-            bound: Some(substituted),
+        return Ok(ResolvedLoopOperand {
+            expression: Some(substituted),
             refusal: None,
         });
     }
-    // A registered Core call in a bound folds through the shared engine like any other operand,
-    // so a refusal keeps the whole loop dynamic instead of failing as non-constant bounds.
+    // A registered Core call in an operand folds through the shared engine like any other
+    // operand, so a refusal keeps the whole loop dynamic instead of failing as non-constant.
     match constant_fold(
         resolved,
         fold_context.expression_builder,
@@ -175,32 +177,32 @@ fn resolve_range_constant_operand(
         ),
         FoldRequirement::Opportunistic,
     ) {
-        Ok(ConstantFoldOutcome::Folded(expression)) => Ok(ResolvedRangeOperand {
-            bound: Some(expression),
+        Ok(ConstantFoldOutcome::Folded(expression)) => Ok(ResolvedLoopOperand {
+            expression: Some(expression),
             refusal: None,
         }),
-        Ok(ConstantFoldOutcome::Refused { reason, .. }) => Ok(ResolvedRangeOperand {
-            bound: None,
+        Ok(ConstantFoldOutcome::Refused { reason, .. }) => Ok(ResolvedLoopOperand {
+            expression: None,
             refusal: Some(reason),
         }),
-        Ok(ConstantFoldOutcome::NotConstant(_)) => Ok(ResolvedRangeOperand {
-            bound: None,
+        Ok(ConstantFoldOutcome::NotConstant(_)) => Ok(ResolvedLoopOperand {
+            expression: None,
             refusal: None,
         }),
         Err(
             ConstantFoldError::Diagnostic(diagnostic)
             | ConstantFoldError::NumericFailure(diagnostic),
-        ) if diagnostic.code() != "MOTH-SYNTAX-0037" => Ok(ResolvedRangeOperand {
-            bound: None,
+        ) if diagnostic.code() != "MOTH-SYNTAX-0037" => Ok(ResolvedLoopOperand {
+            expression: None,
             refusal: None,
         }),
         Err(error) => Err(error.into()),
     }
 }
 
-/// WHAT: folds module-constant references inside a range bound or step through
+/// WHAT: folds module-constant references inside a loop-header operand through
 /// the atomic store, preserving the authored span and value mode.
-/// WHY: loop bounds may name module constants; the const cursor only accepts
+/// WHY: loop bounds and steps may name module constants; the const cursors only accept
 /// folded numeric roots, so source constants must resolve before cursor entry.
 fn resolve_source_constant_references(
     expression: ExprId,
@@ -584,6 +586,15 @@ pub(super) fn fold_tir_loop(
             } else {
                 range.as_ref()
             };
+            // The authored step position is the inner header's own expression span. Operand
+            // substitution replaces that expression with a fold-binding value whose span names
+            // the outer binding, so the diagnostic anchor is read before resolution.
+            let authored_step_span = range
+                .step
+                .map(|id| fold_context.expression_builder.view(id))
+                .transpose()?
+                .and_then(|step| step.span())
+                .or(loop_span);
             let resolved_operands = resolve_range_constant_operands(range_ref, fold_context)?;
             if let Some(reason) = resolved_operands.refusal {
                 output_state.refusal = Some(reason);
@@ -596,6 +607,7 @@ pub(super) fn fold_tir_loop(
                 &*fold_context.const_values,
                 fold_context.template_const_loop_iteration_limit,
                 loop_span,
+                authored_step_span,
             )?;
             let range_provenance = range_operand_provenance(range_ref, fold_context)?;
             output_state.provenance.merge(&range_provenance);
@@ -626,9 +638,15 @@ pub(super) fn fold_tir_loop(
             (aggregate_state, estimated_aggregate)
         }
 
-        TemplateLoopHeader::Collection { bindings, iterable } => {
-            let site_id = match header_sites {
-                TemplateLoopHeaderExpressionSites::Collection { iterable } => iterable,
+        TemplateLoopHeader::Collection {
+            bindings,
+            iterable,
+            step,
+        } => {
+            let (iterable_site, step_site) = match header_sites {
+                TemplateLoopHeaderExpressionSites::Collection { iterable, step } => {
+                    (iterable, step)
+                }
                 _ => {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::AstConstruction,
@@ -639,7 +657,7 @@ pub(super) fn fold_tir_loop(
             };
 
             let effective_iterable = fold_input
-                .effective_expression_for_site(&*fold_context.expression_builder, site_id)?;
+                .effective_expression_for_site(&*fold_context.expression_builder, iterable_site)?;
             let iterable_ref = effective_iterable.unwrap_or(*iterable);
             let resolved_iterable =
                 resolve_fold_bindings_in_expression(iterable_ref, fold_context)?.expression;
@@ -650,13 +668,81 @@ pub(super) fn fold_tir_loop(
                 expression_provenance(fold_context.expression_builder.view(resolved_iterable)?);
             output_state.provenance.merge(&resolved_iterable_provenance);
 
+            // The source is captured before the step, so a source that is not a const collection
+            // keeps its own diagnostic instead of being preempted by the step.
             let items = const_collection_items(
                 resolved_iterable,
                 fold_context.expression_builder,
                 &*fold_context.const_values,
             )?;
-            let estimated_iterations = std::cmp::min(
+
+            // The authored step position is the header's own expression span. Substitution
+            // replaces that expression with a fold-binding value whose span names the source
+            // binding, so the diagnostic anchor is read before resolution.
+            let authored_step_span = (*step)
+                .map(|id| fold_context.expression_builder.view(id))
+                .transpose()?
+                .and_then(|step| step.span())
+                .or(loop_span);
+            let step_ref = match (*step, step_site) {
+                (None, None) => None,
+                (Some(original), Some(step_site)) => Some(
+                    fold_input
+                        .effective_expression_for_site(
+                            &*fold_context.expression_builder,
+                            step_site,
+                        )?
+                        .unwrap_or(original),
+                ),
+                _ => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "TIR fold: collection-loop header/site step shape mismatch.",
+                    )
+                    .into());
+                }
+            };
+            let step = match step_ref {
+                // The omitted step is the independent signed `+1` default, not a source-typed
+                // value.
+                None => 1,
+                Some(step_ref) => {
+                    output_state.provenance.merge(&expression_provenance(
+                        fold_context.expression_builder.view(step_ref)?,
+                    ));
+                    let resolved = resolve_loop_constant_operand(step_ref, fold_context)?;
+                    if let Some(reason) = resolved.refusal {
+                        output_state.refusal = Some(reason);
+                        return Ok(());
+                    }
+                    let resolved_step = resolved.expression.unwrap_or(step_ref);
+                    let resolved_span = fold_context.expression_builder.view(resolved_step)?.span();
+                    output_state.provenance.merge(&expression_provenance(
+                        fold_context.expression_builder.view(resolved_step)?,
+                    ));
+                    const_collection_step(
+                        resolved_step,
+                        &*fold_context.expression_builder,
+                        &*fold_context.const_values,
+                        resolved_span.or(loop_span),
+                    )?
+                }
+            };
+
+            // The step sign selects the start index and the zero-step check runs before the
+            // empty-source check, so an empty source still rejects a const-known zero step.
+            let mut cursor = ConstCollectionCursor::new(
                 items.len(),
+                step,
+                fold_context.template_const_loop_iteration_limit,
+                authored_step_span,
+                loop_span,
+            )?;
+            // The reservation follows visited iterations, not source indices, so a stride over a
+            // long source stays proportional to the output it can produce.
+            let estimated_iterations = estimated_collection_iteration_count(
+                items.len(),
+                step,
                 fold_context.template_const_loop_iteration_limit,
             );
             let estimated_aggregate =
@@ -666,22 +752,19 @@ pub(super) fn fold_tir_loop(
                 aggregate_state.enable_projection();
             }
 
-            for (index, item) in items.iter().enumerate() {
-                add_ast_counter(AstCounter::TemplateFoldLoopIterations, 1);
-                if index >= fold_context.template_const_loop_iteration_limit {
-                    return Err(templates::invalid_template_structure(
-                        InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
-                            limit: fold_context.template_const_loop_iteration_limit,
-                        },
-                        loop_span,
+            while let Some(index) = cursor.next_index()? {
+                let item = *items.get(index).ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "TIR fold: const collection index left the captured source.",
                     )
-                    .into());
-                }
+                })?;
+                add_ast_counter(AstCounter::TemplateFoldLoopIterations, 1);
                 let resolved_item =
-                    resolve_fold_bindings_in_expression(*item, fold_context)?.expression;
-                let resolved_item = if resolved_item != *item {
+                    resolve_fold_bindings_in_expression(item, fold_context)?.expression;
+                let resolved_item = if resolved_item != item {
                     let item_provenance =
-                        expression_provenance(fold_context.expression_builder.view(*item)?);
+                        expression_provenance(fold_context.expression_builder.view(item)?);
                     let combined =
                         expression_provenance(fold_context.expression_builder.view(resolved_item)?)
                             .union(&item_provenance);

@@ -28,7 +28,7 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
 };
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
 use rustc_hash::FxHashSet;
 
 impl<'a> HirValidator<'a> {
@@ -205,12 +205,12 @@ impl<'a> HirValidator<'a> {
                 ..
             } => self.require_statement_destination(*destination, block_id)?,
             HirStatementKind::NumericOp { result, .. }
-            | HirStatementKind::RangeStepFailure { result, .. }
+            | HirStatementKind::LoopStepFailure { result, .. }
             | HirStatementKind::FormatFloat { result, .. }
             | HirStatementKind::ValidateFloat { result, .. } => {
                 self.require_statement_destination(*result, block_id)?;
             }
-            HirStatementKind::FloatRangeCandidate {
+            HirStatementKind::RangeCandidate {
                 candidate_result,
                 in_range_result,
                 ..
@@ -367,59 +367,74 @@ impl<'a> HirValidator<'a> {
                 )?;
             }
 
-            HirStatementKind::RangeStepFailure {
+            HirStatementKind::LoopStepFailure {
                 failure_mode,
                 result,
                 ..
             } => {
                 if *failure_mode == NumericFailureMode::Infallible {
                     return Err(self.error_with_hir(
-                        "RangeStepFailure cannot use the discharged numeric mode".to_owned(),
+                        "LoopStepFailure cannot use the discharged numeric mode".to_owned(),
                     ));
                 }
                 self.validate_numeric_result_local(
-                    "RangeStepFailure",
+                    "LoopStepFailure",
                     *failure_mode,
                     *result,
                     self.type_environment.builtins().bool,
                 )?;
             }
 
-            HirStatementKind::FloatRangeCandidate {
+            HirStatementKind::RangeCandidate {
                 current,
                 step,
                 end,
-                ascending,
                 domain,
                 candidate_result,
                 in_range_result,
                 ..
             } => {
-                if !domain.is_binary_float() {
-                    return Err(
-                        self.error_with_hir("FloatRangeCandidate requires a binary-float domain")
-                    );
+                if !domain.is_integer() && !domain.is_binary_float() {
+                    return Err(self.error_with_hir(
+                        "RangeCandidate requires a fixed integer or binary-float counter domain",
+                    ));
                 }
 
                 self.validate_expression(*current, anchor)?;
                 self.validate_expression(*step, anchor)?;
                 self.validate_expression(*end, anchor)?;
-                self.validate_expression(*ascending, anchor)?;
 
                 let domain_type = domain.type_id(self.type_environment);
                 let current = self.expression_row(*current)?;
                 let step = self.expression_row(*step)?;
                 let end = self.expression_row(*end)?;
-                let ascending = self.expression_row(*ascending)?;
-                if current.ty != domain_type || step.ty != domain_type || end.ty != domain_type {
+                if current.ty != domain_type || end.ty != domain_type {
                     return Err(self.error_with_hir(
-                        "FloatRangeCandidate operands must match its numeric domain",
+                        "RangeCandidate bound operands must use the counter domain type",
                     ));
                 }
-                if ascending.ty != self.type_environment.builtins().bool {
-                    return Err(
-                        self.error_with_hir("FloatRangeCandidate direction operand must be Bool")
+
+                // An integer counter accepts an independent signed integer step. A binary-float
+                // counter requires the step to be exactly the counter type, because candidate
+                // rounding must finish at the counter's exact precision.
+                if domain.is_binary_float() {
+                    if step.ty != domain_type {
+                        return Err(self.error_with_hir(
+                            "RangeCandidate binary-float step must match the counter domain type",
+                        ));
+                    }
+                } else {
+                    let step_domain = NumericScalar::from_type_id(step.ty, self.type_environment);
+                    let signed_integer_step = matches!(
+                        step_domain,
+                        Some(NumericScalar::Fixed(scalar))
+                            if scalar.class() == FixedScalarClass::SignedInteger
                     );
+                    if !signed_integer_step {
+                        return Err(self.error_with_hir(
+                            "RangeCandidate integer step must be a signed fixed integer",
+                        ));
+                    }
                 }
 
                 let candidate_local = candidate_result.local();
@@ -427,18 +442,21 @@ impl<'a> HirValidator<'a> {
                 self.require_local_id(candidate_local)?;
                 self.require_local_id(in_range_local)?;
                 let Some(candidate_type) = self.local_types.get(&candidate_local).copied() else {
-                    return Err(self
-                        .error_with_hir("FloatRangeCandidate destination has no registered type"));
+                    return Err(
+                        self.error_with_hir("RangeCandidate destination has no registered type")
+                    );
                 };
                 let Some(in_range_type) = self.local_types.get(&in_range_local).copied() else {
-                    return Err(self
-                        .error_with_hir("FloatRangeCandidate Bool result has no registered type"));
+                    return Err(
+                        self.error_with_hir("RangeCandidate Bool result has no registered type")
+                    );
                 };
                 if candidate_type != domain_type
                     || in_range_type != self.type_environment.builtins().bool
                 {
-                    return Err(self
-                        .error_with_hir("FloatRangeCandidate result locals have the wrong types"));
+                    return Err(
+                        self.error_with_hir("RangeCandidate result locals have the wrong types")
+                    );
                 }
             }
 

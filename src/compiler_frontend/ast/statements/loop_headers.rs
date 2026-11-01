@@ -44,13 +44,13 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data, choices_control_flow, token_lexical,
 };
 use crate::compiler_frontend::compiler_messages::{
-    InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind, ValueReceiverContext,
+    InvalidLoopHeaderReason, InvalidLoopOperandReason, LoopOperandKind, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::range_iteration_domain;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
     reject_reserved_word_token,
@@ -97,6 +97,19 @@ pub(crate) enum ParsedLoopHeader {
     Collection {
         bindings: Box<LoopBindings>,
         iterable: StatementExpression,
+        /// The optional authored step, evaluated once after the source and its length.
+        ///
+        /// WHAT: a built signed-integer expression, or a retained fragment whose numeric origin the
+        ///       owning body root selects.
+        /// WHY: the step is authored after the source and is independent of the item type, so the
+        ///      header keeps its own position instead of folding it into the source window.
+        step: Option<StatementExpression>,
+        /// The authored `by` marker span, present exactly when the header parsed a step.
+        ///
+        /// WHY: a retained source classifies itself at the body root, and a completed `Bool` there
+        ///      is the conditional loop whose step diagnostic belongs at the marker rather than at
+        ///      the source.
+        step_marker_span: Option<SourceSpan>,
         pending_item: Option<NumericBindingId>,
     },
 }
@@ -140,8 +153,8 @@ pub(crate) enum ParsedRangeHeader {
 
 /// One parsed range header before its domain is selected and its bindings are final.
 ///
-/// WHY: a range header's exact domain is a forward result of its operands' selected types, and a
-///      retained operand has no selected type at parse time; the authored slots therefore stay in
+/// WHY: a range header's exact domain is a forward result of its bounds' selected types, and a
+///      retained bound has no selected type at parse time; the authored slots therefore stay in
 ///      their authored form until the body root owns every permitted use of the origins they
 ///      reference.
 #[derive(Debug)]
@@ -163,7 +176,7 @@ impl ParsedRangeSpec {
     ///       authored no bindings.
     /// WHY: the shared range policy is the only domain/synthesis/check owner, and a retained
     ///      header must not select a binding type: the counter's type is the forward result of
-    ///      the operands' selected types, so no binding type exists yet.
+    ///      the bounds' selected types, so no binding type exists yet.
     fn into_parsed_header(
         self,
         binding_names: Option<ParsedBindingNames>,
@@ -195,17 +208,16 @@ impl ParsedRangeSpec {
                 None => None,
             };
             let range = range_loop_spec_from_completed_operands(
-                start.map(|id| parser.expression_builder.own(id)),
-                parser.expression_builder.own(end),
-                end_kind,
-                step.map(|id| parser.expression_builder.own(id)),
-                span,
-                parser.scope_context,
+                CompletedRangeOperands {
+                    start: start.map(|id| parser.expression_builder.own(id)),
+                    end: parser.expression_builder.own(end),
+                    end_kind,
+                    step: step.map(|id| parser.expression_builder.own(id)),
+                    omitted_start_span: span,
+                },
                 parser.type_interner,
                 parser.expression_builder,
                 parser.const_values,
-                parser.string_table,
-                parser.path_fork,
             )?;
             // The counter's domain is the spec's selected domain: one policy owns both.
             let binding_type = range_binding_type(&range, parser.type_interner.environment());
@@ -254,6 +266,18 @@ enum BareLoopBindingKind {
 struct CursorBindingSuffixSplit {
     core_end: usize,
     bindings: ParsedBindingNames,
+    /// The authored `|...|` pipe range, used when a conditional loop rejects bindings.
+    span: Option<SourceSpan>,
+}
+
+/// One collection header split at its top-level `by` step marker.
+///
+/// WHAT: the index of the header's single top-level `by` token.
+/// WHY: the source window ends where the step begins, so the split must be decided once and then
+///      shared by the source parse, the bare-binding probe and the step parse.
+#[derive(Debug, Clone, Copy)]
+struct CursorCollectionStepSplit {
+    by_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -468,53 +492,79 @@ fn parse_non_range_loop_header_cursor(
     header_end: usize,
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<ParsedLoopHeader> {
-    if let Some(pipe_binding_split) = parse_pipe_binding_suffix_cursor(
+    let pipe_binding_split = parse_pipe_binding_suffix_cursor(
         token_stream,
         header_start,
         header_end,
         parser.string_table,
-    )? {
-        let source = parse_collection_iterable_cursor(CursorExpressionInput {
+    )?;
+    // A binding suffix ends the header's expression window, and the top-level step separator then
+    // splits the remaining source and step windows. The source is parsed first because it is
+    // evaluated first and its element metadata declares the loop bindings.
+    let (core_end, binding_names, bindings_span) = match pipe_binding_split {
+        Some(split) => (split.core_end, Some(split.bindings), split.span),
+        None => (header_end, None, None),
+    };
+    let step_split = collection_step_split_cursor(token_stream, header_start, core_end)?;
+    let source_end = step_split.as_ref().map_or(core_end, |split| split.by_index);
+    let step_marker_span = match &step_split {
+        Some(split) => token_stream.span_at(split.by_index),
+        None => None,
+    };
+
+    if let Some(binding_names) = binding_names {
+        let source = parse_collection_iterable_cursor(
+            CursorExpressionInput {
+                token_stream,
+                expression_start: header_start,
+                expression_end: source_end,
+                context: parser.scope_context,
+                type_interner: parser.type_interner,
+                expression_builder: parser.expression_builder,
+                const_values: parser.const_values,
+                value_mode: &ValueMode::ImmutableReference,
+                string_table: parser.string_table,
+                path_fork: parser.path_fork,
+            },
+            bindings_span,
+        )?;
+        let step = parse_optional_collection_step(
             token_stream,
-            expression_start: header_start,
-            expression_end: pipe_binding_split.core_end,
-            context: parser.scope_context,
-            type_interner: parser.type_interner,
-            expression_builder: parser.expression_builder,
-            const_values: parser.const_values,
-            value_mode: &ValueMode::ImmutableReference,
-            string_table: parser.string_table,
-            path_fork: parser.path_fork,
-        })?;
+            step_split.as_ref(),
+            core_end,
+            parser,
+            CollectionStepValidation::AtHeader,
+        )?;
         return match source {
             CollectionIterable::Known {
                 iterable,
                 item_type,
             } => {
-                let bindings =
-                    declare_loop_bindings(Some(pipe_binding_split.bindings), item_type, parser)?;
+                let bindings = declare_loop_bindings(Some(binding_names), item_type, parser)?;
                 Ok(ParsedLoopHeader::Collection {
                     bindings: Box::new(bindings),
                     iterable,
+                    step,
+                    step_marker_span,
                     pending_item: None,
                 })
             }
             CollectionIterable::Pending { iterable, source } => {
-                let (item, bindings) = declare_pending_collection_bindings(
-                    pipe_binding_split.bindings,
-                    source,
-                    parser,
-                )?;
+                let (item, bindings) =
+                    declare_pending_collection_bindings(binding_names, source, parser)?;
                 Ok(ParsedLoopHeader::Collection {
                     bindings: Box::new(bindings),
                     iterable,
+                    step,
+                    step_marker_span,
                     pending_item: Some(item),
                 })
             }
         };
     }
+
     let bare_binding_suffix =
-        detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)?;
+        detect_bare_loop_binding_suffix_cursor(token_stream, header_start, source_end)?;
     if let Some(bare_binding_suffix) = bare_binding_suffix
         && parses_as_collection_cursor(CursorExpressionInput {
             token_stream,
@@ -536,7 +586,7 @@ fn parse_non_range_loop_header_cursor(
         CursorExpressionInput {
             token_stream,
             expression_start: header_start,
-            expression_end: header_end,
+            expression_end: source_end,
             context: parser.scope_context,
             type_interner: parser.type_interner,
             expression_builder: parser.expression_builder,
@@ -545,48 +595,71 @@ fn parse_non_range_loop_header_cursor(
             string_table: parser.string_table,
             path_fork: parser.path_fork,
         },
+        ExpectedType::Infer,
         false,
     ) {
         Ok(expression) => expression,
         Err(error) => {
             let deferral = error.take_numeric_deferral("a loop condition")?;
-            // A bare pending collection binding is a collection source with no item binding; the
-            // body root completes its source exactly like a concrete bare collection loop.
-            if pending_collection_source(
+            let pending_collection = pending_collection_source(
                 &deferral.items,
                 parser.scope_context,
                 parser.type_interner.environment(),
                 parser.expression_builder,
             )?
-            .is_some()
-            {
-                return Ok(ParsedLoopHeader::Collection {
-                    bindings: Box::new(LoopBindings {
-                        item: None,
-                        index: None,
-                    }),
-                    iterable: StatementExpression::Retained(deferred_numeric_expression(
-                        deferral.items,
-                        ExpectedType::Infer,
-                        deferral.value_mode,
-                        deferral.span,
-                        deferral.suffix,
-                    )),
-                    pending_item: None,
-                });
+            .is_some();
+            // An explicit `by` marks a collection loop, so a source whose finished type this parse
+            // cannot classify keeps the collection header and completes at the body root, which
+            // reports a `Bool` source at the step marker and any other non-collection at the
+            // source. A bare pending collection binding is the same shape with no item binding.
+            if !pending_collection && step_split.is_none() {
+                // A fragment that still references a pending numeric origin is numeric by
+                // construction, so it cannot be a collection source. It completes at the body
+                // root, where `ensure_loop_condition` validates it as a `Bool` condition with the
+                // condition context rather than as a numeric receiver.
+                let condition = retain_loop_condition(deferral);
+                return Ok(ParsedLoopHeader::Conditional { condition });
             }
-            // A fragment that still references a pending numeric origin is numeric by
-            // construction, so it cannot be a collection source. It completes as this loop's
-            // `Bool` condition at the body root, exactly like a concrete condition.
-            let bool_type_id = parser.type_interner.environment().builtins().bool;
-            let condition = retain_loop_condition(deferral, bool_type_id);
-            return Ok(ParsedLoopHeader::Conditional { condition });
+            // Completion reports the source diagnostic before the step's, so the step waits for
+            // the source check even when its own expression already built here.
+            let step = parse_optional_collection_step(
+                token_stream,
+                step_split.as_ref(),
+                core_end,
+                parser,
+                CollectionStepValidation::AtCompletion,
+            )?;
+            return Ok(ParsedLoopHeader::Collection {
+                bindings: Box::new(LoopBindings {
+                    item: None,
+                    index: None,
+                }),
+                iterable: StatementExpression::Retained(deferred_numeric_expression(
+                    deferral.items,
+                    ExpectedType::Infer,
+                    deferral.value_mode,
+                    deferral.span,
+                    deferral.suffix,
+                )),
+                step,
+                step_marker_span,
+                pending_item: None,
+            });
         }
     };
-    let source_type = parser
-        .expression_builder
-        .view(expression)?
-        .require_single(ValueReceiverContext::General)?;
+    let source_view = parser.expression_builder.view(expression)?;
+    let source_type = source_view.require_single(ValueReceiverContext::General)?;
+
+    // A `by` step marks an intended collection loop, so the completed-source contract owns this
+    // rejection: a `Bool` source points at the step marker and any other non-collection type at
+    // the source. A collection source passes and takes the collection header below.
+    if step_split.is_some() {
+        validate_completed_collection_source(
+            source_view,
+            parser.type_interner.environment(),
+            step_marker_span,
+        )?;
+    }
 
     let item_type_id = parser
         .type_interner
@@ -595,17 +668,23 @@ fn parse_non_range_loop_header_cursor(
 
     if let Some(item_type_id) = item_type_id {
         let bindings = declare_loop_bindings(None, item_type_id, parser)?;
+        let step = parse_optional_collection_step(
+            token_stream,
+            step_split.as_ref(),
+            core_end,
+            parser,
+            CollectionStepValidation::AtHeader,
+        )?;
         return Ok(ParsedLoopHeader::Collection {
             bindings: Box::new(bindings),
             iterable: StatementExpression::Built(expression),
+            step,
+            step_marker_span,
             pending_item: None,
         });
     }
 
-    ensure_loop_condition(
-        parser.expression_builder.view(expression)?,
-        parser.type_interner.environment(),
-    )?;
+    ensure_loop_condition(source_view, parser.type_interner.environment())?;
     Ok(ParsedLoopHeader::Conditional {
         condition: StatementExpression::Built(expression),
     })
@@ -630,6 +709,21 @@ fn parse_pipe_binding_suffix_cursor(
         .and_then(|index| token_tag_at(token_stream, index))
         .is_none_or(|tag| tag != TokenTag::TYPE_PARAMETER_BRACKET)
     {
+        // A complete binding pair followed by a step is the authored step in the wrong place,
+        // not a missing closing pipe. The step marker names the construct to move.
+        if let [_, close_pipe_index] = pipe_indices.as_slice()
+            && let Some(by_index) = find_top_level_cursor_token(
+                token_stream,
+                close_pipe_index.saturating_add(1),
+                header_end,
+                TokenTag::BY,
+            )?
+        {
+            return loop_header_error(
+                InvalidLoopHeaderReason::MisplacedLoopStep,
+                token_stream.span_at(by_index),
+            );
+        }
         return loop_header_error(
             InvalidLoopHeaderReason::MissingClosingPipe,
             last_index.and_then(|index| token_stream.span_at(index)),
@@ -668,8 +762,28 @@ fn parse_pipe_binding_suffix_cursor(
     Ok(Some(CursorBindingSuffixSplit {
         core_end: open_pipe_index,
         bindings,
+        span: binding_suffix_span(token_stream, open_pipe_index, close_pipe_index),
     }))
 }
+/// The authored span covering one binding suffix from its opening to closing pipe.
+///
+/// WHAT: joins two short inline pipe spans without borrowing an extended-span builder.
+/// WHY: the diagnostic underlines the bindings rather than the condition. Pipe tokens are single
+///      characters, so their combined range stays inline except for pathological headers, which
+///      return `None` so the caller falls back to the condition span.
+fn binding_suffix_span(
+    token_stream: &AstCursor,
+    open_pipe_index: usize,
+    close_pipe_index: usize,
+) -> Option<SourceSpan> {
+    let open_span = token_stream.span_at(open_pipe_index)?;
+    let close_span = token_stream.span_at(close_pipe_index)?;
+    let start = open_span.local().inline_range()?.start();
+    let end = close_span.local().inline_range()?.end();
+    let local = LocalSpan::exact_inline(start, end.checked_sub(start)?)?;
+    Some(SourceSpan::new(open_span.source(), local))
+}
+
 fn parse_binding_cursor(
     token_stream: &AstCursor,
     binding_start: usize,
@@ -842,6 +956,7 @@ fn parse_range_loop_spec_cursor(
     } = input;
     let saved_position = token_stream.position();
     let result = (|| {
+        validate_range_step_markers(token_stream, range_start, range_end)?;
         token_stream
             .set_position(range_start)
             .map_err(ExpressionParseError::from)?;
@@ -878,8 +993,10 @@ fn parse_range_loop_spec_cursor(
             },
         };
 
+        let range_marker_span;
         let end_kind = match token_stream.current_tag() {
             TokenTag::EXCLUSIVE_RANGE => {
+                range_marker_span = token_stream.current_span();
                 token_stream.advance();
                 if token_stream.current_tag() == TokenTag::AMPERSAND {
                     token_stream.advance();
@@ -903,7 +1020,11 @@ fn parse_range_loop_spec_cursor(
         };
 
         if token_stream.position() >= range_end || token_stream.current_tag() == TokenTag::EOF {
-            return loop_header_error(InvalidLoopHeaderReason::MissingRangeEndBound, start_span);
+            // The range marker is the authored point where the missing bound belonged.
+            return loop_header_error(
+                InvalidLoopHeaderReason::MissingRangeEndBound,
+                Some(range_marker_span),
+            );
         }
 
         let end_start = token_stream.position();
@@ -937,6 +1058,7 @@ fn parse_range_loop_spec_cursor(
                     string_table,
                     path_fork,
                 },
+                ExpectedType::Infer,
                 false,
             ))?
         };
@@ -948,6 +1070,31 @@ fn parse_range_loop_spec_cursor(
                 return loop_header_error(InvalidLoopHeaderReason::MissingRangeStep, by_span);
             }
             let step_start = token_stream.position();
+            // Bounds that already built select the step's literal context here: a float counter
+            // supplies its exact precision, while an integer counter leaves the ordinary `I32`
+            // default. Pending bounds keep the literal until body completion, where the resolved
+            // bounds supply the same context. The step never joins the bounds' numeric domain.
+            let (step_expected, retain_step) = match (&start_operand, &end_operand) {
+                (None, StatementExpression::Built(end)) => (
+                    range_step_literal_destination(
+                        None,
+                        *end,
+                        expression_builder,
+                        type_interner.environment(),
+                    )?,
+                    false,
+                ),
+                (Some(StatementExpression::Built(start)), StatementExpression::Built(end)) => (
+                    range_step_literal_destination(
+                        Some(*start),
+                        *end,
+                        expression_builder,
+                        type_interner.environment(),
+                    )?,
+                    false,
+                ),
+                _ => (ExpectedType::Infer, true),
+            };
             Some(range_operand_from_result(parse_cursor_expression(
                 CursorExpressionInput {
                     token_stream,
@@ -961,7 +1108,8 @@ fn parse_range_loop_spec_cursor(
                     string_table,
                     path_fork,
                 },
-                false,
+                step_expected,
+                retain_step,
             ))?)
         } else {
             None
@@ -989,7 +1137,7 @@ fn parse_range_loop_spec_cursor(
 /// WHY: a range operand's domain is selected at the body root from every permitted use of the
 ///      origins it references, so the slot must survive in its authored form. No receiving
 ///      witness is registered on the origins here: the header's counter is a forward result of
-///      the selected operand domains, never a constraint that selects them.
+///      the selected bound domains, never a constraint that selects them.
 fn range_operand_from_result(
     result: LoopHeaderResult<ExprId>,
 ) -> LoopHeaderResult<StatementExpression> {
@@ -1013,8 +1161,8 @@ fn range_operand_from_result(
 /// WHAT: the counter becomes a pending numeric row whose `RangeCounter` recipe owns the header's
 ///       authored operand slots, and its name is inserted into the loop frame as a pending slot;
 ///       the index binding is always the concrete `I32` declaration.
-/// WHY: the counter's type is a forward result of the range's completed operand domains, so no
-///      binding type can be selected while an operand is still retained. The row keeps the
+/// WHY: the counter's type is a forward result of the range's completed bound domains, so no
+///      binding type can be selected while a bound is still retained. The row keeps the
 ///      counter visible to the body — and resolves before any binding that reads it — without a
 ///      fabricated `TypeId`, an early default witness on the endpoints, or a dependency on the
 ///      loop construct's own body resumption.
@@ -1072,33 +1220,43 @@ fn range_slot_span(
     }
 }
 
+/// The authored range operand slots once every one of them is complete.
+///
+/// WHAT: the completed start, end and step expressions, the authored end kind and the span of an
+///       omitted start.
+/// WHY: the shared range policy consumes exactly these authored positions, so grouping them keeps
+///      the policy's inputs and the parser services it borrows separate without a long signature.
+pub(crate) struct CompletedRangeOperands {
+    pub(crate) start: Option<OwnedExpr>,
+    pub(crate) end: OwnedExpr,
+    pub(crate) end_kind: RangeEndKind,
+    pub(crate) step: Option<OwnedExpr>,
+    pub(crate) omitted_start_span: Option<SourceSpan>,
+}
+
 /// Build one range loop spec from operands that are already complete.
 ///
-/// WHAT: the single shared range policy — derive the domain from the completed operand types,
-///       synthesise an omitted start at that domain, then apply the start/end/step compatibility,
-///       float-step and zero-step rules.
+/// WHAT: the single shared range policy — derive the counter domain from the completed bounds,
+///       validate the independent step against that domain, synthesise an omitted start at the
+///       counter domain, then apply the float-step and zero-step rules.
 /// WHY: a range header whose operands referenced pending numeric origins completes at the body
 ///      root, and the concrete parse path needs exactly the same domain selection and checks, so
 ///      both callers share one implementation instead of a second policy in the completion driver.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the shared range policy keeps the four authored operand slots, the omitted-start span, the parser services and the expression storage as separate inputs"
-)]
 pub(crate) fn range_loop_spec_from_completed_operands(
-    start: Option<OwnedExpr>,
-    end: OwnedExpr,
-    end_kind: RangeEndKind,
-    step: Option<OwnedExpr>,
-    omitted_start_span: Option<SourceSpan>,
-    _context: &ScopeContext,
+    operands: CompletedRangeOperands,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    _string_table: &mut StringTable,
-    _path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<RangeLoopSpec> {
+    let CompletedRangeOperands {
+        start,
+        end,
+        end_kind,
+        step,
+        omitted_start_span,
+    } = operands;
     let type_environment = type_interner.environment();
-    let domain = range_numeric_domain(
+    let selection = range_numeric_domain(
         start
             .map(|start| expression_builder.view_owned(start))
             .transpose()?,
@@ -1107,20 +1265,29 @@ pub(crate) fn range_loop_spec_from_completed_operands(
             .transpose()?,
         type_environment,
     )?;
+    let domain = selection.domain;
     if domain.is_binary_float() && step.is_none() {
         return loop_header_error(
             InvalidLoopHeaderReason::FloatRangeMissingStep,
             expression_builder.view_owned(end)?.span(),
         );
     }
-    if let Some(step_id) = step
-        && is_zero_numeric_literal(expression_builder.view_owned(step_id)?, const_values)
-    {
-        return loop_header_error(
-            InvalidLoopHeaderReason::ZeroRangeStep,
-            expression_builder.view_owned(step_id)?.span(),
-        );
-    }
+    // The zero check runs before any float-step conversion so a folded `-0.0` remains a constant.
+    let step = match step {
+        Some(step_id) => {
+            if is_zero_numeric_literal(expression_builder.view_owned(step_id)?, const_values) {
+                return loop_header_error(
+                    InvalidLoopHeaderReason::ZeroLoopStep,
+                    expression_builder.view_owned(step_id)?.span(),
+                );
+            }
+            Some(match selection.step_destination {
+                Some(destination) => expression_builder.coerced(step_id, destination)?,
+                None => step_id,
+            })
+        }
+        None => None,
+    };
 
     let start = match start {
         Some(start) => start,
@@ -1150,21 +1317,34 @@ pub(crate) fn range_loop_spec_from_completed_operands(
 
 fn range_operand_domain(
     operand: ExpressionView<'_>,
-    kind: RangeOperandKind,
+    kind: LoopOperandKind,
     type_environment: &TypeEnvironment,
 ) -> LoopHeaderResult<NumericScalar> {
     let operand_type = operand.require_single(ValueReceiverContext::OperatorOperand)?;
-    let domain = NumericScalar::from_type_id(operand_type, type_environment);
-    match domain {
-        Some(domain) if domain.is_integer() || domain.is_binary_float() => Ok(domain),
-        _ => Err(calls_data::invalid_range_operand(
+    match range_bound_domain(operand, type_environment) {
+        Some(domain) => Ok(domain),
+        None => Err(calls_data::invalid_loop_operand(
             kind,
             operand_type,
-            InvalidRangeOperandReason::NotNumeric,
+            InvalidLoopOperandReason::BoundNotNumeric,
             operand.span(),
         )
         .into()),
     }
+}
+
+/// The counter domain selected by a range's bounds and the conversion its step needs.
+///
+/// WHAT: the domain comes from start and end alone; the step is then validated against that
+///       domain and either keeps its own type (integer counters) or converts to the counter type
+///       (binary-float counters).
+/// WHY: a step never selects or widens the counter. Keeping both facts in one selection record
+///      lets the shared policy apply the step conversion before the finished spec leaves AST.
+struct RangeNumericSelection {
+    domain: NumericScalar,
+    /// The counter type a binary-float step must convert to, when the step's own precision is
+    /// narrower. `None` for integer counters and already-matching float steps.
+    step_destination: Option<TypeId>,
 }
 
 fn range_numeric_domain(
@@ -1172,36 +1352,166 @@ fn range_numeric_domain(
     end: ExpressionView<'_>,
     step: Option<ExpressionView<'_>>,
     type_environment: &TypeEnvironment,
-) -> LoopHeaderResult<NumericScalar> {
-    let end_domain = range_operand_domain(end, RangeOperandKind::End, type_environment)?;
+) -> LoopHeaderResult<RangeNumericSelection> {
+    let end_domain = range_operand_domain(end, LoopOperandKind::End, type_environment)?;
     let start_domain = match start {
-        Some(operand) => range_operand_domain(operand, RangeOperandKind::Start, type_environment)?,
+        Some(operand) => range_operand_domain(operand, LoopOperandKind::Start, type_environment)?,
         None => end_domain,
     };
-    let step_domain = step
-        .map(|operand| range_operand_domain(operand, RangeOperandKind::Step, type_environment))
-        .transpose()?;
-    let Some(domain) = range_iteration_domain(start_domain, end_domain, step_domain) else {
-        // Applying the selector to the bounds alone tells whether the explicit step introduced
-        // the incompatibility or the bounds already disagreed.
-        let (operand, offender) = match step {
-            Some(step_operand)
-                if range_iteration_domain(start_domain, end_domain, None).is_some() =>
-            {
-                (RangeOperandKind::Step, step_operand)
-            }
-            _ => (RangeOperandKind::End, end),
-        };
-        return Err(calls_data::invalid_range_operand(
-            operand,
-            offender.value_type_id()?,
-            InvalidRangeOperandReason::IncompatibleDomain,
-            offender.span(),
+    let Some(domain) = range_iteration_domain(start_domain, end_domain) else {
+        return Err(calls_data::invalid_loop_operand(
+            LoopOperandKind::End,
+            end.value_type_id()?,
+            InvalidLoopOperandReason::BoundIncompatibleDomain,
+            end.span(),
         )
         .into());
     };
+    let step_destination = step
+        .map(|step_operand| range_step_destination(step_operand, domain, type_environment))
+        .transpose()?
+        .flatten();
 
-    Ok(domain)
+    Ok(RangeNumericSelection {
+        domain,
+        step_destination,
+    })
+}
+
+/// Validate one range step against the counter domain selected by the bounds.
+///
+/// WHAT: an integer counter accepts only an independent signed fixed-width integer step, which
+///       keeps its own type. A binary-float counter accepts a binary float at the same or narrower
+///       precision and reports the counter type the step must convert to.
+/// WHY: step direction and magnitude are independent of the counter, so an unsigned, float,
+///       `Byte`, `Dec` or non-numeric integer-range step is an authored type error at the step
+///       position, never a reason to retype the counter.
+fn range_step_destination(
+    step: ExpressionView<'_>,
+    counter: NumericScalar,
+    type_environment: &TypeEnvironment,
+) -> LoopHeaderResult<Option<TypeId>> {
+    let NumericScalar::Fixed(counter_scalar) = counter else {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "a range counter domain is always a fixed scalar"
+        )
+    };
+
+    match counter_scalar.class() {
+        FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
+            require_signed_integer_step(step, type_environment)?;
+            Ok(None)
+        }
+
+        FixedScalarClass::BinaryFloat => {
+            let step_type = step.require_single(ValueReceiverContext::OperatorOperand)?;
+            let step_domain = NumericScalar::from_type_id(step_type, type_environment);
+            let step_scalar = match step_domain {
+                Some(NumericScalar::Fixed(scalar))
+                    if scalar.class() == FixedScalarClass::BinaryFloat
+                        && scalar.bit_width() <= counter_scalar.bit_width() =>
+                {
+                    scalar
+                }
+                _ => {
+                    return Err(calls_data::invalid_loop_operand(
+                        LoopOperandKind::Step,
+                        step_type,
+                        InvalidLoopOperandReason::StepNotConvertibleToFloatCounter,
+                        step.span(),
+                    )
+                    .into());
+                }
+            };
+            Ok((step_scalar != counter_scalar).then(|| counter.type_id(type_environment)))
+        }
+
+        FixedScalarClass::Octet => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "a Byte operand has no range counter domain"
+        ),
+    }
+}
+
+/// Require one loop step to be a signed fixed-width integer at its authored position.
+///
+/// WHAT: returns the step's single type when it is a signed integer, otherwise the shared
+///       step-not-signed-integer diagnostic at the step span.
+/// WHY: range steps against integer counters and collection steps share one typing rule, so both
+///      owners call this predicate instead of restating it.
+fn require_signed_integer_step(
+    step: ExpressionView<'_>,
+    type_environment: &TypeEnvironment,
+) -> Result<TypeId, DiagnosticDraft> {
+    let step_type = step.require_single(ValueReceiverContext::OperatorOperand)?;
+    let is_signed_integer = matches!(
+        NumericScalar::from_type_id(step_type, type_environment),
+        Some(NumericScalar::Fixed(scalar))
+            if scalar.class() == FixedScalarClass::SignedInteger
+    );
+    if is_signed_integer {
+        return Ok(step_type);
+    }
+    Err(calls_data::invalid_loop_operand(
+        LoopOperandKind::Step,
+        step_type,
+        InvalidLoopOperandReason::StepNotSignedInteger,
+        step.span(),
+    ))
+}
+
+/// The numeric literal context one range step takes from its bounds alone.
+///
+/// WHAT: a binary-float counter supplies that exact counter type as the step literal's
+///       destination; an integer counter supplies no destination, so an untyped whole step
+///       literal keeps its independent `I32` default rather than the counter type.
+/// WHY: completion drivers complete a retained step after the bounds but before the shared range
+///      policy runs. This hint makes an untyped float step materialise at the counter precision
+///      without ever joining the bounds' domain; the policy still owns final validation and any
+///      conversion. An invalid bound pair yields no hint and is reported by that policy.
+pub(crate) fn range_step_literal_destination(
+    start: Option<ExprId>,
+    end: ExprId,
+    expression_builder: &AstExpressionBuilder,
+    type_environment: &TypeEnvironment,
+) -> LoopHeaderResult<ExpectedType> {
+    let end_domain = range_bound_domain(expression_builder.view(end)?, type_environment);
+    let start_domain = match start {
+        Some(start) => range_bound_domain(expression_builder.view(start)?, type_environment),
+        None => end_domain,
+    };
+    let Some(domain) = start_domain
+        .zip(end_domain)
+        .and_then(|(start, end)| range_iteration_domain(start, end))
+    else {
+        return Ok(ExpectedType::Infer);
+    };
+
+    if domain.is_binary_float() {
+        Ok(ExpectedType::NumericLiteral(
+            domain.type_id(type_environment),
+        ))
+    } else {
+        Ok(ExpectedType::Infer)
+    }
+}
+
+/// One completed range bound's contribution to the counter domain.
+///
+/// WHAT: returns the bound's integer or binary-float domain, or `None` when the completed value
+///       is not a legal bound type.
+/// WHY: the shared policy and the literal-step hint must classify bounds identically, so one
+///      classifier owns the numeric filter instead of each caller repeating it.
+fn range_bound_domain(
+    operand: ExpressionView<'_>,
+    type_environment: &TypeEnvironment,
+) -> Option<NumericScalar> {
+    let [type_id] = operand.success_types() else {
+        return None;
+    };
+    let domain = NumericScalar::from_type_id(*type_id, type_environment)?;
+    (domain.is_integer() || domain.is_binary_float()).then_some(domain)
 }
 
 fn contextual_range_zero(
@@ -1241,11 +1551,15 @@ fn contextual_range_zero(
 ///       expression at that position, so it owns a numeric deferral raised by the shared parser.
 ///       `retain_pending_numeric_fragment` keeps a pending literal origin unresolved past this
 ///       position: a collection source passes true so its item's element class types the literal
-///       before body-root defaults run. Conditions and range operands pass false.
+///       before body-root defaults run, and a range step passes true only when its bounds are
+///       still pending, so the resolved bounds can type its literal at body completion. A step
+///       whose bounds already built receives that context directly. Conditions and range bounds
+///       pass false.
 /// WHY: the retained fragment must be spliceable verbatim at the body root, which is only legal
 ///      when the position owned the whole fragment instead of swallowing enclosing structure.
 fn parse_cursor_expression(
     input: CursorExpressionInput<'_, '_, '_, '_>,
+    expected_type: ExpectedType,
     retain_pending_numeric_fragment: bool,
 ) -> LoopHeaderResult<ExprId> {
     let CursorExpressionInput {
@@ -1265,7 +1579,7 @@ fn parse_cursor_expression(
     }
 
     parse_cursor_expression_window(token_stream, expression_start, expression_end, |stream| {
-        let mut expected_type = ExpectedType::Infer;
+        let mut expected_type = expected_type;
         let mut cast_target_context = CastTargetContext::None;
         let input = ExpressionParseInput::without_boundary_catch(
             ExpressionParseResources {
@@ -1358,14 +1672,14 @@ fn parse_cursor_expression_window<T>(
 
 /// Retain one conditional loop condition whose fragment still references a pending origin.
 ///
-/// WHAT: takes the complete deferral and records the exact `Bool` receiving expectation.
-/// WHY: a conditional loop's condition is a `Bool` predicate; the body root completes the
-///      fragment and validates the resolved expression against `Bool`, exactly like the
-///      concrete path validates a built condition.
-fn retain_loop_condition(deferral: NumericDeferral, bool_type_id: TypeId) -> StatementExpression {
+/// WHAT: keeps the fragment's own inferred completion without registering a `Bool` receiver.
+/// WHY: a resolved non-`Bool` condition must be reported as a condition mismatch at the body
+///      root, not as a numeric receiver conflict, so the loop validates the completed type through
+///      the shared condition owner exactly like the concrete path.
+fn retain_loop_condition(deferral: NumericDeferral) -> StatementExpression {
     StatementExpression::Retained(deferred_numeric_expression(
         deferral.items,
-        ExpectedType::Known(bool_type_id),
+        ExpectedType::Infer,
         deferral.value_mode,
         deferral.span,
         deferral.suffix,
@@ -1493,15 +1807,177 @@ fn retained_known_result_type(
 ///      a target, never the origin's selected type, so the diagnostic never invents one.
 fn collection_source_diagnostic(
     deferral: NumericDeferral,
+    bindings_span: Option<SourceSpan>,
     context: &ScopeContext,
     environment: &TypeEnvironment,
     expression_builder: &AstExpressionBuilder,
 ) -> LoopHeaderResult<DiagnosticDraft> {
     let found_type =
         retained_known_result_type(&deferral.items, context, environment, expression_builder)?;
-    Ok(choices_control_flow::invalid_loop_header(
-        InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type },
-        deferral.span,
+    let (reason, span) = if found_type == Some(environment.builtins().bool) {
+        (
+            InvalidLoopHeaderReason::BindingsOnConditionalLoop,
+            bindings_span.or(deferral.span),
+        )
+    } else {
+        (
+            InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type },
+            deferral.span,
+        )
+    };
+    Ok(choices_control_flow::invalid_loop_header(reason, span))
+}
+
+/// Which owner reports one built collection step's type and static-zero violations.
+///
+/// WHY: a header that classified its source at parse time owns its step diagnostic immediately,
+///      while a header whose source completes at the body root must report the source diagnostic
+///      first, so completion owns the step check and its source-then-step order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollectionStepValidation {
+    AtHeader,
+    AtCompletion,
+}
+
+/// Parse one collection header's optional `by` step.
+///
+/// WHAT: the authored step expression when the header carries a `by` marker, otherwise `None`.
+/// WHY: every collection header path parses the step after its source and under the same
+///      deferral rules, so one helper keeps that position and those rules in a single place.
+fn parse_optional_collection_step(
+    token_stream: &mut AstCursor,
+    step_split: Option<&CursorCollectionStepSplit>,
+    core_end: usize,
+    parser: &mut LoopHeaderParser<'_, '_>,
+    validation: CollectionStepValidation,
+) -> LoopHeaderResult<Option<StatementExpression>> {
+    match step_split {
+        Some(split) => Ok(Some(parse_collection_step_cursor(
+            token_stream,
+            split.by_index,
+            core_end,
+            parser,
+            validation,
+        )?)),
+        None => Ok(None),
+    }
+}
+
+/// Parse one collection loop step after its `by` marker.
+///
+/// WHAT: the whole authored expression between `by` and the binding suffix or header end.
+/// WHY: the step is an independent signed integer expression evaluated once after the source and
+///      its length, so it takes the ordinary `I32` numeric default rather than any item context.
+///      A fragment that still references a pending numeric origin stays retained for body-root
+///      completion, exactly like a range step.
+fn parse_collection_step_cursor(
+    token_stream: &mut AstCursor,
+    by_index: usize,
+    core_end: usize,
+    parser: &mut LoopHeaderParser<'_, '_>,
+    validation: CollectionStepValidation,
+) -> LoopHeaderResult<StatementExpression> {
+    let by_span = token_stream.span_at(by_index);
+    if by_index + 1 >= core_end {
+        return loop_header_error(InvalidLoopHeaderReason::MissingCollectionStep, by_span);
+    }
+
+    let slot = match parse_cursor_expression(
+        CursorExpressionInput {
+            token_stream,
+            expression_start: by_index + 1,
+            expression_end: core_end,
+            context: parser.scope_context,
+            type_interner: parser.type_interner,
+            expression_builder: parser.expression_builder,
+            const_values: parser.const_values,
+            value_mode: &ValueMode::ImmutableReference,
+            string_table: parser.string_table,
+            path_fork: parser.path_fork,
+        },
+        ExpectedType::Infer,
+        false,
+    ) {
+        Ok(expression) => StatementExpression::Built(expression),
+        Err(error) => {
+            let deferral = error.take_numeric_deferral("a loop collection step")?;
+            StatementExpression::Retained(deferred_numeric_expression(
+                deferral.items,
+                ExpectedType::Infer,
+                deferral.value_mode,
+                deferral.span,
+                deferral.suffix,
+            ))
+        }
+    };
+
+    if validation == CollectionStepValidation::AtHeader
+        && let StatementExpression::Built(expression) = &slot
+    {
+        validate_collection_step(
+            parser.expression_builder.view(*expression)?,
+            parser.type_interner.environment(),
+            parser.const_values,
+        )?;
+    }
+    Ok(slot)
+}
+
+/// Validate one built collection loop step.
+///
+/// WHAT: the step must be a signed fixed-width integer (`I8` to `I64`), and a statically known
+///       zero, including `-0`, is rejected at the step's authored span.
+/// WHY: the step is independent of the item type and of any counter domain, so one shared check
+///      owns the type and static-zero rules for the parse-time and deferred completion paths.
+///      The diagnostic family is the same one range steps use, at the authored step position.
+pub(crate) fn validate_collection_step(
+    step: ExpressionView<'_>,
+    type_environment: &TypeEnvironment,
+    const_values: &ConstValueStore,
+) -> Result<(), DiagnosticDraft> {
+    require_signed_integer_step(step, type_environment)?;
+    if is_zero_numeric_literal(step, const_values) {
+        return Err(choices_control_flow::invalid_loop_header(
+            InvalidLoopHeaderReason::ZeroLoopStep,
+            step.span(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate one completed collection loop source.
+///
+/// WHAT: succeeds for a collection, reports `StepOnConditionalLoop` at the authored `by` marker
+///       when the source completed to `Bool`, and otherwise reports the ordinary invalid-source
+///       diagnostic at the completed expression's span.
+/// WHY: a header whose source still references pending numeric origins defers the classification to
+///      the body root, so both completion owners — statement AST and template TIR — must apply the
+///      same contract the concrete parse path applies, including where each diagnostic points.
+pub(crate) fn validate_completed_collection_source(
+    source: ExpressionView<'_>,
+    type_environment: &TypeEnvironment,
+    step_marker_span: Option<SourceSpan>,
+) -> Result<(), DiagnosticDraft> {
+    let source_type = source.require_single(ValueReceiverContext::General)?;
+    if type_environment
+        .collection_element_type(source_type)
+        .is_some()
+    {
+        return Ok(());
+    }
+    if let Some(step_marker_span) = step_marker_span
+        && source_type == type_environment.builtins().bool
+    {
+        return Err(choices_control_flow::invalid_loop_header(
+            InvalidLoopHeaderReason::StepOnConditionalLoop,
+            Some(step_marker_span),
+        ));
+    }
+    Err(choices_control_flow::invalid_loop_header(
+        InvalidLoopHeaderReason::CollectionSourceNotCollection {
+            found_type: Some(source_type),
+        },
+        source.span(),
     ))
 }
 
@@ -1516,6 +1992,7 @@ fn collection_source_diagnostic(
 ///      source literal's element class; any other retained fragment reports the source constraint.
 fn parse_collection_iterable_cursor(
     input: CursorExpressionInput<'_, '_, '_, '_>,
+    bindings_span: Option<SourceSpan>,
 ) -> LoopHeaderResult<CollectionIterable> {
     let CursorExpressionInput {
         token_stream,
@@ -1547,6 +2024,7 @@ fn parse_collection_iterable_cursor(
             string_table,
             path_fork,
         },
+        ExpectedType::Infer,
         true,
     ) {
         Ok(expression) => expression,
@@ -1583,6 +2061,7 @@ fn parse_collection_iterable_cursor(
             let Some(item_type_id) = retained_element_type else {
                 return Err(collection_source_diagnostic(
                     deferral,
+                    bindings_span,
                     context,
                     type_interner.environment(),
                     expression_builder,
@@ -1605,6 +2084,12 @@ fn parse_collection_iterable_cursor(
     let collection_view = expression_builder.view(collection_expression)?;
     let source_type = collection_view.require_single(ValueReceiverContext::General)?;
     let Some(item_type_id) = type_environment.collection_element_type(source_type) else {
+        if source_type == type_environment.builtins().bool {
+            return loop_header_error(
+                InvalidLoopHeaderReason::BindingsOnConditionalLoop,
+                bindings_span.or_else(|| collection_view.span()),
+            );
+        }
         return loop_header_error(
             InvalidLoopHeaderReason::CollectionSourceNotCollection {
                 found_type: Some(source_type),
@@ -1651,6 +2136,7 @@ fn parses_as_collection_cursor(
             string_table,
             path_fork,
         },
+        ExpectedType::Infer,
         true,
     ) {
         Ok(expression) => expression,
@@ -1791,6 +2277,112 @@ fn find_top_level_cursor_token(
     Ok(None)
 }
 
+/// Every top-level separator index of one header window, using the expression parser's depth.
+///
+/// WHAT: a collection header needs the first `by` and proof that no second one is authored.
+/// WHY: the source and step windows must follow the same delimiter depth as
+///      `create_expression_until`, so a `by` nested in a template or call argument never splits
+///      the header.
+fn collect_top_level_expression_boundary_cursor_indexes(
+    token_stream: &AstCursor,
+    start: usize,
+    end: usize,
+    target: TokenTag,
+) -> Result<Vec<usize>, InfrastructureFailure> {
+    let mut walk = header_probe_walk(token_stream, start, end)?;
+    let mut depth = ExpressionBoundaryDepth::default();
+    let mut indexes = Vec::new();
+    while !walk.is_at_end() {
+        let tag = walk.current_tag();
+        if depth.is_top_level() && tag == target {
+            indexes.push(walk.position());
+        }
+        let is_eof = tag == TokenTag::EOF;
+        depth.step_tag(tag);
+        if is_eof {
+            break;
+        }
+        walk.advance();
+    }
+    Ok(indexes)
+}
+
+/// Split one collection header at its single top-level `by`.
+///
+/// WHAT: no `by` leaves the whole window as the source; one `by` yields the step split; a second
+///      top-level `by` is reported at that authored token.
+/// WHY: the collection step is optional, so the header must distinguish an omitted step from a
+///      repeated marker instead of letting the expression parser blame the step expression.
+fn collection_step_split_cursor(
+    token_stream: &AstCursor,
+    header_start: usize,
+    core_end: usize,
+) -> LoopHeaderResult<Option<CursorCollectionStepSplit>> {
+    let by_indices = collect_top_level_expression_boundary_cursor_indexes(
+        token_stream,
+        header_start,
+        core_end,
+        TokenTag::BY,
+    )?;
+    match by_indices.as_slice() {
+        [] => Ok(None),
+        [by_index] => Ok(Some(CursorCollectionStepSplit {
+            by_index: *by_index,
+        })),
+        [_, repeated, ..] => loop_header_error(
+            InvalidLoopHeaderReason::RepeatedLoopStep,
+            token_stream.span_at(*repeated),
+        ),
+    }
+}
+
+/// Reject a misplaced or repeated range step marker before any operand parses.
+///
+/// WHAT: a top-level `by` before the range marker is misplaced, and a second top-level `by` is a
+///       repeated step. The diagnostic points at the offending authored marker.
+/// WHY: the start and end operand parsers stop at `to` and `by` only through their own windows, so
+///       an early or repeated marker would otherwise surface as a generic expression error from
+///       whichever operand swallowed it.
+fn validate_range_step_markers(
+    token_stream: &AstCursor,
+    range_start: usize,
+    range_end: usize,
+) -> LoopHeaderResult<()> {
+    let by_indices = collect_top_level_expression_boundary_cursor_indexes(
+        token_stream,
+        range_start,
+        range_end,
+        TokenTag::BY,
+    )?;
+    let Some(first_by) = by_indices.first().copied() else {
+        return Ok(());
+    };
+    let first_range_marker = collect_top_level_expression_boundary_cursor_indexes(
+        token_stream,
+        range_start,
+        range_end,
+        TokenTag::EXCLUSIVE_RANGE,
+    )?
+    .first()
+    .copied();
+    let Some(first_range_marker) = first_range_marker else {
+        return Ok(());
+    };
+    if first_by < first_range_marker {
+        return loop_header_error(
+            InvalidLoopHeaderReason::MisplacedLoopStep,
+            token_stream.span_at(first_by),
+        );
+    }
+    if let Some(repeated_by) = by_indices.get(1) {
+        return loop_header_error(
+            InvalidLoopHeaderReason::RepeatedLoopStep,
+            token_stream.span_at(*repeated_by),
+        );
+    }
+    Ok(())
+}
+
 /// Find a range-step separator using the same delimiter depth as
 /// [`create_expression_until`].
 ///
@@ -1868,10 +2460,10 @@ fn token_string_id_at(
 
 /// The exact counter domain of one already-built range loop spec.
 ///
-/// WHAT: returns the counter's canonical type from the spec's already-selected iteration domain.
+/// WHAT: returns the counter's canonical type from the spec's bounds-selected domain.
 /// WHY: a retained range header's counter is resolved at the body root, after the shared policy
 ///      has built and checked the spec, so both the concrete and the resumed path read that one
-///      selected domain instead of selecting a second time from the spec's operands.
+///      selected domain instead of selecting a second time from the spec's bounds.
 pub(crate) fn range_binding_type(
     range: &RangeLoopSpec,
     type_environment: &TypeEnvironment,
@@ -1976,8 +2568,11 @@ fn declare_loop_binding(
     Ok(declaration)
 }
 
-// Detect literal zero so we can reject `by 0` ranges with a targeted diagnostic.
-fn is_zero_numeric_literal(expression: ExpressionView<'_>, const_values: &ConstValueStore) -> bool {
+// Detect a static zero so `by 0` ranges and collection steps get a targeted diagnostic.
+pub(crate) fn is_zero_numeric_literal(
+    expression: ExpressionView<'_>,
+    const_values: &ConstValueStore,
+) -> bool {
     let ExpressionOperationView::Constant(value) = expression.operation() else {
         return false;
     };

@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " uint_range_mixed_step_full_width u64=18446744073709551615/true/9223372036854775807 u8=200/false/200 i8=-5/false/-5 i64=0/true/-9223372036854775808 wrong=false i32=0/3/9 u8_step=0/200"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@page.moth"
+line = 16
+column = 1

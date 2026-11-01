@@ -1,5 +1,5 @@
-A collection loop visits each value in a collection, from the first item to the
-last.
+A collection loop visits the values in a collection, from the first item to the
+last by default.
 
 [codeblock, $code("moth"):
     names = {"Priya", "Rob", "Emmy"}
@@ -14,7 +14,7 @@ refers to the current item.
 
 ### Add an index when you need one
 
-A second name receives the zero-based position of the item.
+A second name receives the item's index in the source.
 
 [codeblock, $code("moth"):
     names = {"Priya", "Rob", "Emmy"}
@@ -24,9 +24,26 @@ A second name receives the zero-based position of the item.
     ;
 ]
 
-The first item has index `0`.
+Without a step, the first item has index `0`, the second has index `1` and so
+on. The index binding has type `I32`.
 
-The position binding has type `I32`.
+### Visit every second item
+
+Add `by` after the source to set a signed step.
+
+[codeblock, $code("moth"):
+    names = {"Priya", "Rob", "Emmy"}
+
+    loop names by 2 |name, index|:
+        io.line([: [index]: [name]])
+    ;
+]
+
+This visits `Priya` at index `0` and `Emmy` at index `2`. The index binding
+still reports the item's real position in the source.
+
+A negative step starts at the last item and walks backwards. The step must be a
+signed whole number and cannot be zero.
 
 ### Ignore the item when only the repetition matters
 

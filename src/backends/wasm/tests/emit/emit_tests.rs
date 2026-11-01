@@ -6,8 +6,9 @@ use crate::backends::wasm::emit::sections::{
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::{
     IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
-    WasmIntegerPowerScratch, WasmIntegerScratch, WasmLirStmt, WasmLirTerminator,
-    WasmNumericOperationOperands,
+    WasmIntegerPowerScratch, WasmIntegerRangeCandidate, WasmIntegerRangeCandidateScratch,
+    WasmIntegerScratch, WasmLirStmt, WasmLirTerminator, WasmNumericOperationOperands,
+    WasmRangeCandidateKind,
 };
 use crate::backends::wasm::lir::linkage::{
     WasmExport, WasmExportKind, WasmFunctionLinkage, WasmImport, WasmImportKind,
@@ -608,6 +609,243 @@ fn checked_integer_machine_boundaries_execute_with_native_traps() {
                 "{name} returned an unexpected result"
             );
         }
+    }
+}
+
+#[test]
+fn integer_range_candidates_execute_widened_distance_boundaries() {
+    let cases = [
+        IntegerRangeCandidateCase {
+            name: "i64_ascending",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: 10,
+            step: 2,
+            end: 15,
+            inclusive: false,
+            expected: "12,1",
+        },
+        IntegerRangeCandidateCase {
+            name: "i64_ascending_exclusive_boundary",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: 14,
+            step: 2,
+            end: 15,
+            inclusive: false,
+            expected: "0,0",
+        },
+        IntegerRangeCandidateCase {
+            name: "i64_ascending_inclusive_endpoint",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: 14,
+            step: 2,
+            end: 16,
+            inclusive: true,
+            expected: "16,1",
+        },
+        IntegerRangeCandidateCase {
+            name: "i64_descending",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: 5,
+            step: -2,
+            end: 0,
+            inclusive: false,
+            expected: "3,1",
+        },
+        // `0 - I64::MIN` wraps to 2^63, which must compare as an unsigned magnitude.
+        IntegerRangeCandidateCase {
+            name: "i64_min_step_reaches_min",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: 0,
+            step: i64::MIN,
+            end: i64::MIN,
+            inclusive: true,
+            expected: "-9223372036854775808,1",
+        },
+        // Both extrema wrap: distance is 1 and the magnitude is 2^63, so no successor exists.
+        IntegerRangeCandidateCase {
+            name: "i64_min_step_from_min",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: i64::MIN,
+            step: i64::MIN,
+            end: i64::MAX,
+            inclusive: false,
+            expected: "0,0",
+        },
+        IntegerRangeCandidateCase {
+            name: "i64_max_step_never_materialises_overflow",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: i64::MAX - 1,
+            step: i64::MAX,
+            end: i64::MAX,
+            inclusive: true,
+            expected: "0,0",
+        },
+        IntegerRangeCandidateCase {
+            name: "i64_max_step_exact",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: i64::MAX - 1,
+            step: 1,
+            end: i64::MAX,
+            inclusive: true,
+            expected: "9223372036854775807,1",
+        },
+        // `U64` descent to zero: the bit pattern of `u64::MAX - 1` is `-2`.
+        IntegerRangeCandidateCase {
+            name: "u64_descends_to_zero",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: false,
+            step_carrier: WasmAbiType::I64,
+            current: -1,
+            step: -1,
+            end: 0,
+            inclusive: false,
+            expected: "-2,1",
+        },
+        // A narrow counter rides the I32 carrier but widens for the stride comparison.
+        IntegerRangeCandidateCase {
+            name: "i8_counter_with_i64_step",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I64,
+            current: 100,
+            step: 1000,
+            end: 127,
+            inclusive: true,
+            expected: "0,0",
+        },
+        IntegerRangeCandidateCase {
+            name: "i8_counter_inclusive_endpoint",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I32,
+            current: 126,
+            step: 1,
+            end: 127,
+            inclusive: true,
+            expected: "127,1",
+        },
+        IntegerRangeCandidateCase {
+            name: "i8_underflow_guard",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I32,
+            current: -128,
+            step: -1,
+            end: -128,
+            inclusive: true,
+            expected: "0,0",
+        },
+        IntegerRangeCandidateCase {
+            name: "i8_descending_endpoint",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: true,
+            step_carrier: WasmAbiType::I32,
+            current: -127,
+            step: -1,
+            end: -128,
+            inclusive: true,
+            expected: "-128,1",
+        },
+        IntegerRangeCandidateCase {
+            name: "u8_zero_extends_counter",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: false,
+            step_carrier: WasmAbiType::I32,
+            current: 254,
+            step: 5,
+            end: 255,
+            inclusive: false,
+            expected: "0,0",
+        },
+        IntegerRangeCandidateCase {
+            name: "u8_inclusive_endpoint",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: false,
+            step_carrier: WasmAbiType::I32,
+            current: 254,
+            step: 1,
+            end: 255,
+            inclusive: true,
+            expected: "255,1",
+        },
+        // A `U32` counter above 2^31 rides the I32 carrier. Widening must zero-extend, so the
+        // inclusive endpoint stays one step away and the candidate is 0xFFFF_FFFF (`-1` as i32).
+        IntegerRangeCandidateCase {
+            name: "u32_carrier_inclusive_endpoint",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: false,
+            step_carrier: WasmAbiType::I32,
+            current: -2,
+            step: 1,
+            end: -1,
+            inclusive: true,
+            expected: "-1,1",
+        },
+        // A descending `U32` counter above 2^31 with a stride larger than its unsigned distance.
+        // Zero-extension makes the distance short and the candidate out of range; a signed
+        // extension would wrap the distance and wrongly commit `-1`.
+        IntegerRangeCandidateCase {
+            name: "u32_carrier_short_unsigned_distance",
+            counter_carrier: WasmAbiType::I32,
+            counter_signed: false,
+            step_carrier: WasmAbiType::I64,
+            current: i32::MIN as i64,
+            step: -2_147_483_649,
+            end: 0,
+            inclusive: false,
+            expected: "0,0",
+        },
+        // A `U64` distance above `i64::MAX` compares as an unsigned magnitude, so the `I64::MAX`
+        // step commits instead of failing a signed range check.
+        IntegerRangeCandidateCase {
+            name: "u64_ascending_distance_above_signed_max",
+            counter_carrier: WasmAbiType::I64,
+            counter_signed: false,
+            step_carrier: WasmAbiType::I64,
+            current: 0,
+            step: i64::MAX,
+            end: -1,
+            inclusive: true,
+            expected: "9223372036854775807,1",
+        },
+    ];
+
+    let module = build_integer_range_candidate_module(&cases);
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("integer range candidate module should emit");
+    validate_wasm(&result.wasm_bytes);
+
+    let export_specs = cases
+        .iter()
+        .map(|case| (case.name, None))
+        .collect::<Vec<_>>();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
+
+    assert_eq!(actual.len(), cases.len());
+    for (actual, case) in actual.iter().zip(cases) {
+        assert_eq!(actual.0, case.name);
+        assert_eq!(actual.1, "ok", "{} should not trap", case.name);
+        assert_eq!(
+            actual.2, case.expected,
+            "{} returned an unexpected candidate/valid pair",
+            case.name
+        );
     }
 }
 
@@ -2621,6 +2859,128 @@ fn local(id: u32, ty: WasmAbiType, name: &str) -> WasmLirLocal {
         ty,
         role: WasmLocalRole::Temp,
     }
+}
+
+#[derive(Clone, Copy)]
+struct IntegerRangeCandidateCase {
+    name: &'static str,
+    counter_carrier: WasmAbiType,
+    counter_signed: bool,
+    step_carrier: WasmAbiType,
+    current: i64,
+    step: i64,
+    end: i64,
+    inclusive: bool,
+    /// Expected `String([candidate, in_range])` from the exported function.
+    expected: &'static str,
+}
+
+fn build_integer_range_candidate_module(cases: &[IntegerRangeCandidateCase]) -> WasmLirModule {
+    let mut module = WasmLirModule::default();
+    for (function_index, case) in cases.iter().enumerate() {
+        let (function, export) =
+            integer_range_candidate_function(WasmLirFunctionId(function_index as u32), case);
+        module.functions.push(function);
+        module.exports.push(export);
+    }
+    module
+}
+
+fn integer_range_candidate_function(
+    function_id: WasmLirFunctionId,
+    case: &IntegerRangeCandidateCase,
+) -> (WasmLirFunction, WasmExport) {
+    let current = WasmLirLocalId(0);
+    let step = WasmLirLocalId(1);
+    let end = WasmLirLocalId(2);
+    let candidate = WasmLirLocalId(3);
+    let in_range = WasmLirLocalId(4);
+
+    let mut locals = vec![
+        local(current.0, case.counter_carrier, "current"),
+        local(step.0, case.step_carrier, "step"),
+        local(end.0, case.counter_carrier, "end"),
+        local(candidate.0, case.counter_carrier, "candidate"),
+        local(in_range.0, WasmAbiType::I32, "in_range"),
+    ];
+    let scratch = WasmIntegerRangeCandidateScratch {
+        current: push_scalar_local(&mut locals, WasmAbiType::I64, "widened_current"),
+        step: push_scalar_local(&mut locals, WasmAbiType::I64, "widened_step"),
+        end: push_scalar_local(&mut locals, WasmAbiType::I64, "widened_end"),
+        ascending: push_scalar_local(&mut locals, WasmAbiType::I32, "ascending"),
+        distance: push_scalar_local(&mut locals, WasmAbiType::I64, "distance"),
+        magnitude: push_scalar_local(&mut locals, WasmAbiType::I64, "magnitude"),
+        candidate: push_scalar_local(&mut locals, WasmAbiType::I64, "successor"),
+    };
+
+    let mut statements = Vec::new();
+    push_candidate_const(&mut statements, current, case.counter_carrier, case.current);
+    push_candidate_const(&mut statements, step, case.step_carrier, case.step);
+    push_candidate_const(&mut statements, end, case.counter_carrier, case.end);
+    statements.push(WasmLirStmt::RangeCandidate {
+        candidate_dst: candidate,
+        in_range_dst: in_range,
+        current,
+        step,
+        end,
+        inclusive: case.inclusive,
+        kind: WasmRangeCandidateKind::Integer(WasmIntegerRangeCandidate {
+            counter_carrier: case.counter_carrier,
+            counter_signed: case.counter_signed,
+            step_carrier: case.step_carrier,
+            scratch,
+        }),
+    });
+
+    let function = WasmLirFunction {
+        id: function_id,
+        debug_name: case.name.to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![case.counter_carrier, WasmAbiType::I32],
+        },
+        locals,
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements,
+            terminator: WasmLirTerminator::Return {
+                values: vec![candidate, in_range],
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let export = WasmExport {
+        export_name: case.name.to_owned(),
+        kind: WasmExportKind::Function(function_id),
+    };
+    (function, export)
+}
+
+fn push_candidate_const(
+    statements: &mut Vec<WasmLirStmt>,
+    dst: WasmLirLocalId,
+    carrier: WasmAbiType,
+    value: i64,
+) {
+    match carrier {
+        WasmAbiType::I32 => statements.push(WasmLirStmt::ConstI32 {
+            dst,
+            value: value as i32,
+        }),
+        WasmAbiType::I64 => statements.push(WasmLirStmt::ConstI64 { dst, value }),
+        _ => panic!("integer range candidate cases use integer carriers"),
+    }
+}
+
+fn push_scalar_local(
+    locals: &mut Vec<WasmLirLocal>,
+    ty: WasmAbiType,
+    name: &str,
+) -> WasmLirLocalId {
+    let id = WasmLirLocalId(locals.len() as u32);
+    locals.push(local(id.0, ty, name));
+    id
 }
 
 fn build_checked_integer_boundary_module() -> WasmLirModule {

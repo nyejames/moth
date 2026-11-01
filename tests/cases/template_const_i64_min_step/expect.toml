@@ -1,0 +1,18 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "i64-min-step-0;",
+    "i64-min-step--9223372036854775808;",
+]
+must_contain_exactly_once = [
+    "i64-min-step-0;",
+    "i64-min-step--9223372036854775808;",
+]
+must_not_contain = [
+    "i64-min-equal-exclusive-",
+]

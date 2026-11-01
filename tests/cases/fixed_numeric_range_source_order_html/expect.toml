@@ -1,18 +1,42 @@
-
 [backends.html]
 mode = "success"
 warnings = "forbid"
 rendered_output_contains = [
     "fixed_numeric_range_source_order count=3/index=2/sum=0",
+    "fixed_numeric_range_source_order failing=-1",
+    "fixed_numeric_range_source_order failing_start=-1",
+    "fixed_numeric_range_source_order failing_end=-1",
 ]
 rendered_output_contains_exactly_once = [
     "fixed-numeric-range source-start",
     "fixed-numeric-range source-end",
     "fixed-numeric-range source-step",
+    "fixed-numeric-range failing-source-start",
+    "fixed-numeric-range failing-source-end",
+    "fixed-numeric-range failing-source-step",
+    "fixed-numeric-range failing-start-only",
+    "fixed-numeric-range start-evaluated",
+    "fixed-numeric-range failing-end-only",
 ]
 rendered_output_contains_in_order = [
     "fixed-numeric-range source-start",
     "fixed-numeric-range source-end",
     "fixed-numeric-range source-step",
     "fixed_numeric_range_source_order count=3/index=2/sum=0",
+    "fixed-numeric-range failing-source-start",
+    "fixed-numeric-range failing-source-end",
+    "fixed-numeric-range failing-source-step",
+    "fixed_numeric_range_source_order failing=-1",
+    "fixed-numeric-range failing-start-only",
+    "fixed_numeric_range_source_order failing_start=-1",
+    "fixed-numeric-range start-evaluated",
+    "fixed-numeric-range failing-end-only",
+    "fixed_numeric_range_source_order failing_end=-1",
+]
+rendered_output_not_contains = [
+    "fixed-numeric-range failing-body",
+    "fixed-numeric-range failing-start-body",
+    "fixed-numeric-range failing-end-body",
+    "fixed-numeric-range end-evaluated",
+    "fixed-numeric-range step-evaluated",
 ]

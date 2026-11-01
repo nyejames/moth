@@ -3035,19 +3035,14 @@ fn collect_statement_values(
         | HirStatementKind::ValidateFloat { source, .. } => {
             collect_expression_values(expressions, *source, out);
         }
-        HirStatementKind::FloatRangeCandidate {
-            current,
-            step,
-            end,
-            ascending,
-            ..
+        HirStatementKind::RangeCandidate {
+            current, step, end, ..
         } => {
             collect_expression_values(expressions, *current, out);
             collect_expression_values(expressions, *step, out);
             collect_expression_values(expressions, *end, out);
-            collect_expression_values(expressions, *ascending, out);
         }
-        HirStatementKind::RangeStepFailure { .. } => {}
+        HirStatementKind::LoopStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             collect_expression_values(expressions, *value, out);
         }

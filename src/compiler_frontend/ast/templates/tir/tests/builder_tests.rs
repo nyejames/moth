@@ -907,6 +907,7 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
                     &mut values,
                     string_table.intern("items"),
                 ),
+                step: None,
             },
             collection_body,
             None,
@@ -936,7 +937,7 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
         .expect("collection loop node");
     match &collection_loop.kind {
         TemplateIrNodeKind::Loop { header_sites, .. } => match header_sites {
-            TemplateLoopHeaderExpressionSites::Collection { iterable } => {
+            TemplateLoopHeaderExpressionSites::Collection { iterable, step: _ } => {
                 assert_eq!(*iterable, ExpressionSiteId::new(1));
             }
             other => panic!("expected Collection header sites, got {other:?}"),

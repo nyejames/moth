@@ -1,6 +1,7 @@
 -- Typed U64 ranges at U64 width. Same shape as
 -- uint_range_runtime but the terminal loop reaches the inclusive U64
--- maximum and the above-i64 values exercise the BigInt carrier end to end.
+-- maximum, the above-i64 values exercise the BigInt carrier end to end, and
+-- direction comes only from the signed step.
 
 asc_lo U64 = 0
 asc_hi U64 = 5
@@ -13,7 +14,9 @@ loop asc_lo to & asc_hi |value, index|:
     ~asc_last_index = copy index
 ;
 
-step_two U64 = 2
+step_two I32 = 2
+desc_one I32 = -1
+neg_step_two I32 = -2
 stepped_total ~U64 = 0
 stepped_count ~= 0
 loop asc_lo to & asc_hi by step_two |value|:
@@ -25,7 +28,7 @@ desc_total ~U64 = 0
 desc_count ~= 0
 desc_last ~U64 = 99
 desc_first_val ~U64 = 99
-loop asc_hi to & asc_lo |item, idx|:
+loop asc_hi to & asc_lo by desc_one |item, idx|:
     ~desc_total = desc_total + item
     ~desc_count = desc_count + 1
     if desc_count is 0 + 1:
@@ -35,16 +38,17 @@ loop asc_hi to & asc_lo |item, idx|:
 ;
 desc_step_total ~U64 = 0
 desc_step_count ~= 0
-loop asc_hi to & asc_lo by step_two |value|:
+loop asc_hi to & asc_lo by neg_step_two |value|:
     ~desc_step_total = desc_step_total + value
     ~desc_step_count = desc_step_count + 1
 ;
 
 above U64 = 9223372036854775808
 huge U64 = 18446744073709551615
+huge_step I64 = 9223372036854775807
 above_count ~= 0
 above_last ~U64 = 0
-loop above to & huge by huge |value|:
+loop above to huge by huge_step |value|:
     ~above_count = above_count + 1
     ~above_last = copy value
 ;
@@ -58,7 +62,8 @@ loop max_lo to & huge |value|:
 
 zero_terminal ~U64 = 99
 zero_count ~= 0
-loop step_two to & asc_lo by step_two |value|:
+two_u64 U64 = 2
+loop two_u64 to & asc_lo by neg_step_two |value|:
     ~zero_terminal = copy value
     ~zero_count = zero_count + 1
 ;

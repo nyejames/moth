@@ -287,13 +287,14 @@ fn runtime_template_range_loop_expression(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "test fixture keeps bindings, iterable, body, aggregate prefix, suffix and span separate"
+    reason = "test fixture keeps bindings, iterable, step, body, aggregate prefix, suffix and span separate"
 )]
 fn runtime_template_collection_loop_expression(
     builder: &mut AstExpressionBuilder,
     constants: &ConstValueStore,
     bindings: LoopBindings,
     iterable: ExprId,
+    step: Option<ExprId>,
     body_content: Vec<ExprId>,
     aggregate_prefix: StringId,
     aggregate_suffix: StringId,
@@ -308,6 +309,7 @@ fn runtime_template_collection_loop_expression(
         header: TemplateLoopHeader::Collection {
             bindings: Box::new(bindings),
             iterable,
+            step,
         },
         body: Box::new(body),
         aggregate_wrapper: Some(Box::new(aggregate_wrapper)),
@@ -2782,6 +2784,7 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
             index: None,
         },
         iterable,
+        None,
         body_content,
         prefix,
         suffix,
@@ -2824,6 +2827,174 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
             .iter()
             .any(|block| block_marks_loop_emitted(&builder.module, block)),
         "collection template loop body should mark emitted iterations independently from string length"
+    );
+}
+
+#[test]
+fn runtime_template_control_flow_loop_collection_with_step_captures_source_and_length_once() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let prefix = string_table.intern("");
+    let suffix = string_table.intern("");
+    let span = None;
+    let items_path = super::symbol("items", &mut path_fork, &mut string_table);
+    let item_binding = loop_binding(
+        "item",
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        &mut path_fork,
+        &mut string_table,
+    );
+    let item_path = item_binding.id;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let collection_type = builder
+        .type_environment
+        .intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
+    register_local(&mut builder, items_path, LocalId(21), collection_type, span);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let body_content = vec![reference_expr_with_type_id(
+        &mut expressions,
+        item_path,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        span,
+        ValueMode::ImmutableReference,
+    )];
+    let iterable = reference_expr_with_type_id(
+        &mut expressions,
+        items_path,
+        collection_type,
+        span,
+        ValueMode::ImmutableReference,
+    );
+    let step = expressions
+        .fixed_scalar(
+            &mut builder.module_const_values,
+            i64_value(2),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture step should construct")
+        .id();
+    let expr = runtime_template_collection_loop_expression(
+        &mut expressions,
+        &builder.module_const_values,
+        LoopBindings {
+            item: Some(item_binding),
+            index: None,
+        },
+        iterable,
+        Some(step),
+        body_content,
+        prefix,
+        suffix,
+        span,
+        builder.string_table,
+    );
+
+    builder
+        .lower_expression(
+            expressions
+                .view(expr)
+                .expect("stepped runtime collection template loop should have a view"),
+        )
+        .expect("stepped runtime collection template loop should lower inline");
+
+    let length_calls = builder
+        .module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            matches!(
+                statement.kind,
+                HirStatementKind::Call {
+                    target: CallTarget::External(ExternalFunctionId::CollectionLength),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        length_calls, 1,
+        "stepped collection template loop should compute iterable length once"
+    );
+
+    let source_carrier_writes = builder
+        .module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(_),
+                value,
+            } = &statement.kind
+            else {
+                return false;
+            };
+            matches!(
+                &builder.module.expressions.expression(*value).kind,
+                HirExpressionKind::Load(place) if place.root == LocalId(21)
+            )
+        })
+        .count();
+    assert_eq!(
+        source_carrier_writes, 1,
+        "stepped collection template loop should materialise the source into one carrier write"
+    );
+
+    let step_definitions = builder
+        .module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            let HirStatementKind::Write { value, .. } = &statement.kind else {
+                return false;
+            };
+            matches!(
+                &builder.module.expressions.expression(*value).kind,
+                HirExpressionKind::FixedScalar(literal) if *literal == i64_value(2)
+            )
+        })
+        .count();
+    assert_eq!(
+        step_definitions, 1,
+        "stepped collection template loop should evaluate the step once"
+    );
+
+    let candidate = builder
+        .module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::RangeCandidate {
+                step,
+                inclusive,
+                domain,
+                ..
+            } => Some((*step, *inclusive, *domain)),
+            _ => None,
+        })
+        .expect("stepped collection template loop should advance with one range candidate");
+    assert!(candidate.1, "the final source index is inclusive");
+    assert_eq!(
+        candidate.2,
+        NumericScalar::Fixed(FixedScalar::I32),
+        "the collection counter domain is the exact I32 source index"
+    );
+    assert_eq!(
+        builder.module.expressions.expression(candidate.0).ty,
+        builtin_type_ids::fixed_scalar(FixedScalar::I64),
+        "the wider signed step keeps its own type in the runtime template loop"
+    );
+    assert!(
+        builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| block_marks_loop_emitted(&builder.module, block)),
+        "stepped collection template loop body should mark emitted iterations"
     );
 }
 

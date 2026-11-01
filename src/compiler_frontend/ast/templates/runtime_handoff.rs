@@ -205,7 +205,12 @@ fn visit_node_expression_ids(node: &OwnedRuntimeTemplateNode, visitor: &mut dyn 
         }
         OwnedRuntimeTemplateNode::Loop { header, .. } => match header {
             TemplateLoopHeader::Conditional { condition } => visitor(*condition),
-            TemplateLoopHeader::Collection { iterable, .. } => visitor(*iterable),
+            TemplateLoopHeader::Collection { iterable, step, .. } => {
+                visitor(*iterable);
+                if let Some(step) = step {
+                    visitor(*step);
+                }
+            }
             TemplateLoopHeader::Range { range, .. } => {
                 visitor(range.start);
                 visitor(range.end);
@@ -230,7 +235,12 @@ fn visit_node_expression_ids_mut(
         },
         OwnedRuntimeTemplateNode::Loop { header, .. } => match header {
             TemplateLoopHeader::Conditional { condition } => visitor(condition),
-            TemplateLoopHeader::Collection { iterable, .. } => visitor(iterable),
+            TemplateLoopHeader::Collection { iterable, step, .. } => {
+                visitor(iterable);
+                if let Some(step) = step {
+                    visitor(step);
+                }
+            }
             TemplateLoopHeader::Range { range, .. } => {
                 visitor(&mut range.start);
                 visitor(&mut range.end);

@@ -1730,8 +1730,8 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
             .any(|block_id| {
                 matches!(&hir_block(&hir, block_id).terminator,
                     HirTerminator::Invoke {
-                        operation: crate::compiler_frontend::hir::terminators::HirFallibleOperation::RangeStepFailure {
-                            cause: crate::compiler_frontend::hir::numeric::RangeStepFailureCause::ZeroStep,
+                        operation: crate::compiler_frontend::hir::terminators::HirFallibleOperation::LoopStepFailure {
+                            cause: crate::compiler_frontend::hir::numeric::LoopStepFailureCause::ZeroStep,
                         }, ..
                     })
             }),

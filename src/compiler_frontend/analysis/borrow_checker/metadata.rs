@@ -1115,10 +1115,10 @@ fn collect_statement_defined_locals(statement: &HirStatement, visitor: &mut impl
             }
         }
         HirStatementKind::NumericOp { result, .. }
-        | HirStatementKind::RangeStepFailure { result, .. }
+        | HirStatementKind::LoopStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => visit_destination(result),
-        HirStatementKind::FloatRangeCandidate {
+        HirStatementKind::RangeCandidate {
             candidate_result,
             in_range_result,
             ..
@@ -1188,17 +1188,12 @@ fn collect_statement_loaded_locals(
                 collect_expression_loaded_locals(expressions, *right, visitor);
             }
         },
-        HirStatementKind::FloatRangeCandidate {
-            current,
-            step,
-            end,
-            ascending,
-            ..
+        HirStatementKind::RangeCandidate {
+            current, step, end, ..
         } => {
             collect_expression_loaded_locals(expressions, *current, visitor);
             collect_expression_loaded_locals(expressions, *step, visitor);
             collect_expression_loaded_locals(expressions, *end, visitor);
-            collect_expression_loaded_locals(expressions, *ascending, visitor);
         }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
@@ -1207,7 +1202,7 @@ fn collect_statement_loaded_locals(
         HirStatementKind::Expr(expression) => {
             collect_expression_loaded_locals(expressions, *expression, visitor);
         }
-        HirStatementKind::RangeStepFailure { .. } => {}
+        HirStatementKind::LoopStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             visitor(*vec_local);
             collect_expression_loaded_locals(expressions, *value, visitor);
@@ -1231,8 +1226,8 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
             ..
         } => visitor(local.local()),
         HirStatementKind::NumericOp { result, .. }
-        | HirStatementKind::RangeStepFailure { result, .. } => visitor(result.local()),
-        HirStatementKind::FloatRangeCandidate {
+        | HirStatementKind::LoopStepFailure { result, .. } => visitor(result.local()),
+        HirStatementKind::RangeCandidate {
             candidate_result,
             in_range_result,
             ..

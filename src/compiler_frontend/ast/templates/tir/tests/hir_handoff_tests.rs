@@ -2487,6 +2487,7 @@ fn handoff_rejects_mismatched_loop_header_shape() {
             },
             header_sites: TemplateLoopHeaderExpressionSites::Collection {
                 iterable: ExpressionSiteId::new(0),
+                step: None,
             },
             body,
             aggregate_wrapper: None,

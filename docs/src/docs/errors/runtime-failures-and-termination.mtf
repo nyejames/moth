@@ -91,8 +91,8 @@ and message.
     ]
     [td:
         [: 306]
-        [: InvalidRangeStep]
-        [: Dynamic range with a zero step.]
+        [: InvalidLoopStep]
+        [: A dynamic range or collection loop step is zero.]
     ]
     [td:
         [: 307]
@@ -105,6 +105,10 @@ and message.
 boundary and `305` (`FloatFormatInvariant`) marks a defensive formatting
 check. Neither is ordinary implicit failure; each follows its declared
 integrity contract.
+
+`306` applies to range and collection loops. Its message is `Loop step cannot
+be zero`. A dynamic zero step fails before the loop checks its bounds or
+emptiness, so an empty or wrong-direction loop still reports it.
 
 The catalogue is closed. Extend it only with a documented code plus backend
 parity tests that keep JS and Wasm message and code behaviour consistent. There
@@ -262,10 +266,10 @@ overflow limit, but still depend on host resources.
         [: No native Moth decimal-scale operation. A helper using BigInt division must handle its zero-divisor RangeError.]
     ]
     [td:
-        [: A runtime range step is invalid or a required counter update overflows]
-        [: Built-in failure under the range contract. Finishing at the last endpoint does not require an overflowing sentinel.]
-        [: Branches and arithmetic have no Moth range-loop contract.]
-        [: Loops and arithmetic have no Moth range-loop contract.]
+        [: A runtime loop step is invalid]
+        [: Built-in failure under the loop contract. Finishing at the last endpoint does not require an overflowing sentinel.]
+        [: Branches and arithmetic have no Moth loop contract.]
+        [: Loops and arithmetic have no Moth loop contract.]
     ]
     [td:
         [: Invalid collection index, missing map key or full fixed collection]

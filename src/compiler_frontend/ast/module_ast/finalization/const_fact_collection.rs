@@ -327,8 +327,16 @@ impl<'a> ConstFactCollector<'a> {
                 self.walk_body_local(body, &mut loop_env)?;
             }
 
-            NodeKind::CollectionLoop { iterable, body, .. } => {
+            NodeKind::CollectionLoop {
+                iterable,
+                step,
+                body,
+                ..
+            } => {
                 self.walk_expression_for_body_local(iterable, env)?;
+                if let Some(step) = step {
+                    self.walk_expression_for_body_local(step, env)?;
+                }
 
                 let mut loop_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut loop_env)?;

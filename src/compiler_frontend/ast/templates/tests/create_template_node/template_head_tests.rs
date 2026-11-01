@@ -1,5 +1,8 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidLoopHeaderCode, InvalidLoopHeaderView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidExpressionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -882,6 +885,19 @@ fn template_loop_suffix_requires_header() {
         &diagnostic,
         InvalidTemplateStructureReason::MissingTemplateLoopHeader,
     );
+}
+
+#[test]
+fn template_conditional_loop_rejects_by_step() {
+    let diagnostic = parse_template_error("[loop true by 2: Visible]");
+    let view = diagnostic
+        .first()
+        .expect("the conditional-step diagnostic compacts to one record");
+    assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0029");
+    let facts = view
+        .family_view::<InvalidLoopHeaderView>()
+        .expect("the loop header rejection keeps its typed reason");
+    assert_eq!(facts.reason, InvalidLoopHeaderCode::StepOnConditionalLoop);
 }
 
 /// Parses one template with `style_directives` and returns the compacted failure, the string table

@@ -1,0 +1,43 @@
+-- The dynamic zero-step guard runs before the first bounds/direction check.
+-- A zero step fails with 306 even when the bounds are wrongly directed or
+-- equal, while a runtime-selected negative step descends and the I32 minimum
+-- step exits after one value without overflowing.
+
+walk |start I32, end I32, step I32| -> I32, Error!:
+    seen ~= 0
+    loop start to end by step |value|:
+        ~seen = seen + 1
+    ;
+    return seen
+;
+
+descending = walk(10, 0, -3) catch then -1
+positive_wrong_direction = walk(10, 0, 3) catch then -1
+minimum_step = walk(10, 0, -2147483648) catch then -1
+zero_code ~U32 = 0
+zero_wrong_direction = walk(10, 0, 0) catch |zero_error|:
+    ~zero_code = zero_error.code
+    then -1
+;
+equal_code ~U32 = 0
+zero_equal_bounds = walk(5, 5, 0) catch |equal_error|:
+    ~equal_code = equal_error.code
+    then -1
+;
+ascending_code ~U32 = 0
+zero_ascending = walk(0, 10, 0) catch |ascending_error|:
+    ~ascending_code = ascending_error.code
+    then -1
+;
+
+assert(descending is 4)
+assert(positive_wrong_direction is 0)
+assert(minimum_step is 1)
+assert(zero_wrong_direction is -1)
+assert(zero_code is 306)
+assert(zero_equal_bounds is -1)
+assert(equal_code is 306)
+assert(zero_ascending is -1)
+assert(ascending_code is 306)
+
+[: implicit_failure_range_step_zero_before_bounds descending=[descending] positive-wrong-direction=[positive_wrong_direction] minimum-step=[minimum_step] zero-wrong-direction=[zero_wrong_direction]/[zero_code] zero-equal-bounds=[zero_equal_bounds]/[equal_code] zero-ascending=[zero_ascending]/[ascending_code]]

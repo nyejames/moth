@@ -4796,6 +4796,20 @@ contract = "language.loops.collection_iteration_acceptance"
 role = "boundary"
 
 [[case]]
+id = "loop_collection_step_rejected"
+path = "loop_collection_step_rejected"
+tags = ["integration", "control-flow", "collections", "diagnostics"]
+contract = "language.loops.collection_step_rejected"
+role = "primary"
+
+[[case]]
+id = "loop_range_step_rejected"
+path = "loop_range_step_rejected"
+tags = ["integration", "control-flow", "diagnostics"]
+contract = "language.loops.range_step_rejected"
+role = "primary"
+
+[[case]]
 id = "loop_conditional_and_range"
 path = "loop_conditional_and_range"
 tags = ["integration", "control-flow"]
@@ -6294,10 +6308,10 @@ contract = "language.templates.const_range_runtime_reference_rejected"
 role = "primary"
 
 [[case]]
-id = "template_const_fixed_range_unrepresentable_step_rejected"
-path = "template_const_fixed_range_unrepresentable_step_rejected"
-tags = ["integration", "templates", "diagnostics", "numeric", "int64"]
-contract = "language.loops.fixed_range_unrepresentable_step_rejected"
+id = "template_const_i64_min_step"
+path = "template_const_i64_min_step"
+tags = ["integration", "templates", "numeric", "int64"]
+contract = "language.templates.const_range_i64_min_step"
 role = "boundary"
 
 [[case]]
@@ -6362,6 +6376,20 @@ path = "template_const_loop_runtime_source_rejected"
 tags = ["integration","templates","diagnostics"]
 contract = "language.templates.const_loop_runtime_source_rejected"
 role = "primary"
+
+[[case]]
+id = "template_const_loop_runtime_step_rejected"
+path = "template_const_loop_runtime_step_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.const_loop_runtime_step_rejected"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_collection_step_limit"
+path = "template_const_loop_collection_step_limit"
+tags = ["integration","templates","collections","config"]
+contract = "language.templates.const_loop_collection_acceptance"
+role = "boundary"
 
 [[case]]
 id = "template_const_loop_dependent_range"
@@ -13329,10 +13357,17 @@ contract = "language.numeric.compound_writeback_preserves_target"
 role = "boundary"
 
 [[case]]
-id = "implicit_failure_range_update"
-path = "implicit_failure_range_update"
+id = "implicit_failure_range_step_zero_before_bounds"
+path = "implicit_failure_range_step_zero_before_bounds"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
-contract = "language.numeric.range_update_uses_private_failure_lane"
+contract = "language.numeric.range_step_zero_before_bounds"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_collection_step_zero_and_order"
+path = "implicit_failure_collection_step_zero_and_order"
+tags = ["integration", "language", "control-flow", "collections", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.loops.collection_step_zero_and_header_order"
 role = "primary"
 
 [[case]]
@@ -15817,10 +15852,10 @@ contract = "language.numbers.uint_capacity_rejected"
 role = "primary"
 
 [[case]]
-id = "uint_range_mixed_step"
-path = "uint_range_mixed_step"
-tags = ["integration", "language", "numeric", "errors"]
-contract = "language.numbers.uint_range_mixed_step_rejected"
+id = "uint_range_mixed_step_full_width"
+path = "uint_range_mixed_step_full_width"
+tags = ["integration", "language", "numeric", "runtime", "int64", "html-wasm"]
+contract = "language.numbers.uint_range_signed_step_boundaries"
 role = "primary"
 
 [[case]]

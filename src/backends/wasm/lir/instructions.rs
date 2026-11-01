@@ -115,6 +115,65 @@ pub(crate) enum WasmScalarComparisonOp {
     Ge,
 }
 
+/// Widened I64 working set for one integer range candidate.
+///
+/// WHAT: the locals the emitter fills while widening both carriers, selecting the step
+///       direction, comparing the unsigned step magnitude with the remaining distance and
+///       computing the wrapping successor.
+/// WHY: the counter and the independent signed step use different carriers, so the candidate
+///       cannot share one scratch local and must not narrow before the distance guard accepted
+///       the successor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WasmIntegerRangeCandidateScratch {
+    /// `current` sign- or zero-extended to I64.
+    pub(crate) current: WasmLirLocalId,
+    /// The signed step sign-extended to I64.
+    pub(crate) step: WasmLirLocalId,
+    /// `end` sign- or zero-extended to I64.
+    pub(crate) end: WasmLirLocalId,
+    /// `step > 0` as an I32 Bool selecting the direction and the bounds comparison.
+    pub(crate) ascending: WasmLirLocalId,
+    /// Wrapping remaining distance to the bound in the step direction.
+    pub(crate) distance: WasmLirLocalId,
+    /// Wrapping unsigned step magnitude, computed without a signed `abs`.
+    pub(crate) magnitude: WasmLirLocalId,
+    /// Wrapping `current + step` before narrowing to the counter carrier.
+    pub(crate) candidate: WasmLirLocalId,
+}
+
+/// One integer range candidate's carriers and widened scratch.
+///
+/// WHY: the counter and the independent signed step use different carriers, so the emitter needs
+///      both carriers, the counter's signedness and the I64 working set as one payload rather
+///      than a long parameter list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WasmIntegerRangeCandidate {
+    /// Counter carrier: `I32` for narrow and 32-bit counters, `I64` for 64-bit counters.
+    pub(crate) counter_carrier: WasmAbiType,
+    /// Whether widening the counter carrier sign-extends rather than zero-extends.
+    pub(crate) counter_signed: bool,
+    /// Step carrier: `I32` for `I8`/`I16`/`I32` steps, `I64` for an `I64` step.
+    pub(crate) step_carrier: WasmAbiType,
+    pub(crate) scratch: WasmIntegerRangeCandidateScratch,
+}
+
+/// Which domain algorithm one `WasmLirStmt::RangeCandidate` implements.
+///
+/// WHY: the binary-float form rounds and compares in the counter carrier, while the integer form
+///      widens to I64 and compares an unsigned magnitude. The two need different operands and
+///      scratch, so the domain choice is explicit rather than inferred at emission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmRangeCandidateKind {
+    /// Exact binary-float counter with a step at the same precision.
+    BinaryFloat {
+        precision: BinaryFloatPrecision,
+        /// Receives the rounded `current + step` before the bound decision.
+        scratch: WasmLirLocalId,
+    },
+    /// Integer counter with an independent signed integer step.
+    Integer(WasmIntegerRangeCandidate),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum WasmLirStmt {
     /// Materialize immediate scalar constants.
@@ -262,17 +321,23 @@ pub(crate) enum WasmLirStmt {
         precision: BinaryFloatPrecision,
         operands: WasmNumericOperationOperands,
     },
-    /// Compute a float range candidate in a backend-local scratch and commit only if accepted.
-    FloatRangeCandidate {
+    /// Compute a range candidate in backend-local scratch and commit only if accepted.
+    ///
+    /// WHAT: evaluates the signed successor `current + step`, writes whether it lies within
+    ///       `end` in the step's direction to `in_range_dst`, then commits a counter-carried
+    ///       successor to `candidate_dst` only when in range.
+    /// WHY: the HIR candidate statement has no direction operand, so the step sign selects the
+    ///      bound comparison at emission. The integer form must never materialise an
+    ///      out-of-domain successor, so it widens both operands to I64 and commits only after an
+    ///      unsigned magnitude/distance guard accepted the value.
+    RangeCandidate {
         candidate_dst: WasmLirLocalId,
         in_range_dst: WasmLirLocalId,
-        scratch: WasmLirLocalId,
         current: WasmLirLocalId,
         step: WasmLirLocalId,
         end: WasmLirLocalId,
-        ascending: WasmLirLocalId,
-        precision: BinaryFloatPrecision,
         inclusive: bool,
+        kind: WasmRangeCandidateKind,
     },
     /// Convert a signed or unsigned integer carrier directly to an F32/F64 computation carrier.
     IntegerToFloat {

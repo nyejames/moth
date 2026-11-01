@@ -962,7 +962,7 @@ fn builtin_failure_witness_resolves_local_private_and_generated_hops_in_order() 
             facts.contributors[0].codes = vec![
                 BuiltinErrorCode::DivideByZero,
                 BuiltinErrorCode::IntOverflow,
-                BuiltinErrorCode::InvalidRangeStep,
+                BuiltinErrorCode::InvalidLoopStep,
                 BuiltinErrorCode::RangeStepNoProgress,
             ];
         }

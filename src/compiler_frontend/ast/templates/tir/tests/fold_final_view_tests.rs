@@ -67,7 +67,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, runtime_slot_application_handoff_expr,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 use std::path::Path;
 
 use std::cell::RefCell;
@@ -94,15 +94,41 @@ fn i32_value(value: i64) -> FixedScalarValue {
     FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
 }
 
+/// One exact fixed integer value at the given scalar; the caller supplies an in-range value.
+fn integer_value(scalar: FixedScalar, value: i128) -> FixedScalarValue {
+    match scalar.class() {
+        FixedScalarClass::SignedInteger => {
+            FixedScalarValue::signed(scalar, i64::try_from(value).expect("test literal fits i64"))
+                .expect("test literal fits its signed scalar")
+        }
+        FixedScalarClass::UnsignedInteger => {
+            FixedScalarValue::unsigned(scalar, u64::try_from(value).expect("test literal fits u64"))
+                .expect("test literal fits its unsigned scalar")
+        }
+        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => {
+            panic!("integer fixtures need a fixed integer scalar")
+        }
+    }
+}
+
+/// One exact fixed value as a constant expression.
+fn fixed_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: FixedScalarValue,
+) -> ExprId {
+    expressions
+        .fixed_scalar(constants, value, None, ValueMode::ImmutableOwned)
+        .expect("test fixed literal constructs")
+        .id()
+}
+
 fn i32_expression(
     expressions: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
     value: i64,
 ) -> ExprId {
-    expressions
-        .fixed_scalar(constants, i32_value(value), None, ValueMode::ImmutableOwned)
-        .expect("test i32 literal constructs")
-        .id()
+    fixed_expression(expressions, constants, i32_value(value))
 }
 
 fn u64_expression(
@@ -110,15 +136,11 @@ fn u64_expression(
     constants: &mut ConstValueStore,
     value: u64,
 ) -> ExprId {
-    expressions
-        .fixed_scalar(
-            constants,
-            FixedScalarValue::unsigned(FixedScalar::U64, value).expect("test literal fits U64"),
-            None,
-            ValueMode::ImmutableOwned,
-        )
-        .expect("test u64 literal constructs")
-        .id()
+    fixed_expression(
+        expressions,
+        constants,
+        FixedScalarValue::unsigned(FixedScalar::U64, value).expect("test literal fits U64"),
+    )
 }
 
 fn float_expression(
@@ -144,16 +166,12 @@ fn float_expression_at(
     scalar: FixedScalar,
     value: f64,
 ) -> ExprId {
-    expressions
-        .fixed_scalar(
-            constants,
-            FixedScalarValue::binary_float(scalar, value)
-                .expect("test float is exactly representable at its scalar"),
-            None,
-            ValueMode::ImmutableOwned,
-        )
-        .expect("test float literal constructs")
-        .id()
+    fixed_expression(
+        expressions,
+        constants,
+        FixedScalarValue::binary_float(scalar, value)
+            .expect("test float is exactly representable at its scalar"),
+    )
 }
 
 fn bool_expression(
@@ -1432,8 +1450,8 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
 
 /// Collects exact float counters from a range cursor to completion.
 ///
-/// WHAT: drives `ConstRangeCursor` directly so precision behaviour is pinned without
-///       template rendering in the way.
+/// WHAT: drives `ConstRangeCursor` directly so precision and direction behaviour is pinned
+///       without template rendering in the way.
 /// WHY: every counter keeps its range's selected precision, and the header owns that
 ///      selection, so the caller supplies the domain its operand fixtures were built at
 ///      and this helper is the single place these tests advance a float cursor to completion.
@@ -1442,13 +1460,14 @@ fn collect_float_counters(
     constants: &ConstValueStore,
     start: ExprId,
     end: ExprId,
+    end_kind: RangeEndKind,
     step: Option<ExprId>,
     scalar: FixedScalar,
 ) -> Vec<f64> {
     let range = RangeLoopSpec {
         start,
         end,
-        end_kind: RangeEndKind::Exclusive,
+        end_kind,
         step,
         domain: NumericScalar::Fixed(scalar),
     };
@@ -1457,6 +1476,7 @@ fn collect_float_counters(
         expressions,
         constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
         None,
     )
     .expect("range cursor should construct");
@@ -1483,6 +1503,7 @@ fn range_cursor_rounds_float32_step_accumulation() {
         &constants,
         start,
         end,
+        RangeEndKind::Exclusive,
         Some(step),
         FixedScalar::F32,
     );
@@ -1518,6 +1539,7 @@ fn range_cursor_rounds_float16_step_accumulation() {
         &constants,
         start,
         end,
+        RangeEndKind::Exclusive,
         Some(step),
         FixedScalar::F16,
     );
@@ -1565,7 +1587,11 @@ fn range_cursor_rejects_non_progressing_float32_range() {
     };
     let error =
         expect_non_progressing_range(&expressions, &constants, range, "a stalled F32 update");
-    assert_non_progressing_bounds_diagnostic(error, "a stalled F32 update");
+    assert_range_step_diagnostic(
+        error,
+        InvalidTemplateStructureCode::TemplateLoopStepNoProgress,
+        "a stalled F32 update",
+    );
 }
 
 #[test]
@@ -1588,13 +1614,17 @@ fn range_cursor_rejects_non_progressing_float16_range() {
     };
     let error =
         expect_non_progressing_range(&expressions, &constants, range, "a stalled F16 update");
-    assert_non_progressing_bounds_diagnostic(error, "a stalled F16 update");
+    assert_range_step_diagnostic(
+        error,
+        InvalidTemplateStructureCode::TemplateLoopStepNoProgress,
+        "a stalled F16 update",
+    );
 }
 
 /// Advances one range cursor to its non-progressing source diagnostic.
 ///
 /// WHAT: accepts either construction or advancement failure because both carry the
-///       same source-level bounds reason.
+///       same step-level reason.
 /// WHY: the range owns its endpoint and no-progress rules, so the test must not pin
 ///      which stage detects the stall.
 fn expect_non_progressing_range(
@@ -1608,6 +1638,7 @@ fn expect_non_progressing_range(
         expressions,
         constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
         None,
     ) {
         Err(error) => return error,
@@ -1624,20 +1655,23 @@ fn expect_non_progressing_range(
     panic!("{context} must fail within the template iteration limit")
 }
 
-fn assert_non_progressing_bounds_diagnostic(error: TemplateError, context: &str) {
+fn assert_range_step_diagnostic(
+    error: TemplateError,
+    expected: InvalidTemplateStructureCode,
+    context: &str,
+) {
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("{context} must stay on the source diagnostic lane");
     };
     let diagnostic = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
     let facts = diagnostic
         .first()
-        .expect("non-progressing bounds error should compact to one record")
+        .expect("a const range failure should compact to one record")
         .family_view::<InvalidTemplateStructureView>()
-        .expect("non-progressing bounds error should retain typed structure facts");
+        .expect("a const range failure should retain typed structure facts");
     assert_eq!(
-        facts.reason,
-        InvalidTemplateStructureCode::TemplateLoopRangeBoundsNotConst,
-        "{context} must report non-progressing bounds"
+        facts.reason, expected,
+        "{context} must report its step reason"
     );
 }
 
@@ -1653,6 +1687,7 @@ fn range_cursor_keeps_float64_step_accumulation() {
         &constants,
         start,
         end,
+        RangeEndKind::Exclusive,
         Some(step),
         FixedScalar::F64,
     );
@@ -1669,113 +1704,361 @@ fn range_cursor_keeps_float64_step_accumulation() {
     );
 }
 
-/// Collects `U64` counters from a const range cursor to completion.
+#[test]
+fn range_cursor_follows_signed_float_step_direction() {
+    // 1.0 to & 0.0 by -0.5 visits the inclusive endpoint exactly, and a negative step against
+    // ascending bounds stays empty because the bounds never override the step sign.
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let descending_start = float32_expression(&mut expressions, &mut constants, 1.0);
+    let descending_end = float32_expression(&mut expressions, &mut constants, 0.0);
+    let negative_step = float32_expression(&mut expressions, &mut constants, -0.5);
+    assert_eq!(
+        collect_float_counters(
+            &expressions,
+            &constants,
+            descending_start,
+            descending_end,
+            RangeEndKind::Inclusive,
+            Some(negative_step),
+            FixedScalar::F32,
+        ),
+        vec![1.0, 0.5, 0.0],
+        "a descending inclusive float range must visit its endpoint and stop"
+    );
+
+    let ascending_start = float32_expression(&mut expressions, &mut constants, 0.0);
+    let ascending_end = float32_expression(&mut expressions, &mut constants, 1.0);
+    let negative_step = float32_expression(&mut expressions, &mut constants, -0.5);
+    assert!(
+        collect_float_counters(
+            &expressions,
+            &constants,
+            ascending_start,
+            ascending_end,
+            RangeEndKind::Inclusive,
+            Some(negative_step),
+            FixedScalar::F32,
+        )
+        .is_empty(),
+        "a negative step against ascending bounds must stay empty"
+    );
+}
+
+/// One const integer range fixture and the counters folding must visit.
 ///
-/// WHAT: drives `ConstRangeCursor` directly so unsigned iteration is pinned
-///       without template rendering in the way.
-/// WHY: inclusive-maximum and descending-to-zero endpoints must terminate
-///      through the in-range exit without ever materialising an out-of-range
-///      `u64` successor.
-fn collect_uint_counters(
-    expressions: &AstExpressionBuilder,
-    constants: &ConstValueStore,
-    start: ExprId,
-    end: ExprId,
-    step: Option<ExprId>,
+/// WHAT: the counter domain comes from the bounds, while the authored step carries its own
+///       signed scalar and value.
+/// WHY: direction and step width are independent header facts, so each row states just the
+///      counters it expects rather than repeating cursor construction.
+struct IntegerRangeCase {
+    label: &'static str,
+    domain: FixedScalar,
+    start: i128,
+    end: i128,
     end_kind: RangeEndKind,
-) -> Vec<u64> {
+    /// The authored step as `(scalar, value)`, or `None` for the omitted `+1` default.
+    step: Option<(FixedScalar, i128)>,
+    expected: Vec<i128>,
+}
+
+/// Collects every counter one const integer range visits.
+///
+/// WHAT: builds the header from exact fixed literals and drives `ConstRangeCursor` directly.
+/// WHY: only counters inside the counter domain may be emitted, so every collected value is
+///      checked against the case's domain before its value is compared.
+fn collect_integer_counters(case: &IntegerRangeCase) -> Vec<i128> {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let start = fixed_expression(
+        &mut expressions,
+        &mut constants,
+        integer_value(case.domain, case.start),
+    );
+    let end = fixed_expression(
+        &mut expressions,
+        &mut constants,
+        integer_value(case.domain, case.end),
+    );
+    let step = case.step.map(|(scalar, value)| {
+        fixed_expression(
+            &mut expressions,
+            &mut constants,
+            integer_value(scalar, value),
+        )
+    });
     let range = RangeLoopSpec {
         start,
         end,
-        end_kind,
+        end_kind: case.end_kind,
         step,
-        domain: NumericScalar::Fixed(FixedScalar::U64),
+        domain: NumericScalar::Fixed(case.domain),
     };
     let mut cursor = ConstRangeCursor::new(
+        &range,
+        &expressions,
+        &constants,
+        crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
+        None,
+    )
+    .unwrap_or_else(|error| panic!("{}: range cursor should construct: {error:?}", case.label));
+    let mut counters = Vec::new();
+    while let Some(counter) = cursor
+        .next_counter()
+        .unwrap_or_else(|error| panic!("{}: range cursor should advance: {error:?}", case.label))
+    {
+        assert_eq!(
+            counter.scalar(),
+            case.domain,
+            "{}: counters stay inside the counter domain",
+            case.label
+        );
+        counters.push(integer_payload(counter));
+    }
+    counters
+}
+
+fn integer_payload(value: FixedScalarValue) -> i128 {
+    value
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| value.as_u64().map(i128::from))
+        .expect("fixed integer counters carry an integer payload")
+}
+
+#[test]
+fn range_cursor_follows_signed_integer_step_direction() {
+    let uint_maximum = i128::from(u64::MAX);
+    let cases = [
+        IntegerRangeCase {
+            label: "ascending exclusive range without a step",
+            domain: FixedScalar::I32,
+            start: 0,
+            end: 5,
+            end_kind: RangeEndKind::Exclusive,
+            step: None,
+            expected: vec![0, 1, 2, 3, 4],
+        },
+        IntegerRangeCase {
+            label: "ascending exclusive range steps by its own signed width",
+            domain: FixedScalar::U64,
+            start: 0,
+            end: 10,
+            end_kind: RangeEndKind::Exclusive,
+            step: Some((FixedScalar::I64, 3)),
+            expected: vec![0, 3, 6, 9],
+        },
+        IntegerRangeCase {
+            label: "descending exclusive range needs a negative step",
+            domain: FixedScalar::I32,
+            start: 5,
+            end: 0,
+            end_kind: RangeEndKind::Exclusive,
+            step: Some((FixedScalar::I32, -1)),
+            expected: vec![5, 4, 3, 2, 1],
+        },
+        IntegerRangeCase {
+            label: "inclusive descending range overshoots its endpoint",
+            domain: FixedScalar::I32,
+            start: 5,
+            end: 0,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I8, -2)),
+            expected: vec![5, 3, 1],
+        },
+        IntegerRangeCase {
+            label: "positive step against descending bounds is empty",
+            domain: FixedScalar::I32,
+            start: 10,
+            end: 0,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I32, 2)),
+            expected: vec![],
+        },
+        IntegerRangeCase {
+            label: "descending bounds without a step are empty",
+            domain: FixedScalar::U64,
+            start: 5,
+            end: 0,
+            end_kind: RangeEndKind::Inclusive,
+            step: None,
+            expected: vec![],
+        },
+        IntegerRangeCase {
+            label: "equal exclusive endpoints visit nothing",
+            domain: FixedScalar::I32,
+            start: 3,
+            end: 3,
+            end_kind: RangeEndKind::Exclusive,
+            step: Some((FixedScalar::I32, -1)),
+            expected: vec![],
+        },
+        IntegerRangeCase {
+            label: "equal inclusive endpoints visit one value descending",
+            domain: FixedScalar::I32,
+            start: 3,
+            end: 3,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I32, -1)),
+            expected: vec![3],
+        },
+        IntegerRangeCase {
+            label: "equal inclusive endpoints visit one value ascending",
+            domain: FixedScalar::I32,
+            start: 3,
+            end: 3,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I32, 1)),
+            expected: vec![3],
+        },
+        IntegerRangeCase {
+            label: "narrow ascending counter overshoots to its last value",
+            domain: FixedScalar::I8,
+            start: 0,
+            end: 5,
+            end_kind: RangeEndKind::Exclusive,
+            step: Some((FixedScalar::I8, 2)),
+            expected: vec![0, 2, 4],
+        },
+        IntegerRangeCase {
+            label: "unsigned counter descends to zero",
+            domain: FixedScalar::U64,
+            start: 3,
+            end: 0,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I8, -1)),
+            expected: vec![3, 2, 1, 0],
+        },
+        IntegerRangeCase {
+            label: "inclusive uint maximum endpoint stops without a successor",
+            domain: FixedScalar::U64,
+            start: uint_maximum - 2,
+            end: uint_maximum,
+            end_kind: RangeEndKind::Inclusive,
+            step: None,
+            expected: vec![uint_maximum - 2, uint_maximum - 1, uint_maximum],
+        },
+        IntegerRangeCase {
+            label: "i64 minimum step descends a uint counter at full width",
+            domain: FixedScalar::U64,
+            start: uint_maximum,
+            end: 0,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I64, i128::from(i64::MIN))),
+            expected: vec![uint_maximum, i128::from(i64::MAX)],
+        },
+        IntegerRangeCase {
+            label: "i64 minimum step leaves a narrow counter after one value",
+            domain: FixedScalar::I8,
+            start: 5,
+            end: -128,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I64, i128::from(i64::MIN))),
+            expected: vec![5],
+        },
+        IntegerRangeCase {
+            label: "i64 minimum step against ascending bounds is empty",
+            domain: FixedScalar::I8,
+            start: -128,
+            end: 127,
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I64, i128::from(i64::MIN))),
+            expected: vec![],
+        },
+        IntegerRangeCase {
+            label: "i64 minimum endpoints stay inclusive with a minimum step",
+            domain: FixedScalar::I64,
+            start: i128::from(i64::MIN),
+            end: i128::from(i64::MIN),
+            end_kind: RangeEndKind::Inclusive,
+            step: Some((FixedScalar::I64, i128::from(i64::MIN))),
+            expected: vec![i128::from(i64::MIN)],
+        },
+    ];
+
+    for case in &cases {
+        assert_eq!(
+            collect_integer_counters(case),
+            case.expected,
+            "{}",
+            case.label
+        );
+    }
+}
+
+/// The const range failure the cursor must report for one header it refuses.
+fn range_failure(
+    range: RangeLoopSpec,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+    context: &str,
+) -> TemplateError {
+    match ConstRangeCursor::new(
         &range,
         expressions,
         constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-    )
-    .expect("range cursor should construct");
-    let mut counters = Vec::new();
-    while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
-        counters.push(
-            counter
-                .as_u64()
-                .expect("unsigned ranges must emit unsigned counters"),
-        );
-    }
-    counters
-}
-
-#[test]
-fn range_cursor_terminates_at_inclusive_uint_maximum() {
-    let mut expressions = AstExpressionBuilder::new().unwrap();
-    let mut constants = ConstValueStore::default();
-    let start = u64_expression(&mut expressions, &mut constants, u64::MAX - 2);
-    let end = u64_expression(&mut expressions, &mut constants, u64::MAX);
-    let counters = collect_uint_counters(
-        &expressions,
-        &constants,
-        start,
-        end,
-        None,
-        RangeEndKind::Inclusive,
-    );
-
-    assert_eq!(
-        counters,
-        vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
-        "an inclusive U64 range must emit the maximum and stop without a successor"
-    );
-}
-
-#[test]
-fn range_cursor_terminates_descending_at_uint_zero() {
-    let mut expressions = AstExpressionBuilder::new().unwrap();
-    let mut constants = ConstValueStore::default();
-    let start = u64_expression(&mut expressions, &mut constants, 2);
-    let end = u64_expression(&mut expressions, &mut constants, 0);
-    let counters = collect_uint_counters(
-        &expressions,
-        &constants,
-        start,
-        end,
-        None,
-        RangeEndKind::Inclusive,
-    );
-
-    assert_eq!(
-        counters,
-        vec![2, 1, 0],
-        "a descending U64 range must reach zero and stop without underflowing"
-    );
-}
-
-#[test]
-fn range_cursor_rejects_zero_uint_step() {
-    let mut expressions = AstExpressionBuilder::new().unwrap();
-    let mut constants = ConstValueStore::default();
-    let range = RangeLoopSpec {
-        start: u64_expression(&mut expressions, &mut constants, 0),
-        end: u64_expression(&mut expressions, &mut constants, 10),
-        end_kind: RangeEndKind::Inclusive,
-        step: Some(u64_expression(&mut expressions, &mut constants, 0)),
-        domain: NumericScalar::Fixed(FixedScalar::U64),
-    };
-    let error = match ConstRangeCursor::new(
-        &range,
-        &expressions,
-        &constants,
-        crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
     ) {
         Err(error) => error,
-        Ok(_) => panic!("a zero U64 step must not construct a const cursor"),
+        Ok(_) => panic!("{context} must not construct a const cursor"),
+    }
+}
+
+#[test]
+fn range_cursor_rejects_zero_step_on_empty_uint_range() {
+    // A zero step fails before any bounds check, so a wrong-direction U64 range still reports.
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let range = RangeLoopSpec {
+        start: u64_expression(&mut expressions, &mut constants, 10),
+        end: u64_expression(&mut expressions, &mut constants, 0),
+        end_kind: RangeEndKind::Exclusive,
+        step: Some(fixed_expression(
+            &mut expressions,
+            &mut constants,
+            integer_value(FixedScalar::I32, 0),
+        )),
+        domain: NumericScalar::Fixed(FixedScalar::U64),
     };
-    assert_non_progressing_bounds_diagnostic(error, "a zero U64 step");
+    let error = range_failure(
+        range,
+        &expressions,
+        &constants,
+        "a zero step on an empty U64 range",
+    );
+    assert_range_step_diagnostic(
+        error,
+        InvalidTemplateStructureCode::TemplateLoopStepIsZero,
+        "a zero step on an empty U64 range",
+    );
+}
+
+#[test]
+fn range_cursor_rejects_negative_zero_float_step_on_equal_endpoints() {
+    // `-0.0` counts as zero, and equal exclusive endpoints would otherwise visit nothing.
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let range = RangeLoopSpec {
+        start: float32_expression(&mut expressions, &mut constants, 0.0),
+        end: float32_expression(&mut expressions, &mut constants, 0.0),
+        end_kind: RangeEndKind::Exclusive,
+        step: Some(fixed_expression(
+            &mut expressions,
+            &mut constants,
+            FixedScalarValue::binary_float(FixedScalar::F32, -0.0)
+                .expect("negative zero is representable at F32"),
+        )),
+        domain: NumericScalar::Fixed(FixedScalar::F32),
+    };
+    let error = range_failure(range, &expressions, &constants, "a negative zero F32 step");
+    assert_range_step_diagnostic(
+        error,
+        InvalidTemplateStructureCode::TemplateLoopStepIsZero,
+        "a negative zero F32 step",
+    );
 }
 
 #[test]

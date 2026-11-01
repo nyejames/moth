@@ -498,6 +498,9 @@ define_stable_reason_keys! {
         &InvalidTemplateStructureCode::TemplateOptionCaptureConstDeferred => "invalid_template_structure.template_option_capture_const_deferred",
         &InvalidTemplateStructureCode::TemplateLoopRangeBoundsNotConst => "invalid_template_structure.template_loop_range_bounds_not_const",
         &InvalidTemplateStructureCode::TemplateLoopSourceNotConst => "invalid_template_structure.template_loop_source_not_const",
+        &InvalidTemplateStructureCode::TemplateLoopStepNotConst => "invalid_template_structure.template_loop_step_not_const",
+        &InvalidTemplateStructureCode::TemplateLoopStepIsZero => "invalid_template_structure.template_loop_step_is_zero",
+        &InvalidTemplateStructureCode::TemplateLoopStepNoProgress => "invalid_template_structure.template_loop_step_no_progress",
         &InvalidTemplateStructureCode::TemplateLoopConditionNotConst => "invalid_template_structure.template_loop_condition_not_const",
         &InvalidTemplateStructureCode::TemplateConditionalLoopConstTrue => "invalid_template_structure.template_conditional_loop_const_true",
         &InvalidTemplateStructureCode::TemplateLoopBodyNotConst => "invalid_template_structure.template_loop_body_not_const",
@@ -953,9 +956,11 @@ define_stable_reason_keys! {
     &InvalidPageMetadataReason::DuplicateDeclaration => "invalid_page_metadata.duplicate_declaration",
     },
 
-    InvalidRangeOperandReason => {
-    &InvalidRangeOperandReason::NotNumeric => "invalid_range_operand.not_numeric",
-    &InvalidRangeOperandReason::IncompatibleDomain => "invalid_range_operand.incompatible_domain",
+    InvalidLoopOperandReason => {
+    &InvalidLoopOperandReason::BoundNotNumeric => "invalid_loop_operand.bound_not_numeric",
+    &InvalidLoopOperandReason::BoundIncompatibleDomain => "invalid_loop_operand.bound_incompatible_domain",
+    &InvalidLoopOperandReason::StepNotSignedInteger => "invalid_loop_operand.step_not_signed_integer",
+    &InvalidLoopOperandReason::StepNotConvertibleToFloatCounter => "invalid_loop_operand.step_not_convertible_to_float_counter",
     },
 
     InvalidExpressionReason => {
@@ -1009,7 +1014,12 @@ define_stable_reason_keys! {
     &InvalidLoopHeaderCode::MissingRangeEndBound => "invalid_loop_header.missing_range_end_bound",
     &InvalidLoopHeaderCode::MissingRangeStep => "invalid_loop_header.missing_range_step",
     &InvalidLoopHeaderCode::FloatRangeMissingStep => "invalid_loop_header.float_range_missing_step",
-    &InvalidLoopHeaderCode::ZeroRangeStep => "invalid_loop_header.zero_range_step",
+    &InvalidLoopHeaderCode::ZeroLoopStep => "invalid_loop_header.zero_loop_step",
+    &InvalidLoopHeaderCode::MissingCollectionStep => "invalid_loop_header.missing_collection_step",
+    &InvalidLoopHeaderCode::RepeatedLoopStep => "invalid_loop_header.repeated_loop_step",
+    &InvalidLoopHeaderCode::StepOnConditionalLoop => "invalid_loop_header.step_on_conditional_loop",
+    &InvalidLoopHeaderCode::MisplacedLoopStep => "invalid_loop_header.misplaced_loop_step",
+    &InvalidLoopHeaderCode::BindingsOnConditionalLoop => "invalid_loop_header.bindings_on_conditional_loop",
     &InvalidLoopHeaderCode::ExpectedHeaderExpression => "invalid_loop_header.expected_header_expression",
     },
 

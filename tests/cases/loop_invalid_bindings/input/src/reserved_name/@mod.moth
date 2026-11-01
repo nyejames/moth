@@ -1,0 +1,5 @@
+-- 'to' is a reserved range keyword and cannot name a loop binding.
+items = {1, 2, 3}
+loop items |to|:
+    io.line([: [1]])
+;

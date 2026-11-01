@@ -16,7 +16,7 @@ The captured value is available inside that body.
 ]
 
 Template `if` has no `else` or `else if` form. Template loops repeat content
-with an ordinary loop header.
+with an ordinary loop header, including its signed `by` step and bindings.
 
 [codeblock, $code("moth"):
     [loop names |name|:

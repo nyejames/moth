@@ -973,7 +973,7 @@ build_descending_series || -> String:
         <div class="runtime-table">
     ]
 
-    loop 30 to 0 by 3 |value|:
+    loop 30 to 0 by -3 |value|:
         folded = (value * value) + (value * 2) + 9
         residue = folded % 11
 
@@ -1082,7 +1082,7 @@ runtime_descending_head #= [$insert("head"):
     ]
 ]
 runtime_descending_foot #= [$insert("foot"):
-    descending range with by 3 to keep loop direction inference active
+    descending range with an explicit negative step
 ]
 runtime_pair_head #= [$insert("head"):
     [section_title, accent_title:

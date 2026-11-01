@@ -5,4 +5,17 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["0=red;", "1=green;", "2=blue;"]
+must_contain = [
+    "0=red;",
+    "1=green;",
+    "2=blue;",
+    "rev:2=blue;rev:1=green;rev:0=red;",
+    "min:2=blue;",
+    "back:2=blue;back:0=red;",
+    "val:2=blue;val:0=red;",
+]
+must_contain_exactly_once = [
+    "min:2=blue;",
+    "back:2=blue;back:0=red;",
+    "val:2=blue;val:0=red;",
+]

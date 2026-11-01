@@ -8,9 +8,78 @@ range_source_end || -> U16:
     return 1
 ;
 
-range_source_step || -> U16:
+range_source_step || -> I32:
     io.line([: fixed-numeric-range source-step])
     return 1
+;
+
+range_source_failing_start || -> I8, Error!:
+    io.line([: fixed-numeric-range failing-source-start])
+    return -1
+;
+
+range_source_failing_end || -> U16, Error!:
+    io.line([: fixed-numeric-range failing-source-end])
+    return 1
+;
+
+range_source_failing_step || -> I32, Error!:
+    io.line([: fixed-numeric-range failing-source-step])
+    return! Error("fixed-numeric-range step unavailable")
+;
+
+failing_source_order || -> I32, Error!:
+    total ~= 0
+    loop range_source_failing_start()! to & range_source_failing_end()! by range_source_failing_step()! |value|:
+        io.line([: fixed-numeric-range failing-body])
+        ~total = total + value
+    ;
+    return total
+;
+
+range_source_start_marker || -> I8:
+    io.line([: fixed-numeric-range start-evaluated])
+    return -1
+;
+
+range_source_end_marker || -> U16:
+    io.line([: fixed-numeric-range end-evaluated])
+    return 1
+;
+
+range_source_step_marker || -> I32:
+    io.line([: fixed-numeric-range step-evaluated])
+    return 1
+;
+
+range_source_failing_start_only || -> I8, Error!:
+    io.line([: fixed-numeric-range failing-start-only])
+    return! Error("fixed-numeric-range start unavailable")
+;
+
+range_source_failing_end_only || -> U16, Error!:
+    io.line([: fixed-numeric-range failing-end-only])
+    return! Error("fixed-numeric-range end unavailable")
+;
+
+-- A failing START must skip the END and STEP side effects entirely.
+failing_start_order || -> I32, Error!:
+    total ~= 0
+    loop range_source_failing_start_only()! to & range_source_end_marker() by range_source_step_marker() |value|:
+        io.line([: fixed-numeric-range failing-start-body])
+        ~total = total + value
+    ;
+    return total
+;
+
+-- A failing END still evaluates the START but must skip the STEP side effect.
+failing_end_order || -> I32, Error!:
+    total ~= 0
+    loop range_source_start_marker() to & range_source_failing_end_only()! by range_source_step_marker() |value|:
+        io.line([: fixed-numeric-range failing-end-body])
+        ~total = total + value
+    ;
+    return total
 ;
 
 source_order_sum ~I32 = 0
@@ -23,3 +92,9 @@ loop range_source_start() to & range_source_end() by range_source_step() |value,
 ;
 
 io.line([: fixed_numeric_range_source_order count=[source_order_count]/index=[source_order_last_index]/sum=[source_order_sum]])
+failing_total = failing_source_order() catch then -1
+io.line([: fixed_numeric_range_source_order failing=[failing_total]])
+failing_start_total = failing_start_order() catch then -1
+io.line([: fixed_numeric_range_source_order failing_start=[failing_start_total]])
+failing_end_total = failing_end_order() catch then -1
+io.line([: fixed_numeric_range_source_order failing_end=[failing_end_total]])

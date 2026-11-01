@@ -11,7 +11,7 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, RangeStepFailureCause,
+    HirNumericOp, HirNumericOperands, LoopStepFailureCause,
 };
 use crate::compiler_frontend::hir::patterns::HirMatchArm;
 use crate::compiler_frontend::source::SourceSpan;
@@ -109,8 +109,8 @@ pub enum HirFallibleOperation {
         op: HirNumericOp,
         operands: HirNumericOperands,
     },
-    RangeStepFailure {
-        cause: RangeStepFailureCause,
+    LoopStepFailure {
+        cause: LoopStepFailureCause,
     },
     FormatFloat {
         source: HirValueId,
@@ -141,7 +141,7 @@ impl HirFallibleOperation {
                 HirNumericOperands::Unary { operand } => inline[0] = Some(*operand),
                 HirNumericOperands::Binary { left, right } => inline = [Some(*left), Some(*right)],
             },
-            Self::RangeStepFailure { .. } => {}
+            Self::LoopStepFailure { .. } => {}
         }
         inline
             .into_iter()

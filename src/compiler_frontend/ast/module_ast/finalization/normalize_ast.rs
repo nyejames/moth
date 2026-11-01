@@ -575,10 +575,14 @@ fn normalize_control_flow_templates(
         NodeKind::CollectionLoop {
             bindings,
             iterable,
+            step,
             body,
         } => {
             normalize_loop_bindings(bindings, context)?;
             normalize_expression_templates(iterable, context)?;
+            if let Some(step) = step {
+                normalize_expression_templates(step, context)?;
+            }
             normalize_nodes(body, context)
         }
 

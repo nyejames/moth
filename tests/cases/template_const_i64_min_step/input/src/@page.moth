@@ -1,0 +1,15 @@
+-- A signed I64 minimum step is always representable and nonzero, so const
+-- templates fold it with exact widened arithmetic. Equal exclusive bounds
+-- still fold to no output, while inclusive descent from zero reaches the
+-- minimum endpoint exactly once and stops.
+
+minimum #I64 = -9223372036854775808
+zero #I64 = 0
+
+#[loop zero to zero by minimum |i|:
+    i64-min-equal-exclusive-[i];
+]
+
+#[loop zero to & minimum by minimum |i|:
+    i64-min-step-[i];
+]

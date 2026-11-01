@@ -1,0 +1,6 @@
+-- A decimal step keeps its own type and cannot become an integer index step.
+items = {1, 2, 3}
+step Dec = 2
+loop items by step |item|:
+    io.line([: [item]])
+;

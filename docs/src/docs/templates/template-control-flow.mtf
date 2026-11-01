@@ -56,19 +56,27 @@ Template loops repeat their body using the ordinary loop-header families:
 - numeric ranges
 
 [codeblock, $code("moth"):
-    [loop items |item, index|:
+    [loop items by 2 |item, index|:
         [index]: [item]
     ]
 
-    [loop 0 to 10 |value|:
+    [loop 10 to 0 by -2 |value|:
         [value]
     ]
 ]
 
-Collection and range loops may bind the current value and optional zero-based
-index. Their source or bounds are evaluated once before iteration. Conditional
-loop conditions are checked before each iteration. Iterations concatenate
-directly without separators.
+Collection and range loops may bind the current value and an optional second
+binding. A collection loop's second binding is the actual source index, while a
+range loop's second binding is the zero-based iteration ordinal. Both have type
+`I32`.
+
+Collection and range headers accept the ordinary signed `by` step. A collection
+step's sign selects its starting item and direction, while a range step's sign
+selects direction. In runtime templates, their source or bounds and their step
+are evaluated once before iteration. Conditional loop conditions are checked
+before each iteration. Iterations concatenate directly without separators.
+Compile-time zero steps are rejected in both forms, while a runtime template's
+dynamic zero step fails before the first iteration.
 
 ### Wrappers and no-output
 

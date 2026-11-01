@@ -1,17 +1,5 @@
 # Quick note of noticed bad diagnostics to fix
 
-## Keyword names before a spaced minus in assignment position
-
-```moth
-f |a I32| -> I32:
-    by = a
-    x = by - 1
-    return x
-;
-```
-
-`by` is the range-loop step keyword, so `by = a` should report the reserved-keyword diagnostic (MOTH-RULE-0039). Tokenization stops first at `by - 1` with "Unary negation must be attached to its operand with no intervening whitespace." (MOTH-SYNTAX-0031), so the AST never reports the name. The lexer reports the reserved keyword instead when the keyword follows a binary operator, `then`, `else`, `return`, `,` or `(`. It deliberately skips assignment position so that `x = if - 1 then ...` keeps the unary message. Telling the two readings apart needs more context than the token before the keyword.
-
 ## HTML warnings in long `$html` bodies point at the template opener
 
 ```moth

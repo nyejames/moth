@@ -585,6 +585,32 @@ fn const_required_template_range_loop_folds_expressions_with_iteration_bindings(
 }
 
 #[test]
+fn const_required_template_loop_folds_a_literal_step() {
+    // A literal `by` on an integer counter takes its own `I32` default during header parsing so
+    // the const template can fold. Retaining it for body-root completion would leave a pending
+    // literal at fold time and misreport the header as non-constant.
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, context, mut string_table) = parse_const_required_template(
+        "[loop 0 to 3 by 1 |i|:
+            a-[i];
+        ]",
+        &mut expression_builder,
+        &mut const_values,
+    );
+
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
+
+    assert_eq!(string_table.resolve(folded), "a-0;a-1;a-2;");
+}
+
+#[test]
 fn const_required_template_loop_allows_nested_if_to_use_iteration_binding() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -749,6 +775,72 @@ fn const_required_template_collection_loop_folds_iteration_bindings() {
     );
 
     assert_eq!(string_table.resolve(folded), "0-Ada;1-Bo;");
+}
+
+/// Folds one const-required template through the same preparation and fold entry points as
+/// production, returning the rendered text.
+fn fold_const_required_template(source: &str) -> String {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, context, mut string_table) =
+        parse_const_required_template(source, &mut expression_builder, &mut const_values);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
+    string_table.resolve(folded).to_owned()
+}
+
+#[test]
+fn const_required_template_collection_loop_follows_signed_steps() {
+    // The second binding is the actual source index, so a stride reports the skipped positions
+    // and a negative step starts at the last element. Numeric literal sources with item bindings
+    // install their retained headers during const-template construction; the numeric forms are
+    // covered by `const_required_template_collection_loop_folds_numeric_literal_source`.
+    for (step, expected) in [
+        (None, "0:a;1:b;2:c;3:d;4:e;"),
+        (Some("by 2"), "0:a;2:c;4:e;"),
+        (Some("by -2"), "4:e;2:c;0:a;"),
+        (Some("by 7"), "0:a;"),
+        (Some("by -7"), "4:e;"),
+    ] {
+        let authored_step = step.map_or_else(String::new, |step| format!(" {step}"));
+        let source = format!(
+            "[loop {{\"a\", \"b\", \"c\", \"d\", \"e\"}}{authored_step} |item, index|:
+                [index]:[item];
+            ]"
+        );
+        assert_eq!(
+            fold_const_required_template(&source),
+            expected,
+            "collection loop with {authored_step:?}"
+        );
+    }
+}
+
+#[test]
+fn const_required_template_collection_loop_folds_numeric_literal_source() {
+    // A numeric literal source declares a pending item at parse time, so the header must install
+    // from the body root before const folding can visit it.
+    assert_eq!(
+        fold_const_required_template(
+            "[loop {10, 20} |item, index|:
+                [index]:[item];
+            ]"
+        ),
+        "0:10;1:20;"
+    );
+    assert_eq!(
+        fold_const_required_template(
+            "[loop {10, 20, 30, 40} by 2 |item, index|:
+                [index]:[item];
+            ]"
+        ),
+        "0:10;2:30;"
+    );
 }
 
 #[test]
@@ -1113,6 +1205,54 @@ fn const_required_template_loop_reports_non_const_collection_source() {
         &mut path_fork,
     )
     .expect_err("const-required loop should reject runtime collection source");
+    let diagnostic = expect_template_diagnostic(diagnostic);
+
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
+    );
+}
+
+#[test]
+fn const_required_template_parent_joined_context_keeps_retained_collection_rejected() {
+    // A const-required template parsed inside another constant context joins that parent's numeric
+    // domain instead of owning it, so template construction must not drain its retained positions.
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let file_tokens = template_tokens_from_source(
+        "[loop {10, 20} |item|:
+        [item]
+    ]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let root = new_constant_context(source_path, &path_fork);
+    let context = ScopeContext::new_constant(source_path, &root);
+    let canonical_owner = file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let diagnostic = Template::new_const_required(
+        &mut token_stream,
+        source_path,
+        &context,
+        &mut expression_builder,
+        &mut const_values,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a parent-joined const template should keep its retained collection header");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
     assert_invalid_template_structure(

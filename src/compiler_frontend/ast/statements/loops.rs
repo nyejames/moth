@@ -221,6 +221,8 @@ pub fn create_loop(
         ParsedLoopHeader::Collection {
             bindings,
             iterable,
+            step,
+            step_marker_span: _,
             pending_item,
         } => {
             let (StatementExpression::Built(iterable), None) = (iterable, pending_item) else {
@@ -229,9 +231,20 @@ pub fn create_loop(
                 )
                 .into());
             };
+            let step = match step {
+                Some(StatementExpression::Built(step)) => Some(step),
+                Some(StatementExpression::Retained(_)) => {
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
+                        "a collection loop header held a retained step after the loop decided it needs no numeric completion",
+                    )
+                    .into());
+                }
+                None => None,
+            };
             NodeKind::CollectionLoop {
                 bindings,
                 iterable,
+                step,
                 body,
             }
         }
@@ -248,8 +261,11 @@ fn header_needs_completion(header: &ParsedLoopHeader) -> bool {
             matches!(condition, StatementExpression::Retained(_))
         }
         ParsedLoopHeader::Range(header) => matches!(header, ParsedRangeHeader::Deferred(_)),
-        ParsedLoopHeader::Collection { iterable, .. } => {
+        ParsedLoopHeader::Collection { iterable, step, .. } => {
             matches!(iterable, StatementExpression::Retained(_))
+                || step
+                    .as_ref()
+                    .is_some_and(|step| matches!(step, StatementExpression::Retained(_)))
         }
     }
 }
@@ -271,10 +287,14 @@ fn deferred_loop_header(header: ParsedLoopHeader) -> DeferredLoopHeader {
         ParsedLoopHeader::Collection {
             bindings,
             iterable,
+            step,
+            step_marker_span,
             pending_item,
         } => DeferredLoopHeader::Collection {
             bindings,
             iterable,
+            step,
+            step_marker_span,
             pending_item,
         },
     }

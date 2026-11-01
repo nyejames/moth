@@ -1828,12 +1828,12 @@ the failure catalogue and the Wasm/JavaScript comparison.
         </tr><tr style="">
              <td style=""><p> 303</p></td> <td style=""><p> FloatNonFinite</p></td> <td style=""><p> Binary floating-point arithmetic with a non-finite result.</p></td>
         </tr><tr style="">
-             <td style=""><p> 306</p></td> <td style=""><p> InvalidRangeStep</p></td> <td style=""><p> Dynamic range with a zero step.</p></td>
+             <td style=""><p> 306</p></td> <td style=""><p> InvalidLoopStep</p></td> <td style=""><p> A dynamic range or collection loop step is zero.</p></td>
         </tr><tr style="">
              <td style=""><p> 307</p></td> <td style=""><p> RangeStepNoProgress</p></td> <td style=""><p> Range where a floating-point candidate stops advancing after rounding.</p></td>
         </tr>
             
-</table><p><code>304</code> (<code>FloatBoundaryNonFinite</code>) marks a non-finite external binary-float boundary and <code>305</code> (<code>FloatFormatInvariant</code>) marks a defensive formatting check. Neither is ordinary implicit failure; each follows its declared integrity contract.</p><p>The catalogue is closed. Extend it only with a documented code plus backend parity tests that keep JS and Wasm message and code behaviour consistent. There is no public <code>Failure</code> type, no mandatory stack trace, no new <code>Error</code> fields and no diagnostic ID used as an error code.</p><h3 id="termination-outside-assert">Termination outside assert</h3><p>The following cases remain outside the recoverable failure system. An infallible source operation promises no recoverable error result, not unlimited memory, stack space or execution time.</p><table style="">
+</table><p><code>304</code> (<code>FloatBoundaryNonFinite</code>) marks a non-finite external binary-float boundary and <code>305</code> (<code>FloatFormatInvariant</code>) marks a defensive formatting check. Neither is ordinary implicit failure; each follows its declared integrity contract.</p><p><code>306</code> applies to range and collection loops. Its message is `Loop step cannot be zero`. A dynamic zero step fails before the loop checks its bounds or emptiness, so an empty or wrong-direction loop still reports it.</p><p>The catalogue is closed. Extend it only with a documented code plus backend parity tests that keep JS and Wasm message and code behaviour consistent. There is no public <code>Failure</code> type, no mandatory stack trace, no new <code>Error</code> fields and no diagnostic ID used as an error code.</p><h3 id="termination-outside-assert">Termination outside assert</h3><p>The following cases remain outside the recoverable failure system. An infallible source operation promises no recoverable error result, not unlimited memory, stack space or execution time.</p><table style="">
             
             <tr style="">
                 
@@ -1888,7 +1888,7 @@ the failure catalogue and the Wasm/JavaScript comparison.
         </tr><tr style="">
              <td style=""><p> Dec-family division or remainder has a zero divisor</p></td> <td style=""><p> Built-in division failure. Arbitrary precision removes fixed-width overflow, not invalid operands.</p></td> <td style=""><p> No scalar arbitrary-precision decimal operation. Runtime helpers supply it.</p></td> <td style=""><p> No native Moth decimal-scale operation. A helper using BigInt division must handle its zero-divisor RangeError.</p></td>
         </tr><tr style="">
-             <td style=""><p> A runtime range step is invalid or a required counter update overflows</p></td> <td style=""><p> Built-in failure under the range contract. Finishing at the last endpoint does not require an overflowing sentinel.</p></td> <td style=""><p> Branches and arithmetic have no Moth range-loop contract.</p></td> <td style=""><p> Loops and arithmetic have no Moth range-loop contract.</p></td>
+             <td style=""><p> A runtime loop step is invalid</p></td> <td style=""><p> Built-in failure under the loop contract. Finishing at the last endpoint does not require an overflowing sentinel.</p></td> <td style=""><p> Branches and arithmetic have no Moth loop contract.</p></td> <td style=""><p> Loops and arithmetic have no Moth loop contract.</p></td>
         </tr><tr style="">
              <td style=""><p> Invalid collection index, missing map key or full fixed collection</p></td> <td style=""><p> The operation&#39;s declared Error! result</p></td> <td style=""><p> Linear-memory bounds are not logical collection bounds. Collection helpers enforce the API contract.</p></td> <td style=""><p> Arrays and maps do not implement Moth&#39;s typed error contract. Collection helpers enforce it.</p></td>
         </tr>

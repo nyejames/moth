@@ -28,9 +28,11 @@ its body while that condition remains `true`.
 
 A top-level `to` marker makes the header a range loop.
 
-Without a range marker, an explicit `|...|` suffix makes the header a collection
-loop. Without bindings, a collection-typed header is still a collection loop.
-Every other header must type-check as a `Bool` condition.
+Without a range marker, a top-level `by` step or an explicit `|...|` suffix marks
+a collection loop. Without bindings or a step, a collection-typed header is still
+a collection loop. Every other header must type-check as a `Bool` condition. A
+`by` step on a `Bool` condition is rejected instead of being treated as a
+collection loop.
 
 ### Scope
 

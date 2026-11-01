@@ -160,8 +160,8 @@ impl BlockAnalyser<'_> {
                 // Unproven operations conservatively drop the cache.
                 self.cache = None;
             }
-            // Range guards always fail and have no numeric success interval to retain.
-            HirStatementKind::RangeStepFailure { .. } => self.cache = None,
+            // Loop-step failures always fail and have no numeric success interval to retain.
+            HirStatementKind::LoopStepFailure { .. } => self.cache = None,
             // Calls, side-effect expressions, map operations, drops, float helpers and every
             // other unsupported statement conservatively drop value-specific facts.
             _ => self.cache = None,

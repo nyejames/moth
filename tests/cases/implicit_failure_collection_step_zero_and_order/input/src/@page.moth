@@ -1,0 +1,75 @@
+-- Collection headers capture the source (and its length) before the step, each exactly once.
+-- A runtime zero step fails with 306 before the empty-source check, so the body never runs.
+
+source_items |log ~String| -> {I32}, Error!:
+    ~log = [:[log]S]
+    return {10, 20, 30, 40, 50}
+;
+
+source_empty |log ~String| -> {I32}, Error!:
+    ~log = [:[log]E]
+    return {}
+;
+
+source_broken |log ~String| -> {I32}, Error!:
+    ~log = [:[log]S]
+    return! Error("source unavailable")
+;
+
+step_from |wanted I32, log ~String| -> I32:
+    ~log = [:[log]P]
+    return wanted
+;
+
+walk |wanted I32, log ~String, visited ~I32, seen ~String| -> I32, Error!:
+    loop source_items(~log)! by step_from(wanted, ~log) |item, index|:
+        ~visited += 1
+        ~seen = [:[seen]([item],[index])]
+    ;
+    return visited
+;
+
+walk_empty |log ~String, visited ~I32| -> I32, Error!:
+    loop source_empty(~log)! by step_from(0, ~log) |item, index|:
+        ~visited += 1
+    ;
+    return visited
+;
+
+-- A failure-only source keeps its log separate so the empty step log proves the
+-- step was never evaluated after the source failed.
+walk_broken |source_log ~String, step_log ~String, visited ~I32| -> I32, Error!:
+    loop source_broken(~source_log)! by step_from(2, ~step_log) |item, index|:
+        ~visited += 1
+    ;
+    return visited
+;
+
+descend_log ~= [:]
+descend_seen ~= [:]
+descend_visits ~= 0
+descend = walk(-2, ~descend_log, ~descend_visits, ~descend_seen) catch then -1
+
+zero_log ~= [:]
+zero_seen ~= [:]
+zero_visits ~= 0
+zero_report ~= [:]
+zero = walk(0, ~zero_log, ~zero_visits, ~zero_seen) catch |err|:
+    ~zero_report = [: [err.code] [err.message]]
+    then -1
+;
+
+empty_log ~= [:]
+empty_visits ~= 0
+empty_code ~U32 = 0
+empty = walk_empty(~empty_log, ~empty_visits) catch |err|:
+    ~empty_code = err.code
+    then -1
+;
+
+broken_source_log ~= [:]
+broken_step_log ~= [:]
+broken_visits ~= 0
+broken = walk_broken(~broken_source_log, ~broken_step_log, ~broken_visits) catch then -2
+
+[:implicit_failure_collection_step_zero_and_order descend=[descend] seen=[descend_seen] log=[descend_log] zero=[zero] zero-visits=[zero_visits] zero-seen=[zero_seen] zero-log=[zero_log] zero-report=[zero_report] empty=[empty] empty-visits=[empty_visits] empty-log=[empty_log] empty-code=[empty_code] broken=[broken] broken-visits=[broken_visits] broken-source-log=[broken_source_log] broken-step-log=[broken_step_log]]

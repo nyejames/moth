@@ -1,0 +1,7 @@
+-- A collection step that names a const-known zero cannot progress, so the const fold
+-- rejects the authored step position instead of the template's source position.
+zero #I32 = 0
+
+#[loop {"red", "green", "blue"} by zero |item|:
+    [item]
+]

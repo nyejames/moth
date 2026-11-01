@@ -12,4 +12,20 @@ loop i < 10:
     ~sum = sum + i
 ;
 
-[:<p>[sum]</p>]
+-- Control flow inside a reversed strided collection loop: `continue` advances
+-- by the negative step and `break` exits without stepping to a smaller index.
+stride_items = {0, 1, 2, 3, 4, 5, 6}
+stride_seen ~= [:]
+stride_sum ~= 0
+loop stride_items by -2 |item, index|:
+    ~stride_seen = [:[stride_seen][index],]
+    if index is 4:
+        continue
+    ;
+    if index is 0:
+        break
+    ;
+    ~stride_sum = stride_sum + item
+;
+
+[:<p>[sum] [stride_sum] [stride_seen]</p>]

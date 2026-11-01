@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "implicit_failure_collection_step_zero_and_order descend=3 seen=(50,4)(30,2)(10,0) log=SP zero=-1 zero-visits=0 zero-seen= zero-log=SP zero-report= 306 Loop step cannot be zero empty=-1 empty-visits=0 empty-log=EP empty-code=306 broken=-2 broken-visits=0 broken-source-log=S broken-step-log="
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]

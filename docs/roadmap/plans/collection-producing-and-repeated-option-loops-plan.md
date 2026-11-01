@@ -152,6 +152,8 @@ Collection production is orthogonal to the loop source. The accepted statement-l
 
 Template loops remain a separate template-language feature and do not become collection-producing loops.
 
+Producing loops inherit each source's ordinary header contract. Range production keeps the authored signed `by` step and the direction that its sign selects, so a wrong-direction producing range produces an empty collection. A collection-loop `|item, index|` binding is the actual source index rather than a visit ordinal, and its optional signed `by` step keeps the same one-time evaluation. A produced `then`, `continue` or `break` follows the same stepped advance and exit edges as a non-producing loop.
+
 ## Eager result semantics
 
 A producing loop constructs its complete result before the receiving statement continues.
@@ -1075,8 +1077,8 @@ For a collection-production target:
 - [ ] Reuse the existing collection-loop body emitter.
 - [ ] Reuse the existing range-loop body emitter.
 - [ ] Do not clone any full loop CFG implementation for a producing variant.
-- [ ] Preserve range step behavior.
-- [ ] Preserve collection captured-length behavior.
+- [ ] Preserve the authored signed range `by` step and the direction its sign selects.
+- [ ] Preserve collection captured-length behavior and the true source-index binding under a signed `by` step.
 - [ ] Preserve condition reevaluation behavior.
 - [ ] Preserve existing `break` and `continue` target stacks.
 

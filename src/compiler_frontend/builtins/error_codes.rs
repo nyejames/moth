@@ -41,8 +41,8 @@ pub enum BuiltinErrorCode {
     FloatBoundaryNonFinite = 304,
     /// Defensive binary-float formatting checks use this when an internal finite-value invariant fails.
     FloatFormatInvariant = 305,
-    /// A dynamic range step must be non-zero before the first iteration.
-    InvalidRangeStep = 306,
+    /// A dynamic loop step must be non-zero before the first iteration or emptiness check.
+    InvalidLoopStep = 306,
     /// An in-range floating-point candidate must advance after rounding.
     RangeStepNoProgress = 307,
     /// Time ISO parsing uses this when text does not match the accepted timestamp format.
@@ -78,7 +78,7 @@ impl BuiltinErrorCode {
                 | Self::IntOverflow
                 | Self::InvalidExponent
                 | Self::FloatNonFinite
-                | Self::InvalidRangeStep
+                | Self::InvalidLoopStep
                 | Self::RangeStepNoProgress
         )
     }
@@ -166,7 +166,7 @@ impl BuiltinErrorCode {
                 "External floating-point boundary produced a non-finite value"
             }
             BuiltinErrorCode::FloatFormatInvariant => "Floating-point formatting invariant failed",
-            BuiltinErrorCode::InvalidRangeStep => "Loop step cannot be zero",
+            BuiltinErrorCode::InvalidLoopStep => "Loop step cannot be zero",
             BuiltinErrorCode::RangeStepNoProgress => "Floating-point range step made no progress",
             BuiltinErrorCode::TimeInvalidTimestampText => "Cannot parse Timestamp from text",
             BuiltinErrorCode::TimeTimestampOutOfRange => {

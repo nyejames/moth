@@ -51,6 +51,8 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::numeric_construction::BodyDraft;
+use crate::compiler_frontend::ast::statements::numeric_body_completion::complete_numeric_body;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
@@ -584,6 +586,25 @@ impl Template {
                 )
                 .map_err(TemplateError::from)?;
             }
+        }
+
+        // A const-required template whose scope is an independent numeric root owns its retained
+        // numeric positions: no enclosing statement body will complete them, so complete them here
+        // before preparation reads the authoritative view. A const-required template expression
+        // parsed inside another constant context joins that parent's domain and is deliberately
+        // excluded; its positions stay with the enclosing scope instead of being drained here.
+        if matches!(preparation_mode, TemplatePreparationMode::ConstRequired)
+            && context.is_numeric_body_root()
+        {
+            complete_numeric_body(
+                BodyDraft::new(),
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                path_fork,
+            )?;
         }
 
         // Preparation from the effective TirView of the final

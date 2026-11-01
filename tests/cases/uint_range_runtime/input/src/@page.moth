@@ -1,7 +1,8 @@
 -- Typed U32 ranges reuse the unsigned
--- candidate/termination shape. Ascending/descending, implicit/explicit steps,
--- empty/equal/inclusive bounds, a U32 value binding with an I32 iteration
--- index, break/continue, and the zero and U32-max terminal endpoints.
+-- counter/candidate/termination shape. Ascending and signed-step descending
+-- loops, implicit and explicit steps, empty/equal/inclusive bounds, a U32 value
+-- binding with an I32 iteration index, break/continue, and the zero and U32-max
+-- terminal endpoints. Direction comes only from the signed step.
 
 asc_lo U32 = 0
 asc_hi U32 = 5
@@ -14,7 +15,9 @@ loop asc_lo to & asc_hi |value, index|:
     ~asc_last_index = copy index
 ;
 
-step_two U32 = 2
+step_two I32 = 2
+desc_one I32 = -1
+neg_step_two I32 = -2
 stepped_total ~U32 = 0
 stepped_count ~= 0
 loop asc_lo to & asc_hi by step_two |value|:
@@ -26,7 +29,7 @@ desc_total ~U32 = 0
 desc_count ~= 0
 desc_last ~U32 = 99
 desc_first_val ~U32 = 99
-loop asc_hi to & asc_lo |item, idx|:
+loop asc_hi to & asc_lo by desc_one |item, idx|:
     ~desc_total = desc_total + item
     ~desc_count = desc_count + 1
     ~desc_last = copy item
@@ -36,7 +39,7 @@ loop asc_hi to & asc_lo |item, idx|:
 ;
 desc_step_total ~U32 = 0
 desc_step_count ~= 0
-loop asc_hi to & asc_lo by step_two |value|:
+loop asc_hi to & asc_lo by neg_step_two |value|:
     ~desc_step_total = desc_step_total + value
     ~desc_step_count = desc_step_count + 1
 ;
@@ -52,7 +55,8 @@ loop asc_hi to & asc_hi |value|:
 
 zero_terminal ~U32 = 99
 zero_count ~= 0
-loop step_two to & asc_lo by step_two |value|:
+two_u32 U32 = 2
+loop two_u32 to & asc_lo by neg_step_two |value|:
     ~zero_terminal = copy value
     ~zero_count = zero_count + 1
 ;

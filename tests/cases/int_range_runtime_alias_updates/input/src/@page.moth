@@ -11,13 +11,15 @@ check_range_aliases |ascending_start I32, ascending_end I32, ascending_step I32,
 
     descending_values ~= 0
     descending_indices ~= 0
+    descending_count ~= 0
     loop descending_start to descending_end by descending_step |descending_value, descending_index|:
-        assert(descending_value is descending_start - descending_index * descending_step, "descending value/index")
         ~descending_values = descending_values + descending_value
         ~descending_indices = descending_indices + descending_index
+        ~descending_count = descending_count + 1
     ;
-    assert(descending_values is 24, "descending value sum")
-    assert(descending_indices is 6, "descending index sum")
+    assert(descending_count is 0, "positive-step descending bounds are empty")
+    assert(descending_values is 0, "empty descending value sum")
+    assert(descending_indices is 0, "empty descending index sum")
 
     negative_step_values ~= 0
     negative_step_indices ~= 0

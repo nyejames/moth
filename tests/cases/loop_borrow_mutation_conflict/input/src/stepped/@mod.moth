@@ -1,0 +1,5 @@
+-- A stride never relaxes source-mutation exclusivity.
+items ~= {1, 2, 3}
+loop items by 2 |iter_value|:
+    ~items.push(4)
+;

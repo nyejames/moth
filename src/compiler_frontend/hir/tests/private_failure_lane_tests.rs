@@ -201,7 +201,7 @@ fn inferred_range_guard_has_no_success_slots() {
     let mut guards = 0;
     for block in &hir.blocks {
         if let HirTerminator::Invoke {
-            operation: HirFallibleOperation::RangeStepFailure { .. },
+            operation: HirFallibleOperation::LoopStepFailure { .. },
             success_results,
             success,
             ..
@@ -210,7 +210,7 @@ fn inferred_range_guard_has_no_success_slots() {
             guards += 1;
             assert!(
                 success_results.is_empty(),
-                "a terminal range guard produces no success values"
+                "a terminal loop-step guard produces no success values"
             );
             assert!(
                 matches!(

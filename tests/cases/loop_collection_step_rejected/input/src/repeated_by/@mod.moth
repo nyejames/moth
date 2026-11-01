@@ -1,0 +1,5 @@
+-- A loop header accepts exactly one step marker.
+items = {1, 2, 3}
+loop items by 1 by 2 |item|:
+    io.line([: [item]])
+;

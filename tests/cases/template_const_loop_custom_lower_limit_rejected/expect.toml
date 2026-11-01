@@ -3,4 +3,12 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0022"]
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.template_const_loop_expansion_limit_exceeded"
+path = "input/collection/@mod.moth"
+line = 2
+column = 3

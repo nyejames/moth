@@ -1,4 +1,43 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0029"]
+diagnostic_codes = ["MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-RULE-0039"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.bare_dual_binding"
+occurrence = 1
+path = "input/@page.moth"
+line = 2
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.missing_binding_comma"
+occurrence = 2
+path = "input/missing_comma/@mod.moth"
+line = 3
+column = 18
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.missing_closing_pipe"
+occurrence = 3
+path = "input/missing_pipe/@mod.moth"
+line = 3
+column = 13
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.trailing_binding_comma"
+occurrence = 4
+path = "input/trailing_comma/@mod.moth"
+line = 3
+column = 17
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0039"
+occurrence = 1
+path = "input/reserved_name/@mod.moth"
+line = 3
+column = 13

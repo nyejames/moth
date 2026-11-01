@@ -41,8 +41,8 @@ pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
-    InvalidCollectionTypeView, InvalidMapLiteralView, InvalidMapTypeCode, InvalidMapTypeView,
-    InvalidRangeOperandView,
+    InvalidCollectionTypeView, InvalidLoopOperandView, InvalidMapLiteralView, InvalidMapTypeCode,
+    InvalidMapTypeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidChoiceVariantView, invalid_choice_variant_available_variants,
@@ -75,10 +75,10 @@ use crate::compiler_frontend::compiler_messages::{
     HtmlTemplateWarning, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
     InvalidExpressionReason, InvalidExternalModuleReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidMapLiteralReason, InvalidMutableAccessReason,
-    InvalidOutputFolderReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
-    InvalidRouteOutputReason, InvalidTemplateDirectiveReason, MalformedTemplateReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
+    InvalidImportPathReason, InvalidLoopOperandReason, InvalidMapLiteralReason,
+    InvalidMutableAccessReason, InvalidOutputFolderReason, InvalidPageMetadataReason,
+    InvalidRouteOutputReason, InvalidTemplateDirectiveReason, LoopOperandKind,
+    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
     SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
@@ -1063,33 +1063,39 @@ fn deferred_feature_static_message(reason: &DeferredFeatureReason) -> &'static s
     }
 }
 
-pub(crate) fn invalid_range_operand_message(
-    operand: RangeOperandKind,
+pub(crate) fn invalid_loop_operand_message(
+    operand: LoopOperandKind,
     found_type_name: &str,
-    reason: InvalidRangeOperandReason,
+    reason: InvalidLoopOperandReason,
 ) -> String {
     let operand_name = match operand {
-        RangeOperandKind::Start => "start",
-        RangeOperandKind::End => "end",
-        RangeOperandKind::Step => "step",
+        LoopOperandKind::Start => "start",
+        LoopOperandKind::End => "end",
+        LoopOperandKind::Step => "step",
     };
     match reason {
-        InvalidRangeOperandReason::NotNumeric => {
+        InvalidLoopOperandReason::BoundNotNumeric => {
             format!(
                 "Range {operand_name} must be an integer or binary-float type. Found '{found_type_name}'"
             )
         }
-        InvalidRangeOperandReason::IncompatibleDomain => format!(
-            "Range {operand_name} type '{found_type_name}' has no shared numeric domain with the other range operands. Integer and binary-float operands do not mix, and integer operands need one type that holds every operand's range. Convert the operand explicitly with `cast` at a typed declaration."
+        InvalidLoopOperandReason::BoundIncompatibleDomain => format!(
+            "Range {operand_name} type '{found_type_name}' has no shared numeric domain with the other bound. Integer and binary-float operands do not mix, and integer bounds need one type that holds both ranges. Convert the operand explicitly with `cast` at a typed declaration."
+        ),
+        InvalidLoopOperandReason::StepNotSignedInteger => format!(
+            "Loop step must be a signed fixed-width integer (I8, I16, I32 or I64). Found '{found_type_name}'. The step keeps its own type and never changes the loop counter or collection source type."
+        ),
+        InvalidLoopOperandReason::StepNotConvertibleToFloatCounter => format!(
+            "Range step type '{found_type_name}' cannot convert safely to the binary-float counter type. A float range needs a binary-float step at the same or narrower precision than the counter, and a typed integer step never becomes a float step."
         ),
     }
 }
 
-/// WHAT: renders a range operand diagnostic from its compact facts.
+/// WHAT: renders a loop operand diagnostic from its compact facts.
 /// WHY: the type snapshot supplies the same source-facing type name after compaction.
-pub(crate) fn render_invalid_range_operand(
+pub(crate) fn render_invalid_loop_operand(
     diagnostic: &DiagnosticView<'_>,
-    view: &InvalidRangeOperandView,
+    view: &InvalidLoopOperandView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
     let found_type_name = diagnostic.types().display_for_render(
@@ -1098,7 +1104,7 @@ pub(crate) fn render_invalid_range_operand(
         context.path_table(),
     );
     RenderedPayload {
-        message: invalid_range_operand_message(view.operand, &found_type_name, view.reason),
+        message: invalid_loop_operand_message(view.operand, &found_type_name, view.reason),
         guidance: Vec::new(),
     }
 }

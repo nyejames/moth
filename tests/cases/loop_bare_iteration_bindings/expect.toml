@@ -2,3 +2,10 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0029"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.bare_dual_binding"
+path = "input/@page.moth"
+line = 3
+column = 12

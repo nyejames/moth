@@ -30,17 +30,17 @@ pub enum NumericFailureMode {
     Infallible,
 }
 
-/// Language-defined range guards, distinct from resource and invariant traps.
+/// Language-defined loop-step failures, distinct from resource and invariant traps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RangeStepFailureCause {
+pub enum LoopStepFailureCause {
     ZeroStep,
     NoProgress,
 }
 
-impl RangeStepFailureCause {
+impl LoopStepFailureCause {
     pub(crate) fn builtin_error_code(self) -> BuiltinErrorCode {
         match self {
-            Self::ZeroStep => BuiltinErrorCode::InvalidRangeStep,
+            Self::ZeroStep => BuiltinErrorCode::InvalidLoopStep,
             Self::NoProgress => BuiltinErrorCode::RangeStepNoProgress,
         }
     }

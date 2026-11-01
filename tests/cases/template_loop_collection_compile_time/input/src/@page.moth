@@ -1,3 +1,20 @@
+minimum #I64 = -9223372036854775808
+back_two #I32 = -2
+
 #[loop {"red", "green", "blue"} |color, index|:
     [index]=[color];
 ]
+#[loop {"red", "green", "blue"} by -1 |color, index|:rev:[index]=[color];]
+
+-- A step naming a module constant folds exactly like an authored literal: the I64 minimum
+-- visits the last item once, and the I32 -2 walks from the end to the first item.
+#[loop {"red", "green", "blue"} by minimum |color, index|:min:[index]=[color];]
+#[loop {"red", "green", "blue"} by back_two |color, index|:back:[index]=[color];]
+
+-- The same named step folds inside a const template value binding.
+render_named_step || -> String:
+    value #= [loop {"red", "green", "blue"} by back_two |color, index|:val:[index]=[color];]
+    return value
+;
+
+[:[render_named_step()]]

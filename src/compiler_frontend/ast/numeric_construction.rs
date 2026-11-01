@@ -336,10 +336,11 @@ pub(crate) enum NumericRecipe {
     ///      must keep the origin classes of its constructor argument instead of a fixed type.
     PatternPayload { shape: KnownShapeId },
     /// A range loop counter: its type is the range iteration domain selected from this header's
-    /// completed operands.
+    /// completed start and end bounds.
     ///
-    /// WHAT: owns the retained header slots, completes them once, selects the exact domain
-    ///      through the shared range policy and hands the finished spec to the loop construct.
+    /// WHAT: owns the retained header slots, completes the bounds and step once, selects the
+    ///      counter domain from the bounds through the shared range policy and hands the finished
+    ///      spec to the loop construct.
     /// WHY: the counter's type is a forward result of its operands' selected types, and the
     ///      operands belong to a loop construct the counter's own body cannot wait for; keeping
     ///      the slots here resolves the counter before any binding that reads it, so header
@@ -1247,8 +1248,9 @@ pub(crate) struct DeferredMatch {
 ///       authored end kind and header span.
 /// WHY: a range operand may reference a pending numeric origin whose single static type is only
 ///      selected at the body root; the header must keep the authored positions (including an
-///      omitted start and an omitted step) so completion materialises them once at the selected
-///      domain and the shared range policy still selects and checks that exact domain.
+///      omitted start and an omitted step) so completion materialises the bounds once at the
+///      bounds-selected counter domain and the step at its own independent type. The shared range
+///      policy still selects the counter and validates the step.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredRangeSpec {
     pub(crate) start: Option<StatementExpression>,
@@ -1263,7 +1265,7 @@ pub(crate) struct DeferredRangeSpec {
 /// WHAT: the retained counter plus the positional index binding.
 /// WHY: a deferred range header's counter can never be `Ready` — the header defers exactly
 ///      because an operand references a pending origin, and the counter's type is a forward
-///      result of the operands' selected domains. The row keeps the authored name/path/span/mode
+///      result of the bounds' selected domains. The row keeps the authored name/path/span/mode
 ///      in one place, so the body sees the counter without a fabricated `TypeId`.
 #[derive(Debug, Clone)]
 pub(crate) struct RetainedRangeCounter {
@@ -1310,6 +1312,16 @@ pub(crate) enum DeferredLoopHeader {
     Collection {
         bindings: Box<crate::compiler_frontend::ast::ast_nodes::LoopBindings>,
         iterable: StatementExpression,
+        /// The optional authored step, retained until its numeric origin resolves.
+        ///
+        /// WHY: the step is evaluated after the source and keeps its own signed integer type, so
+        ///      the header keeps its exact position instead of reconstructing it from the source.
+        step: Option<StatementExpression>,
+        /// The authored `by` marker span, present exactly when the header parsed a step.
+        ///
+        /// WHY: a retained source classifies itself at the body root, and a completed `Bool` there
+        ///      is the conditional loop whose step diagnostic belongs at the marker.
+        step_marker_span: Option<SourceSpan>,
         /// The item binding declared before the body, when its element type is still pending.
         ///
         /// WHY: a pending item completes with the header, so the body sees one resolved declaration.

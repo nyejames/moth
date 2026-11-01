@@ -28,8 +28,9 @@ init_docs_sidebar()!
     iteration and numeric ranges. The header selects the form, so you don't need
     separate `while`, `for` and range-loop keywords.
 
-    `break` and `continue` target the nearest loop. Range bounds and steps follow
-    checked numeric rules rather than backend-native arithmetic.
+    `break` and `continue` target the nearest loop. A `by` step is signed, so its
+    sign chooses direction rather than the bounds. Range bounds and steps follow
+    the exact numeric rules rather than backend-native arithmetic.
 ]
 
 #[section:

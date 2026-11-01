@@ -5,4 +5,17 @@ loop items |item|:
     ~sum = sum + item
 ;
 
-[:loop_collection_iteration sum=[sum]]
+-- A single binding keeps receiving the element while the step selects source
+-- positions; the index is never implicitly bound.
+stride_items = {10, 20, 30, 40, 50}
+forward ~= [:]
+loop stride_items by 2 |item|:
+    ~forward = [:[forward][item],]
+;
+
+reverse ~= [:]
+loop stride_items by -2 |item|:
+    ~reverse = [:[reverse][item],]
+;
+
+[:loop_collection_iteration sum=[sum] forward=[forward] reverse=[reverse]]

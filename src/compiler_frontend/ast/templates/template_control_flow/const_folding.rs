@@ -19,6 +19,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -43,57 +44,62 @@ pub(crate) struct TemplateFoldBinding {
 
 /// Streaming driver for const numeric range loops.
 ///
-/// WHAT: produces one counter at a time while enforcing the iteration limit
-///       and hardened range edge-case rules, instead of preallocating a vector.
-/// WHY: avoids O(N) upfront allocation for large or unbounded ranges, and keeps
-///       validation (by-0, overflow, non-finite, non-progressing) near the range
-///       shape rather than spread across separate vector-building helpers.
+/// WHAT: produces one counter at a time while enforcing the iteration limit and the hardened
+///       range edge cases, instead of preallocating a vector.
+/// WHY: avoids O(N) upfront allocation for large or unbounded ranges, and keeps validation
+///      (zero step, non-finite and non-progressing candidates) near the range shape rather than
+///      spread across separate vector-building helpers.
 pub(crate) struct ConstRangeCursor {
     kind: ConstRangeCursorKind,
     emitted_iterations: usize,
     finished: bool,
     limit: usize,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    span: Option<SourceSpan>,
+    /// The authored step position, or `None` when the step is the implicit `+1`.
+    step_span: Option<SourceSpan>,
 }
 
 enum ConstRangeCursorKind {
-    /// One shared `i128` cursor for signed and unsigned fixed integers.
+    /// One shared `i128` cursor for every fixed integer counter domain.
     ///
-    /// WHAT: the candidate/termination mechanics run once on `i128`; only the
-    ///       emitted counter materialises at `scalar`.
-    /// WHY: signed, unsigned and widened integer ranges share one stepping path
-    ///      instead of owning parallel per-class successors.
+    /// WHAT: the candidate and termination mechanics run once on `i128`; only the emitted
+    ///       counter materialises at `scalar`.
+    /// WHY: an integer step keeps its own signed width, independent of the counter, so exact
+    ///      `i128` arithmetic covers signed minima, unsigned maxima and narrow counters on one
+    ///      stepping path without magnitude normalisation or narrowing.
     Integer {
         current: i128,
         end: i128,
         end_kind: RangeEndKind,
+        /// The authored signed step widened exactly, or the independent `+1` default. Never zero.
         step: i128,
         scalar: FixedScalar,
     },
     /// A fixed binary-float cursor that rounds every candidate to its own precision.
     ///
-    /// WHY: the range's selected precision is kept, so an `F16` counter advances
-    ///      exactly as `F16` arithmetic does rather than widening to `F32`.
+    /// WHY: the range's selected precision is kept, so an `F16` counter advances exactly as `F16`
+    ///      arithmetic does rather than widening to `F32`.
     FixedFloat {
         current: f64,
         end: f64,
         end_kind: RangeEndKind,
+        /// The authored step converted to the counter precision. Never zero.
         step: f64,
         scalar: FixedScalar,
         precision: BinaryFloatPrecision,
     },
 }
 
-/// Inputs for the shared integer cursor constructor.
-struct ConstRangeIntegerInput<'range> {
-    scalar: FixedScalar,
-    start: i128,
-    end: i128,
-    step: Option<(i128, Option<crate::compiler_frontend::source::SourceSpan>)>,
-    maximum_step_magnitude: i128,
-    range: &'range RangeLoopSpec,
-    limit: usize,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
+/// The resolved const values of a range header's three operand slots.
+///
+/// WHAT: the start, end and optional step after transparent coercion unwrapping.
+/// WHY: both counter classes read the same three slots, so one small record keeps the class
+///      constructors from repeating the driver's operand plumbing.
+struct ConstRangeOperands {
+    start: FixedScalarValue,
+    end: FixedScalarValue,
+    /// The authored step. `None` keeps the independent `+1` default.
+    step: Option<FixedScalarValue>,
 }
 
 impl ConstRangeCursor {
@@ -102,7 +108,8 @@ impl ConstRangeCursor {
         expressions: &AstExpressionBuilder,
         constants: &ConstValueStore,
         limit: usize,
-        span: Option<crate::compiler_frontend::source::SourceSpan>,
+        span: Option<SourceSpan>,
+        step_span: Option<SourceSpan>,
     ) -> Result<Self, TemplateError> {
         let start = const_numeric_expression(expressions.view(range.start)?, constants)?;
         let end = const_numeric_expression(expressions.view(range.end)?, constants)?;
@@ -110,132 +117,19 @@ impl ConstRangeCursor {
             .step
             .map(|id| const_numeric_expression(expressions.view(id)?, constants))
             .transpose()?;
-        // The header selected its iteration domain from the operand types before any operand
-        // value substitution, and those substitutions preserve operand types, so the spec's
-        // domain is this cursor's exact counter domain.
+        // The header selected its iteration domain from the bound types before any operand value
+        // substitution, and those substitutions preserve operand types, so the spec's domain is
+        // this cursor's exact counter domain.
         let NumericScalar::Fixed(scalar) = range.domain else {
             return Err(invalid_range_bounds(span));
         };
-
-        let step_span = range
-            .step
-            .map(|id| expressions.view(id).map(|value| value.span()))
-            .transpose()?
-            .flatten();
-        Self::new_fixed(scalar, (start, end, step), range, step_span, limit, span)
-    }
-    /// Builds the shared `i128` integer cursor for one exact fixed integer domain.
-    ///
-    /// WHAT: validates the step magnitude against the domain maximum,
-    ///       normalises it to a positive magnitude and signs it by direction.
-    ///       Only the emitted counter materialises at the source scalar.
-    /// WHY: descending ranges subtract a magnitude without unary negation, the
-    ///      inclusive maximum and descending zero endpoints terminate through
-    ///      the in-range exit without ever computing an invalid successor.
-    fn new_integer(input: ConstRangeIntegerInput<'_>) -> Result<Self, TemplateError> {
-        let ConstRangeIntegerInput {
-            scalar,
-            start,
-            end,
-            step,
-            maximum_step_magnitude,
-            range,
-            limit,
-            span,
-        } = input;
-        let step_span = step.and_then(|(_, explicit)| explicit).or(span);
-        let magnitude = match step {
-            Some((value, _)) => value
-                .checked_abs()
-                .filter(|magnitude| *magnitude <= maximum_step_magnitude)
-                .ok_or_else(|| invalid_range_bounds(step_span))?,
-            None => 1,
-        };
-        if magnitude == 0 {
-            return Err(invalid_range_bounds(step_span));
-        }
-        Ok(Self {
-            kind: ConstRangeCursorKind::Integer {
-                current: start,
-                end,
-                end_kind: range.end_kind,
-                step: if start <= end { magnitude } else { -magnitude },
-                scalar,
-            },
-            emitted_iterations: 0,
-            finished: false,
-            limit,
-            span,
-        })
-    }
-    fn new_fixed(
-        scalar: FixedScalar,
-        range_values: (FixedScalarValue, FixedScalarValue, Option<FixedScalarValue>),
-        range: &RangeLoopSpec,
-        step_span: Option<crate::compiler_frontend::source::SourceSpan>,
-        limit: usize,
-        span: Option<crate::compiler_frontend::source::SourceSpan>,
-    ) -> Result<Self, TemplateError> {
-        let (start, end, step) = range_values;
-        let end_kind = range.end_kind;
+        let operands = ConstRangeOperands { start, end, step };
         let kind = match scalar.class() {
             FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
-                let current =
-                    fixed_integer_value(start).ok_or_else(|| invalid_range_bounds(span))?;
-                let end = fixed_integer_value(end).ok_or_else(|| invalid_range_bounds(span))?;
-                let maximum_step_magnitude = fixed_integer_max_magnitude(scalar)
-                    .ok_or_else(|| invalid_range_bounds(span))?;
-                let explicit_step = step
-                    .map(|value| {
-                        fixed_integer_value(value)
-                            .ok_or_else(|| invalid_range_bounds(step_span.or(span)))
-                    })
-                    .transpose()?
-                    .map(|magnitude| (magnitude, step_span));
-                return Self::new_integer(ConstRangeIntegerInput {
-                    scalar,
-                    start: current,
-                    end,
-                    step: explicit_step,
-                    maximum_step_magnitude,
-                    range,
-                    limit,
-                    span,
-                });
+                integer_cursor_kind(scalar, operands, range.end_kind, step_span, span)?
             }
             FixedScalarClass::BinaryFloat => {
-                // Every candidate rounds to the range's own precision before the
-                // endpoint and no-progress checks, so `F16` advances exactly as `F16`
-                // arithmetic does instead of widening through an `F32` floor.
-                let precision = scalar
-                    .binary_float_precision()
-                    .ok_or_else(|| invalid_range_bounds(span))?;
-                let current = fixed_float_value(start, precision)
-                    .ok_or_else(|| invalid_range_bounds(span))?;
-                let end =
-                    fixed_float_value(end, precision).ok_or_else(|| invalid_range_bounds(span))?;
-                if !current.is_finite() || !end.is_finite() {
-                    return Err(invalid_range_bounds(span));
-                }
-                let step_magnitude = match step {
-                    Some(value) => fixed_float_value(value, precision)
-                        .map(f64::abs)
-                        .filter(|value| *value != 0.0 && value.is_finite())
-                        .ok_or_else(|| invalid_range_bounds(step_span.or(span)))?,
-                    None => return Err(invalid_range_bounds(span)),
-                };
-                ConstRangeCursorKind::FixedFloat {
-                    current,
-                    end,
-                    end_kind,
-                    step: if current <= end {
-                        step_magnitude
-                    } else {
-                        -step_magnitude
-                    },
-                    scalar,
-                    precision,
-                }
+                fixed_float_cursor_kind(scalar, operands, range.end_kind, step_span, span)?
             }
             // `Byte` has no range counter domain: the shared selector rejects it and
             // `const_numeric_expression` keeps it out of range operand materialisation.
@@ -248,6 +142,7 @@ impl ConstRangeCursor {
             finished: false,
             limit,
             span,
+            step_span,
         })
     }
 
@@ -268,8 +163,11 @@ impl ConstRangeCursor {
                 step,
                 scalar,
             } => {
+                // The step sign is the only direction fact: the bounds never infer it and the
+                // step is never normalised to a magnitude.
                 let ascending = *step > 0;
                 if !fixed_integer_range_contains(*current, *end, *end_kind, ascending) {
+                    self.finished = true;
                     return Ok(None);
                 }
 
@@ -284,16 +182,20 @@ impl ConstRangeCursor {
                 }
 
                 // Only counter materialisation returns to the source scalar: the
-                // candidate/termination mechanics above run once on `i128`.
-                // The in-range exit below never computes an invalid successor,
-                // so the inclusive maximum and descending zero terminate.
+                // candidate/termination mechanics run once on `i128`.
                 let counter = fixed_integer_scalar(*scalar, *current)
                     .ok_or_else(|| invalid_range_bounds(self.span))?;
                 self.emitted_iterations += 1;
 
-                let next = current
-                    .checked_add(*step)
-                    .ok_or_else(|| invalid_range_bounds(self.span))?;
+                // An inclusive endpoint is the last value, so no successor is computed past it.
+                if *current == *end && *end_kind == RangeEndKind::Inclusive {
+                    self.finished = true;
+                    return Ok(Some(counter));
+                }
+
+                // `i128` holds the sum exactly for every fixed-width counter and signed step, so
+                // a huge negative step simply overshoots the bound and the range stops.
+                let next = *current + *step;
                 if fixed_integer_range_contains(next, *end, *end_kind, ascending) {
                     *current = next;
                 } else {
@@ -311,8 +213,10 @@ impl ConstRangeCursor {
                 scalar,
                 precision,
             } => {
+                // The signed step selects direction; a wrong-direction range is empty.
                 let ascending = *step > 0.0;
                 if !float_range_contains(*current, *end, *end_kind, ascending) {
+                    self.finished = true;
                     return Ok(None);
                 }
 
@@ -337,19 +241,21 @@ impl ConstRangeCursor {
                     return Ok(Some(counter));
                 }
 
-                // Round every candidate at the range's own precision before the
-                // endpoint and no-progress checks, so narrow counters stall exactly
-                // where their arithmetic does.
+                // Add the signed step and round at the range's own precision before the
+                // endpoint and no-progress checks, so narrow counters stall exactly where
+                // their arithmetic does.
                 let previous = *current;
-                let next = precision.round(*current + *step);
-                if !float_range_contains(next, *end, *end_kind, ascending) {
+                let next = precision.round(previous + *step);
+                if !next.is_finite() || !float_range_contains(next, *end, *end_kind, ascending) {
                     self.finished = true;
-                } else {
-                    if !next.is_finite() || next == previous {
-                        return Err(invalid_range_bounds(self.span));
-                    }
-                    *current = next;
+                    return Ok(Some(counter));
                 }
+                // An in-range candidate that rounds back to the current counter would make the
+                // range stall without ever reaching its endpoint.
+                if next == previous {
+                    return Err(invalid_range_step_no_progress(self.step_span));
+                }
+                *current = next;
 
                 Ok(Some(counter))
             }
@@ -357,7 +263,101 @@ impl ConstRangeCursor {
     }
 }
 
-/// The integer payload of a fixed integer value widened to `i128`, exact for `U64`.
+/// Builds the shared `i128` integer cursor kind for one exact fixed integer domain.
+///
+/// WHAT: widens the bounds and the authored step to `i128` without narrowing the step to the
+///       counter, and rejects a const-known zero step before any bound is examined.
+/// WHY: exact arithmetic preserves signed minima and unsigned maxima, and only the emitted
+///      counter materialises at the counter scalar.
+fn integer_cursor_kind(
+    scalar: FixedScalar,
+    operands: ConstRangeOperands,
+    end_kind: RangeEndKind,
+    step_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+) -> Result<ConstRangeCursorKind, TemplateError> {
+    let current = fixed_integer_value(operands.start).ok_or_else(|| invalid_range_bounds(span))?;
+    let end = fixed_integer_value(operands.end).ok_or_else(|| invalid_range_bounds(span))?;
+    let step_span = step_span.or(span);
+    // The authored step keeps its own signed width and is never narrowed to the counter. The
+    // omitted step is the independent signed `+1` default, not a counter-typed value.
+    let step = match operands.step {
+        Some(value) => fixed_integer_value(value).ok_or_else(|| invalid_range_bounds(step_span))?,
+        None => 1,
+    };
+    // A const-known zero step fails even when the bounds would visit nothing.
+    if step == 0 {
+        return Err(invalid_range_step_is_zero(step_span));
+    }
+
+    Ok(ConstRangeCursorKind::Integer {
+        current,
+        end,
+        end_kind,
+        step,
+        scalar,
+    })
+}
+
+/// Builds the fixed binary-float cursor kind for one exact float counter domain.
+///
+/// WHAT: rounds every operand to the counter precision, rejects a missing, zero or non-finite
+///       step and keeps the signed step unchanged.
+/// WHY: candidates round at the counter's own precision, and the step's sign alone selects
+///      direction rather than the bounds overriding it.
+fn fixed_float_cursor_kind(
+    scalar: FixedScalar,
+    operands: ConstRangeOperands,
+    end_kind: RangeEndKind,
+    step_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+) -> Result<ConstRangeCursorKind, TemplateError> {
+    // Every candidate rounds to the range's own precision before the endpoint and no-progress
+    // checks, so `F16` advances exactly as `F16` arithmetic does instead of widening through an
+    // `F32` floor.
+    let precision = scalar
+        .binary_float_precision()
+        .ok_or_else(|| invalid_range_bounds(span))?;
+    let current =
+        fixed_float_value(operands.start, precision).ok_or_else(|| invalid_range_bounds(span))?;
+    let end =
+        fixed_float_value(operands.end, precision).ok_or_else(|| invalid_range_bounds(span))?;
+    if !current.is_finite() || !end.is_finite() {
+        return Err(invalid_range_bounds(span));
+    }
+    let step_span = step_span.or(span);
+    let step = match operands.step {
+        // The step was converted to the counter precision before folding, so rounding here only
+        // re-applies that owned conversion.
+        Some(value) => {
+            fixed_float_value(value, precision).ok_or_else(|| invalid_range_bounds(step_span))?
+        }
+        // A binary-float range always requires an explicit step.
+        None => return Err(invalid_range_bounds(span)),
+    };
+    // `-0.0 == 0.0`, so a folded negative zero fails exactly like an authored integer zero, even
+    // for equal endpoints that would otherwise visit nothing.
+    if step == 0.0 {
+        return Err(invalid_range_step_is_zero(step_span));
+    }
+    // Compile-time evaluation rejects non-finite constants, so this is a defensive bound check
+    // rather than a source-reachable zero or no-progress case.
+    if !step.is_finite() {
+        return Err(invalid_range_bounds(step_span));
+    }
+
+    Ok(ConstRangeCursorKind::FixedFloat {
+        current,
+        end,
+        end_kind,
+        step,
+        scalar,
+        precision,
+    })
+}
+
+/// The integer payload of a fixed integer value widened to `i128`, exact for every width
+/// including `U64`.
 fn fixed_integer_value(value: FixedScalarValue) -> Option<i128> {
     value
         .as_i64()
@@ -381,21 +381,33 @@ fn fixed_integer_scalar(scalar: FixedScalar, value: i128) -> Option<FixedScalarV
         FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
     }
 }
-fn fixed_integer_max_magnitude(scalar: FixedScalar) -> Option<i128> {
-    match scalar.class() {
-        FixedScalarClass::SignedInteger => scalar
-            .signed_range()
-            .map(|(_, maximum)| i128::from(maximum)),
-        FixedScalarClass::UnsignedInteger => scalar.unsigned_max().map(i128::from),
-        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
-    }
-}
 
-fn invalid_range_bounds(
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
-) -> TemplateError {
+fn invalid_range_bounds(span: Option<SourceSpan>) -> TemplateError {
     templates::invalid_template_structure(
         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
+        span,
+    )
+    .into()
+}
+
+/// The const-time zero step of a range or collection loop.
+///
+/// WHY: a const-known zero cannot progress, and it is a step fact rather than a non-constant
+///      bound fact, so it keeps its own reason at the authored step position.
+fn invalid_range_step_is_zero(span: Option<SourceSpan>) -> TemplateError {
+    templates::invalid_template_structure(
+        InvalidTemplateStructureReason::TemplateLoopStepIsZero,
+        span,
+    )
+    .into()
+}
+
+/// A const float range step that rounds back to the current counter.
+///
+/// WHY: the range cannot reach its endpoint, and the authored step position owns the repair.
+fn invalid_range_step_no_progress(span: Option<SourceSpan>) -> TemplateError {
+    templates::invalid_template_structure(
+        InvalidTemplateStructureReason::TemplateLoopStepNoProgress,
         span,
     )
     .into()
@@ -424,11 +436,25 @@ fn const_numeric_expression(
     expression: ExpressionView<'_>,
     constants: &ConstValueStore,
 ) -> Result<FixedScalarValue, TemplateError> {
+    const_numeric_expression_value(expression, constants)?
+        .ok_or_else(|| invalid_range_bounds(expression.span()))
+}
+
+/// The materialised fixed scalar behind one const operand, or `None` when it is not const.
+///
+/// WHAT: accepts a constant through transparent coercion wrappers.
+/// WHY: range operands and collection steps both read one const numeric slot but own different
+///      diagnostics, so value extraction stays free of the caller's reason.
+fn const_numeric_expression_value(
+    expression: ExpressionView<'_>,
+    constants: &ConstValueStore,
+) -> Result<Option<FixedScalarValue>, TemplateError> {
     match expression.operation() {
-        ExpressionOperationView::Constant(id) => const_numeric_payload(id, constants)
-            .ok_or_else(|| invalid_range_bounds(expression.span())),
-        ExpressionOperationView::Coerce { value, .. } => const_numeric_expression(value, constants),
-        _ => Err(invalid_range_bounds(expression.span())),
+        ExpressionOperationView::Constant(id) => Ok(const_numeric_payload(id, constants)),
+        ExpressionOperationView::Coerce { value, .. } => {
+            const_numeric_expression_value(value, constants)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -452,6 +478,122 @@ fn float_range_contains(current: f64, end: f64, end_kind: RangeEndKind, ascendin
         (false, RangeEndKind::Exclusive) => current > end,
         (false, RangeEndKind::Inclusive) => current >= end,
     }
+}
+
+// -------------------------
+//  Const Collection Stepping
+// -------------------------
+
+/// The const-known signed integer step of one collection header.
+///
+/// WHAT: widens the authored step exactly and keeps its own type independent of the source.
+/// WHY: the traversal only needs the exact value, and a runtime-only step must keep the
+///      const-required diagnostic rather than being defaulted or narrowed to the source index.
+///      `i128` holds every signed fixed-width step exactly, including `I64::MIN`, so no consumer
+///      needs a signed `abs`.
+pub(crate) fn const_collection_step(
+    step: ExprId,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+    span: Option<SourceSpan>,
+) -> Result<i128, TemplateError> {
+    let value = const_numeric_expression_value(expressions.view(step)?, constants)?
+        .ok_or_else(|| invalid_collection_step(span))?;
+    let signed = match value.scalar().class() {
+        // The AST admits only signed fixed-width integer steps; anything else is a broken
+        // invariant that still reports as a non-const step instead of a panic.
+        FixedScalarClass::SignedInteger => value.as_i64(),
+        FixedScalarClass::UnsignedInteger
+        | FixedScalarClass::BinaryFloat
+        | FixedScalarClass::Octet => None,
+    }
+    .ok_or_else(|| invalid_collection_step(span))?;
+    Ok(i128::from(signed))
+}
+
+/// Streaming driver for const collection loops.
+///
+/// WHAT: visits the source's actual indices under the authored signed step and enforces the
+///       visited-iteration limit.
+/// WHY: enumeration would report wrong indices for a stride and would apply the limit to source
+///      positions. Exact `i128` arithmetic also keeps an overshoot from ever materialising an
+///      invalid index, including for `I64::MIN`.
+pub(crate) struct ConstCollectionCursor {
+    /// The next source index to visit, exact so an overshoot never wraps or narrows.
+    next_index: i128,
+    step: i128,
+    /// The source length widened once; every bound test compares against it.
+    source_len: i128,
+    visited_iterations: usize,
+    limit: usize,
+    span: Option<SourceSpan>,
+}
+
+impl ConstCollectionCursor {
+    pub(crate) fn new(
+        source_len: usize,
+        step: i128,
+        limit: usize,
+        step_span: Option<SourceSpan>,
+        span: Option<SourceSpan>,
+    ) -> Result<Self, TemplateError> {
+        // A const-known zero step fails even when the source is empty or the step would visit
+        // nothing. Range and collection loops share the same const-time zero-step reason.
+        if step == 0 {
+            return Err(invalid_range_step_is_zero(step_span.or(span)));
+        }
+        let source_len = i128::try_from(source_len).map_err(|_| {
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "Const collection source length exceeded I128.",
+            )
+        })?;
+        Ok(Self {
+            // The step sign selects the start: positive steps begin at the first source index,
+            // negative steps at the last. An empty source starts outside the bounds either way.
+            next_index: if step > 0 { 0 } else { source_len - 1 },
+            step,
+            source_len,
+            visited_iterations: 0,
+            limit,
+            span,
+        })
+    }
+
+    pub(crate) fn next_index(&mut self) -> Result<Option<usize>, TemplateError> {
+        if self.next_index < 0 || self.next_index >= self.source_len {
+            return Ok(None);
+        }
+        if self.visited_iterations >= self.limit {
+            return Err(templates::invalid_template_structure(
+                InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
+                    limit: self.limit,
+                },
+                self.span,
+            )
+            .into());
+        }
+
+        let index = usize::try_from(self.next_index).map_err(|_| {
+            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "Const collection index left the source bounds.",
+            )
+        })?;
+        self.visited_iterations += 1;
+        // Exact `i128` addition: a huge step overshoots the bound and the next call stops without
+        // constructing an invalid index.
+        self.next_index += self.step;
+        Ok(Some(index))
+    }
+}
+
+fn invalid_collection_step(span: Option<SourceSpan>) -> TemplateError {
+    templates::invalid_template_structure(
+        InvalidTemplateStructureReason::TemplateLoopStepNotConst,
+        span,
+    )
+    .into()
 }
 
 // -------------------------
@@ -552,7 +694,7 @@ pub(crate) fn build_range_iteration_bindings(
 pub(crate) fn build_collection_iteration_bindings(
     bindings: &LoopBindings,
     item_value: ExprId,
-    zero_based_index: usize,
+    source_index: usize,
     iterable_provenance: &SyntheticInterfaceProvenance,
     expressions: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
@@ -580,7 +722,7 @@ pub(crate) fn build_collection_iteration_bindings(
     if let Some(index) = &bindings.index {
         fold_bindings.push(iteration_index_binding(
             index,
-            zero_based_index,
+            source_index,
             iterable_provenance,
             expressions,
             constants,
@@ -614,12 +756,12 @@ fn iteration_constant(
 
 fn iteration_index_binding(
     index: &Declaration,
-    zero_based_index: usize,
+    position: usize,
     provenance: &SyntheticInterfaceProvenance,
     expressions: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
 ) -> Result<TemplateFoldBinding, TemplateError> {
-    let position = i32::try_from(zero_based_index).map_err(|_| {
+    let position = i32::try_from(position).map_err(|_| {
         crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
             "Const loop position exceeded I32.",

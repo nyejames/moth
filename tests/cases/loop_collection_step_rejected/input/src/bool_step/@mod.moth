@@ -1,0 +1,6 @@
+-- A Bool is not an integer step and never converts.
+items = {1, 2, 3}
+flag = true
+loop items by flag |item|:
+    io.line([: [item]])
+;

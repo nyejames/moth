@@ -507,39 +507,33 @@ fn failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure
 }
 
 #[test]
-fn range_iteration_uses_the_fixed_pairwise_table_and_rejects_dec() {
-    // Fixed-width operands keep the pairwise table, including mixed-width promotion.
+fn range_iteration_selects_the_counter_domain_from_bounds_only() {
+    // Fixed-width bounds keep the pairwise table, including mixed-width promotion.
     assert_eq!(
-        range_iteration_domain(fixed(I8), fixed(U16), Some(fixed(U16))),
+        range_iteration_domain(fixed(I8), fixed(U16)),
         Some(fixed(I32))
     );
     // An equal narrow fixed type keeps its own counter domain instead of a wider floor.
     assert_eq!(
-        range_iteration_domain(fixed(U8), fixed(U8), Some(fixed(U8))),
+        range_iteration_domain(fixed(U8), fixed(U8)),
         Some(fixed(U8))
     );
     assert_eq!(
-        range_iteration_domain(fixed(I8), fixed(I8), None),
+        range_iteration_domain(fixed(I8), fixed(I8)),
         Some(fixed(I8))
     );
 
-    // Binary floats promote by precision, but an integer/float mixture stays rejected:
-    // a float step cannot rescue it.
+    // Binary floats promote by precision, but an integer/float bound mixture stays rejected.
+    // The step has no input here, so it can never widen or rescue the counter.
     assert_eq!(
-        range_iteration_domain(fixed(F16), fixed(F32), None),
+        range_iteration_domain(fixed(F16), fixed(F32)),
         Some(fixed(F32))
     );
-    assert_eq!(
-        range_iteration_domain(fixed(F16), fixed(U16), Some(fixed(F32))),
-        None
-    );
+    assert_eq!(range_iteration_domain(fixed(F16), fixed(U16)), None);
 
-    // `Dec` operands never form a range counter.
-    assert_eq!(range_iteration_domain(number(2), number(2), None), None);
-    assert_eq!(
-        range_iteration_domain(fixed(I8), number(2), Some(fixed(I8))),
-        None
-    );
+    // `Dec` bounds never form a range counter.
+    assert_eq!(range_iteration_domain(number(2), number(2)), None);
+    assert_eq!(range_iteration_domain(fixed(I8), number(2)), None);
 }
 
 #[test]
@@ -565,7 +559,7 @@ fn byte_is_outside_every_numeric_operator_domain() {
     }
 
     assert!(!comparison_supported(byte, byte));
-    assert_eq!(range_iteration_domain(byte, byte, None), None);
+    assert_eq!(range_iteration_domain(byte, byte), None);
     assert!(!numeric_operation_cannot_fail(
         NumericOperator::Add,
         byte,

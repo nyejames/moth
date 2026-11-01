@@ -1,0 +1,5 @@
+project #= (
+    name = "template_const_loop_runtime_step_rejected",
+    entry_root = "src",
+)
+html #= ()

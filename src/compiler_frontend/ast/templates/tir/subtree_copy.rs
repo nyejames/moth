@@ -624,13 +624,20 @@ fn remap_loop_header_expression_sites(
                 }),
             }
         }
-        TemplateLoopHeaderExpressionSites::Collection { iterable } => {
+        TemplateLoopHeaderExpressionSites::Collection { iterable, step } => {
             let copied_iterable = remap_expression_site_id(store);
             identity_remap
                 .expression_sites
                 .insert(iterable, copied_iterable);
             TemplateLoopHeaderExpressionSites::Collection {
                 iterable: copied_iterable,
+                step: step.map(|source_step| {
+                    let copied_step = remap_expression_site_id(store);
+                    identity_remap
+                        .expression_sites
+                        .insert(source_step, copied_step);
+                    copied_step
+                }),
             }
         }
     }

@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["loop_nested_break_continue total=12"]
+rendered_output_contains = ["loop_nested_break_continue total=12 strided-total=12 strided-seen=0:5,2:5,"]

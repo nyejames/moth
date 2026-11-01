@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["loop_collection_iteration sum=10"]
+rendered_output_exact = "loop_collection_iteration sum=10 forward=10,30,50, reverse=50,30,10,"

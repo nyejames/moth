@@ -1,0 +1,36 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-RULE-0059"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.misplaced_loop_step"
+occurrence = 1
+path = "input/misplaced_by/@mod.moth"
+line = 3
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.missing_range_step"
+occurrence = 2
+path = "input/missing_value/@mod.moth"
+line = 3
+column = 18
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.repeated_loop_step"
+occurrence = 3
+path = "input/repeated_by/@mod.moth"
+line = 3
+column = 23
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_loop_operand.step_not_signed_integer"
+occurrence = 1
+path = "input/unsigned_step/@mod.moth"
+line = 4
+column = 21

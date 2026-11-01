@@ -1,0 +1,8 @@
+-- A pending numeric condition completes as I32 and is rejected with the condition context.
+probe ||:
+    value = 1
+    loop value:
+        io.line([: [1]])
+    ;
+;
+probe()

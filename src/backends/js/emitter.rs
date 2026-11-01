@@ -261,9 +261,7 @@ impl<'hir> JsEmitter<'hir> {
                             usage.require_float_formatter(precision);
                         }
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
-                        HirStatementKind::RangeStepFailure { .. } => {
-                            usage.range_step_failure = true
-                        }
+                        HirStatementKind::LoopStepFailure { .. } => usage.loop_step_failure = true,
                         _ => {}
                     }
                 }
@@ -277,8 +275,8 @@ impl<'hir> JsEmitter<'hir> {
                             usage.require_float_formatter(precision);
                         }
                         HirFallibleOperation::ValidateFloat { .. } => usage.validate_float = true,
-                        HirFallibleOperation::RangeStepFailure { .. } => {
-                            usage.range_step_failure = true;
+                        HirFallibleOperation::LoopStepFailure { .. } => {
+                            usage.loop_step_failure = true;
                         }
                         HirFallibleOperation::Call { .. }
                         | HirFallibleOperation::CastOp { .. }
@@ -415,19 +413,14 @@ impl<'hir> JsEmitter<'hir> {
                 self.numeric_operands_use_maps(operands)
             }
 
-            HirStatementKind::FloatRangeCandidate {
-                current,
-                step,
-                end,
-                ascending,
-                ..
+            HirStatementKind::RangeCandidate {
+                current, step, end, ..
             } => {
                 self.expression_uses_maps(*current)
                     || self.expression_uses_maps(*step)
                     || self.expression_uses_maps(*end)
-                    || self.expression_uses_maps(*ascending)
             }
-            HirStatementKind::RangeStepFailure { .. } => false,
+            HirStatementKind::LoopStepFailure { .. } => false,
         }
     }
 
@@ -511,7 +504,7 @@ impl<'hir> JsEmitter<'hir> {
                 HirFallibleOperation::NumericOp { operands, .. } => {
                     self.numeric_operands_use_maps(operands)
                 }
-                HirFallibleOperation::RangeStepFailure { .. } => false,
+                HirFallibleOperation::LoopStepFailure { .. } => false,
             },
 
             HirTerminator::Match { scrutinee, arms } => {
@@ -617,19 +610,14 @@ fn collect_statement_cast_policies(
                 collect_expression_cast_policies(hir, *right, policies);
             }
         },
-        HirStatementKind::FloatRangeCandidate {
-            current,
-            step,
-            end,
-            ascending,
-            ..
+        HirStatementKind::RangeCandidate {
+            current, step, end, ..
         } => {
             collect_expression_cast_policies(hir, *current, policies);
             collect_expression_cast_policies(hir, *step, policies);
             collect_expression_cast_policies(hir, *end, policies);
-            collect_expression_cast_policies(hir, *ascending, policies);
         }
-        HirStatementKind::RangeStepFailure { .. } => {}
+        HirStatementKind::LoopStepFailure { .. } => {}
     }
 }
 
@@ -671,7 +659,7 @@ fn collect_terminator_cast_policies(
                     collect_expression_cast_policies(hir, *right, policies);
                 }
             },
-            HirFallibleOperation::RangeStepFailure { .. } => {}
+            HirFallibleOperation::LoopStepFailure { .. } => {}
         },
         HirTerminator::Match { scrutinee, arms } => {
             collect_expression_cast_policies(hir, *scrutinee, policies);

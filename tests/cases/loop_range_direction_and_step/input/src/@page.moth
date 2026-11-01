@@ -1,28 +1,86 @@
--- Validate descending inference and explicit step semantics.
+-- Direction comes only from the signed `by` step. Bounds never infer it:
+-- descending bounds with an omitted or positive step are empty, while an
+-- explicit negative step descends. Equal endpoints are empty with `to` and
+-- emit exactly one value with `to &` for either nonzero direction.
 
-count_desc ~= 0
+descending_omitted_count ~= 0
 loop 5 to 0 |i|:
-    ~count_desc = count_desc + 1
+    ~descending_omitted_count = descending_omitted_count + 1
 ;
 
-sum_even_desc ~= 0
+descending_positive_count ~= 0
 loop 10 to & 0 by 2 |i|:
-    ~sum_even_desc = sum_even_desc + i
+    ~descending_positive_count = descending_positive_count + 1
 ;
 
-sum_even_desc_negative ~= 0
+descending_negative_sum ~= 0
 loop 10 to & 0 by -2 |i|:
-    ~sum_even_desc_negative = sum_even_desc_negative + i
+    ~descending_negative_sum = descending_negative_sum + i
 ;
 
-omitted_start_desc_count ~= 0
+ascending_negative_count ~= 0
+loop 0 to & 5 by -1 |i|:
+    ~ascending_negative_count = ascending_negative_count + 1
+;
+
+omitted_start_positive_count ~= 0
 loop to 0 |i|:
-    ~omitted_start_desc_count = omitted_start_desc_count + 1
+    ~omitted_start_positive_count = omitted_start_positive_count + 1
 ;
 
-omitted_start_inclusive_desc_sum ~= 0
-loop to & 0 by 2 |i|:
-    ~omitted_start_inclusive_desc_sum = omitted_start_inclusive_desc_sum + i
+omitted_start_equal_sum ~= 0
+loop to & 0 by -1 |i|:
+    ~omitted_start_equal_sum = omitted_start_equal_sum + i
 ;
 
-[:loop_range_direction_and_step count_desc=[count_desc] sum_even_desc=[sum_even_desc] sum_even_desc_negative=[sum_even_desc_negative] omitted_desc=[omitted_start_desc_count] omitted_inclusive_desc=[omitted_start_inclusive_desc_sum]]
+equal_inclusive_count ~= 0
+equal_inclusive_sum ~= 0
+loop 3 to & 3 by -1 |i|:
+    ~equal_inclusive_count = equal_inclusive_count + 1
+    ~equal_inclusive_sum = equal_inclusive_sum + i
+;
+
+ascending_positive_sum ~= 0
+loop 0 to & 6 by 2 |i|:
+    ~ascending_positive_sum = ascending_positive_sum + i
+;
+
+float_desc_sum ~F64 = 0.0
+float_desc_count ~= 0
+loop 1.0 to & 0.0 by -0.5 |value|:
+    ~float_desc_sum = float_desc_sum + value
+    ~float_desc_count = float_desc_count + 1
+;
+
+descending_flow_sum ~= 0
+descending_flow_count ~= 0
+loop 10 to & 0 by -2 |value|:
+    if value is 8:
+        if value is 8:
+            continue
+        ;
+    ;
+    if value is 4:
+        if value is 4:
+            break
+        ;
+    ;
+    ~descending_flow_sum = descending_flow_sum + value
+    ~descending_flow_count = descending_flow_count + 1
+;
+
+assert(descending_omitted_count is 0)
+assert(descending_positive_count is 0)
+assert(descending_negative_sum is 30)
+assert(ascending_negative_count is 0)
+assert(omitted_start_positive_count is 0)
+assert(omitted_start_equal_sum is 0)
+assert(equal_inclusive_count is 1)
+assert(equal_inclusive_sum is 3)
+assert(ascending_positive_sum is 12)
+assert(float_desc_count is 3)
+assert(float_desc_sum is 1.5)
+assert(descending_flow_count is 2)
+assert(descending_flow_sum is 16)
+
+[:loop_range_direction_and_step descending_omitted=[descending_omitted_count] descending_positive=[descending_positive_count] descending_negative=[descending_negative_sum] ascending_negative=[ascending_negative_count] omitted_positive=[omitted_start_positive_count] omitted_equal=[omitted_start_equal_sum] equal_inclusive=[equal_inclusive_count]/[equal_inclusive_sum] ascending_positive=[ascending_positive_sum] float_desc=[float_desc_count]/[float_desc_sum] descending_flow=[descending_flow_count]/[descending_flow_sum]]

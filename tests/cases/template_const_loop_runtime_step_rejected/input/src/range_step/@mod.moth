@@ -1,0 +1,8 @@
+-- The literal bounds are const, but the step comes from a runtime parameter, so the
+-- const template reports the step position rather than the range bounds.
+render_range |step I32| -> String:
+    value #= [loop 0 to 3 by step |i|:
+        [i]
+    ]
+    return value
+;

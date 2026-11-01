@@ -1046,6 +1046,9 @@ pub enum InvalidTemplateStructureReason {
     TemplateOptionCaptureConstDeferred,
     TemplateLoopRangeBoundsNotConst,
     TemplateLoopSourceNotConst,
+    TemplateLoopStepNotConst,
+    TemplateLoopStepIsZero,
+    TemplateLoopStepNoProgress,
     TemplateLoopConditionNotConst,
     TemplateConditionalLoopConstTrue,
     TemplateLoopBodyNotConst,
@@ -1927,20 +1930,38 @@ pub enum InvalidPageMetadataReason {
     DuplicateDeclaration,
 }
 
+/// Which operand position one loop header rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RangeOperandKind {
+pub enum LoopOperandKind {
     Start,
     End,
     Step,
 }
 
-/// Why a range header rejected one operand.
+/// Why a loop header rejected one operand.
+///
+/// WHAT: the range bounds and the shared range or collection step rules.
+/// WHY: both loop kinds take an independent signed step, so one loop-owned family reports every
+///      operand rejection at its authored position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidRangeOperandReason {
-    /// The operand has no integer or binary-float domain.
-    NotNumeric,
-    /// The operand is numeric but no range domain combines it with the other operands.
-    IncompatibleDomain,
+pub enum InvalidLoopOperandReason {
+    /// The bound has no integer or binary-float domain.
+    BoundNotNumeric,
+    /// The bound is numeric but no range domain combines it with the other bound.
+    BoundIncompatibleDomain,
+    /// An integer range's step or any collection step is not one of the independent signed
+    /// fixed-width integer types.
+    ///
+    /// The step keeps its own type and never changes the unsigned or signed counter or the
+    /// collection source type, so an unsigned, floating-point, `Byte`, `Dec` or non-numeric step
+    /// is rejected at the step position.
+    StepNotSignedInteger,
+    /// A binary-float range's step cannot convert safely to the counter precision.
+    ///
+    /// The step must be a binary float at the same or narrower precision than the counter. A typed
+    /// integer step never becomes a float step, and a wider float step would narrow the authored
+    /// precision.
+    StepNotConvertibleToFloatCounter,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2018,7 +2039,12 @@ pub enum InvalidLoopHeaderReason {
     MissingRangeEndBound,
     MissingRangeStep,
     FloatRangeMissingStep,
-    ZeroRangeStep,
+    ZeroLoopStep,
+    MissingCollectionStep,
+    RepeatedLoopStep,
+    StepOnConditionalLoop,
+    MisplacedLoopStep,
+    BindingsOnConditionalLoop,
     ExpectedHeaderExpression,
 }
 

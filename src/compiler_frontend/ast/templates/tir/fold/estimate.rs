@@ -45,6 +45,28 @@ pub(super) fn estimated_range_iteration_count(loop_limit: usize) -> usize {
     std::cmp::min(loop_limit, FOLD_RANGE_LOOP_RESERVE_ITERATION_CAP)
 }
 
+/// The number of source indices a strided const collection loop visits.
+///
+/// WHAT: `ceil(length / |step|)`, capped at the fold limit.
+/// WHY: a signed step skips source indices, so the reservation must follow visited iterations
+///      rather than the source length, exactly as the fold's cursor counts them.
+pub(super) fn estimated_collection_iteration_count(
+    source_len: usize,
+    step: i128,
+    loop_limit: usize,
+) -> usize {
+    if source_len == 0 {
+        return 0;
+    }
+    // An I64 step's magnitude reaches `2^63`, which exceeds `usize` on 32-bit targets. Saturating
+    // keeps the count exact: any magnitude of at least the source length visits one index.
+    let magnitude = usize::try_from(step.unsigned_abs())
+        .unwrap_or(usize::MAX)
+        .max(1);
+    let visited = source_len.div_ceil(magnitude);
+    std::cmp::min(visited, loop_limit)
+}
+
 pub(super) fn record_tir_fold_output_intern(byte_len: usize) {
     add_ast_counter(AstCounter::TirFoldStringInternCalls, 1);
     add_ast_counter(AstCounter::TirFoldOutputBytes, byte_len);

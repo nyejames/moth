@@ -20,4 +20,24 @@ loop outer |outer_item, outer_index|:
     ;
 ;
 
-[:loop_nested_break_continue total=[total]]
+-- Nested strided loops keep independent signs and control flow: the inner
+-- `continue` advances by its own negative step and `break` leaves only the
+-- inner loop.
+stride_outer = {0, 1, 2, 3}
+stride_inner = {0, 1, 2, 3, 4, 5}
+strided_total ~= 0
+strided_seen ~= [:]
+loop stride_outer by 2 |outer_item, outer_index|:
+    loop stride_inner by -2 |inner_item, inner_index|:
+        if inner_index is 3:
+            continue
+        ;
+        if inner_index is 1:
+            break
+        ;
+        ~strided_total = strided_total + outer_item + inner_item
+        ~strided_seen = [:[strided_seen][outer_index]:[inner_index],]
+    ;
+;
+
+[:loop_nested_break_continue total=[total] strided-total=[strided_total] strided-seen=[strided_seen]]

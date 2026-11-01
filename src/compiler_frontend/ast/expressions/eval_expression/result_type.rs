@@ -622,7 +622,7 @@ pub(crate) fn resolved_operation(
     } else if matches!(operator, Operator::Range) {
         let domain = left
             .zip(right)
-            .and_then(|(left, right)| range_iteration_domain(left, right, None))
+            .and_then(|(left, right)| range_iteration_domain(left, right))
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,

@@ -773,8 +773,25 @@ pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> St
         InvalidLoopHeaderReason::FloatRangeMissingStep => {
             "Float ranges require an explicit 'by' step.".to_string()
         }
-        InvalidLoopHeaderReason::ZeroRangeStep => {
-            "Range step cannot be zero.".to_string()
+        InvalidLoopHeaderReason::ZeroLoopStep => {
+            "Loop step cannot be zero.".to_string()
+        }
+        InvalidLoopHeaderReason::MissingCollectionStep => {
+            "Collection loop uses 'by' without a step value.".to_string()
+        }
+        InvalidLoopHeaderReason::RepeatedLoopStep => {
+            "A loop header accepts only one 'by' step.".to_string()
+        }
+        InvalidLoopHeaderReason::StepOnConditionalLoop => {
+            "Conditional loops do not take a 'by' step. Use 'by' on a collection loop."
+                .to_string()
+        }
+        InvalidLoopHeaderReason::MisplacedLoopStep => {
+            "A loop step must come after the range's end bound or collection source, and before any bindings.".to_string()
+        }
+        InvalidLoopHeaderReason::BindingsOnConditionalLoop => {
+            "Conditional loops do not take bindings. Use `|...|` on a collection or range loop."
+                .to_string()
         }
         InvalidLoopHeaderReason::ExpectedHeaderExpression => {
             "Expected an expression in loop header.".to_string()
@@ -817,10 +834,13 @@ pub(crate) fn render_invalid_loop_header(
         }
         reason => invalid_loop_header_message(reason.to_reason(None)),
     };
-    RenderedPayload {
-        message,
-        guidance: Vec::new(),
-    }
+    let guidance = match facts.reason {
+        InvalidLoopHeaderCode::ZeroLoopStep => {
+            vec!["Use a positive step to ascend or a negative step to descend.".to_owned()]
+        }
+        _ => Vec::new(),
+    };
+    RenderedPayload { message, guidance }
 }
 
 pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositionReason) -> String {

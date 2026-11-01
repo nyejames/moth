@@ -639,6 +639,92 @@ fn multi_bind_reports_reserved_keyword_target_name() {
 }
 
 #[test]
+fn reserved_binding_declaration_precedes_later_assignment_name_before_minus() {
+    let source = "f |a I32| -> I32:\n    by = a\n    x = by - 1\n    return x\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the declaration must report a reserved name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+
+    let declaration_start = source
+        .find("by")
+        .expect("the declaration target must occur") as u32;
+    let mut builder = ExtendedSpanBuilder::new();
+    let declaration_span = LocalSpan::exact(declaration_start, "by".len() as u32, &mut builder)
+        .expect("the keyword span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            declaration_span
+        )),
+        "the earlier declaration must be the first diagnostic, not the later minus",
+    );
+
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+        panic!("the reserved declaration must produce a diagnosed result");
+    };
+    assert_eq!(
+        reports.iter_severity(DiagnosticSeverity::Error).count(),
+        1,
+        "the reserved declaration must remain the only reported error",
+    );
+}
+
+#[test]
+fn assignment_name_before_spaced_minus_reports_reserved_collision() {
+    let source = "f |a I32| -> I32:\n    x = by - 1\n    return x\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the assignment name must report a reserved name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+
+    let keyword_start = source.find("by").expect("the reserved name must occur") as u32;
+    let mut builder = ExtendedSpanBuilder::new();
+    let keyword_span = LocalSpan::exact(keyword_start, "by".len() as u32, &mut builder)
+        .expect("the keyword span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, keyword_span)),
+        "the collision must point at the reserved name, not the minus",
+    );
+
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &failure else {
+        panic!("the assignment name must produce a diagnosed result");
+    };
+    assert_eq!(
+        reports.iter_severity(DiagnosticSeverity::Error).count(),
+        1,
+        "the reserved name must remain the only reported error",
+    );
+}
+
+#[test]
+fn compound_assignment_name_before_spaced_minus_reports_reserved_collision() {
+    let source = "f |a I32| -> I32:\n    x ~= 0\n    ~x += by - 1\n    return x\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0039", None);
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("the compound assignment name must report a reserved name collision");
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+
+    let keyword_start = source.find("by").expect("the reserved name must occur") as u32;
+    let mut builder = ExtendedSpanBuilder::new();
+    let keyword_span = LocalSpan::exact(keyword_start, "by".len() as u32, &mut builder)
+        .expect("the keyword span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, keyword_span)),
+        "the collision must point at the reserved name after the compound assignment",
+    );
+}
+
+#[test]
 fn body_local_prelude_malformed_host_statement_keeps_missing_parenthesis_diagnostic() {
     let source = "@core/io line as print\nprint\n";
     let failure = parse_single_file_ast_diagnostic(source);

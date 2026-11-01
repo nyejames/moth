@@ -261,9 +261,10 @@ impl TemplateIrStore {
                 end: self.next_expression_site_id(),
                 step: range.step.as_ref().map(|_| self.next_expression_site_id()),
             },
-            TemplateLoopHeader::Collection { .. } => {
+            TemplateLoopHeader::Collection { step, .. } => {
                 TemplateLoopHeaderExpressionSites::Collection {
                     iterable: self.next_expression_site_id(),
+                    step: step.as_ref().map(|_| self.next_expression_site_id()),
                 }
             }
         }

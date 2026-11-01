@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["loop_bindingless_iteration item_count=3 range_count=3"]
+rendered_output_exact = "loop_bindingless_iteration item_count=3 range_count=3 stride_count=3 reverse_count=3"

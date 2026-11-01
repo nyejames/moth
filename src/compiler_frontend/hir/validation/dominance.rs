@@ -182,19 +182,18 @@ impl HirValidator<'_> {
                 }
                 self.validate_destination_reads(*result, defined)?;
             }
-            HirStatementKind::RangeStepFailure { result, .. } => {
+            HirStatementKind::LoopStepFailure { result, .. } => {
                 self.validate_destination_reads(*result, defined)?
             }
-            HirStatementKind::FloatRangeCandidate {
+            HirStatementKind::RangeCandidate {
                 current,
                 step,
                 end,
-                ascending,
                 candidate_result,
                 in_range_result,
                 ..
             } => {
-                for value in [current, step, end, ascending] {
+                for value in [current, step, end] {
                     expression(*value)?;
                 }
                 self.validate_destination_reads(*candidate_result, defined)?;
@@ -370,12 +369,12 @@ fn transfer_statement_definitions(statement: &HirStatementKind, defined: &mut De
             }
         }
         HirStatementKind::NumericOp { result, .. }
-        | HirStatementKind::RangeStepFailure { result, .. }
+        | HirStatementKind::LoopStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => {
             defined.insert(result.local());
         }
-        HirStatementKind::FloatRangeCandidate {
+        HirStatementKind::RangeCandidate {
             candidate_result,
             in_range_result,
             ..

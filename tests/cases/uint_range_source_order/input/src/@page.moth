@@ -12,7 +12,7 @@ range_source_end || -> U32:
     return 4
 ;
 
-range_source_step || -> U32:
+range_source_step || -> I32:
     io.line([: uint-range source-step])
     return 2
 ;

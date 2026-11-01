@@ -20,7 +20,7 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
+    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
@@ -154,31 +154,37 @@ pub enum HirStatementKind {
         result: HirLocalDestination,
     },
 
-    /// Produce the failure selected by a language-defined range-step guard.
+    /// Produce the failure selected by a language-defined loop-step guard.
     ///
     /// The enclosing CFG has established zero step or lack of progress.
-    /// Recoverable range failures use `Invoke` instead.
-    RangeStepFailure {
-        cause: RangeStepFailureCause,
+    /// Recoverable loop-step failures use `Invoke` instead.
+    LoopStepFailure {
+        cause: LoopStepFailureCause,
         failure_mode: NumericFailureMode,
         result: HirLocalDestination,
     },
 
-    /// Compute the next candidate for a compiler-generated binary-float range loop.
+    /// Compute the next candidate for a compiler-generated range loop.
     ///
-    /// WHAT: performs exactly one domain-precision add/subtract into a backend-local scratch,
-    ///       then reports whether that finite candidate satisfies the authored range endpoint.
-    /// WHY: the rounded step-vs-distance precheck can reject an inclusive endpoint reached by
-    ///      rounding. The candidate destination is written only when the result is finite and in
-    ///      range; the Bool result is always written.
+    /// WHAT: performs exactly one add of the signed step to `current`, rounds binary floats at the
+    ///       counter's exact precision, then reports whether that value lies within the authored
+    ///       endpoint in the step's direction. `in_range` is the exclusive `<`/`>` or inclusive
+    ///       `<=`/`>=` comparison selected by the step's sign. The candidate destination is
+    ///       written only when the result is in range; the Bool result is always written.
+    /// WHY: this is the one narrow backend-neutral operation that can produce a counter-typed
+    ///      successor from an independent signed step. Checked numeric operations cannot express
+    ///      the mixed pair, and an integer lowering must never materialise an out-of-domain
+    ///      successor. The precondition is that `current` already satisfied the bound in the
+    ///      step's direction.
     ///
-    /// `domain` is any exact binary-float range (`F16`/`F32`/`F64`). The expressions are
-    /// already converted to that domain by HIR lowering.
-    FloatRangeCandidate {
+    /// `domain` is the counter domain: a fixed integer or exact binary float. `current` and
+    /// `end` use that counter type. `step` keeps its own completed type: a signed fixed integer
+    /// for integer counters, or exactly the counter type for binary floats. HIR lowering reads
+    /// that type from the step expression and never converts it to the counter.
+    RangeCandidate {
         current: HirValueId,
         step: HirValueId,
         end: HirValueId,
-        ascending: HirValueId,
         inclusive: bool,
         domain: NumericScalar,
         candidate_result: HirLocalDestination,

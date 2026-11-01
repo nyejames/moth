@@ -2,7 +2,8 @@ use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
 use crate::backends::wasm::lir::instructions::{
-    WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
+    WasmCalleeRef, WasmIntegerRangeCandidate, WasmLirStmt, WasmLirTerminator,
+    WasmRangeCandidateKind, WasmScalarComparisonOp, WasmScalarComparisonType,
 };
 use crate::backends::wasm::lir::linkage::{WasmExportKind, WasmFunctionLinkage, WasmImportKind};
 use crate::backends::wasm::lir::types::{
@@ -1451,6 +1452,167 @@ fn lowers_ordered_comparison_and_control_flow() {
         ),
         "entry block should preserve the conditional control flow"
     );
+}
+
+#[test]
+fn integer_range_candidate_lowers_independent_carriers_and_widened_scratch() {
+    for (counter_scalar, counter_carrier, counter_signed, step_scalar, step_carrier) in [
+        (
+            FixedScalar::I8,
+            WasmAbiType::I32,
+            true,
+            FixedScalar::I64,
+            WasmAbiType::I64,
+        ),
+        (
+            FixedScalar::U32,
+            WasmAbiType::I32,
+            false,
+            FixedScalar::I32,
+            WasmAbiType::I32,
+        ),
+        (
+            FixedScalar::U64,
+            WasmAbiType::I64,
+            false,
+            FixedScalar::I64,
+            WasmAbiType::I64,
+        ),
+    ] {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let mut expressions = HirExpressionStore::default();
+        let (type_environment, types) = build_type_environment();
+        let region = RegionId(0);
+        let counter_type = fixed_scalar_type(counter_scalar);
+        let step_type = fixed_scalar_type(step_scalar);
+        let function_path = path_fork
+            .try_intern_portable_path("range_candidate_fn", &mut string_table)
+            .expect("test path fits");
+
+        let current = load_local(&mut expressions, LocalId(0), counter_type, region);
+        let step = load_local(&mut expressions, LocalId(1), step_type, region);
+        let end = load_local(&mut expressions, LocalId(2), counter_type, region);
+        let entry_block = HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![
+                local(0, counter_type, region),
+                local(1, step_type, region),
+                local(2, counter_type, region),
+                local(3, counter_type, region),
+                local(4, types.boolean, region),
+            ],
+            statements: vec![statement(
+                1,
+                HirStatementKind::RangeCandidate {
+                    current,
+                    step,
+                    end,
+                    inclusive: true,
+                    domain: NumericScalar::Fixed(counter_scalar),
+                    candidate_result: HirLocalDestination::Define(LocalId(3)),
+                    in_range_result: HirLocalDestination::Define(LocalId(4)),
+                },
+                1,
+            )],
+            terminator: HirTerminator::Return(HirValueRange::empty()),
+        };
+        let function = HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![],
+            returns: Box::new([]),
+            error_return: None,
+        };
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            expressions,
+            vec![(function, function_path, HirFunctionOrigin::Normal)],
+            vec![entry_block],
+            FunctionId(0),
+        );
+
+        let result = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &WasmBackendRequest::default(),
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("an integer range candidate should lower");
+
+        let lowered = result
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(0))
+            .expect("lowered function should be present");
+        let mut candidate_statements =
+            lowered.blocks[0].statements.iter().filter_map(|statement| {
+                let WasmLirStmt::RangeCandidate {
+                    candidate_dst,
+                    in_range_dst,
+                    inclusive,
+                    kind,
+                    ..
+                } = statement
+                else {
+                    return None;
+                };
+                Some((*candidate_dst, *in_range_dst, *inclusive, *kind))
+            });
+        let (candidate_dst, in_range_dst, inclusive, kind) = candidate_statements
+            .next()
+            .expect("the integer range candidate should lower to one LIR statement");
+        assert!(
+            candidate_statements.next().is_none(),
+            "{counter_scalar:?} must lower exactly one candidate statement"
+        );
+        assert!(inclusive, "the inclusive flag must reach LIR unchanged");
+
+        let WasmRangeCandidateKind::Integer(candidate) = kind else {
+            panic!("{counter_scalar:?} must lower the integer candidate form");
+        };
+        let WasmIntegerRangeCandidate {
+            counter_carrier: lowered_counter_carrier,
+            counter_signed: lowered_counter_signed,
+            step_carrier: lowered_step_carrier,
+            scratch,
+        } = candidate;
+        assert_eq!(lowered_counter_carrier, counter_carrier);
+        assert_eq!(lowered_counter_signed, counter_signed);
+        assert_eq!(lowered_step_carrier, step_carrier);
+
+        let local_type = |local_id| {
+            lowered
+                .locals
+                .iter()
+                .find(|local| local.id == local_id)
+                .map(|local| local.ty)
+                .expect("candidate locals should be allocated")
+        };
+        assert_eq!(local_type(candidate_dst), counter_carrier);
+        assert_eq!(local_type(in_range_dst), WasmAbiType::I32);
+        for widened in [
+            scratch.current,
+            scratch.step,
+            scratch.end,
+            scratch.distance,
+            scratch.magnitude,
+            scratch.candidate,
+        ] {
+            assert_eq!(
+                local_type(widened),
+                WasmAbiType::I64,
+                "{counter_scalar:?} must widen its I64 scratch"
+            );
+        }
+        assert_eq!(local_type(scratch.ascending), WasmAbiType::I32);
+    }
 }
 
 #[test]

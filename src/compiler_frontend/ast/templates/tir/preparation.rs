@@ -1190,35 +1190,15 @@ impl PreparationWalk<'_> {
                 diagnostic
             }
             TemplateLoopHeader::Range { range, .. } => {
-                let mut source_constant_paths = Vec::new();
-                if let Some(source_scope) = self.source_scope {
-                    collect_source_constant_paths(
-                        self.expressions.view(range.start)?,
-                        source_scope,
-                        self.const_values,
-                        &mut source_constant_paths,
-                    );
-                    collect_source_constant_paths(
-                        self.expressions.view(range.end)?,
-                        source_scope,
-                        self.const_values,
-                        &mut source_constant_paths,
-                    );
-                    if let Some(step) = &range.step {
-                        collect_source_constant_paths(
-                            self.expressions.view(*step)?,
-                            source_scope,
-                            self.const_values,
-                            &mut source_constant_paths,
-                        );
-                    }
+                let mut range_operands = vec![
+                    self.expressions.view(range.start)?,
+                    self.expressions.view(range.end)?,
+                ];
+                if let Some(step) = &range.step {
+                    range_operands.push(self.expressions.view(*step)?);
                 }
-                let mut const_binding_paths = source_constant_paths;
-                for inherited in loop_binding_paths {
-                    if !const_binding_paths.contains(inherited) {
-                        const_binding_paths.push(*inherited);
-                    }
-                }
+                let const_binding_paths =
+                    self.const_binding_paths_for_operands(&range_operands, loop_binding_paths);
                 let start_facts = self.walk_expression_with_bindings(
                     view,
                     range.start,
@@ -1233,11 +1213,54 @@ impl PreparationWalk<'_> {
                     loop_binding_paths,
                     role,
                 )?;
-                let mut header_const = start_facts.const_evaluable;
-                header_const &= end_facts.const_evaluable;
+                let mut bounds_const = start_facts.const_evaluable;
+                bounds_const &= end_facts.const_evaluable;
                 facts.merge(start_facts);
                 facts.merge(end_facts);
+                let mut step_span = None;
+                let mut step_const = true;
                 if let Some(step) = &range.step {
+                    let step_facts = self.walk_expression_with_bindings(
+                        view,
+                        *step,
+                        &const_binding_paths,
+                        loop_binding_paths,
+                        role,
+                    )?;
+                    step_const = step_facts.const_evaluable;
+                    facts.merge(step_facts);
+                    step_span = self.expressions.view(*step)?.span().or(loop_span);
+                }
+                (!(bounds_const && step_const)).then(|| {
+                    if bounds_const {
+                        templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopStepNotConst,
+                            step_span,
+                        )
+                    } else {
+                        templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
+                            loop_span,
+                        )
+                    }
+                })
+            }
+            TemplateLoopHeader::Collection { iterable, step, .. } => {
+                let iterable_facts =
+                    self.walk_expression(view, *iterable, loop_binding_paths, role)?;
+                let iterable_const = iterable_facts.const_evaluable;
+                facts.merge(iterable_facts);
+                let iterable_span = self.expressions.view(*iterable)?.span().or(loop_span);
+                let mut header_const = iterable_const;
+                let mut step_span = None;
+                if let Some(step) = step {
+                    // A collection step may name a module constant exactly like a range step, so
+                    // it classifies with the same expression-local constant bindings. The source
+                    // keeps its own classification: a named collection source stays rejected.
+                    let const_binding_paths = self.const_binding_paths_for_operands(
+                        &[self.expressions.view(*step)?],
+                        loop_binding_paths,
+                    );
                     let step_facts = self.walk_expression_with_bindings(
                         view,
                         *step,
@@ -1247,25 +1270,20 @@ impl PreparationWalk<'_> {
                     )?;
                     header_const &= step_facts.const_evaluable;
                     facts.merge(step_facts);
+                    step_span = self.expressions.view(*step)?.span().or(loop_span);
                 }
                 (!header_const).then(|| {
-                    templates::invalid_template_structure(
-                        InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        loop_span,
-                    )
-                })
-            }
-            TemplateLoopHeader::Collection { iterable, .. } => {
-                let iterable_facts =
-                    self.walk_expression(view, *iterable, loop_binding_paths, role)?;
-                let header_const = iterable_facts.const_evaluable;
-                facts.merge(iterable_facts);
-                let iterable_span = self.expressions.view(*iterable)?.span().or(loop_span);
-                (!header_const).then(|| {
-                    templates::invalid_template_structure(
-                        InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
-                        iterable_span,
-                    )
+                    if iterable_const {
+                        templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopStepNotConst,
+                            step_span,
+                        )
+                    } else {
+                        templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
+                            iterable_span,
+                        )
+                    }
                 })
             }
         };
@@ -1276,6 +1294,37 @@ impl PreparationWalk<'_> {
             self.record_const_diagnostic(diagnostic);
         }
         Ok(facts)
+    }
+
+    /// The expression-local const bindings of one loop-header operand.
+    ///
+    /// WHAT: collects the module constants the operands name and appends the inherited loop
+    ///       bindings.
+    /// WHY: a header operand that names a module constant is const-evaluable once that reference
+    ///      is accepted, and the accepted paths stay expression-local so nested templates
+    ///      re-entered by the same expression do not see them.
+    fn const_binding_paths_for_operands(
+        &self,
+        operands: &[ExpressionView<'_>],
+        loop_binding_paths: &[PathId],
+    ) -> Vec<PathId> {
+        let mut const_binding_paths = Vec::new();
+        if let Some(source_scope) = self.source_scope {
+            for operand in operands {
+                collect_source_constant_paths(
+                    *operand,
+                    source_scope,
+                    self.const_values,
+                    &mut const_binding_paths,
+                );
+            }
+        }
+        for inherited in loop_binding_paths {
+            if !const_binding_paths.contains(inherited) {
+                const_binding_paths.push(*inherited);
+            }
+        }
+        const_binding_paths
     }
 }
 fn collect_source_constant_paths(

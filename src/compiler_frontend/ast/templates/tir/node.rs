@@ -501,6 +501,10 @@ pub(crate) enum TemplateLoopHeaderExpressionSites {
         step: Option<ExpressionSiteId>,
     },
 
-    /// `for (item in iterable)` loop: one expression site for the iterable.
-    Collection { iterable: ExpressionSiteId },
+    /// `for (item in iterable[ by step])` loop: one expression site for the
+    /// iterable and one for the optional step.
+    Collection {
+        iterable: ExpressionSiteId,
+        step: Option<ExpressionSiteId>,
+    },
 }

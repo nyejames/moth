@@ -721,7 +721,6 @@ fn staging_identities_stay_outside_the_traversal_range() {
         .register_provider_source(&canonical, "drawing.js", "export const x = 1;\n".to_owned())
         .expect("first provider source registers");
     let first_id = first.source();
-    drop(first);
     let second = staging
         .register_provider_source(
             Path::new("/fixture/other.js"),

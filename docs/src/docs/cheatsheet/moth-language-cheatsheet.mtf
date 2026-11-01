@@ -508,7 +508,7 @@ A compile-time-known `if` selects its branch only after both sides have been che
         ~count += 1
     ;
 
-    loop names |name, index|:  -- read-only element and optional I32 index
+    loop names |name, index|:  -- read-only element and optional I32 source index
         io.line([: [index]: [name]])
     ;
 
@@ -517,13 +517,13 @@ A compile-time-known `if` selects its branch only after both sides have been che
     ;
 ]
 
-Collection loops capture their source and length once. The iteration binding is immutable, and a map is not a collection-loop source.
+Collection loops capture their source and length once, then evaluate an optional signed step once. The item binding is immutable, the optional second binding is the actual `I32` source index and a map is not a collection-loop source.
 `break` exits the nearest loop, `continue` advances it and neither takes values or labels.
 
 Ranges exclude the endpoint with `to` and include it with `to &`. `loop to n` begins at zero.
-`by` supplies the step magnitude. Direction follows the bounds. Integer steps default to one, while float ranges require `by`.
-Bounds and steps evaluate once. Zero steps fail, as do floating steps that can't make progress.
-Updates respect fixed-width limits, including inclusive endpoints. `Byte` and `Dec` have no range iteration.
+`by` supplies a signed `I8` through `I64` step whose sign chooses direction, so a wrong-direction range is empty. An omitted step is one, while a range using a binary float needs a float step.
+Bounds and steps evaluate once. A literal zero step is rejected during compilation, and any other zero step fails before the first iteration. Floating steps that can't make progress also fail.
+Inclusive endpoints and descending ranges stop without overflowing. `Byte` and `Dec` have no range iteration.
 
 ### Repeated option capture
 
@@ -888,7 +888,7 @@ Templates support a single-body `if` and `loop`, written last in the head. More 
 ]
 
 An `if` body renders when its condition is true or its option is present, with a captured value available only in that body.
-Loops concatenate iteration bodies in order, using conditional, collection or range headers.
+Loops concatenate iteration bodies in order, using conditional, collection or range headers. The optional second binding is the actual collection source index or the range iteration ordinal.
 Template control flow supports `if` and `loop` only, without `else`, `break` or `continue`.
 
 A loop-head wrapper wraps the whole loop once. Place per-item wrappers inside the body.

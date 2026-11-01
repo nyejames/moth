@@ -152,22 +152,22 @@ descending_ranges ||:
     io.line("Descending range loops")
     
     result_1 ~= ""
-    loop 10 to 0 |i|:
+    loop 10 to 0 by -1 |i|:
         ~result_1 = [: [result_1][i] ]
     ;
-    io.line([: 10 to 0: [result_1]])
+    io.line([: 10 to 0 by -1: [result_1]])
     
     result_2 ~= ""
-    loop 10 to & 0 by 2 |i|:
+    loop 10 to & 0 by -2 |i|:
         ~result_2 = [: [result_2][i] ]
     ;
-    io.line([: 10 to & 0 by 2: [result_2]])
+    io.line([: 10 to & 0 by -2: [result_2]])
     
     result_3 ~= ""
-    loop 50 to 10 by 5 |i|:
+    loop 50 to 10 by -5 |i|:
         ~result_3 = [: [result_3][i] ]
     ;
-    io.line([: 50 to 10 by 5: [result_3]])
+    io.line([: 50 to 10 by -5: [result_3]])
 ;
 
 -- F64 ranges

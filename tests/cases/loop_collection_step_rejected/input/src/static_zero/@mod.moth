@@ -1,0 +1,5 @@
+-- A static zero collection step is rejected before any iteration.
+items = {1, 2, 3}
+loop items by 0 |item|:
+    io.line([: [item]])
+;

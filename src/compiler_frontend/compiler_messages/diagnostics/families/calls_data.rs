@@ -17,16 +17,16 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_builtin_call, render_invalid_call_shape, render_invalid_cast,
     render_invalid_collection_type, render_invalid_copy_target, render_invalid_field_access,
-    render_invalid_map_literal, render_invalid_map_type, render_invalid_multi_bind,
-    render_invalid_range_operand, render_invalid_receiver_call, render_invalid_return_shape,
+    render_invalid_loop_operand, render_invalid_map_literal, render_invalid_map_type,
+    render_invalid_multi_bind, render_invalid_receiver_call, render_invalid_return_shape,
     render_invalid_value_receiver,
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidCollectionTypeReason, InvalidCopyTargetReason, InvalidFieldAccessReason,
-    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMultiBindReason,
-    InvalidRangeOperandReason, InvalidReceiverCallReason, InvalidReturnShapeReason,
-    RangeOperandKind, ReceiverCallKind, ValueReceiverContext,
+    InvalidLoopOperandReason, InvalidMapLiteralReason, InvalidMapTypeReason,
+    InvalidMultiBindReason, InvalidReceiverCallReason, InvalidReturnShapeReason, LoopOperandKind,
+    ReceiverCallKind, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -70,14 +70,16 @@ unit_code! {
 }
 
 unit_code! {
-    impl InvalidRangeOperandReason {
-        NotNumeric = 1,
-        IncompatibleDomain = 2,
+    impl InvalidLoopOperandReason {
+        BoundNotNumeric = 1,
+        BoundIncompatibleDomain = 2,
+        StepNotSignedInteger = 3,
+        StepNotConvertibleToFloatCounter = 4,
     }
 }
 
 unit_code! {
-    impl RangeOperandKind {
+    impl LoopOperandKind {
         Start = 1,
         End = 2,
         Step = 3,
@@ -577,16 +579,16 @@ pub(crate) fn invalid_copy_target(
     })
 }
 
-pub(crate) fn invalid_range_operand(
-    operand: RangeOperandKind,
+pub(crate) fn invalid_loop_operand(
+    operand: LoopOperandKind,
     found_type: TypeId,
-    reason: InvalidRangeOperandReason,
+    reason: InvalidLoopOperandReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
-    DiagnosticDraft::with_facts(&INVALID_RANGE_OPERAND, span, |cursor| {
-        cursor.push::<UnitFact<RangeOperandKind>>(&operand)?;
+    DiagnosticDraft::with_facts(&INVALID_LOOP_OPERAND, span, |cursor| {
+        cursor.push::<UnitFact<LoopOperandKind>>(&operand)?;
         cursor.push::<TypeFact>(&found_type)?;
-        cursor.push::<UnitFact<InvalidRangeOperandReason>>(&reason)?;
+        cursor.push::<UnitFact<InvalidLoopOperandReason>>(&reason)?;
         Ok(())
     })
 }
@@ -1036,23 +1038,23 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    INVALID_RANGE_OPERAND {
+    INVALID_LOOP_OPERAND {
         internal: 3059,
         stable: "MOTH-RULE-0059",
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
-        title: "Invalid range operand",
+        title: "Invalid loop operand",
         facts: [
-            operand: UnitFact<RangeOperandKind>,
+            operand: UnitFact<LoopOperandKind>,
             found_type: TypeFact,
-            reason: UnitFact<InvalidRangeOperandReason>,
+            reason: UnitFact<InvalidLoopOperandReason>,
         ],
         labels: [],
         extra: None,
         ctor: manual,
         reason_key: reason,
-        view: InvalidRangeOperandView,
-        render: render_invalid_range_operand,
+        view: InvalidLoopOperandView,
+        render: render_invalid_loop_operand,
     }
 }
 
@@ -1108,7 +1110,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_CALL_SHAPE,
     INVALID_RETURN_SHAPE,
     INVALID_COPY_TARGET,
-    INVALID_RANGE_OPERAND,
+    INVALID_LOOP_OPERAND,
     INVALID_CAST,
     INVALID_VALUE_RECEIVER,
 ];

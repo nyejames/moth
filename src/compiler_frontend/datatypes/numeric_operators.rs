@@ -102,39 +102,31 @@ pub(crate) fn binary_operation_domain(
     }
 }
 
-/// The selected iteration domain for a range header, or `None` when the operand
-/// mix has no range domain.
+/// The selected counter domain for a range header, or `None` when its bounds have no shared
+/// range domain.
 ///
-/// WHAT: fixed-width operands combine through the pairwise `Add` table, so mixed
-///       widths promote through their common integer/float type (e.g. `I8`/`U16`)
-///       while integer/float mixtures stay rejected. `Dec` operands reject
-///       outright: a range counter is not an ordinary Dec-mixing expression.
-/// WHY: a range header combines three operands at once, while `Add` only sees
-///      pairs; reusing that one table keeps a single shared domain selector.
-///      Endpoint, no-progress and termination semantics stay range-owned and are
-///      not ordinary checked arithmetic. AST parsing selects the header's
-///      iteration domain through this selector; HIR lowering and const folding
-///      then consume that selected domain.
+/// WHAT: the start and end bounds combine through the pairwise `Add` table, so mixed widths
+///       promote through their common integer/float type (e.g. `I8`/`U16`) while integer/float
+///       mixtures stay rejected. `Dec` bounds reject outright: a range counter is not an
+///       ordinary Dec-mixing expression.
+/// WHY: the counter domain is a function of the bounds alone. A step keeps its own type and
+///      never changes the counter, so this selector must not see it. AST parsing selects the
+///      header's counter domain through this selector; HIR lowering and const folding then
+///      consume that selected domain.
 pub(crate) fn range_iteration_domain(
     start: NumericScalar,
     end: NumericScalar,
-    step: Option<NumericScalar>,
 ) -> Option<NumericScalar> {
-    if [Some(start), Some(end), step]
+    if [start, end]
         .into_iter()
-        .flatten()
         .any(|operand| matches!(operand, NumericScalar::Number(_)))
     {
         return None;
     }
 
-    // Fixed-width operands keep the pairwise table: mixed widths promote through their
-    // common integer/float type, while integer/float mixtures stay rejected.
-    binary_operation_domain(
-        NumericOperator::Add,
-        binary_operation_domain(NumericOperator::Add, start, end)?,
-        step.unwrap_or(start),
-    )
+    // Fixed-width bounds keep the pairwise table: mixed widths promote through their common
+    // integer/float type, while integer/float mixtures stay rejected.
+    binary_operation_domain(NumericOperator::Add, start, end)
 }
 fn number_binary_operation_domain(
     operator: NumericOperator,

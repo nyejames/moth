@@ -32,7 +32,7 @@ You can leave out the first `0`.
 
 ### Change the step
 
-Use `by` to skip between values:
+Use `by` to set a signed step:
 
 [codeblock, $code("moth"):
     loop 0 to 10 by 2 |value|:
@@ -44,15 +44,21 @@ This produces `0`, `2`, `4`, `6` and `8`.
 
 ### Count downward
 
-The direction comes from the bounds. You do not need a `reverse` keyword.
+Use a negative step:
 
 [codeblock, $code("moth"):
-    loop 5 to 0 |value|:
+    loop 5 to 0 by -1 |value|:
         io.line([: [value]])
     ;
 ]
 
-Any range using `F16`, `F32` or `F64` needs an explicit step:
+This produces `5`, `4`, `3`, `2` and `1`.
+
+The step's sign chooses direction. The bounds never do, so `loop 5 to 0` visits
+nothing and `loop 5 to & 0 by -1` includes `0`. You do not need a `reverse`
+keyword.
+
+Any range using `F16`, `F32` or `F64` needs an explicit float step:
 
 [codeblock, $code("moth"):
     loop 0.0 to 1.0 by 0.1 |amount|:
@@ -60,12 +66,15 @@ Any range using `F16`, `F32` or `F64` needs an explicit step:
     ;
 ]
 
-The value binding uses the selected range type. The optional position binding
-always has type `I32`, even when the range counter uses another exact type.
+The value binding uses the selected range type. The optional second binding
+counts visited iterations from zero and always has type `I32`, even when the
+range counter uses another exact type.
 
-Fixed-width bounds and steps use the exact numeric domain rules. All omitted
-zero and default one values materialise in the selected counter type. Invalid
-steps and counter updates produce implicit failure through the enclosing
-handler or function contract. Ranges run on HTML-JS; HTML-Wasm rejects
-recoverable range failure with a capability diagnostic. See @../progress
-(Progress) for current support.
+Fixed-width bounds follow the exact numeric domain rules. Steps are signed whole
+numbers from `I8` through `I64`. An omitted step is one, and unsigned, `Byte`,
+`Dec` or float steps do not apply to an integer range. A literal zero step is
+rejected during compilation. Any other zero step fails before the first iteration.
+Counter updates end at the last valid endpoint rather than
+overflowing. Ranges run on HTML-JS. HTML-Wasm lowers integer, `F32` and `F64`
+counters, and rejects `F16` counters or recoverable range failure with a
+capability diagnostic. See @../progress (Progress) for current support.

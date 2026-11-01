@@ -70,6 +70,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::identifier_policy;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::{
     c_family_operator_mistake_at, check_expression_common_mistake,
@@ -194,6 +195,22 @@ fn unexpected_token_at_current(
     string_table: &mut StringTable,
 ) -> Result<DiagnosticDraft, ExpressionParseError> {
     let span = Some(token_stream.current_span());
+
+    // The tokenizer only emits a spaced binary minus after a reserved word in assignment name
+    // position; every other reserved-word name before a spaced minus is diagnosed lexically. So
+    // this shape is the author's attempted name, and the reserved word explains it better than
+    // the later operator. An earlier `by = a` declaration keeps its own first diagnostic because
+    // tokenization no longer stops here.
+    if token_stream.peek_next_tag() == Some(TokenTag::SUBTRACT)
+        && let Some(diagnostic) = identifier_policy::reject_reserved_word_token(
+            token_stream.current_tag(),
+            span,
+            string_table,
+        )
+    {
+        return Ok(diagnostic);
+    }
+
     let found = token_stream
         .current_diagnostic_token(string_table)
         .map_err(|error| {

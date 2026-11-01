@@ -17,7 +17,9 @@ use super::super::store::{MalformedTirStore, TemplateIrStore, TemplateWrapperSet
 use super::super::summary::TemplateIrSummary;
 use super::super::{TemplateTirPhase, TemplateViewContext, TirView};
 use super::builder::TemplateIrBuilder;
+use crate::compiler_frontend::ast::ast_nodes::LoopBindings;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression::CollectionExpressionType;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
@@ -46,6 +48,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn assert_structure_reason(draft: DiagnosticDraft, expected: InvalidTemplateStructureCode) {
     let diagnostic = compact_bag_for_test(DiagnosticBag::from(draft), None);
@@ -1276,4 +1279,234 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
     MalformedTirStore::new(&mut store).set_runtime_slot_plan(template_id, Some(outer_plan));
 
     prepare_slot_plan_view(&store, template_id).expect("nested plans may both use local source 0");
+}
+
+/// One runtime `I32` call, so a collection step keeps its authored signed-integer type.
+fn runtime_i32_expression(
+    expressions: &mut AstExpressionBuilder,
+    string_table: &mut StringTable,
+) -> ExprId {
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("main.moth", string_table)
+        .expect("test path fits");
+    let name = path_fork
+        .try_intern_child(scope, string_table.intern("runtime_i32"))
+        .expect("test path fits");
+    expressions
+        .function_call_with_typed_arguments(
+            name,
+            Vec::new(),
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )
+        .expect("runtime fixture call fits expression store")
+        .id()
+}
+
+#[test]
+fn preparation_const_required_reports_a_runtime_collection_step() {
+    // The source and its length are const, so only the step keeps the template from folding.
+    // A runtime-only step must keep the AST slice's const-required diagnostic, not a pending
+    // step or a source error.
+    let result = prepare_root(
+        TemplateType::StringFunction,
+        |builder, table, expressions, constants| {
+            let item = expressions
+                .fixed_scalar(
+                    constants,
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("literal fits I32"),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("literal fits expression store");
+            let mut type_environment = TypeEnvironment::new();
+            let iterable = expressions
+                .collection_with_type_id(
+                    vec![item],
+                    CollectionExpressionType {
+                        element_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        fixed_capacity: None,
+                        collection_type_id: None,
+                    },
+                    &mut type_environment,
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("collection literal fits expression store")
+                .id();
+            let step = runtime_i32_expression(expressions, table);
+            let body_text = table.intern("body");
+            let body = builder.push_text_node(body_text, 4, TemplateSegmentOrigin::Body, None);
+            builder.push_loop_node(
+                TemplateLoopHeader::Collection {
+                    bindings: Box::new(LoopBindings {
+                        item: None,
+                        index: None,
+                    }),
+                    iterable,
+                    step: Some(step),
+                },
+                body,
+                None,
+                None,
+            )
+        },
+        TemplatePreparationMode::ConstRequired,
+    );
+
+    let TemplateError::Diagnostic(diagnostic) =
+        result.expect_err("a runtime-only collection step must keep the const-required diagnostic")
+    else {
+        panic!("a runtime collection step must remain a source diagnostic");
+    };
+    assert_structure_reason(
+        diagnostic,
+        InvalidTemplateStructureCode::TemplateLoopStepNotConst,
+    );
+}
+
+#[test]
+fn preparation_const_required_accepts_a_module_constant_collection_step() {
+    // A collection step may name a module constant exactly like a range step. The step is
+    // const-evaluable once that reference is accepted, so preparation must classify the
+    // template as foldable instead of reporting the runtime-step diagnostic.
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
+    use crate::compiler_frontend::ast::const_values::store::ConstValuePayload;
+    use crate::compiler_frontend::ast::module_ast::environment::{
+        DeclarationId, ResolvedConstantSet,
+    };
+    use crate::compiler_frontend::ast::templates::tir::preparation::prepare_tir_view_with_source_scope;
+    use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+    use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+    use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
+
+    let mut store = TemplateIrStore::new();
+    let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut path_fork = PathInternerFork::empty();
+
+    let module_path = path_fork
+        .try_intern_portable_path("preparation_tests.moth", &mut string_table)
+        .expect("test path fits");
+    let step_path = path_fork
+        .try_intern_child(module_path, string_table.intern("step"))
+        .expect("test path fits");
+    let step_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+
+    let step_value = const_values
+        .insert_resolved(
+            step_type,
+            ConstValuePayload::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, -2).expect("literal fits I32"),
+            ),
+            None,
+        )
+        .expect("module constant value fits store");
+    const_values
+        .bind_module_constant(step_path, step_value)
+        .expect("module constant binding fits store");
+
+    let mut resolved_constants = ResolvedConstantSet::default();
+    resolved_constants.insert(DeclarationId::from_index(0));
+    let declarations = TopLevelDeclarationTable::new(
+        vec![Declaration {
+            id: step_path,
+            type_id: step_type,
+            type_syntax: None,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
+            binding_span: None,
+            config_qualifier: None,
+        }],
+        &path_fork,
+    );
+    let scope = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        module_path,
+        Rc::new(declarations),
+        Arc::new(ExternalPackageRegistry::default()),
+        0,
+    )
+    .with_resolved_module_constants(Rc::new(resolved_constants));
+
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let item = expressions
+            .fixed_scalar(
+                &mut const_values,
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("literal fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("literal fits expression store");
+        let mut type_environment = TypeEnvironment::new();
+        let iterable = expressions
+            .collection_with_type_id(
+                vec![item],
+                CollectionExpressionType {
+                    element_type_id: step_type,
+                    fixed_capacity: None,
+                    collection_type_id: None,
+                },
+                &mut type_environment,
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("collection literal fits expression store")
+            .id();
+        let step = reference_expr_with_type_id(
+            &mut expressions,
+            step_path,
+            step_type,
+            None,
+            ValueMode::ImmutableOwned,
+        );
+        let body_text = string_table.intern("body");
+        let body = builder.push_text_node(body_text, 4, TemplateSegmentOrigin::Body, None);
+        let root = builder.push_loop_node(
+            TemplateLoopHeader::Collection {
+                bindings: Box::new(LoopBindings {
+                    item: None,
+                    index: None,
+                }),
+                iterable,
+                step: Some(step),
+            },
+            body,
+            None,
+            None,
+        );
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("composed view fits store");
+    let prepared = prepare_tir_view_with_source_scope(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+        &scope,
+    )
+    .expect("a module-constant collection step must classify as const");
+    assert!(
+        matches!(prepared.outcome, TemplatePreparationOutcome::Foldable),
+        "a collection loop naming a module constant must stay foldable"
+    );
 }

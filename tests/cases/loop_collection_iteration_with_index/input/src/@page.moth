@@ -5,4 +5,51 @@ loop items |item, index|:
     ~weighted = weighted + item + index
 ;
 
-[:loop_collection_iteration_with_index weighted=[weighted]]
+-- The index binding is the real source index for every signed step, including
+-- a step that overshoots the source or visits only the last element.
+stride_items = {10, 20, 30, 40, 50}
+
+forward ~= [:]
+loop stride_items by 2 |item, index|:
+    ~forward = [:[forward]([item],[index])]
+;
+
+reverse ~= [:]
+loop stride_items by -2 |item, index|:
+    ~reverse = [:[reverse]([item],[index])]
+;
+
+overshoot_forward ~= [:]
+loop stride_items by 7 |item, index|:
+    ~overshoot_forward = [:[overshoot_forward]([item],[index])]
+;
+
+overshoot_reverse ~= [:]
+loop stride_items by -7 |item, index|:
+    ~overshoot_reverse = [:[overshoot_reverse]([item],[index])]
+;
+
+narrow_step I8 = 2
+narrow ~= [:]
+loop stride_items by narrow_step |item, index|:
+    ~narrow = [:[narrow]([item],[index])]
+;
+
+minimum_step I64 = -9223372036854775808
+minimum ~= [:]
+loop stride_items by minimum_step |item, index|:
+    ~minimum = [:[minimum]([item],[index])]
+;
+
+empty_items {I32} = {}
+empty_forward ~= 0
+loop empty_items by 2 |item, index|:
+    ~empty_forward += 1
+;
+
+empty_reverse ~= 0
+loop empty_items by -2 |item, index|:
+    ~empty_reverse += 1
+;
+
+[:loop_collection_iteration_with_index weighted=[weighted] forward=[forward] reverse=[reverse] overshoot=[overshoot_forward]/[overshoot_reverse] narrow=[narrow] minimum=[minimum] empty=[empty_forward]/[empty_reverse]]

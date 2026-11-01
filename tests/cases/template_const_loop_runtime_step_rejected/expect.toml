@@ -1,0 +1,28 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.template_loop_step_not_const"
+occurrence = 1
+path = "input/@page.moth"
+line = 4
+column = 40
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.template_loop_step_not_const"
+occurrence = 2
+path = "input/float_range_step/@mod.moth"
+line = 4
+column = 35
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.template_loop_step_not_const"
+occurrence = 3
+path = "input/range_step/@mod.moth"
+line = 4
+column = 30

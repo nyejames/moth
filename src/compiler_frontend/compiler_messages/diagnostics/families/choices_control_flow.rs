@@ -173,8 +173,13 @@ unit_code! {
         MissingRangeEndBound = 19,
         MissingRangeStep = 20,
         FloatRangeMissingStep = 21,
-        ZeroRangeStep = 22,
+        ZeroLoopStep = 22,
         ExpectedHeaderExpression = 23,
+        MissingCollectionStep = 24,
+        RepeatedLoopStep = 25,
+        StepOnConditionalLoop = 26,
+        MisplacedLoopStep = 27,
+        BindingsOnConditionalLoop = 28,
     }
 }
 
@@ -204,7 +209,12 @@ impl InvalidLoopHeaderCode {
             InvalidLoopHeaderReason::MissingRangeEndBound => Self::MissingRangeEndBound,
             InvalidLoopHeaderReason::MissingRangeStep => Self::MissingRangeStep,
             InvalidLoopHeaderReason::FloatRangeMissingStep => Self::FloatRangeMissingStep,
-            InvalidLoopHeaderReason::ZeroRangeStep => Self::ZeroRangeStep,
+            InvalidLoopHeaderReason::ZeroLoopStep => Self::ZeroLoopStep,
+            InvalidLoopHeaderReason::MissingCollectionStep => Self::MissingCollectionStep,
+            InvalidLoopHeaderReason::RepeatedLoopStep => Self::RepeatedLoopStep,
+            InvalidLoopHeaderReason::StepOnConditionalLoop => Self::StepOnConditionalLoop,
+            InvalidLoopHeaderReason::MisplacedLoopStep => Self::MisplacedLoopStep,
+            InvalidLoopHeaderReason::BindingsOnConditionalLoop => Self::BindingsOnConditionalLoop,
             InvalidLoopHeaderReason::ExpectedHeaderExpression => Self::ExpectedHeaderExpression,
         }
     }
@@ -243,7 +253,12 @@ impl InvalidLoopHeaderCode {
             Self::MissingRangeEndBound => InvalidLoopHeaderReason::MissingRangeEndBound,
             Self::MissingRangeStep => InvalidLoopHeaderReason::MissingRangeStep,
             Self::FloatRangeMissingStep => InvalidLoopHeaderReason::FloatRangeMissingStep,
-            Self::ZeroRangeStep => InvalidLoopHeaderReason::ZeroRangeStep,
+            Self::ZeroLoopStep => InvalidLoopHeaderReason::ZeroLoopStep,
+            Self::MissingCollectionStep => InvalidLoopHeaderReason::MissingCollectionStep,
+            Self::RepeatedLoopStep => InvalidLoopHeaderReason::RepeatedLoopStep,
+            Self::StepOnConditionalLoop => InvalidLoopHeaderReason::StepOnConditionalLoop,
+            Self::MisplacedLoopStep => InvalidLoopHeaderReason::MisplacedLoopStep,
+            Self::BindingsOnConditionalLoop => InvalidLoopHeaderReason::BindingsOnConditionalLoop,
             Self::ExpectedHeaderExpression => InvalidLoopHeaderReason::ExpectedHeaderExpression,
         }
     }

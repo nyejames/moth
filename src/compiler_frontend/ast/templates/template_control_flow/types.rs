@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeLoopSpec};
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredNumericExpression, DeferredRangeHeader, NumericBindingId,
-    NumericConstructionDomainId,
+    NumericConstructionDomainId, StatementExpression,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::source::SourceSpan;
@@ -47,6 +47,8 @@ pub(crate) enum TemplateLoopHeader {
     Collection {
         bindings: Box<LoopBindings>,
         iterable: ExprId,
+        /// The optional independent signed step, evaluated once after the source and its length.
+        step: Option<ExprId>,
     },
 }
 
@@ -73,8 +75,8 @@ pub(crate) enum TemplateLoopHeaderDraft {
 
     /// Range header whose operands complete at the owning body root.
     ///
-    /// WHY: the header's exact domain is a forward result of its operands' selected types, so a
-    ///      header with a retained operand keeps its authored form until the owning body root owns
+    /// WHY: the header's exact domain is a forward result of its bounds' selected types, so a
+    ///      header with a retained bound keeps its authored form until the owning body root owns
     ///      every permitted use. The producer's own deferred shapes travel verbatim:
     ///      `Unbound` completes its own operand slots through template intake records, while
     ///      `Bound` belongs to a retained counter row that resolves before the loop construct, so
@@ -86,12 +88,12 @@ pub(crate) enum TemplateLoopHeaderDraft {
         header: Box<DeferredRangeHeader>,
     },
 
-    /// Collection header whose iterable still reaches a pending numeric origin.
+    /// Collection header whose iterable or step still reaches a pending numeric origin.
     ///
     /// WHY: the callee's returned collection type is known, so the loop bindings are final at parse
-    ///      time, but the iterable expression itself cannot be built until the body root selects its
-    ///      origin's single static type. The bindings travel with the position instead of being
-    ///      re-derived from the fragment later.
+    ///      time, but the iterable or step expression cannot be built until the body root selects
+    ///      its origin's single static type. The bindings and both authored slots travel with the
+    ///      position instead of being re-derived from the fragment later.
     ///      A pending numeric collection item is declared by the body root from the source's
     ///      completed element type, before this header completes.
     RetainedCollection {
@@ -101,8 +103,15 @@ pub(crate) enum TemplateLoopHeaderDraft {
         bindings: Box<LoopBindings>,
         /// Pending numeric item; the body root declares it before this header completes.
         pending_item: Option<NumericBindingId>,
-        /// Retained iterable fragment and its receiving metadata.
-        deferred: Box<DeferredNumericExpression>,
+        /// The source, built or retained.
+        iterable: StatementExpression,
+        /// The optional step, built or retained.
+        step: Option<StatementExpression>,
+        /// The authored `by` marker span, present exactly when the header parsed a step.
+        ///
+        /// WHY: a completed `Bool` source is the conditional loop whose step diagnostic belongs
+        ///      at the marker, and only the header parse knows that position.
+        step_marker_span: Option<SourceSpan>,
     },
 }
 

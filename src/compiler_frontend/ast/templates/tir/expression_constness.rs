@@ -111,15 +111,45 @@ pub(crate) fn effective_loop_header_for_view(
         (
             TemplateLoopHeader::Collection {
                 bindings,
-                iterable: _,
+                iterable,
+                step,
             },
-            TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
-        ) => Ok(view
-            .effective_expression_for_site(expressions, site_id)?
-            .map(|expression| TemplateLoopHeader::Collection {
+            TemplateLoopHeaderExpressionSites::Collection {
+                iterable: iterable_site,
+                step: step_site,
+            },
+        ) => {
+            let effective_iterable =
+                view.effective_expression_for_site(expressions, iterable_site)?;
+            let effective_step = match (step, step_site) {
+                (None, None) => None,
+                (Some(_), Some(step_site)) => {
+                    view.effective_expression_for_site(expressions, step_site)?
+                }
+                _ => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "TIR collection-loop header/site step shape mismatch.",
+                    ));
+                }
+            };
+
+            if effective_iterable.is_none() && effective_step.is_none() {
+                return Ok(None);
+            }
+
+            Ok(Some(TemplateLoopHeader::Collection {
                 bindings: bindings.clone(),
-                iterable: expression.id(),
-            })),
+                iterable: effective_iterable
+                    .map(|expression| expression.id())
+                    .unwrap_or(*iterable),
+                step: match (step, effective_step) {
+                    (_, Some(expression)) => Some(expression.id()),
+                    (Some(original), None) => Some(*original),
+                    (None, None) => None,
+                },
+            }))
+        }
         _ => Err(InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
             "TIR loop header shape does not match its expression sites.",
@@ -408,8 +438,14 @@ impl StructuralConstness<'_> {
                     None => Ok(true),
                 }
             }
-            TemplateLoopHeader::Collection { iterable, .. } => {
-                self.expression(self.expressions.view(*iterable)?, bindings)
+            TemplateLoopHeader::Collection { iterable, step, .. } => {
+                if !self.expression(self.expressions.view(*iterable)?, bindings)? {
+                    return Ok(false);
+                }
+                match step {
+                    Some(step) => self.expression(self.expressions.view(*step)?, bindings),
+                    None => Ok(true),
+                }
             }
         }
     }

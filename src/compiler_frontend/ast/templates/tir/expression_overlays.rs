@@ -503,12 +503,30 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             }
 
             (
-                TemplateLoopHeader::Collection { iterable, .. },
-                TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
+                TemplateLoopHeader::Collection { iterable, step, .. },
+                TemplateLoopHeaderExpressionSites::Collection {
+                    iterable: site_id,
+                    step: step_site,
+                },
             ) => {
                 let (expression, precedence) =
                     self.effective_expression(store, *site_id, *iterable)?;
                 self.record_payload(*site_id, expression, precedence);
+
+                match (step_site, step) {
+                    (Some(step_site), Some(step_expression)) => {
+                        let (expression, precedence) =
+                            self.effective_expression(store, *step_site, *step_expression)?;
+                        self.record_payload(*step_site, expression, precedence);
+                    }
+                    (None, None) => {}
+                    _ => {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "TIR expression overlay collection found mismatched collection loop step site.",
+                        ));
+                    }
+                }
             }
 
             _ => {

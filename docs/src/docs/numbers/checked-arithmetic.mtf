@@ -217,9 +217,10 @@ same result types, rounding and failure rules.
 
 ### Related behaviour
 
-Range-loop counter updates use the same checked numeric operations. Assertions
-remain unrecoverable and checked in release. Allocation and stack exhaustion
-and fatal foreign-value integrity guards stay outside `catch`.
+Range candidates are checked against the endpoint before commit, so a counter
+update never overflows. Loop ordinals keep their checked integer updates.
+Assertions remain unrecoverable and checked in release. Allocation and stack
+exhaustion and fatal foreign-value integrity guards stay outside `catch`.
 
 Conversions that may lose information belong to
 @../casts (Casts). Compound write-back remains the receiving-context exception

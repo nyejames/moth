@@ -26,8 +26,8 @@ loop body do not run for the current iteration.
 The next action depends on the loop form:
 
 - a conditional loop checks its condition again
-- a collection loop advances to its next item
-- a range loop advances its counter, then checks the next bound
+- a collection loop advances by its step to the next visited item
+- a range loop advances its counter by the step, then checks the next bound
 
 ### Rules
 

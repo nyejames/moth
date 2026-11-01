@@ -5,4 +5,5 @@ colors {String} = {"red", "green", "blue"}
     [loop colors |color, index|:
         [index]=[color];
     ]
+    [loop colors by -1 |color, index|:rev:[index]=[color];]
 ]

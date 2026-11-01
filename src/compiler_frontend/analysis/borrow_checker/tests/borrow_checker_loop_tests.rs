@@ -62,6 +62,28 @@ loop items |item|:
 }
 
 #[test]
+fn stepped_collection_loop_mutation_of_iterable_reports_shared_mutable_conflict() {
+    let source = r#"
+items ~{I32} = {1, 2, 3, 4}
+loop items by 2 |item|:
+~items.push(5)
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
+
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("mutating a collection while a stepped loop iterates it should fail");
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+#[test]
 fn collection_loop_mutable_helper_call_on_iterable_reports_shared_mutable_conflict() {
     let source = r#"
 mutate |values ~{I32}|:
@@ -158,6 +180,18 @@ loop inner |inner_item|:
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the inner iterable must stay protected inside a nested loop");
     assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+#[test]
+fn stepped_collection_loop_mutation_after_exit_is_valid() {
+    borrow_check_source(
+        r#"
+items ~{I32} = {1, 2, 3, 4}
+loop items by 2 |item|:
+;
+~items.push(5)
+"#,
+    );
 }
 
 #[test]

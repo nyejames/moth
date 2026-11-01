@@ -94,7 +94,7 @@ impl<'hir> JsEmitter<'hir> {
                 )?;
             }
 
-            HirStatementKind::RangeStepFailure {
+            HirStatementKind::LoopStepFailure {
                 cause,
                 failure_mode,
                 result,
@@ -107,18 +107,17 @@ impl<'hir> JsEmitter<'hir> {
                 );
                 self.emit_numeric_carrier_assignment(helper_call, *failure_mode, *result)?;
             }
-            HirStatementKind::FloatRangeCandidate {
+            HirStatementKind::RangeCandidate {
                 current,
                 step,
                 end,
-                ascending,
                 inclusive,
                 domain,
                 candidate_result,
                 in_range_result,
             } => {
-                self.emit_float_range_candidate_statement(
-                    [*current, *step, *end, *ascending],
+                self.emit_range_candidate_statement(
+                    [*current, *step, *end],
                     *inclusive,
                     *domain,
                     *candidate_result,
@@ -427,21 +426,36 @@ impl<'hir> JsEmitter<'hir> {
         self.numeric_proofs.integer_narrowing_is_safe(statement)
     }
 
-    /// Emit the range candidate into JS-local scratch, then commit only a finite in-bound value.
-    fn emit_float_range_candidate_statement(
+    /// Emit one range candidate, dispatching on the counter domain.
+    ///
+    /// WHAT: integer domains use exact arithmetic on the counter and step carriers; binary floats
+    ///       round the signed successor at the counter precision.
+    /// WHY: only a finite in-bound successor is committed, so an integer lowering never
+    ///      materialises an out-of-domain value and a non-finite float never becomes a counter
+    ///      value.
+    fn emit_range_candidate_statement(
         &mut self,
-        expressions: [HirValueId; 4],
+        expressions: [HirValueId; 3],
         inclusive: bool,
         domain: NumericScalar,
         candidate_result: HirLocalDestination,
         in_range_result: HirLocalDestination,
     ) -> Result<(), InfrastructureFailure> {
-        let [current, step, end, ascending] = expressions;
+        if domain.is_integer() {
+            return self.emit_integer_range_candidate_statement(
+                expressions,
+                inclusive,
+                domain,
+                candidate_result,
+                in_range_result,
+            );
+        }
+
+        let [current, step, end] = expressions;
 
         let current_expr = self.lower_expr(current)?;
         let step_expr = self.lower_expr(step)?;
         let end_expr = self.lower_expr(end)?;
-        let ascending_expr = self.lower_expr(ascending)?;
         let precision = domain.binary_float_precision().unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::BackendLowering,
@@ -449,12 +463,11 @@ impl<'hir> JsEmitter<'hir> {
             )
         });
 
-        let direction_name = self.next_temp_identifier("__float_range_ascending");
-        let candidate_name = self.next_temp_identifier("__float_range_candidate");
-        let in_range_name = self.next_temp_identifier("__float_range_valid");
-        let unrounded_candidate = format!(
-            "({direction_name} ? ({current_expr} + {step_expr}) : ({current_expr} - {step_expr}))"
-        );
+        let step_name = self.next_temp_identifier("__range_candidate_step");
+        let direction_name = self.next_temp_identifier("__range_candidate_ascending");
+        let candidate_name = self.next_temp_identifier("__range_candidate_value");
+        let in_range_name = self.next_temp_identifier("__range_candidate_valid");
+        let unrounded_candidate = format!("({current_expr} + {step_name})");
         // An F16 range step completes at F16 at each candidate, so the selected domain
         // keeps its precision instead of widening to F32.
         let candidate_expr = match precision {
@@ -467,11 +480,13 @@ impl<'hir> JsEmitter<'hir> {
         let bound_check = format!(
             "({direction_name} ? ({candidate_name} {ascending_comparison} {end_expr}) : ({candidate_name} {descending_comparison} {end_expr}))"
         );
-        let direction_assignment = format!("const {direction_name} = {ascending_expr};");
+        let step_assignment = format!("const {step_name} = {step_expr};");
+        let direction_assignment = format!("const {direction_name} = {step_name} > 0;");
         let candidate_assignment = format!("const {candidate_name} = {candidate_expr};");
         let in_range_assignment =
             format!("const {in_range_name} = Number.isFinite({candidate_name}) && {bound_check};");
 
+        self.emit_line(&step_assignment);
         self.emit_line(&direction_assignment);
         self.emit_line(&candidate_assignment);
         self.emit_line(&in_range_assignment);
@@ -483,6 +498,129 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
 
         Ok(())
+    }
+
+    /// Emit the exact integer range candidate.
+    ///
+    /// WHAT: adds the signed step to the counter with exact arithmetic, selects the bound
+    ///       comparison from the step sign and commits the successor only when in range.
+    /// WHY: a signed step cannot be added through the counter domain without overflow or a
+    ///      narrowing cast, and a mixed Number/BigInt carrier pair would need a runtime type
+    ///      test. Both carriers are static HIR facts, so `BigInt` arithmetic is selected
+    ///      whenever either operand is wide and exact `Number` arithmetic stays available when
+    ///      both are at most 32 bits.
+    fn emit_integer_range_candidate_statement(
+        &mut self,
+        expressions: [HirValueId; 3],
+        inclusive: bool,
+        domain: NumericScalar,
+        candidate_result: HirLocalDestination,
+        in_range_result: HirLocalDestination,
+    ) -> Result<(), InfrastructureFailure> {
+        let [current, step, end] = expressions;
+        let current_expr = self.lower_expr(current)?;
+        let step_expr = self.lower_expr(step)?;
+        let end_expr = self.lower_expr(end)?;
+
+        let counter_carrier = self.integer_range_candidate_carrier(domain, "counter");
+        let step_type = self.hir.expressions.expression(step).ty;
+        let step_scalar = NumericScalar::from_type_id(step_type, self.type_environment)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS backend received a range candidate step without a numeric type"
+                )
+            });
+        let step_carrier = self.integer_range_candidate_carrier(step_scalar, "step");
+
+        let counter_is_bigint = matches!(counter_carrier, JsNumericCarrier::BigInteger { .. });
+        let step_is_bigint = matches!(step_carrier, JsNumericCarrier::BigInteger { .. });
+        // A Number carrier is exact only up to 32 bits, so one wide operand moves every value
+        // onto the exact BigInt carrier.
+        let arithmetic_is_bigint = counter_is_bigint || step_is_bigint;
+
+        let current_name = self.next_temp_identifier("__range_candidate_current");
+        let step_name = self.next_temp_identifier("__range_candidate_step");
+        let end_name = self.next_temp_identifier("__range_candidate_end");
+        let next_name = self.next_temp_identifier("__range_candidate_next");
+        let in_range_name = self.next_temp_identifier("__range_candidate_valid");
+
+        self.emit_line(&format!("const {current_name} = {current_expr};"));
+        self.emit_line(&format!("const {step_name} = {step_expr};"));
+        self.emit_line(&format!("const {end_name} = {end_expr};"));
+
+        let (arithmetic_current, arithmetic_step, arithmetic_end) = if arithmetic_is_bigint {
+            let mut promote_to_bigint = |operand: &str| {
+                let promoted = self.next_temp_identifier("__range_candidate_wide");
+                self.emit_line(&format!("const {promoted} = BigInt({operand});"));
+                promoted
+            };
+            let arithmetic_current = if counter_is_bigint {
+                current_name.clone()
+            } else {
+                promote_to_bigint(&current_name)
+            };
+            let arithmetic_step = if step_is_bigint {
+                step_name.clone()
+            } else {
+                promote_to_bigint(&step_name)
+            };
+            let arithmetic_end = if counter_is_bigint {
+                end_name.clone()
+            } else {
+                promote_to_bigint(&end_name)
+            };
+            (arithmetic_current, arithmetic_step, arithmetic_end)
+        } else {
+            (current_name.clone(), step_name.clone(), end_name.clone())
+        };
+
+        let zero_literal = if arithmetic_is_bigint { "0n" } else { "0" };
+        let (ascending_comparison, descending_comparison) =
+            if inclusive { ("<=", ">=") } else { ("<", ">") };
+        self.emit_line(&format!(
+            "const {next_name} = {arithmetic_current} + {arithmetic_step};"
+        ));
+        self.emit_line(&format!(
+            "const {in_range_name} = ({arithmetic_step} > {zero_literal}) ? ({next_name} {ascending_comparison} {arithmetic_end}) : ({next_name} {descending_comparison} {arithmetic_end});"
+        ));
+
+        self.emit_value_destination(in_range_result, &in_range_name)?;
+        self.emit_line(&format!("if ({in_range_name}) {{"));
+        self.indent += 1;
+        // The guard proved the successor fits the counter domain, so a Number carrier stays
+        // exact when converted back from BigInt arithmetic.
+        let candidate_value = if arithmetic_is_bigint && !counter_is_bigint {
+            format!("Number({next_name})")
+        } else {
+            next_name.clone()
+        };
+        self.emit_value_destination(candidate_result, &candidate_value)?;
+        self.indent -= 1;
+        self.emit_line("}");
+
+        Ok(())
+    }
+
+    /// The JS carrier one integer range candidate operand uses.
+    ///
+    /// WHY: the candidate selects its arithmetic from static HIR types, so a non-integer or
+    ///      unbounded carrier is an internal contradiction rather than a runtime fallback.
+    fn integer_range_candidate_carrier(
+        &self,
+        scalar: NumericScalar,
+        operand: &'static str,
+    ) -> JsNumericCarrier {
+        match JsNumericCarrier::for_scalar(scalar) {
+            Some(
+                carrier @ (JsNumericCarrier::ExactInteger { .. }
+                | JsNumericCarrier::BigInteger { .. }),
+            ) => carrier,
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JS range candidate {operand} is not an integer domain: {scalar}"
+            ),
+        }
     }
 
     /// Lower a `HirStatementKind::FormatFloat` into the exact-precision binary-float formatter.
@@ -694,7 +832,7 @@ impl<'hir> JsEmitter<'hir> {
                     (js_cast_expression_for_policy(*policy, &source)?, false)
                 }
             }
-            HirFallibleOperation::RangeStepFailure { cause } => {
+            HirFallibleOperation::LoopStepFailure { cause } => {
                 let code = cause.builtin_error_code();
                 (
                     format!(

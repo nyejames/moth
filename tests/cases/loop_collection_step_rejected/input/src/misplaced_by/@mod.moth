@@ -1,0 +1,5 @@
+-- The step belongs before the binding pipes.
+items = {1, 2, 3}
+loop items |item| by 2:
+    io.line([: [item]])
+;

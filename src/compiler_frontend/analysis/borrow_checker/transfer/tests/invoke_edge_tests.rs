@@ -6,7 +6,7 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
-use crate::compiler_frontend::hir::numeric::RangeStepFailureCause;
+use crate::compiler_frontend::hir::numeric::LoopStepFailureCause;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 
 #[test]
@@ -28,8 +28,8 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
     let terminator = HirTerminator::Invoke {
         id: HirNodeId(0),
         span: None,
-        operation: HirFallibleOperation::RangeStepFailure {
-            cause: RangeStepFailureCause::ZeroStep,
+        operation: HirFallibleOperation::LoopStepFailure {
+            cause: LoopStepFailureCause::ZeroStep,
         },
         success: BlockId(1),
         success_results: vec![LocalId(1)],

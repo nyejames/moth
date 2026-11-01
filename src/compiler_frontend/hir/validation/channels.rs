@@ -275,7 +275,7 @@ impl HirValidator<'_> {
                 anchor,
             );
         }
-        let arity = if matches!(operation, HirFallibleOperation::RangeStepFailure { .. }) {
+        let arity = if matches!(operation, HirFallibleOperation::LoopStepFailure { .. }) {
             0
         } else {
             1
@@ -316,10 +316,10 @@ impl HirValidator<'_> {
             },
             HirFallibleOperation::Call { .. }
             | HirFallibleOperation::MapOp { .. }
-            | HirFallibleOperation::RangeStepFailure { .. } => {
+            | HirFallibleOperation::LoopStepFailure { .. } => {
                 crate::compiler_bug!(
                     CompilerStage::HirConstruction,
-                    "Call and MapOp already returned from validate_invoke; RangeStepFailure already returned after the zero-arity check"
+                    "Call and MapOp already returned from validate_invoke; LoopStepFailure already returned after the zero-arity check"
                 )
             }
         };

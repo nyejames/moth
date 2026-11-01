@@ -81,11 +81,11 @@ pub(crate) fn lower_function(
                 .clone();
 
         let mut lowered_statements = Vec::new();
-        let mut range_step_trap = false;
+        let mut loop_step_trap = false;
         for statement in &hir_block.statements {
-            if let HirStatementKind::RangeStepFailure { failure_mode, .. } = statement.kind {
-                range_step_trap = failure_mode == NumericFailureMode::Trap;
-                // Recoverable range guards are Invoke terminators and are target-gated.
+            if let HirStatementKind::LoopStepFailure { failure_mode, .. } = statement.kind {
+                loop_step_trap = failure_mode == NumericFailureMode::Trap;
+                // Recoverable loop-step failures are Invoke terminators and are target-gated.
                 // This statement is the unconditional trap-mode producer.
                 break;
             }
@@ -96,7 +96,7 @@ pub(crate) fn lower_function(
         // WHY: ownership remains optimization-only, but LIR still records possible drop sites for
         // ownership-aware runtime lowering.
         insert_advisory_drops(&function_context, *block_id, &mut lowered_statements);
-        let lowered_terminator = if range_step_trap {
+        let lowered_terminator = if loop_step_trap {
             WasmLirTerminator::Trap
         } else {
             lower_terminator(

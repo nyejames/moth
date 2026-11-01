@@ -194,15 +194,15 @@ pub struct RangeLoopSpec {
     pub end: ExprId,
     pub end_kind: RangeEndKind,
     pub step: Option<ExprId>,
-    /// The iteration domain the range policy selected from these operands.
+    /// The counter domain the range policy selected from the start and end bounds alone.
     ///
-    /// WHAT: the counter type, operand conversion target, unit-step domain and generated
-    ///       stepping-op domain of this header, already selected and checked by
-    ///       `range_loop_spec_from_completed_operands`.
-    /// WHY: domain selection is a pure function of the operands' canonical types, and those types
-    ///      only exist at AST construction. Carrying the selected domain with the header keeps
-    ///      HIR lowering, the counter declaration and template copies reading one selected fact
-    ///      instead of each re-deriving it from operand types.
+    /// WHAT: the loop counter type and generated stepping-op domain of this header, already
+    ///       selected and checked by `range_loop_spec_from_completed_operands`.
+    /// WHY: counter selection is a pure function of the bounds' canonical types, and those types
+    ///      only exist at AST construction. A step keeps its own independent type and never
+    ///      changes this domain. Carrying the selected domain with the header keeps HIR lowering,
+    ///      the counter declaration and template copies reading one selected fact instead of each
+    ///      re-deriving it from operand types.
     pub domain: NumericScalar,
 }
 
@@ -246,6 +246,11 @@ pub enum NodeKind {
     CollectionLoop {
         bindings: Box<LoopBindings>,
         iterable: ExprId,
+        /// Optional independent signed step, evaluated once after the source and its length.
+        ///
+        /// WHY: the step is authored after the source and keeps its own signed integer type, so
+        ///      HIR and template consumers read one field instead of re-deriving it.
+        step: Option<ExprId>,
         body: Vec<AstNode>,
     },
     WhileLoop(ExprId, Vec<AstNode>), // Condition, Body
@@ -433,9 +438,13 @@ fn visit_node_expressions<'a>(
         NodeKind::CollectionLoop {
             bindings,
             iterable,
+            step,
             body,
         } => {
             push_body(stack, body);
+            if let Some(step) = step {
+                stack.push(ExpressionVisit::Expression(*step));
+            }
             stack.push(ExpressionVisit::Expression(*iterable));
             push_bindings(stack, bindings);
         }
@@ -561,9 +570,13 @@ fn visit_node_expressions_mut<'a>(
         NodeKind::CollectionLoop {
             bindings,
             iterable,
+            step,
             body,
         } => {
             push_body_mut(stack, body);
+            if let Some(step) = step {
+                stack.push(ExpressionVisitMut::Expression(step));
+            }
             stack.push(ExpressionVisitMut::Expression(iterable));
             push_bindings_mut(stack, bindings);
         }

@@ -15,7 +15,7 @@ use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
+    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
@@ -25,10 +25,10 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
 
 #[test]
-fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
+fn trap_mode_loop_step_failure_lowers_to_fatal_throw() {
     for cause in [
-        RangeStepFailureCause::ZeroStep,
-        RangeStepFailureCause::NoProgress,
+        LoopStepFailureCause::ZeroStep,
+        LoopStepFailureCause::NoProgress,
     ] {
         let expressions = HirExpressionStore::default();
         let mut string_table = StringTable::new();
@@ -41,7 +41,7 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
             locals: vec![local(0, types.boolean, region)],
             statements: vec![statement(
                 1,
-                HirStatementKind::RangeStepFailure {
+                HirStatementKind::LoopStepFailure {
                     cause,
                     failure_mode: NumericFailureMode::Trap,
                     result: HirLocalDestination::Define(LocalId(0)),
@@ -82,7 +82,7 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
                 code.default_message(),
                 code.as_u32(),
             )),
-            "fatal range guard must consume its typed cause through the numeric trap"
+            "fatal loop-step guard must consume its typed cause through the numeric trap"
         );
         assert!(output.contains("throw new Error(__moth_error_message(carrier.value));"));
     }
@@ -337,6 +337,128 @@ fn lower_float_boundary_module(
             .expect("emitted boundary module carries its entry function name"),
         source: lowered.source,
     }
+}
+
+/// Proves the integer range candidate picks its JS carrier from HIR types, not runtime tags.
+///
+/// WHAT: an I32 counter with an I64 step must promote both Number operands with `BigInt(...)`
+///       and convert the guarded successor back with `Number(...)`; two 32-bit operands stay on
+///       exact Number arithmetic.
+/// WHY: a `typeof` check would hide a carrier contradiction until runtime, and widening a 64-bit
+///       value through Number would lose precision.
+#[test]
+fn integer_range_candidate_selects_static_bigint_carriers() {
+    let promoted = integer_range_candidate_source(FixedScalar::I64);
+    assert!(
+        promoted.contains("BigInt(__range_candidate_current_"),
+        "an I64 step must promote the I32 counter instead of widening through Number"
+    );
+    assert!(
+        promoted.contains("BigInt(__range_candidate_end_"),
+        "an I64 step must promote the bound instead of widening through Number"
+    );
+    assert!(
+        promoted.contains("Number(__range_candidate_next_"),
+        "an in-range successor must convert back to the I32 Number carrier"
+    );
+    assert!(
+        emitted_candidate_line(&promoted, "__range_candidate_valid_").contains("0n"),
+        "BigInt arithmetic must compare the step sign against a BigInt zero"
+    );
+    assert!(
+        !promoted.contains("typeof __range_candidate"),
+        "carrier selection must not dispatch on runtime value types"
+    );
+
+    let exact = integer_range_candidate_source(FixedScalar::I32);
+    assert!(
+        !exact.contains("BigInt(__range_candidate"),
+        "two 32-bit operands must stay on exact Number arithmetic"
+    );
+    assert!(
+        !exact.contains("Number(__range_candidate"),
+        "an already Number-carried counter must not be converted back"
+    );
+    assert!(
+        !emitted_candidate_line(&exact, "__range_candidate_valid_").contains("0n"),
+        "Number arithmetic must compare the step sign against a Number zero"
+    );
+    assert!(
+        !exact.contains("typeof __range_candidate"),
+        "carrier selection must not dispatch on runtime value types"
+    );
+}
+
+/// Lowers a module whose only statement is an I32-counter range candidate.
+fn integer_range_candidate_source(step_scalar: FixedScalar) -> String {
+    let mut expressions = HirExpressionStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let step_type = builtin_type_ids::fixed_scalar(step_scalar);
+
+    let current = i32_expression(0, types.i32, region, &mut expressions);
+    let step = fixed_scalar_expression(
+        FixedScalarValue::signed(step_scalar, 3).expect("three fits every signed range step"),
+        step_type,
+        region,
+        &mut expressions,
+    );
+    let end = i32_expression(10, types.i32, region, &mut expressions);
+
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![local(0, types.i32, region), local(1, types.boolean, region)],
+        statements: vec![statement(
+            1,
+            HirStatementKind::RangeCandidate {
+                current,
+                step,
+                end,
+                inclusive: false,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
+                candidate_result: HirLocalDestination::Define(LocalId(0)),
+                in_range_result: HirLocalDestination::Define(LocalId(1)),
+            },
+        )],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        returns: Box::new([]),
+        error_return: None,
+    };
+    let module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "candidate"), (LocalId(1), "in_range")],
+    );
+
+    lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("integer range candidates must lower")
+    .source
+}
+
+fn emitted_candidate_line<'a>(source: &'a str, needle: &str) -> &'a str {
+    source
+        .lines()
+        .find(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("emitted JavaScript should contain a line with {needle}"))
 }
 
 /// Runs one generated JavaScript program through Node and returns its stdout.

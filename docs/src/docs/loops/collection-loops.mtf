@@ -1,5 +1,5 @@
-A collection loop visits the values in a Moth collection in collection
-order.
+A collection loop visits values from a Moth collection. By default it walks
+from the first item to the last.
 
 [codeblock, $code("moth"):
     names = {"Priya", "Rob", "Emmy"}
@@ -20,7 +20,15 @@ order.
         inspect(item)
     ;
 
-    loop items |item, index|:
+    loop items by step:
+        ~count += 1
+    ;
+
+    loop items by step |item|:
+        inspect(item)
+    ;
+
+    loop items by step |item, index|:
         inspect(item)
     ;
 ]
@@ -32,22 +40,52 @@ order.
 - Hash maps are not collection-loop sources.
 - Bindings are optional.
 - The first binding receives the current item and has the collection's element type.
-- The optional second binding receives the zero-based iteration index and has type `I32`.
+- The optional second binding receives the actual source index of the current item and has type `I32`. A stepped loop visits source indexes such as `0`, `2` and `4`, not ordinal positions.
 - Binding names are written inside one `|...|` suffix.
 - A binding list may contain one or two names.
 - An empty binding list, a third binding or duplicate binding names are invalid.
 - Loop bindings are immutable body-local names.
 - Binding an unresolved whole-number item pins its integer family, including whole-number leaves in a known nested item shape. Later integer receivers can still select its width, but float, decimal and Byte receivers or peers require an explicit cast.
 - A binding name must not collide with another visible name.
-- An empty collection runs the body zero times.
+- An empty collection with a non-zero step runs the body zero times.
 
 ### Collection loop evaluation order
 
 The source expression is evaluated once before iteration begins. The collection
-length is captured at the same point.
+length is captured at the same point. An explicit step is then evaluated once.
 
-The loop then visits zero-based indexes from `0` up to, but not including, that
-captured length.
+The step is a signed fixed-width integer (`I8`, `I16`, `I32` or `I64`) and keeps
+its own type. An omitted step is `+1` with type `I32`, and an untyped
+whole-number literal step also defaults to `I32`. A step whose type is unsigned,
+binary-float, `Byte` or `Dec` is rejected. A zero step is invalid.
+
+A positive step starts at index `0` and advances by the step while the index is
+below the captured length. A negative step starts at the last source index and
+advances by the signed step while the index remains at or above `0`. An overshoot
+ends the loop without constructing an invalid index. With a non-zero step, an
+empty source visits nothing.
+
+`continue` advances by the step. `break` exits the loop.
+
+A literal zero step is rejected during compilation with `MOTH-SYNTAX-0029`. A
+dynamic zero step fails with built-in error code 306 (`InvalidLoopStep`) before
+the empty-source check.
+
+[codeblock, $code("moth"):
+    stride_items = {10, 20, 30, 40, 50}
+
+    loop stride_items by 2 |item, index|:
+        io.line([: [index]: [item]])
+    ;
+
+    loop stride_items by -2 |item, index|:
+        io.line([: [index]: [item]])
+    ;
+]
+
+The first loop visits `10` at index `0`, `30` at index `2` and `50` at index
+`4`. The second loop visits `50` at index `4`, `30` at index `2` and `10` at
+index `0`.
 
 ### Removed syntax
 
@@ -59,10 +97,13 @@ The old `in` form is not valid.
     ;
 ]
 
-Write the collection source first, then place bindings after it:
+Write the collection source first, then any `by` step, then bindings after it:
 
 [codeblock, $code("moth"):
-    loop items |item|:
+    loop items by 2 |item|:
         inspect(item)
     ;
 ]
+
+@../progress (Progress) records target support, including current HTML-Wasm
+collection limits, separately from these collection semantics.

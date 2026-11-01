@@ -23,10 +23,11 @@ must_contain_exactly_once = [
     "fixed-i64-ascending-near-max-9223372036854775807;",
     "fixed-i64-descending-to-zero-9223372036854775807;",
     "fixed-i64-descending-to-zero-0;",
-    "fixed-u64-descending-to-zero-18446744073709551615;",
-    "fixed-u64-descending-to-zero-0;",
+    "fixed-u64-min-step-descent-18446744073709551615;",
+    "fixed-u64-min-step-descent-9223372036854775807;",
 ]
 must_not_contain = [
     "int64-ascending-near-max--9223372036854775808;",
     "int64-descending-near-min-9223372036854775807;",
+    "fixed-u64-min-step-descent-0;",
 ]

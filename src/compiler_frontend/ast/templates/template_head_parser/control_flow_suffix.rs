@@ -291,7 +291,7 @@ pub(crate) fn parse_loop_suffix(
             }
 
             ParsedRangeHeader::Deferred(header) => TemplateLoopHeaderDraft::RetainedRange {
-                // The header's exact domain is a forward result of its operands' selected types;
+                // The header's exact domain is a forward result of its bounds' selected types;
                 // this suffix's enclosing context owns the numeric domain whose root completes it.
                 domain: context.numeric_domain_id(),
                 header: Box::new(header),
@@ -300,34 +300,56 @@ pub(crate) fn parse_loop_suffix(
         ParsedLoopHeader::Collection {
             bindings,
             iterable,
+            step,
+            step_marker_span,
             pending_item,
-        } => match (iterable, pending_item) {
-            (StatementExpression::Built(iterable), None) => {
-                TemplateLoopHeaderDraft::Concrete(TemplateLoopHeader::Collection {
-                    bindings,
-                    iterable,
-                })
-            }
+        } => {
+            let retained_step = step
+                .as_ref()
+                .is_some_and(|slot| matches!(slot, StatementExpression::Retained(_)));
+            match (iterable, pending_item) {
+                (StatementExpression::Built(iterable), None) if !retained_step => {
+                    let step = match step {
+                        Some(StatementExpression::Built(step)) => Some(step),
+                        Some(StatementExpression::Retained(_)) => {
+                            return Err(TemplateError::from(InfrastructureFailure::internal(
+                                CompilerStage::AstConstruction,
+                                "a collection loop step was retained after its header parsed as concrete.",
+                            )));
+                        }
+                        None => None,
+                    };
+                    TemplateLoopHeaderDraft::Concrete(TemplateLoopHeader::Collection {
+                        bindings,
+                        iterable,
+                        step,
+                    })
+                }
 
-            (StatementExpression::Retained(deferred), pending_item) => {
-                TemplateLoopHeaderDraft::RetainedCollection {
-                    // The iterable's origin type is selected at the body root, and this suffix's
-                    // enclosing context owns the numeric domain whose root completes it. The bindings
-                    // are concrete except a pending item, which that root declares from the source.
-                    domain: context.numeric_domain_id(),
-                    bindings,
-                    pending_item,
-                    deferred: Box::new(deferred),
+                (StatementExpression::Built(_), Some(_)) => {
+                    return Err(TemplateError::from(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "a collection loop source was built after its loop declared a pending item.",
+                    )));
+                }
+
+                (iterable, pending_item) => {
+                    TemplateLoopHeaderDraft::RetainedCollection {
+                        // The retained slot's origin type is selected at the body root, and this
+                        // suffix's enclosing context owns the numeric domain whose root completes
+                        // it. The bindings are concrete except a pending item, which that root
+                        // declares from the source. The step marker span keeps a completed `Bool`
+                        // source's diagnostic at the authored `by`.
+                        domain: context.numeric_domain_id(),
+                        bindings,
+                        pending_item,
+                        iterable,
+                        step,
+                        step_marker_span,
+                    }
                 }
             }
-
-            (StatementExpression::Built(_), Some(_)) => {
-                return Err(TemplateError::from(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    "a collection loop source was built after its loop declared a pending item.",
-                )));
-            }
-        },
+        }
     };
 
     token_stream

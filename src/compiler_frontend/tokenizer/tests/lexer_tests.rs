@@ -929,6 +929,9 @@ fn reports_reserved_keyword_name_before_spaced_binary_minus() {
     for (source, keyword) in [
         ("value = if ok then 0 else by - 1\n", "by"),
         ("value = left - by - right\n", "by"),
+        ("value = (by - 1)\n", "by"),
+        ("return by - 1\n", "by"),
+        ("value = pair(by - 1)\n", "by"),
     ] {
         let (diagnostic, string_table) = tokenize_source_error(source);
         let view = first_diagnostic_view(&diagnostic);
@@ -952,12 +955,42 @@ fn reports_reserved_keyword_name_before_spaced_binary_minus() {
 }
 
 #[test]
+fn classifies_assignment_name_before_spaced_minus_as_binary() {
+    // `value = by - 1` names a reserved word before a binary minus. Tokenization continues so
+    // the AST can report the collision after any earlier declaration is diagnosed.
+    let (file_tokens, _string_table) = tokenize_source("value = by - 1\n");
+    let tags: Vec<TokenTag> = token_refs(file_tokens.tokens.as_ref())
+        .map(|token| token.tag())
+        .collect();
+    let by_index = tags
+        .iter()
+        .position(|tag| *tag == TokenTag::BY)
+        .expect("the reserved word must remain a keyword token");
+    assert_eq!(
+        tags.get(by_index + 1),
+        Some(&TokenTag::SUBTRACT),
+        "the spaced minus after an assignment-position name must be binary",
+    );
+    assert_eq!(
+        tags.iter()
+            .filter(|tag| **tag == TokenTag::SUBTRACT)
+            .count(),
+        1,
+    );
+}
+
+#[test]
 fn keeps_unary_negation_spacing_after_operand_introducing_keywords() {
     // The keyword itself introduces the operand, so the minus stays a unary spacing mistake.
     for source in [
         "loop 0 to 10 by - 1:\n;\n",
+        "loop items by - 1:\n;\n",
         "value = if ok then - 1 else 0\n",
         "value = if ok then not - 1 else 0\n",
+        "value = if - 1 then 0 else 0\n",
+        "value = not - 1\n",
+        "value = copy - 1\n",
+        "value = - 1\n",
         "value = base + copy - delta\n",
         "value = base + cast - delta\n",
     ] {

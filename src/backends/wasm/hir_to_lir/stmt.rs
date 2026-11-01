@@ -1,13 +1,14 @@
 //! Statement lowering for HIR -> Wasm LIR.
 
-use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
+use crate::backends::wasm::hir_to_lir::context::{WasmFunctionLoweringContext, lower_type_to_abi};
 use crate::backends::wasm::hir_to_lir::expr::{expression_type, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::resolve_host_call_import;
 use crate::backends::wasm::lir::instructions::{
     IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
-    WasmIntegerPowerScratch, WasmIntegerScratch, WasmLirStmt, WasmNumericOperationOperands,
+    WasmIntegerPowerScratch, WasmIntegerRangeCandidate, WasmIntegerRangeCandidateScratch,
+    WasmIntegerScratch, WasmLirStmt, WasmNumericOperationOperands, WasmRangeCandidateKind,
 };
-use crate::backends::wasm::lir::types::WasmAbiType;
+use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -155,25 +156,22 @@ pub(crate) fn lower_statement(
                 )
             }
         }
-        // Trap-mode statement guards reach here: `validate_wasm_range_step_failures` rejects only
-        // recoverable `Invoke` guards, so this stays infrastructure.
-        HirStatementKind::RangeStepFailure { .. } => {
-            Err(InfrastructureFailure::lir_transformation(
-                "Range-step failure must be lowered as a block terminator",
-            ))
-        }
-        HirStatementKind::FloatRangeCandidate {
+        // Trap-mode loop-step statements reach here: the Wasm feature validator
+        // rejects only recoverable `Invoke` guards, so this stays infrastructure.
+        HirStatementKind::LoopStepFailure { .. } => Err(InfrastructureFailure::lir_transformation(
+            "Loop-step failure must be lowered as a block terminator",
+        )),
+        HirStatementKind::RangeCandidate {
             current,
             step,
             end,
-            ascending,
             inclusive,
             domain,
             candidate_result,
             in_range_result,
-        } => lower_float_range_candidate(
+        } => lower_range_candidate(
             context,
-            [*current, *step, *end, *ascending],
+            [*current, *step, *end],
             *inclusive,
             *domain,
             [candidate_result.local(), in_range_result.local()],
@@ -611,21 +609,132 @@ fn lower_checked_float_operation(
     Ok(())
 }
 
-fn lower_float_range_candidate(
+fn lower_range_candidate(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    inputs: [HirValueId; 4],
+    inputs: [HirValueId; 3],
     inclusive: bool,
     domain: NumericScalar,
     output_ids: [LocalId; 2],
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<(), InfrastructureFailure> {
-    let [current, step, end, ascending] = inputs;
-    let [candidate_result, in_range_result] = output_ids;
-    // Binary16 is unreachable here: every range loop emits a checked subtraction over its
-    // domain (loop_lowering.rs emit_range_loop_step_magnitude_normalization). The Wasm walker
-    // validate_wasm_checked_numeric_ops (backend_feature_validation.rs) rejects a reachable
-    // Binary16 operation before lowering. Non-binary-float domains are rejected by HIR
-    // validation (hir/validation/blocks.rs, FloatRangeCandidate binary-float check).
+    if domain.is_integer() {
+        lower_integer_range_candidate(context, inputs, inclusive, domain, output_ids, statements)
+    } else {
+        lower_float_range_candidate(context, inputs, inclusive, domain, output_ids, statements)
+    }
+}
+
+/// Lower one integer range candidate into the widened I64 distance algorithm.
+///
+/// WHAT: resolves the counter and independent signed-step carriers, allocates the widened I64
+///       scratch, and emits one `RangeCandidate` statement.
+/// WHY: the counter and the step keep separate carriers, and narrow counters ride an I32
+///       carrier, so the emitter needs both carriers and the counter's signedness rather than a
+///       single counter type.
+fn lower_integer_range_candidate(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    inputs: [HirValueId; 3],
+    inclusive: bool,
+    domain: NumericScalar,
+    output_ids: [LocalId; 2],
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), InfrastructureFailure> {
+    let [current, step, end] = inputs;
+
+    let Some((minimum, _)) = domain.integer_range() else {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer range candidate requires a fixed integer counter domain, found {domain}"
+        );
+    };
+    let counter_signed = minimum < 0;
+    let counter_type = domain.type_id(context.module_context.type_environment);
+    if expression_type(context, current) != counter_type
+        || expression_type(context, end) != counter_type
+    {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer range candidate operands do not match {domain}"
+        );
+    }
+
+    // The step keeps its own completed type and is validated as a signed fixed integer upstream.
+    let step_type = expression_type(context, step);
+    let Some(step_domain) =
+        NumericScalar::from_type_id(step_type, context.module_context.type_environment)
+    else {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer range candidate step is not a fixed numeric type"
+        );
+    };
+    if !matches!(step_domain.integer_range(), Some((minimum, _)) if minimum < 0) {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm integer range candidate step is not a signed fixed integer: {step_domain}"
+        );
+    }
+
+    let counter_carrier = lower_type_to_abi(context.module_context, counter_type);
+    let step_carrier = lower_type_to_abi(context.module_context, step_type);
+
+    let lowered_current = lower_expression(context, current, statements)?;
+    let lowered_step = lower_expression(context, step, statements)?;
+    let lowered_end = lower_expression(context, end, statements)?;
+    for (operand, expected, label) in [
+        (lowered_current.value, counter_carrier, "current"),
+        (lowered_step.value, step_carrier, "step"),
+        (lowered_end.value, counter_carrier, "end"),
+    ] {
+        if context.local_type_by_id.get(&operand).copied() != Some(expected) {
+            return Err(InfrastructureFailure::lir_transformation(format!(
+                "Wasm integer range candidate {label} does not use carrier {expected:?}"
+            )));
+        }
+    }
+
+    let [candidate_dst, in_range_dst] =
+        resolve_range_candidate_destinations(context, output_ids, counter_carrier, domain)?;
+
+    let scratch = WasmIntegerRangeCandidateScratch {
+        current: context.alloc_temp(WasmAbiType::I64),
+        step: context.alloc_temp(WasmAbiType::I64),
+        end: context.alloc_temp(WasmAbiType::I64),
+        ascending: context.alloc_temp(WasmAbiType::I32),
+        distance: context.alloc_temp(WasmAbiType::I64),
+        magnitude: context.alloc_temp(WasmAbiType::I64),
+        candidate: context.alloc_temp(WasmAbiType::I64),
+    };
+
+    statements.push(WasmLirStmt::RangeCandidate {
+        candidate_dst,
+        in_range_dst,
+        current: lowered_current.value,
+        step: lowered_step.value,
+        end: lowered_end.value,
+        inclusive,
+        kind: WasmRangeCandidateKind::Integer(WasmIntegerRangeCandidate {
+            counter_carrier,
+            counter_signed,
+            step_carrier,
+            scratch,
+        }),
+    });
+    Ok(())
+}
+
+/// Lower one binary-float range candidate at the counter's exact precision.
+fn lower_float_range_candidate(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    inputs: [HirValueId; 3],
+    inclusive: bool,
+    domain: NumericScalar,
+    output_ids: [LocalId; 2],
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), InfrastructureFailure> {
+    let [current, step, end] = inputs;
+    // Binary16 is unreachable here: validate_wasm_range_candidate_domains rejects a reachable
+    // F16 counter before lowering. Only Binary32 and Binary64 have native carriers.
     let precision = match domain.binary_float_precision() {
         Some(BinaryFloatPrecision::Binary16) => crate::compiler_bug!(
             CompilerStage::BackendLowering,
@@ -652,14 +761,6 @@ fn lower_float_range_candidate(
             domain
         );
     }
-    if expression_type(context, ascending)
-        != context.module_context.type_environment.builtins().bool
-    {
-        crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "Wasm float range candidate direction must be Bool"
-        );
-    }
 
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
@@ -672,7 +773,6 @@ fn lower_float_range_candidate(
     let lowered_current = lower_expression(context, current, statements)?;
     let lowered_step = lower_expression(context, step, statements)?;
     let lowered_end = lower_expression(context, end, statements)?;
-    let lowered_ascending = lower_expression(context, ascending, statements)?;
     for (operand, label) in [
         (lowered_current.value, "current"),
         (lowered_step.value, "step"),
@@ -684,59 +784,52 @@ fn lower_float_range_candidate(
             )));
         }
     }
-    if context
-        .local_type_by_id
-        .get(&lowered_ascending.value)
-        .copied()
-        != Some(WasmAbiType::I32)
-    {
-        return Err(InfrastructureFailure::lir_transformation(
-            "Wasm float range candidate direction does not use the I32 Bool carrier",
-        ));
-    }
 
-    let candidate_dst = context
-        .local_map
-        .get(&candidate_result)
-        .copied()
-        .ok_or_else(|| {
-            InfrastructureFailure::lir_transformation(format!(
-                "Wasm lowering could not resolve float range candidate local {candidate_result:?}"
-            ))
-        })?;
-    let in_range_dst = context
-        .local_map
-        .get(&in_range_result)
-        .copied()
-        .ok_or_else(|| {
-            InfrastructureFailure::lir_transformation(format!(
-                "Wasm lowering could not resolve float range Bool local {in_range_result:?}"
-            ))
-        })?;
-    if context.local_type_by_id.get(&candidate_dst).copied() != Some(expected_carrier) {
+    let [candidate_dst, in_range_dst] =
+        resolve_range_candidate_destinations(context, output_ids, expected_carrier, domain)?;
+
+    let scratch = context.alloc_temp(expected_carrier);
+    statements.push(WasmLirStmt::RangeCandidate {
+        candidate_dst,
+        in_range_dst,
+        current: lowered_current.value,
+        step: lowered_step.value,
+        end: lowered_end.value,
+        inclusive,
+        kind: WasmRangeCandidateKind::BinaryFloat { precision, scratch },
+    });
+    Ok(())
+}
+
+/// Resolve both range-candidate result locals and check their carriers.
+fn resolve_range_candidate_destinations(
+    context: &WasmFunctionLoweringContext<'_, '_>,
+    output_ids: [LocalId; 2],
+    candidate_carrier: WasmAbiType,
+    domain: NumericScalar,
+) -> Result<[WasmLirLocalId; 2], InfrastructureFailure> {
+    let [candidate_result, in_range_result] = output_ids;
+    let Some(candidate_dst) = context.local_map.get(&candidate_result).copied() else {
         return Err(InfrastructureFailure::lir_transformation(format!(
-            "Wasm float range candidate destination does not use carrier {expected_carrier:?}"
+            "Wasm lowering could not resolve range candidate local {candidate_result:?} for {domain}"
+        )));
+    };
+    let Some(in_range_dst) = context.local_map.get(&in_range_result).copied() else {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm lowering could not resolve range candidate Bool local {in_range_result:?} for {domain}"
+        )));
+    };
+    if context.local_type_by_id.get(&candidate_dst).copied() != Some(candidate_carrier) {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm range candidate destination does not use carrier {candidate_carrier:?} for {domain}"
         )));
     }
     if context.local_type_by_id.get(&in_range_dst).copied() != Some(WasmAbiType::I32) {
         return Err(InfrastructureFailure::lir_transformation(
-            "Wasm float range Bool result does not use the I32 carrier",
+            "Wasm range candidate Bool result does not use the I32 carrier",
         ));
     }
-
-    let scratch = context.alloc_temp(expected_carrier);
-    statements.push(WasmLirStmt::FloatRangeCandidate {
-        candidate_dst,
-        in_range_dst,
-        scratch,
-        current: lowered_current.value,
-        step: lowered_step.value,
-        end: lowered_end.value,
-        ascending: lowered_ascending.value,
-        precision,
-        inclusive,
-    });
-    Ok(())
+    Ok([candidate_dst, in_range_dst])
 }
 
 /// Map one exact checked-integer domain onto the LIR kind Wasm implements.

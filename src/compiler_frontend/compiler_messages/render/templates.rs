@@ -478,6 +478,15 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
         InvalidTemplateStructureReason::TemplateLoopSourceNotConst => {
             "This template must be fully evaluated at compile time, so its collection-loop source must fold to a collection.".to_string()
         }
+        InvalidTemplateStructureReason::TemplateLoopStepNotConst => {
+            "This template must be fully evaluated at compile time, so its loop step must fold to a constant numeric value.".to_string()
+        }
+        InvalidTemplateStructureReason::TemplateLoopStepIsZero => {
+            "This template must be fully evaluated at compile time, but its loop step is zero. Use a positive step to ascend or a negative step to descend.".to_string()
+        }
+        InvalidTemplateStructureReason::TemplateLoopStepNoProgress => {
+            "This template must be fully evaluated at compile time, but its range step is too small to advance the counter at its precision. Increase the step's magnitude.".to_string()
+        }
         InvalidTemplateStructureReason::TemplateLoopConditionNotConst => {
             "This template must be fully evaluated at compile time, so its conditional-loop condition must fold to a Bool.".to_string()
         }

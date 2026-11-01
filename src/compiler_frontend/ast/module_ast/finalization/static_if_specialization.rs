@@ -363,8 +363,16 @@ impl StaticIfSpecializer<'_> {
                 self.specialize_body(body, &mut loop_environment)?;
                 None
             }
-            NodeKind::CollectionLoop { iterable, body, .. } => {
+            NodeKind::CollectionLoop {
+                iterable,
+                step,
+                body,
+                ..
+            } => {
                 self.specialize_expression(iterable, environment)?;
+                if let Some(step) = step {
+                    self.specialize_expression(step, environment)?;
+                }
                 let mut loop_environment = environment.clone();
                 self.specialize_body(body, &mut loop_environment)?;
                 None

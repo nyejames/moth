@@ -637,6 +637,39 @@ fn word_operator_token(tag: TokenTag) -> bool {
     )
 }
 
+/// Reserved words that introduce an operand rather than name one.
+///
+/// WHAT: extends [`word_operator_token`] with the conditional keyword.
+/// WHY: `x = if - 1 then ...` starts a conditional operand after the assignment operator, so a
+/// spaced minus there stays a unary-spacing mistake instead of a name collision. `this` needs no
+/// arm because it can end an expression, so the binary path already runs before this check.
+fn keyword_introduces_operand(tag: TokenTag) -> bool {
+    word_operator_token(tag) || tag == TokenTag::IF
+}
+
+/// Recognises a reserved word in name position after an assignment operator before a spaced
+/// minus.
+///
+/// WHAT: matches `x = by - 1`, where the minus has whitespace on both sides and the reserved word
+///       directly before it follows an assignment operator.
+/// WHY: the minus is a binary operator because the author wrote the reserved word as a name. The
+///      tokenizer emits that operator and leaves the reserved-name report to the AST, so an
+///      earlier invalid declaration such as `by = a` still produces the first diagnostic. A
+///      second lexical pre-scan or a token replay would not be needed.
+fn reserved_keyword_name_after_assignment_before_spaced_minus(
+    context: LexerTokenContext,
+    whitespace_before_current: bool,
+) -> bool {
+    whitespace_before_current
+        && context.previous_token_tag == context.last_meaningful_token_tag
+        && context.last_meaningful_token_tag.is_some_and(|tag| {
+            !keyword_introduces_operand(tag) && reserved_word_spelling(tag).is_some()
+        })
+        && context
+            .meaningful_token_before_last_tag
+            .is_some_and(TokenTag::is_assignment_operator)
+}
+
 /// Reports a reserved word read as a name before a spaced binary minus.
 ///
 /// WHAT: when `-` has whitespace on both sides and directly follows a reserved keyword that sits
@@ -644,6 +677,9 @@ fn word_operator_token(tag: TokenTag) -> bool {
 /// WHY: `else by - ay` would otherwise abort tokenization as malformed unary negation before the
 ///      AST can explain that `by` is reserved. The predecessor check keeps the unary diagnostic
 ///      for loop steps and other positions where the keyword introduces the operand itself.
+///      Assignment position is handled by
+///      [`reserved_keyword_name_after_assignment_before_spaced_minus`] instead, because aborting
+///      there would hide an earlier invalid declaration.
 fn reserved_keyword_name_before_spaced_minus(
     stream: &mut TokenStream<'_>,
     context: LexerTokenContext,
@@ -1183,6 +1219,16 @@ fn get_token_tag(
 
             if !next_char_is_whitespace_or_end(stream) {
                 return emit_static(stream, TokenTag::NEGATIVE);
+            }
+
+            // A reserved word after an assignment operator is the author's attempted name, so
+            // this minus is binary and tokenization continues. The AST reports the reserved-name
+            // collision, which keeps an earlier `by = a` declaration diagnostic ahead of it.
+            if reserved_keyword_name_after_assignment_before_spaced_minus(
+                context,
+                whitespace_before_current,
+            ) {
+                return emit_static(stream, TokenTag::SUBTRACT);
             }
 
             if let Some(diagnostic) = reserved_keyword_name_before_spaced_minus(

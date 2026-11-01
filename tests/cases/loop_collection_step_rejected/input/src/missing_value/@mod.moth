@@ -1,0 +1,5 @@
+-- 'by' must carry a step expression.
+items = {1, 2, 3}
+loop items by:
+    io.line([: [1]])
+;

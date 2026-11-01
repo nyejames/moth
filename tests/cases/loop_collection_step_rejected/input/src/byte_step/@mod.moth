@@ -1,0 +1,6 @@
+-- Byte has comparison but no numeric step domain.
+items = {1, 2, 3}
+step Byte = 2
+loop items by step |item|:
+    io.line([: [item]])
+;

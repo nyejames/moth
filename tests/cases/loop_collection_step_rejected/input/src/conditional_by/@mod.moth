@@ -1,0 +1,5 @@
+-- Condition loops take no step; their condition decides continuation.
+count ~= 0
+loop count < 2 by 2:
+    ~count += 1
+;

@@ -194,7 +194,7 @@ fn expression_site_in_header(
         TemplateLoopHeaderExpressionSites::Range { start, end, step } => {
             *start == site_id || *end == site_id || *step == Some(site_id)
         }
-        TemplateLoopHeaderExpressionSites::Collection { iterable } => *iterable == site_id,
+        TemplateLoopHeaderExpressionSites::Collection { iterable, step: _ } => *iterable == site_id,
     }
 }
 
@@ -642,8 +642,12 @@ where
             }
             Ok(())
         }
-        TemplateLoopHeader::Collection { iterable, .. } => {
-            mutator.mutate_expression_payload(expressions, iterable)
+        TemplateLoopHeader::Collection { iterable, step, .. } => {
+            mutator.mutate_expression_payload(expressions, iterable)?;
+            if let Some(step) = step {
+                mutator.mutate_expression_payload(expressions, step)?;
+            }
+            Ok(())
         }
     }
 }

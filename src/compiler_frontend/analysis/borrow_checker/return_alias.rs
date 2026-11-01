@@ -199,7 +199,7 @@ impl<'a> BorrowChecker<'a> {
                         result: result_local,
                         ..
                     }
-                    | HirStatementKind::RangeStepFailure {
+                    | HirStatementKind::LoopStepFailure {
                         result: result_local,
                         ..
                     }
@@ -211,7 +211,7 @@ impl<'a> BorrowChecker<'a> {
                         result: result_local,
                         ..
                     } if result_local.local() == local => Some(FunctionReturnAliasSummary::Fresh),
-                    HirStatementKind::FloatRangeCandidate {
+                    HirStatementKind::RangeCandidate {
                         candidate_result,
                         in_range_result,
                         ..

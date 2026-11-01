@@ -20,7 +20,6 @@
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::HashMap;
 
-use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
@@ -30,7 +29,10 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionSuffix, NumericBindingId, NumericConstructionDomainId,
 };
-use crate::compiler_frontend::ast::statements::loop_headers::range_loop_spec_from_completed_operands;
+use crate::compiler_frontend::ast::statements::loop_headers::{
+    CompletedRangeOperands, range_loop_spec_from_completed_operands, validate_collection_step,
+    validate_completed_collection_source,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
@@ -42,15 +44,14 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
     RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateBranchSelectorKind,
-    TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -66,6 +67,11 @@ pub(crate) struct PendingNumericTemplateIntake {
     pub(crate) site: NumericTemplateIntakeSiteId,
     /// Store row handle and dense body-local group, assigned in first-operand intake order.
     pub(crate) range_header: Option<(RetainedRangeHeaderId, usize)>,
+    /// Dense body-local group of one retained collection header operand.
+    ///
+    /// WHY: a collection header installs once, after its source and optional step complete, so the
+    ///      driver needs the same first-operand grouping a range header gets.
+    pub(crate) collection_header: Option<usize>,
     /// Authored position this fragment completes into.
     ///
     /// WHY: completion groups range operands by their position node before installing the header
@@ -114,6 +120,13 @@ pub(crate) enum NumericTemplateIntakePosition {
     ///      expression whose numeric origin is selected at the body root, so the iterable keeps its
     ///      authored fragment until then and the loop node installs at this position afterwards.
     LoopCollectionIterable(TemplateIrNodeId),
+
+    /// The retained step of one recorded collection `loop` position.
+    ///
+    /// WHY: the step is independent of the item type but may still reference a pending numeric
+    ///      origin, so it completes at the body root after the source and installs with the same
+    ///      header node.
+    LoopCollectionStep(TemplateIrNodeId),
 }
 
 impl NumericTemplateIntakePosition {
@@ -126,7 +139,8 @@ impl NumericTemplateIntakePosition {
             | Self::LoopRangeStart(node_id)
             | Self::LoopRangeEnd(node_id)
             | Self::LoopRangeStep(node_id)
-            | Self::LoopCollectionIterable(node_id) => node_id,
+            | Self::LoopCollectionIterable(node_id)
+            | Self::LoopCollectionStep(node_id) => node_id,
         }
     }
 
@@ -143,6 +157,24 @@ impl NumericTemplateIntakePosition {
             Self::LoopRangeEnd(_) => Self::LoopRangeEnd(node_id),
             Self::LoopRangeStep(_) => Self::LoopRangeStep(node_id),
             Self::LoopCollectionIterable(_) => Self::LoopCollectionIterable(node_id),
+            Self::LoopCollectionStep(_) => Self::LoopCollectionStep(node_id),
+        }
+    }
+
+    /// Dense registration slot used for duplicate detection and header closing.
+    ///
+    /// WHY: a position node carries at most one intake per authored slot; a collection header's
+    ///      iterable and step are distinct slots even though neither is a range operand.
+    fn intake_slot(self) -> usize {
+        match self {
+            Self::LoopRangeStart(_) => 0,
+            Self::LoopRangeEnd(_) => 1,
+            Self::LoopRangeStep(_) => 2,
+            Self::LoopCollectionStep(_) => 1,
+            Self::HeadExpression(_)
+            | Self::ConditionalLoopCondition(_)
+            | Self::ConditionalSelector(_)
+            | Self::LoopCollectionIterable(_) => 0,
         }
     }
 
@@ -158,7 +190,8 @@ impl NumericTemplateIntakePosition {
             Self::HeadExpression(_)
             | Self::ConditionalLoopCondition(_)
             | Self::ConditionalSelector(_)
-            | Self::LoopCollectionIterable(_) => None,
+            | Self::LoopCollectionIterable(_)
+            | Self::LoopCollectionStep(_) => None,
         }
     }
 }
@@ -179,7 +212,13 @@ pub(crate) struct RetainedRangeHeaderId(usize);
 struct NumericNodeIndex {
     header: Option<RetainedRangeHeaderId>,
     sites: [Option<NumericTemplateIntakeSiteId>; 3],
+    /// Dense body-local completion group of a retained range header.
     completion_group: Option<usize>,
+    /// Dense body-local completion group of a retained collection header.
+    ///
+    /// WHY: range and collection headers install through different entry points, so their group
+    ///      numbering is independent; sharing one counter would leave gaps in either vector.
+    collection_group: Option<usize>,
     collection: Option<usize>,
     selector: Option<usize>,
 }
@@ -225,16 +264,6 @@ impl NumericTemplateIntakeIndex {
     }
 }
 
-impl RangeOperandSlot {
-    fn index(self) -> usize {
-        match self {
-            Self::Start => 0,
-            Self::End => 1,
-            Self::Step => 2,
-        }
-    }
-}
-
 /// Prepared body and wrapper roots for one retained range loop.
 #[derive(Clone, Copy)]
 struct RetainedRangeRenderData {
@@ -256,13 +285,14 @@ enum NumericTemplateIntakeState {
 
 /// One retained range loop header whose operands complete at the owning body root.
 ///
-/// WHAT: the parse-time loop bindings (whose counter domain was already selected from the built
-///       operands and the authored family of the retained ones), the authored end kind, and the
-///       operands that were already built at parse time.
+/// WHAT: the parse-time loop bindings, the authored end kind, and the operands that were already
+///       built at parse time.
 /// WHY: the position node must stay payload-free, but the finished `RangeLoopSpec` cannot be
-///      assembled without the parse-time bindings, the end kind and the built operands. Keeping
-///      them in the store's scratch table preserves the known iterator/positional types without
-///      fabricating a default witness or a placeholder type.
+///      assembled without the parse-time bindings, the end kind and the built operands. The
+///      bounds later select the counter domain, while a retained step takes its own literal
+///      context from those bounds. Keeping the parse-time data in the store's scratch table
+///      preserves the known iterator/positional types without fabricating a default witness or a
+///      placeholder type.
 #[derive(Debug)]
 pub(crate) struct RetainedRangeHeaderRecord {
     node: TemplateIrNodeId,
@@ -327,6 +357,17 @@ pub(crate) struct RetainedSelectorRecord {
 pub(crate) struct RetainedCollectionHeaderRecord {
     bindings: Option<Box<LoopBindings>>,
     pending_item: Option<NumericBindingId>,
+    /// Parse-time iterable, present when only the step was retained.
+    built_iterable: Option<ExprId>,
+    /// Parse-time step, present when only the iterable was retained.
+    built_step: Option<ExprId>,
+    /// The authored `by` marker span, present exactly when the header parsed a step.
+    ///
+    /// WHY: a completed `Bool` source is the conditional loop whose step diagnostic belongs at the
+    ///      marker, so completion reuses the span the header parse owned.
+    step_marker_span: Option<SourceSpan>,
+    /// Retained intake sites in iterable-then-step order, closed when the header installs.
+    operand_sites: [Option<NumericTemplateIntakeSiteId>; 2],
     state: NumericTemplateIntakeState,
 }
 
@@ -365,14 +406,17 @@ impl NumericTemplateIntakeRecord {
 
 /// Whether one RPN item is a construction-only pending numeric item.
 ///
-/// WHAT: the retained-intake marker; `PendingNumericLiteral` is a broken-invariant item at this
-///       boundary and is deliberately not treated as retained construction. Group markers are
-///       never pending, so a flat scan of a fragment reaches each pending item inside a group.
+/// WHAT: the retained-intake marker; a pending literal is not retained construction, and every
+///       intake position except a literal-only range step treats one as a broken invariant.
+///       Group markers are never pending, so a flat scan of a fragment reaches each pending item
+///       inside a group.
 /// WHY: one predicate keeps the store and the template boundaries agreeing on what a retained
 ///      numeric recipe is.
-/// NOTE: a bound range header keeps its operands inside its counter row and registers no operand
-///       records, so it is pending through its retained position node and store row rather than
-///       through an item in a TIR payload.
+/// NOTE: a literal-only range step stays unresolved because its literal context comes from the
+///       bounds, which complete with it at the body root; its registration assert names that
+///       exception. A bound range header keeps its operands inside its counter row and registers
+///       no operand records, so it is pending through its retained position node and store row
+///       rather than through an item in a TIR payload.
 pub(crate) fn is_pending_numeric_intake_item(item: &ExpressionRpnItem) -> bool {
     matches!(
         item,
@@ -400,14 +444,20 @@ impl TemplateIrStore {
         value_mode: ValueMode,
         suffix: DeferredExpressionSuffix,
     ) -> Result<NumericTemplateIntakeSiteId, InfrastructureFailure> {
+        // A literal-only range step is the one position whose literal context can only be
+        // selected after the bounds resolve, so its literals stay pending until body completion
+        // instead of being treated as an already-broken invariant.
+        let literal_only_step =
+            matches!(position.range_operand_slot(), Some(RangeOperandSlot::Step))
+                && items
+                    .iter()
+                    .any(|item| matches!(item, ExpressionRpnItem::PendingNumericLiteral { .. }));
         debug_assert!(
-            items.iter().any(is_pending_numeric_intake_item),
+            literal_only_step || items.iter().any(is_pending_numeric_intake_item),
             "numeric template intake registration requires at least one pending numeric item"
         );
 
-        let slot = position
-            .range_operand_slot()
-            .map_or(0, RangeOperandSlot::index);
+        let slot = position.intake_slot();
         if self
             .numeric_intake_index
             .nodes
@@ -528,13 +578,21 @@ impl TemplateIrStore {
         node: TemplateIrNodeId,
         bindings: Box<LoopBindings>,
         pending_item: Option<NumericBindingId>,
+        built_iterable: Option<ExprId>,
+        built_step: Option<ExprId>,
+        step_marker_span: Option<SourceSpan>,
     ) {
-        self.numeric_intake_index.node_mut(node).collection =
-            Some(self.retained_collection_headers.len());
+        let node_index = self.numeric_intake_index.node_mut(node);
+        node_index.collection = Some(self.retained_collection_headers.len());
+        let operand_sites = [node_index.sites[0], node_index.sites[1]];
         self.retained_collection_headers
             .push(RetainedCollectionHeaderRecord {
                 bindings: Some(bindings),
                 pending_item,
+                built_iterable,
+                built_step,
+                step_marker_span,
+                operand_sites,
                 state: NumericTemplateIntakeState::Retained,
             });
     }
@@ -739,6 +797,26 @@ impl TemplateIrStore {
         Some(pattern)
     }
 
+    /// The operands one retained range header already built at parse time.
+    ///
+    /// WHY: body-root completion gives a retained step the literal context selected by the bounds.
+    ///      A bound may have completed at parse time, so its built operand is part of that context
+    ///      even though no intake record exists for it.
+    pub(crate) fn retained_range_header_built_operands(
+        &self,
+        header: RetainedRangeHeaderId,
+    ) -> Option<[Option<ExprId>; 3]> {
+        match self
+            .retained_range_headers
+            .get(header.0)?
+            .completion
+            .as_ref()?
+        {
+            RetainedRangeCompletion::OperandSlots { built_operands, .. } => Some(**built_operands),
+            RetainedRangeCompletion::RetainedCounter { .. } => None,
+        }
+    }
+
     /// The retained template position waiting on one range counter in a body domain, when the
     /// counter's header came from a template suffix.
     ///
@@ -776,27 +854,43 @@ impl TemplateIrStore {
             .remove(&domain)
             .unwrap_or_default();
         let mut taken = Vec::with_capacity(sites.len());
-        let mut next_group = 0;
+        let mut next_range_group = 0;
+        let mut next_collection_group = 0;
 
         for site in sites {
             let record = &mut self.numeric_template_intakes[site.index()];
             if record.state != NumericTemplateIntakeState::Retained {
                 continue;
             }
-            let range_header = record.position.range_operand_slot().map(|_| {
-                let range = &mut self.numeric_intake_index.nodes[record.position.node_id().index()];
-                let group = *range.completion_group.get_or_insert_with(|| {
-                    let group = next_group;
-                    next_group += 1;
+            let position = record.position;
+            let range_header = position.range_operand_slot().map(|_| {
+                let node = &mut self.numeric_intake_index.nodes[position.node_id().index()];
+                let group = *node.completion_group.get_or_insert_with(|| {
+                    let group = next_range_group;
+                    next_range_group += 1;
                     group
                 });
-                (range.header.expect("registered range header"), group)
+                (node.header.expect("registered range header"), group)
+            });
+            let collection_header = matches!(
+                position,
+                NumericTemplateIntakePosition::LoopCollectionIterable(_)
+                    | NumericTemplateIntakePosition::LoopCollectionStep(_)
+            )
+            .then(|| {
+                let node = &mut self.numeric_intake_index.nodes[position.node_id().index()];
+                *node.collection_group.get_or_insert_with(|| {
+                    let group = next_collection_group;
+                    next_collection_group += 1;
+                    group
+                })
             });
 
             taken.push(PendingNumericTemplateIntake {
                 site,
                 range_header,
-                position: record.position,
+                collection_header,
+                position,
                 items: std::mem::take(&mut record.items),
                 expected: record.expected,
                 value_mode: record.value_mode,
@@ -898,9 +992,21 @@ impl TemplateIrStore {
                 ),
             ));
         }
+        if let RetainedNumericIntakeRole::LoopCollection { .. } = role {
+            // A collection header installs once from both completed slots, through
+            // `install_completed_collection_header`.
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "numeric template intake site {site} is one operand of a retained collection \
+                 loop header, which installs through the collection-header entry point."
+                ),
+            ));
+        }
         let render_unit = match role {
             RetainedNumericIntakeRole::HeadExpression { .. }
-            | RetainedNumericIntakeRole::LoopRange { .. } => None,
+            | RetainedNumericIntakeRole::LoopRange { .. }
+            | RetainedNumericIntakeRole::LoopCollection { .. } => None,
             role => Some(require_retained_control_flow_render_unit(role, node_id)?),
         };
 
@@ -939,20 +1045,6 @@ impl TemplateIrStore {
                 ));
             }
             (_, None) => None,
-        };
-
-        // A retained collection header needs its concrete bindings, which the store owns.
-        let collection_bindings = match role {
-            RetainedNumericIntakeRole::LoopCollection { .. } => {
-                let bindings = self.pending_collection_bindings(node_id)?.ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "collection loop iterable completion lost the header's concrete bindings.",
-                    )
-                })?;
-                Some(bindings)
-            }
-            _ => None,
         };
 
         let completed_kind = match role {
@@ -1011,35 +1103,22 @@ impl TemplateIrStore {
                 }
             }
 
-            RetainedNumericIntakeRole::LoopCollection {
-                header_sites, body, ..
-            } => {
-                let aggregate_wrapper =
-                    require_retained_loop_aggregate_wrapper(render_unit, node_id)?;
-                let bindings = collection_bindings.ok_or_else(|| {
-                    InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
-                        "numeric template intake site {site} completed a collection loop iterable \
-                         without its header bindings."
-                    ))
-                })?;
-
-                TemplateIrNodeKind::Loop {
-                    header: TemplateLoopHeader::Collection {
-                        bindings,
-                        iterable: value,
-                    },
-                    header_sites,
-                    body,
-                    aggregate_wrapper: Some(aggregate_wrapper),
-                }
-            }
-
             RetainedNumericIntakeRole::LoopRange { .. } => {
                 return Err(InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,
                     format!(
                         "numeric template intake site {site} is one operand of a retained range loop \
                      header, which installs through the range-header entry point."
+                    ),
+                ));
+            }
+
+            RetainedNumericIntakeRole::LoopCollection { .. } => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "numeric template intake site {site} is one operand of a retained collection \
+                     loop header, which installs through the collection-header entry point."
                     ),
                 ));
             }
@@ -1060,20 +1139,13 @@ impl TemplateIrStore {
     /// Errors: an authored range policy violation (missing float step, zero step) surfaces as the
     ///         producer's diagnostic; a position without its retained header row, a bound header
     ///         installed through this entry point, or a missing operand is a broken invariant.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the header id and completed operands are extra inputs beside the parser borrows"
-    )]
     pub(crate) fn install_completed_numeric_range_header(
         &mut self,
         header_id: RetainedRangeHeaderId,
         completed_operands: [Option<ExprId>; 3],
-        context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
         expression_builder: &mut AstExpressionBuilder,
         const_values: &mut ConstValueStore,
-        string_table: &mut StringTable,
-        path_fork: &mut PathInternerFork,
     ) -> Result<(), TemplateError> {
         // Operands arrive in `RangeOperandSlot` order: Start, End, Step.
         let [completed_start, completed_end, completed_step] = completed_operands;
@@ -1155,17 +1227,16 @@ impl TemplateIrStore {
         };
 
         let range = range_loop_spec_from_completed_operands(
-            start.map(|id| expression_builder.own(id)),
-            expression_builder.own(end),
-            end_kind,
-            step.map(|id| expression_builder.own(id)),
-            omitted_start_span,
-            context,
+            CompletedRangeOperands {
+                start: start.map(|id| expression_builder.own(id)),
+                end: expression_builder.own(end),
+                end_kind,
+                step: step.map(|id| expression_builder.own(id)),
+                omitted_start_span,
+            },
             type_interner,
             expression_builder,
             const_values,
-            string_table,
-            path_fork,
         )
         .map_err(TemplateError::from)?;
 
@@ -1194,6 +1265,175 @@ impl TemplateIrStore {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::AstConstruction,
                         "TIR range-header completion installed a header whose operand was never \
+                         taken for completion.",
+                    )
+                    .into());
+                }
+                NumericTemplateIntakeState::Installed => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Installs the finished collection loop header at its retained position.
+    ///
+    /// WHAT: merges the completed slots with the parse-time slots, checks the completed source is a
+    ///       collection, validates the independent step through the shared collection-step rules,
+    ///       takes the header's concrete bindings and writes the concrete `Loop` node into the
+    ///       payload-free position.
+    /// WHY: the source and step complete at the body root, and the header installs exactly once in
+    ///      authored source-then-step order. The step keeps its own type and never joins the item
+    ///      type, so one shared validator owns its signed-integer and static-zero rules.
+    pub(crate) fn install_completed_collection_header(
+        &mut self,
+        node: TemplateIrNodeId,
+        completed_iterable: Option<ExprId>,
+        completed_step: Option<ExprId>,
+        expression_builder: &AstExpressionBuilder,
+        type_environment: &TypeEnvironment,
+        const_values: &ConstValueStore,
+    ) -> Result<(), TemplateError> {
+        let header_index = self
+            .numeric_intake_index
+            .nodes
+            .get(node.index())
+            .and_then(|node_index| node_index.collection)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR collection-header completion targeted position {node} without a retained header row."
+                    ),
+                )
+            })?;
+
+        if self.retained_collection_headers[header_index].state
+            != NumericTemplateIntakeState::Retained
+        {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "TIR collection-header completion installed a retained collection loop header twice.",
+            )
+            .into());
+        }
+
+        let (header_sites, body, render_unit) = match self.get_node(node) {
+            Some(TemplateIrNode {
+                kind:
+                    TemplateIrNodeKind::RetainedNumericIntake(
+                        RetainedNumericIntakeRole::LoopCollection {
+                            header_sites,
+                            body,
+                            render_unit,
+                        },
+                    ),
+                ..
+            }) => (*header_sites, *body, *render_unit),
+            _ => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR collection-header completion targeted position {node} that is not a retained collection loop."
+                    ),
+                )
+                .into());
+            }
+        };
+        let aggregate_wrapper = require_retained_loop_aggregate_wrapper(render_unit, node)?;
+
+        let operand_sites = self.retained_collection_headers[header_index].operand_sites;
+        let built_iterable = self.retained_collection_headers[header_index].built_iterable;
+        let built_step = self.retained_collection_headers[header_index].built_step;
+        let step_marker_span = self.retained_collection_headers[header_index].step_marker_span;
+
+        let iterable = completed_iterable.or(built_iterable).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR collection-header completion reached position {node} without an iterable."
+                ),
+            )
+        })?;
+        // The source is evaluated before its step, and its finished type decides the source
+        // contract: a bindingless header deferred this classification to the body root.
+        validate_completed_collection_source(
+            expression_builder.view(iterable)?,
+            type_environment,
+            step_marker_span,
+        )
+        .map_err(TemplateError::from)?;
+
+        let step = match header_sites {
+            TemplateLoopHeaderExpressionSites::Collection { step: Some(_), .. } => {
+                let step = completed_step.or(built_step).ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "TIR collection-header completion installed position {node} whose retained step was never completed."
+                        ),
+                    )
+                })?;
+                validate_collection_step(
+                    expression_builder.view(step)?,
+                    type_environment,
+                    const_values,
+                )
+                .map_err(TemplateError::from)?;
+                Some(step)
+            }
+            TemplateLoopHeaderExpressionSites::Collection { step: None, .. }
+                if completed_step.is_none() && built_step.is_none() =>
+            {
+                None
+            }
+            _ => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "TIR collection-header completion reached position {node} with a step that has no expression site."
+                    ),
+                )
+                .into());
+            }
+        };
+
+        let bindings = self.pending_collection_bindings(node)?.ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR collection-header completion lost position {node}'s concrete bindings."
+                ),
+            )
+        })?;
+
+        self.node_mut(node)?.kind = TemplateIrNodeKind::Loop {
+            header: TemplateLoopHeader::Collection {
+                bindings,
+                iterable,
+                step,
+            },
+            header_sites,
+            body,
+            aggregate_wrapper: Some(aggregate_wrapper),
+        };
+
+        self.retained_collection_headers[header_index].state =
+            NumericTemplateIntakeState::Installed;
+
+        // Every operand record of this header was taken before the header installed; close them so
+        // a late operand completion cannot rewrite an already concrete header.
+        for site in operand_sites.into_iter().flatten() {
+            let record = &mut self.numeric_template_intakes[site.index()];
+
+            match record.state {
+                NumericTemplateIntakeState::Taken => {
+                    record.state = NumericTemplateIntakeState::Installed;
+                }
+                NumericTemplateIntakeState::Retained => {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "TIR collection-header completion installed a header whose operand was never \
                          taken for completion.",
                     )
                     .into());
@@ -1417,7 +1657,17 @@ impl TemplateIrStore {
                 )
             })?;
             let pending_item = source_row.pending_item;
-            self.register_retained_collection_header(copied_node_id, bindings, pending_item);
+            let built_iterable = source_row.built_iterable;
+            let built_step = source_row.built_step;
+            let step_marker_span = source_row.step_marker_span;
+            self.register_retained_collection_header(
+                copied_node_id,
+                bindings,
+                pending_item,
+                built_iterable,
+                built_step,
+                step_marker_span,
+            );
         }
 
         // A copied range header keeps its own parse-time data, so the copy completes into its own

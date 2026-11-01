@@ -535,10 +535,15 @@ impl<'a> HirBuilder<'a> {
                 )?;
             }
 
-            TemplateLoopHeader::Collection { bindings, iterable } => {
+            TemplateLoopHeader::Collection {
+                bindings,
+                iterable,
+                step,
+            } => {
                 self.lower_collection_loop_with_body_emitter(
                     bindings,
                     append_context.anchor.bind(*iterable)?,
+                    *step,
                     span_ref,
                     emit_template_iteration,
                 )?;

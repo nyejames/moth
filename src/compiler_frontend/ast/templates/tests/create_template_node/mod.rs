@@ -165,12 +165,17 @@ fn new_constant_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeCon
     new_constant_context_with_style_directives(scope, &style_directives, path_fork)
 }
 
+/// Builds the independent constant context a const-required template owns.
+///
+/// WHY: emission gives a const template a fresh root scope, and a const-required template owns its
+///      numeric boundary so retained positions complete inside construction. Tests must match that
+///      ownership instead of joining a parent body's domain.
 fn new_constant_context_with_style_directives(
     scope: PathId,
     style_directives: &StyleDirectiveRegistry,
     path_fork: &PathInternerFork,
 ) -> ScopeContext {
-    let parent = with_test_path_context(
+    with_test_path_context(
         ScopeContext::new_for_tests(
             ContextKind::Constant,
             scope.to_owned(),
@@ -180,8 +185,7 @@ fn new_constant_context_with_style_directives(
         ),
         &scope,
         style_directives,
-    );
-    ScopeContext::new_constant(scope, &parent)
+    )
 }
 
 fn fold_template_in_context(

@@ -1,0 +1,5 @@
+-- A static zero step is rejected even though this source is empty.
+items {I32} = {}
+loop items by 0:
+    io.line([: [1]])
+;

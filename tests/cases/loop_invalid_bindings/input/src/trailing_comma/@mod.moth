@@ -1,0 +1,5 @@
+-- Pipe bindings cannot end with a comma.
+items = {1, 2, 3}
+loop items |item,|:
+    io.line([: [item]])
+;

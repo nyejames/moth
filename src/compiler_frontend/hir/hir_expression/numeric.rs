@@ -18,7 +18,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
+    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
@@ -123,10 +123,10 @@ impl<'a> HirBuilder<'a> {
         self.make_local_load_expression(result_local, success_type, &no_span, region)
     }
 
-    /// Emits the terminal range guard with arithmetic's builtin failure owner.
-    pub(crate) fn emit_range_step_failure(
+    /// Emits the terminal loop-step failure with arithmetic's builtin failure owner.
+    pub(crate) fn emit_loop_step_failure(
         &mut self,
-        cause: RangeStepFailureCause,
+        cause: LoopStepFailureCause,
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         if self.active_handler_accepts_builtin_failure()?
@@ -134,12 +134,12 @@ impl<'a> HirBuilder<'a> {
         {
             let error_type = self.builtin_error_type_id()?;
             let results = self.emit_fallible_operation(
-                HirFallibleOperation::RangeStepFailure { cause },
+                HirFallibleOperation::LoopStepFailure { cause },
                 &[],
                 error_type,
                 span,
             )?;
-            // The range guard always fails. The structural success edge must still terminate.
+            // The loop-step failure always fails. The structural success edge must still terminate.
             self.lower_numeric_results_to_success_values(results, span)?;
             let block = self.current_block_id_or_error()?;
             self.emit_terminator(
@@ -154,7 +154,7 @@ impl<'a> HirBuilder<'a> {
             let result_local =
                 self.allocate_temp_local(self.type_environment.builtins().bool, None)?;
             self.emit_statement_kind_with_span(
-                HirStatementKind::RangeStepFailure {
+                HirStatementKind::LoopStepFailure {
                     cause,
                     failure_mode: NumericFailureMode::Trap,
                     result: HirLocalDestination::Define(result_local),

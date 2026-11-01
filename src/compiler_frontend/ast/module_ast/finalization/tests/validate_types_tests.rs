@@ -544,6 +544,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             iterable: orphan_bool_expression(&mut expressions),
+            step: None,
         },
         TemplateLoopHeader::Collection {
             bindings: Box::new(LoopBindings {
@@ -554,6 +555,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
                 .expect("fixture literal")
                 .id(),
+            step: None,
         },
     ];
 

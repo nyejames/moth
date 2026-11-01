@@ -1,0 +1,6 @@
+-- A step is independent and signed; unsigned steps never silently convert.
+items = {1, 2, 3}
+step U32 = 1
+loop items by step |item|:
+    io.line([: [item]])
+;

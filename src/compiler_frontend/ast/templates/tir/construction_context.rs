@@ -383,7 +383,7 @@ impl TemplateConstructionContext {
     ///       an unbound header registers one intake record per retained operand plus its store row
     ///       holding the authored end kind, omitted-start site and already built operands; a bound
     ///       header registers its counter row reference plus the concrete positional index.
-    /// WHY: the header's exact domain is a forward result of its operands' selected types, so the
+    /// WHY: the header's exact domain is a forward result of its bounds' selected types, so the
     ///      body parses against the authored bindings while the header stays payload-free until
     ///      the owning body root completes it — through the shared range policy for an unbound
     ///      header, or through the counter's own recipe for a bound one.
@@ -531,20 +531,27 @@ impl TemplateConstructionContext {
 
     /// Records one retained collection loop header position.
     ///
-    /// WHAT: keeps the parsed bindings in a store row, pushes the payload-free position that holds
-    ///       the iterable's expression site and the body node, and registers the authored iterable
-    ///       fragment against that position.
-    /// WHY: the callee's returned collection is known, so the bindings are final at parse time, but
-    ///      the iterable expression still reaches a pending numeric origin whose single static type
-    ///      the owning body root selects; completion installs the concrete `Loop` node in place.
-    ///      Registering this retained position as the template's control-flow child keeps it in
-    ///      the same root and render-unit preparation path as a concrete loop.
+    /// WHAT: keeps the parsed bindings, both authored header slots and the `by` marker span in the
+    ///       store, pushes the payload-free position that holds the iterable and step expression
+    ///       sites, and registers each retained slot as its own intake record.
+    /// WHY: a known callee's returned collection keeps its bindings final at parse time, but a
+    ///      slot that still reaches a pending numeric origin cannot be built until the owning
+    ///      body root selects that origin's type. Completion installs the concrete `Loop` node
+    ///      in place, so no expression is fabricated and the source keeps its authored order
+    ///      before the step. The marker span keeps a completed `Bool` source's diagnostic at the
+    ///      authored `by`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the header slots beside the numeric domain, bindings, body and span are distinct authored facts"
+    )]
     pub(crate) fn record_retained_loop_collection(
         &mut self,
         domain: NumericConstructionDomainId,
         bindings: Box<LoopBindings>,
         pending_item: Option<NumericBindingId>,
-        deferred: DeferredNumericExpression,
+        iterable: StatementExpression,
+        step: Option<StatementExpression>,
+        step_marker_span: Option<SourceSpan>,
         body: TemplateIrNodeId,
         span: Option<SourceSpan>,
     ) -> Result<TemplateIrNodeId, InfrastructureFailure> {
@@ -553,6 +560,7 @@ impl TemplateConstructionContext {
 
             let header_sites = TemplateLoopHeaderExpressionSites::Collection {
                 iterable: store.next_expression_site_id(),
+                step: step.as_ref().map(|_| store.next_expression_site_id()),
             };
 
             let node_id = store.push_node(TemplateIrNode::new(
@@ -566,15 +574,48 @@ impl TemplateConstructionContext {
                 span,
             ));
 
-            store.register_retained_collection_header(node_id, bindings, pending_item);
-            store.register_pending_numeric_template_intake(
-                domain,
-                NumericTemplateIntakePosition::LoopCollectionIterable(node_id),
-                deferred.items,
-                deferred.expected,
-                deferred.value_mode,
-                deferred.suffix,
-            )?;
+            // Slots register in authored order: the source first, then the step that is evaluated
+            // after the source and its length.
+            let mut built_iterable = None;
+            match iterable {
+                StatementExpression::Built(expression) => built_iterable = Some(expression),
+                StatementExpression::Retained(deferred) => {
+                    store.register_pending_numeric_template_intake(
+                        domain,
+                        NumericTemplateIntakePosition::LoopCollectionIterable(node_id),
+                        deferred.items,
+                        deferred.expected,
+                        deferred.value_mode,
+                        deferred.suffix,
+                    )?;
+                }
+            }
+
+            let mut built_step = None;
+            if let Some(step) = step {
+                match step {
+                    StatementExpression::Built(expression) => built_step = Some(expression),
+                    StatementExpression::Retained(deferred) => {
+                        store.register_pending_numeric_template_intake(
+                            domain,
+                            NumericTemplateIntakePosition::LoopCollectionStep(node_id),
+                            deferred.items,
+                            deferred.expected,
+                            deferred.value_mode,
+                            deferred.suffix,
+                        )?;
+                    }
+                }
+            }
+
+            store.register_retained_collection_header(
+                node_id,
+                bindings,
+                pending_item,
+                built_iterable,
+                built_step,
+                step_marker_span,
+            );
             node_id
         };
 

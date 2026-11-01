@@ -1,4 +1,27 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0029"]
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0029"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.template_loop_step_is_zero"
+occurrence = 1
+path = "input/folded_zero_binding/@mod.moth"
+line = 4
+column = 21
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.template_loop_step_is_zero"
+occurrence = 2
+path = "input/named_zero_step/@mod.moth"
+line = 5
+column = 36
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.zero_loop_step"
+path = "input/@page.moth"
+line = 1
+column = 22

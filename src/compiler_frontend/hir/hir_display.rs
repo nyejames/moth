@@ -429,13 +429,13 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
 
-            HirStatementKind::RangeStepFailure {
+            HirStatementKind::LoopStepFailure {
                 cause,
                 failure_mode,
                 result,
             } => {
                 format!(
-                    "{} = range_step_failure_{:?}_{}()",
+                    "{} = loop_step_failure_{:?}_{}()",
                     self.render_local_destination(*result),
                     cause,
                     match failure_mode {
@@ -445,25 +445,23 @@ impl<'a> HirDisplayContext<'a> {
                 )
             }
 
-            HirStatementKind::FloatRangeCandidate {
+            HirStatementKind::RangeCandidate {
                 current,
                 step,
                 end,
-                ascending,
                 inclusive,
                 domain,
                 candidate_result,
                 in_range_result,
             } => {
                 format!(
-                    "({}, {}) = float_range_candidate_{}({}, {}, {}, {}, {})",
+                    "({}, {}) = range_candidate_{}({}, {}, {}, {})",
                     self.render_local_destination(*candidate_result),
                     self.render_local_destination(*in_range_result),
                     domain,
                     self.render_expression(expressions, *current),
                     self.render_expression(expressions, *step),
                     self.render_expression(expressions, *end),
-                    self.render_expression(expressions, *ascending),
                     if *inclusive { "inclusive" } else { "exclusive" }
                 )
             }
@@ -1122,8 +1120,8 @@ impl<'a> HirDisplayContext<'a> {
                 };
                 format!("numeric_{op}({operands})")
             }
-            HirFallibleOperation::RangeStepFailure { cause } => {
-                format!("range_step_failure({cause:?})")
+            HirFallibleOperation::LoopStepFailure { cause } => {
+                format!("loop_step_failure({cause:?})")
             }
             HirFallibleOperation::FormatFloat { source } => format!(
                 "format_float({})",

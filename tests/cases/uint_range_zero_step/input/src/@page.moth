@@ -1,9 +1,9 @@
--- Task 5A: a runtime U32 zero step fails recoverably like the fixed-int
--- precedent. A U32 step variable is not a literal zero, so the static
--- ZeroRangeStep arm does not fire; the HIR step guard reports code 306 and
+-- Task 5A: a runtime zero step fails recoverably like the fixed-int
+-- precedent. A signed step variable is not a literal zero, so the static
+-- ZeroLoopStep arm does not fire; the HIR step guard reports code 306 and
 -- catch recovers without iterating.
 
-walk_uint |step U32, flag ~I32| -> I32:
+walk_uint |step I32, flag ~I32| -> I32:
     lower U32 = 0
     upper U32 = 10
     loop lower to upper by step |i|:
@@ -11,7 +11,7 @@ walk_uint |step U32, flag ~I32| -> I32:
     ;
     return flag
 ;
-safe_walk |step U32, flag ~I32| -> I32, Error!:
+safe_walk |step I32, flag ~I32| -> I32, Error!:
     return walk_uint(step, ~flag)
 ;
 flag ~= 0

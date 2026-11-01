@@ -1,0 +1,7 @@
+-- The step belongs after the range's end bound.
+probe ||:
+    loop 0 by 2 to 5 |i|:
+        io.line([: [i]])
+    ;
+;
+probe()

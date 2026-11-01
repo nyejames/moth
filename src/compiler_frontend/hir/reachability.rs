@@ -18,7 +18,7 @@ use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
+    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
@@ -82,7 +82,7 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_site_root_uses: Vec<ReachableSiteRootUse>,
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
-    pub(crate) reachable_range_step_failures: Vec<ReachableRangeStepFailureUse>,
+    pub(crate) reachable_loop_step_failures: Vec<ReachableLoopStepFailureUse>,
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
     pub(crate) reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
     reachable_function_provenance: SyntheticInterfaceProvenance,
@@ -149,7 +149,7 @@ struct HirBlockRuntimeFacts {
     reachable_site_root_uses: Vec<ReachableSiteRootUse>,
     reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     reachable_numeric_ops: Vec<ReachableNumericOpUse>,
-    reachable_range_step_failures: Vec<ReachableRangeStepFailureUse>,
+    reachable_loop_step_failures: Vec<ReachableLoopStepFailureUse>,
     reachable_float_statements: Vec<ReachableFloatStatementUse>,
     reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
 }
@@ -441,10 +441,10 @@ pub(crate) struct ReachableNumericOpUse {
     pub(crate) span: Option<SourceSpan>,
 }
 
-/// A reachable range guard with its exact failure contract and source anchor.
+/// A reachable loop-step failure with its exact failure contract and source anchor.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ReachableRangeStepFailureUse {
-    pub(crate) cause: RangeStepFailureCause,
+pub(crate) struct ReachableLoopStepFailureUse {
+    pub(crate) cause: LoopStepFailureCause,
     pub(crate) delivery: ReachableNumericDelivery,
     pub(crate) span: Option<SourceSpan>,
 }
@@ -677,8 +677,8 @@ impl HirReachability {
             .extend(direct.reachable_runtime_casts.iter().cloned());
         self.reachable_numeric_ops
             .extend(direct.reachable_numeric_ops.iter().cloned());
-        self.reachable_range_step_failures
-            .extend(direct.reachable_range_step_failures.iter().cloned());
+        self.reachable_loop_step_failures
+            .extend(direct.reachable_loop_step_failures.iter().cloned());
         self.reachable_float_statements
             .extend(direct.reachable_float_statements.iter().cloned());
         self.reachable_assertion_messages
@@ -860,17 +860,12 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
-            HirStatementKind::FloatRangeCandidate {
-                current,
-                step,
-                end,
-                ascending,
-                ..
+            HirStatementKind::RangeCandidate {
+                current, step, end, ..
             } => {
                 expression_collector.collect(&mut self.direct_facts, *current, span);
                 expression_collector.collect(&mut self.direct_facts, *step, span);
                 expression_collector.collect(&mut self.direct_facts, *end, span);
-                expression_collector.collect(&mut self.direct_facts, *ascending, span);
             }
 
             HirStatementKind::NumericOp {
@@ -898,18 +893,18 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
-            HirStatementKind::RangeStepFailure {
+            HirStatementKind::LoopStepFailure {
                 cause,
                 failure_mode,
                 ..
             } => {
-                self.direct_facts.reachable_range_step_failures.push(
-                    ReachableRangeStepFailureUse {
+                self.direct_facts
+                    .reachable_loop_step_failures
+                    .push(ReachableLoopStepFailureUse {
                         cause: *cause,
                         delivery: ReachableNumericDelivery::Statement(*failure_mode),
                         span,
-                    },
-                );
+                    });
             }
 
             HirStatementKind::FormatFloat {
@@ -977,14 +972,14 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         form: ReachableRuntimeCastForm::Invoke,
                     });
             }
-            HirFallibleOperation::RangeStepFailure { cause } => {
-                self.direct_facts.reachable_range_step_failures.push(
-                    ReachableRangeStepFailureUse {
+            HirFallibleOperation::LoopStepFailure { cause } => {
+                self.direct_facts
+                    .reachable_loop_step_failures
+                    .push(ReachableLoopStepFailureUse {
                         cause: *cause,
                         delivery: ReachableNumericDelivery::Invoke,
                         span,
-                    },
-                );
+                    });
             }
             HirFallibleOperation::FormatFloat { .. }
             | HirFallibleOperation::ValidateFloat { .. } => {

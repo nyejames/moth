@@ -227,7 +227,7 @@ impl LaneInstaller<'_> {
         match &statement.kind {
             HirStatementKind::Call { target, .. } => self.target_uses_private_lane(target),
             HirStatementKind::NumericOp { failure_mode, .. }
-            | HirStatementKind::RangeStepFailure { failure_mode, .. }
+            | HirStatementKind::LoopStepFailure { failure_mode, .. }
             | HirStatementKind::FormatFloat { failure_mode, .. }
             | HirStatementKind::ValidateFloat { failure_mode, .. } => {
                 Ok(self.lane_functions.contains(&function_id)
@@ -275,9 +275,9 @@ impl LaneInstaller<'_> {
                 Vec::new(),
                 Some(result),
             ),
-            // Range guards always fail, so they define no success result.
-            HirStatementKind::RangeStepFailure { cause, .. } => (
-                HirFallibleOperation::RangeStepFailure { cause },
+            // Loop-step failures always fail, so they define no success result.
+            HirStatementKind::LoopStepFailure { cause, .. } => (
+                HirFallibleOperation::LoopStepFailure { cause },
                 Vec::new(),
                 None,
             ),
@@ -735,7 +735,7 @@ fn statement_has_implicit_failure(kind: &HirStatementKind) -> bool {
         HirStatementKind::NumericOp { op, .. } => {
             return !numeric_failure_codes(op.operator, op.domain).is_empty();
         }
-        HirStatementKind::RangeStepFailure { cause, .. } => cause.builtin_error_code(),
+        HirStatementKind::LoopStepFailure { cause, .. } => cause.builtin_error_code(),
         HirStatementKind::FormatFloat { .. } => BuiltinErrorCode::FloatFormatInvariant,
         HirStatementKind::ValidateFloat { .. } => BuiltinErrorCode::FloatBoundaryNonFinite,
         _ => return false,

@@ -1,0 +1,6 @@
+-- Collection indices are integers, so a float step is rejected at the step span.
+items = {1, 2, 3}
+step F64 = 0.5
+loop items by step |item|:
+    io.line([: [item]])
+;

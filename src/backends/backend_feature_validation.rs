@@ -40,8 +40,8 @@ use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
-    ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
-    ReachableNumericDelivery, ReachableNumericOpUse, ReachableRangeStepFailureUse,
+    ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableLoopStepFailureUse,
+    ReachableMapUse, ReachableMapUseKind, ReachableNumericDelivery, ReachableNumericOpUse,
     ReachableRuntimeCastForm, ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
@@ -132,13 +132,22 @@ pub fn validate_hir_backend_feature_support(
                 input.target,
                 string_table,
             )?;
+            // A float counter's only arithmetic is its range candidate, so its precision limit
+            // is reported beside the checked numeric-operation limit rather than by an operation
+            // that no longer exists.
+            validate_wasm_range_candidate_domains(
+                input.hir,
+                reachability.backend_selection().blocks(),
+                input.target,
+                string_table,
+            )?;
             validate_wasm_float_statements(
                 &reachability.reachable_float_statements,
                 input.target,
                 string_table,
             )?;
-            validate_wasm_range_step_failures(
-                &reachability.reachable_range_step_failures,
+            validate_wasm_loop_step_failures(
+                &reachability.reachable_loop_step_failures,
                 input.target,
                 string_table,
             )?;
@@ -618,6 +627,57 @@ fn wasm_supports_trap_numeric_op(numeric_op: &ReachableNumericOpUse) -> bool {
     ) && numeric_op.op.operator != NumericOperator::IntegerDivide
 }
 
+/// Reports a reachable range candidate whose counter precision Wasm cannot round.
+///
+/// WHAT: rejects a reachable `RangeCandidate` with an `F16` counter domain, anchored on the
+///       candidate's authored step position.
+/// WHY: the range candidate is now the only arithmetic a float counter feeds, so an `F16` loop
+///      no longer reaches a checked numeric operation that reports the missing precision. `F16`
+///      has no native Wasm carrier and the candidate would need explicit binary16 rounding at
+///      every step, so it keeps the established checked-numeric-operation limit rather than
+///      failing later during lowering.
+fn validate_wasm_range_candidate_domains(
+    hir: &HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+    target: BackendTarget,
+    string_table: &mut DiagnosticStringBuilder,
+) -> Result<(), DiagnosticDraft> {
+    let Some(statement) = first_reachable_f16_range_candidate(hir, reachable_blocks) else {
+        return Ok(());
+    };
+
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        statement.span,
+    );
+
+    Err(diagnostic)
+}
+
+/// Finds the first reachable range candidate with an `F16` counter domain.
+fn first_reachable_f16_range_candidate<'module>(
+    hir: &'module HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+) -> Option<&'module HirStatement> {
+    for block in &hir.blocks {
+        if !reachable_blocks.contains(&block.id) {
+            continue;
+        }
+
+        for statement in &block.statements {
+            let HirStatementKind::RangeCandidate { domain, .. } = &statement.kind else {
+                continue;
+            };
+            if domain.binary_float_precision() == Some(BinaryFloatPrecision::Binary16) {
+                return Some(statement);
+            }
+        }
+    }
+
+    None
+}
+
 /// Reports the first reachable binary-float formatting or unsupported validation statement for Wasm.
 ///
 /// WHAT: trap-mode binary-float formatting and boundary validation are supported, while recoverable
@@ -653,13 +713,13 @@ fn validate_wasm_float_statements(
     Err(diagnostic)
 }
 
-/// Rejects recoverable range guards before generic Error construction is considered.
-fn validate_wasm_range_step_failures(
-    range_step_failures: &[ReachableRangeStepFailureUse],
+/// Rejects recoverable loop-step failures before generic Error construction is considered.
+fn validate_wasm_loop_step_failures(
+    loop_step_failures: &[ReachableLoopStepFailureUse],
     target: BackendTarget,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<(), DiagnosticDraft> {
-    let Some(failure) = range_step_failures
+    let Some(failure) = loop_step_failures
         .iter()
         .find(|failure| failure.delivery == ReachableNumericDelivery::Invoke)
     else {
@@ -1187,15 +1247,11 @@ fn search_statement(
                 search_expression(hir, type_environment, *right, search);
             }
         },
-        HirStatementKind::RangeStepFailure { .. } => {}
-        HirStatementKind::FloatRangeCandidate {
-            current,
-            step,
-            end,
-            ascending,
-            ..
+        HirStatementKind::LoopStepFailure { .. } => {}
+        HirStatementKind::RangeCandidate {
+            current, step, end, ..
         } => {
-            for value in [*current, *step, *end, *ascending] {
+            for value in [*current, *step, *end] {
                 search_expression(hir, type_environment, value, search);
             }
         }
@@ -1650,7 +1706,7 @@ where
 
             None
         }
-        HirStatementKind::RangeStepFailure { result, .. } => {
+        HirStatementKind::LoopStepFailure { result, .. } => {
             first_unsupported_result_local_occurrence(
                 locals,
                 result.local(),
@@ -1658,11 +1714,10 @@ where
                 search,
             )
         }
-        HirStatementKind::FloatRangeCandidate {
+        HirStatementKind::RangeCandidate {
             current,
             step,
             end,
-            ascending,
             candidate_result,
             in_range_result,
             ..
@@ -1687,8 +1742,7 @@ where
             let unsupported_before = search.unsupported_count;
             let occurrence = first_unsupported_expression_occurrence(*current, module, search)
                 .or_else(|| first_unsupported_expression_occurrence(*step, module, search))
-                .or_else(|| first_unsupported_expression_occurrence(*end, module, search))
-                .or_else(|| first_unsupported_expression_occurrence(*ascending, module, search));
+                .or_else(|| first_unsupported_expression_occurrence(*end, module, search));
             if let Some(occurrence) = occurrence {
                 return Some(ReachableTypeOccurrence {
                     span: statement.span.or(occurrence.span),

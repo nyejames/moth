@@ -45,7 +45,7 @@ use crate::compiler_frontend::hir::module::{
     HirChoice, HirChoiceField, HirChoiceVariant, HirModule,
 };
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
+    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
@@ -910,6 +910,87 @@ fn validate_number_numeric_op_for_test(
     )
 }
 
+/// Builds one `RangeCandidate` statement from exact operand and result types.
+///
+/// WHY: the candidate's step type rules differ by counter domain, so validation coverage needs to
+///      inject arbitrary current/step/end triples without going through range-loop lowering.
+fn validate_range_candidate_for_test(
+    domain: NumericScalar,
+    operand_types: [TypeId; 3],
+    candidate_type: TypeId,
+) -> Result<(), InfrastructureFailure> {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let candidate_local = LocalId(9000);
+    let in_range_local = LocalId(9001);
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: candidate_local,
+        ty: candidate_type,
+        mutable: false,
+        region: entry_region,
+        span: None,
+    });
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: in_range_local,
+        ty: builtin_type_ids::BOOL,
+        mutable: false,
+        region: entry_region,
+        span: None,
+    });
+
+    let mut operands = Vec::with_capacity(3);
+    for (index, operand_type) in operand_types.iter().copied().enumerate() {
+        let local_id = LocalId(9002 + index as u32);
+        module.blocks[entry_block_index].locals.push(HirLocal {
+            id: local_id,
+            ty: operand_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        });
+        let function = module
+            .start_function
+            .expect("test module should have start");
+        module.functions[function.0 as usize].params.push(local_id);
+
+        let value_id = append_hir_expression(
+            &mut module,
+            HirExpressionKind::Load(HirPlace::local(local_id)),
+            operand_type,
+            entry_region,
+            ValueKind::RValue,
+        );
+        module.side_table.map_value(span, value_id);
+        operands.push(value_id);
+    }
+    let [current, step, end] = [operands[0], operands[1], operands[2]];
+
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::RangeCandidate {
+            current,
+            step,
+            end,
+            inclusive: true,
+            domain,
+            candidate_result: HirLocalDestination::Define(candidate_local),
+            in_range_result: HirLocalDestination::Define(in_range_local),
+        },
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+}
+
 pub(super) fn builtin_error_type_id(type_environment: &mut TypeEnvironment) -> TypeId {
     let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
     if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
@@ -1288,6 +1369,93 @@ fn validator_accepts_valid_fixed_numeric_ops() {
         i8_type,
     )
     .expect("narrow signed negation keeps its own domain and should pass HIR validation");
+}
+
+#[test]
+fn validator_accepts_range_candidates_with_independent_step_types() {
+    // An integer counter accepts any signed fixed integer step, independent of the counter.
+    let u8_type = fixed_type(FixedScalar::U8);
+    let i32_type = fixed_type(FixedScalar::I32);
+    validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::U8),
+        [u8_type, i32_type, u8_type],
+        u8_type,
+    )
+    .expect("a U8 range counter with an independent I32 step should validate");
+
+    let i64_type = fixed_type(FixedScalar::I64);
+    let i8_type = fixed_type(FixedScalar::I8);
+    validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::I64),
+        [i64_type, i8_type, i64_type],
+        i64_type,
+    )
+    .expect("an I64 range counter with an independent I8 step should validate");
+
+    // A binary-float counter requires its step to be exactly the counter type.
+    let f32_type = fixed_type(FixedScalar::F32);
+    validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::F32),
+        [f32_type, f32_type, f32_type],
+        f32_type,
+    )
+    .expect("an F32 range counter with an F32 step should validate");
+}
+
+#[test]
+fn validator_rejects_range_candidate_type_mismatches() {
+    let u8_type = fixed_type(FixedScalar::U8);
+    let i32_type = fixed_type(FixedScalar::I32);
+    let u32_type = fixed_type(FixedScalar::U32);
+    let f32_type = fixed_type(FixedScalar::F32);
+    let f64_type = fixed_type(FixedScalar::F64);
+
+    // Integer counters accept only signed fixed integer steps.
+    let error = validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::U8),
+        [u8_type, u8_type, u8_type],
+        u8_type,
+    )
+    .expect_err("an unsigned integer step must be rejected for an integer range counter");
+    assert!(error.message.contains("signed fixed integer"));
+
+    let error = validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::I32),
+        [i32_type, u32_type, i32_type],
+        i32_type,
+    )
+    .expect_err("an unsigned integer step must be rejected for a signed counter");
+    assert!(error.message.contains("signed fixed integer"));
+
+    let error = validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::I32),
+        [i32_type, f32_type, i32_type],
+        i32_type,
+    )
+    .expect_err("a binary-float step must be rejected for an integer range counter");
+    assert!(error.message.contains("signed fixed integer"));
+
+    // A binary-float counter requires exactly the counter type, not a narrower or wider float.
+    let error = validate_range_candidate_for_test(
+        NumericScalar::Fixed(FixedScalar::F32),
+        [f32_type, f64_type, f32_type],
+        f32_type,
+    )
+    .expect_err("an F64 step must be rejected for an F32 range counter");
+    assert!(error.message.contains("binary-float step"));
+
+    // Decimal and other non-fixed counter domains are never range counters.
+    let error = validate_range_candidate_for_test(
+        NumericScalar::Number(NumberScale::ZERO),
+        [i32_type, i32_type, i32_type],
+        i32_type,
+    )
+    .expect_err("a Dec counter domain must be rejected");
+    assert!(
+        error
+            .message
+            .contains("fixed integer or binary-float counter domain")
+    );
 }
 
 #[test]
@@ -2289,7 +2457,7 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
     let dummy_source = || HirValueId(0);
     // (statement kind under test, expected rejection): the `inject_float_statement`
     // fixture reads the failure mode off the passed kind, so each case reuses it;
-    // `RangeStepFailure` needs its own injection below.
+    // `LoopStepFailure` needs its own injection below.
     let float_cases = [
         (
             HirStatementKind::FormatFloat {
@@ -2348,8 +2516,8 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
     });
     let statement = HirStatement {
         id: HirNodeId(9000),
-        kind: HirStatementKind::RangeStepFailure {
-            cause: RangeStepFailureCause::ZeroStep,
+        kind: HirStatementKind::LoopStepFailure {
+            cause: LoopStepFailureCause::ZeroStep,
             failure_mode: NumericFailureMode::Infallible,
             result: HirLocalDestination::Define(result_local),
         },
@@ -2364,12 +2532,12 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
         &type_environment,
         &ExternalPackageRegistry::new(),
     )
-    .expect_err("validator should reject Infallible on RangeStepFailure");
+    .expect_err("validator should reject Infallible on LoopStepFailure");
     assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
         error
             .message
-            .contains("RangeStepFailure cannot use the discharged numeric mode"),
+            .contains("LoopStepFailure cannot use the discharged numeric mode"),
         "unexpected rejection message: {}",
         error.message
     );
@@ -3005,8 +3173,8 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
     append_entry_statement(
         &mut module,
         entry,
-        HirStatementKind::RangeStepFailure {
-            cause: RangeStepFailureCause::ZeroStep,
+        HirStatementKind::LoopStepFailure {
+            cause: LoopStepFailureCause::ZeroStep,
             failure_mode: NumericFailureMode::Trap,
             result: HirLocalDestination::Define(parameter),
         },
@@ -3028,8 +3196,8 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
     append_entry_statement(
         &mut module,
         entry,
-        HirStatementKind::RangeStepFailure {
-            cause: RangeStepFailureCause::ZeroStep,
+        HirStatementKind::LoopStepFailure {
+            cause: LoopStepFailureCause::ZeroStep,
             failure_mode: NumericFailureMode::Trap,
             result: HirLocalDestination::Update(parameter),
         },

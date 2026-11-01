@@ -1,0 +1,10 @@
+-- The const template source is a literal, but the step comes from a runtime parameter, so the
+-- template cannot be fully evaluated at compile time and reports the step position.
+render |step I32| -> String:
+    value #= [loop {"red", "green"} by step |item|:
+        [item]
+    ]
+    return value
+;
+
+#[:ok]

@@ -2,7 +2,8 @@
 
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::lir::instructions::{
-    WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
+    WasmCalleeRef, WasmIntegerRangeCandidate, WasmLirStmt, WasmLirTerminator,
+    WasmRangeCandidateKind, WasmScalarComparisonOp, WasmScalarComparisonType,
 };
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId,
@@ -243,26 +244,34 @@ pub(crate) fn emit_statement(
                 function, *dst, *operator, *precision, *operands, context, plan,
             )?;
         }
-        WasmLirStmt::FloatRangeCandidate {
+        WasmLirStmt::RangeCandidate {
             candidate_dst,
             in_range_dst,
-            scratch,
             current,
             step,
             end,
-            ascending,
-            precision,
             inclusive,
-        } => {
-            emit_float_range_candidate(
+            kind,
+        } => match kind {
+            WasmRangeCandidateKind::BinaryFloat { precision, scratch } => {
+                emit_float_range_candidate(
+                    function,
+                    [*current, *step, *end],
+                    [*candidate_dst, *in_range_dst, *scratch],
+                    *precision,
+                    *inclusive,
+                    context,
+                )?
+            }
+            WasmRangeCandidateKind::Integer(candidate) => emit_integer_range_candidate(
                 function,
-                [*current, *step, *end, *ascending],
-                [*candidate_dst, *in_range_dst, *scratch],
-                *precision,
+                [*current, *step, *end],
+                [*candidate_dst, *in_range_dst],
                 *inclusive,
+                candidate,
                 context,
-            )?;
-        }
+            )?,
+        },
         WasmLirStmt::IntegerToFloat {
             dst,
             source,
@@ -411,19 +420,19 @@ pub(crate) fn emit_statement(
 
 fn emit_float_range_candidate(
     function: &mut Function,
-    inputs: [WasmLirLocalId; 4],
+    inputs: [WasmLirLocalId; 3],
     output_ids: [WasmLirLocalId; 3],
     precision: BinaryFloatPrecision,
     inclusive: bool,
     context: &LirBodyEmitContext<'_>,
 ) -> Result<(), InfrastructureFailure> {
-    let [current, step, end, ascending] = inputs;
+    let [current, step, end] = inputs;
     let [candidate_dst, in_range_dst, scratch] = output_ids;
     let carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        // Binary16 candidates are rejected by validate_wasm_checked_numeric_ops before lowering
-        // (see stmt.rs lower_float_range_candidate).
+        // Binary16 candidates are rejected by validate_wasm_range_candidate_domains before
+        // lowering (see stmt.rs lower_float_range_candidate).
         BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
             CompilerStage::BackendLowering,
             "Wasm float range candidates do not support F16"
@@ -433,12 +442,6 @@ fn emit_float_range_candidate(
     ensure_local_abi(step, carrier, context, "float range step")?;
     ensure_local_abi(end, carrier, context, "float range end")?;
     ensure_local_abi(scratch, carrier, context, "float range candidate scratch")?;
-    ensure_local_abi(
-        ascending,
-        WasmAbiType::I32,
-        context,
-        "float range direction",
-    )?;
     ensure_local_abi(
         in_range_dst,
         WasmAbiType::I32,
@@ -452,59 +455,59 @@ fn emit_float_range_candidate(
         "float range candidate destination",
     )?;
 
-    let (add_opcode, subtract_opcode, ascending_compare, descending_compare) = match precision {
-        BinaryFloatPrecision::Binary32 => (
-            &Instruction::F32Add,
-            &Instruction::F32Sub,
-            if inclusive {
-                &Instruction::F32Le
-            } else {
-                &Instruction::F32Lt
-            },
-            if inclusive {
-                &Instruction::F32Ge
-            } else {
-                &Instruction::F32Gt
-            },
-        ),
-        BinaryFloatPrecision::Binary64 => (
-            &Instruction::F64Add,
-            &Instruction::F64Sub,
-            if inclusive {
-                &Instruction::F64Le
-            } else {
-                &Instruction::F64Lt
-            },
-            if inclusive {
-                &Instruction::F64Ge
-            } else {
-                &Instruction::F64Gt
-            },
-        ),
-        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "Wasm float range candidates already rejected Binary16 before this opcode selection"
-        ),
-    };
+    let (add_opcode, step_positive_test, zero, ascending_compare, descending_compare) =
+        match precision {
+            BinaryFloatPrecision::Binary32 => (
+                &Instruction::F32Add,
+                &Instruction::F32Gt,
+                Instruction::F32Const(0.0.into()),
+                if inclusive {
+                    &Instruction::F32Le
+                } else {
+                    &Instruction::F32Lt
+                },
+                if inclusive {
+                    &Instruction::F32Ge
+                } else {
+                    &Instruction::F32Gt
+                },
+            ),
+            BinaryFloatPrecision::Binary64 => (
+                &Instruction::F64Add,
+                &Instruction::F64Gt,
+                Instruction::F64Const(0.0.into()),
+                if inclusive {
+                    &Instruction::F64Le
+                } else {
+                    &Instruction::F64Lt
+                },
+                if inclusive {
+                    &Instruction::F64Ge
+                } else {
+                    &Instruction::F64Gt
+                },
+            ),
+            BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "Wasm float range candidates already rejected Binary16 before this opcode selection"
+            ),
+        };
 
-    function.instruction(&Instruction::LocalGet(local_index(ascending, context)?));
-    function.instruction(&Instruction::If(BlockType::Empty));
+    // The candidate adds the signed step; negative steps subtract through the same add.
     function.instruction(&Instruction::LocalGet(local_index(current, context)?));
     function.instruction(&Instruction::LocalGet(local_index(step, context)?));
     function.instruction(add_opcode);
     function.instruction(&Instruction::LocalSet(local_index(scratch, context)?));
-    function.instruction(&Instruction::Else);
-    function.instruction(&Instruction::LocalGet(local_index(current, context)?));
-    function.instruction(&Instruction::LocalGet(local_index(step, context)?));
-    function.instruction(subtract_opcode);
-    function.instruction(&Instruction::LocalSet(local_index(scratch, context)?));
-    function.instruction(&Instruction::End);
 
     // Native F32/F64 operations already rounded into scratch. Keep the finite predicate separate
     // from ordinary checked arithmetic so an out-of-range infinity exits without trapping.
     function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
     super::checked_float::emit_finite_float_predicate(function, precision);
-    function.instruction(&Instruction::LocalGet(local_index(ascending, context)?));
+
+    // The step sign selects the bound comparison because HIR carries no direction operand.
+    function.instruction(&Instruction::LocalGet(local_index(step, context)?));
+    function.instruction(&zero);
+    function.instruction(step_positive_test);
     function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
     function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
     function.instruction(&Instruction::LocalGet(local_index(end, context)?));
@@ -523,6 +526,224 @@ fn emit_float_range_candidate(
     function.instruction(&Instruction::LocalSet(local_index(candidate_dst, context)?));
     function.instruction(&Instruction::End);
 
+    Ok(())
+}
+
+/// Emit one integer range candidate through the widened distance algorithm.
+///
+/// WHAT: sign- or zero-extends `current`, `end` and the signed step to I64, derives the
+///       direction from the step sign, compares the step's unsigned magnitude with the wrapping
+///       distance in that direction, then commits a wrapping successor narrowed back to the
+///       counter carrier only inside the guard.
+/// WHY: a signed step cannot be added in the counter domain without overflow or a narrowing
+///       cast, and counter-to-end distances can reach `u64::MAX`. The unsigned magnitude
+///       comparison keeps `I64::MIN` steps and full-width counters exact without a signed `abs`,
+///       and the narrowed commit keeps an integer candidate from materialising an
+///       out-of-domain successor.
+fn emit_integer_range_candidate(
+    function: &mut Function,
+    inputs: [WasmLirLocalId; 3],
+    outputs: [WasmLirLocalId; 2],
+    inclusive: bool,
+    candidate: &WasmIntegerRangeCandidate,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    let [current, step, end] = inputs;
+    let [candidate_dst, in_range_dst] = outputs;
+    let WasmIntegerRangeCandidate {
+        counter_carrier,
+        counter_signed,
+        step_carrier,
+        scratch,
+    } = *candidate;
+
+    for (carrier, label) in [(counter_carrier, "counter"), (step_carrier, "step")] {
+        if !matches!(carrier, WasmAbiType::I32 | WasmAbiType::I64) {
+            return Err(InfrastructureFailure::wasm_generation(format!(
+                "Wasm integer range candidate {label} carrier must be I32 or I64, found {carrier:?} in {:?}",
+                context.function_id
+            )));
+        }
+    }
+
+    ensure_local_abi(current, counter_carrier, context, "range current")?;
+    ensure_local_abi(step, step_carrier, context, "range step")?;
+    ensure_local_abi(end, counter_carrier, context, "range end")?;
+    ensure_local_abi(
+        candidate_dst,
+        counter_carrier,
+        context,
+        "range candidate destination",
+    )?;
+    ensure_local_abi(in_range_dst, WasmAbiType::I32, context, "range Bool result")?;
+    for (local, label) in [
+        (scratch.current, "range current widened"),
+        (scratch.step, "range step widened"),
+        (scratch.end, "range end widened"),
+        (scratch.distance, "range distance"),
+        (scratch.magnitude, "range magnitude"),
+        (scratch.candidate, "range successor"),
+    ] {
+        ensure_local_abi(local, WasmAbiType::I64, context, label)?;
+    }
+    ensure_local_abi(
+        scratch.ascending,
+        WasmAbiType::I32,
+        context,
+        "range direction",
+    )?;
+
+    emit_range_operand_widening(
+        function,
+        current,
+        counter_carrier,
+        counter_signed,
+        scratch.current,
+        context,
+    )?;
+    // The step is always a signed fixed integer, so a 32-bit carrier sign-extends.
+    emit_range_operand_widening(function, step, step_carrier, true, scratch.step, context)?;
+    emit_range_operand_widening(
+        function,
+        end,
+        counter_carrier,
+        counter_signed,
+        scratch.end,
+        context,
+    )?;
+
+    // Direction comes only from the step sign; bounds never select it.
+    function.instruction(&Instruction::LocalGet(local_index(scratch.step, context)?));
+    function.instruction(&Instruction::I64Const(0));
+    function.instruction(&Instruction::I64GtS);
+    function.instruction(&Instruction::LocalSet(local_index(
+        scratch.ascending,
+        context,
+    )?));
+
+    // distance = ascending ? end - current : current - end, wrapping.
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.ascending,
+        context,
+    )?));
+    function.instruction(&Instruction::If(BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(local_index(scratch.end, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.current,
+        context,
+    )?));
+    function.instruction(&Instruction::I64Sub);
+    function.instruction(&Instruction::LocalSet(local_index(
+        scratch.distance,
+        context,
+    )?));
+    function.instruction(&Instruction::Else);
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.current,
+        context,
+    )?));
+    function.instruction(&Instruction::LocalGet(local_index(scratch.end, context)?));
+    function.instruction(&Instruction::I64Sub);
+    function.instruction(&Instruction::LocalSet(local_index(
+        scratch.distance,
+        context,
+    )?));
+    function.instruction(&Instruction::End);
+
+    // magnitude = ascending ? step : 0 - step, wrapping, so `I64::MIN` becomes 2^63 unsigned.
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.ascending,
+        context,
+    )?));
+    function.instruction(&Instruction::If(BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(local_index(scratch.step, context)?));
+    function.instruction(&Instruction::LocalSet(local_index(
+        scratch.magnitude,
+        context,
+    )?));
+    function.instruction(&Instruction::Else);
+    function.instruction(&Instruction::I64Const(0));
+    function.instruction(&Instruction::LocalGet(local_index(scratch.step, context)?));
+    function.instruction(&Instruction::I64Sub);
+    function.instruction(&Instruction::LocalSet(local_index(
+        scratch.magnitude,
+        context,
+    )?));
+    function.instruction(&Instruction::End);
+
+    // The unsigned stride/distance comparison is the whole bounds decision: the successor is in
+    // range exactly when the stride does not pass the remaining distance in the step direction.
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.magnitude,
+        context,
+    )?));
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.distance,
+        context,
+    )?));
+    function.instruction(if inclusive {
+        &Instruction::I64LeU
+    } else {
+        &Instruction::I64LtU
+    });
+    function.instruction(&Instruction::LocalSet(local_index(in_range_dst, context)?));
+
+    // Commit only inside the guard, narrowing after the successor was proven representable.
+    function.instruction(&Instruction::LocalGet(local_index(in_range_dst, context)?));
+    function.instruction(&Instruction::If(BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.current,
+        context,
+    )?));
+    function.instruction(&Instruction::LocalGet(local_index(scratch.step, context)?));
+    function.instruction(&Instruction::I64Add);
+    function.instruction(&Instruction::LocalSet(local_index(
+        scratch.candidate,
+        context,
+    )?));
+    function.instruction(&Instruction::LocalGet(local_index(
+        scratch.candidate,
+        context,
+    )?));
+    if counter_carrier == WasmAbiType::I32 {
+        function.instruction(&Instruction::I32WrapI64);
+    }
+    function.instruction(&Instruction::LocalSet(local_index(candidate_dst, context)?));
+    function.instruction(&Instruction::End);
+
+    Ok(())
+}
+
+/// Widen one integer range operand into its I64 slot, preserving its signed interpretation.
+///
+/// WHAT: sign-extends signed and zero-extends unsigned 32-bit carriers; a 64-bit carrier is
+///       already canonical and copied through.
+/// WHY: the distance/magnitude comparison is unsigned at I64, so every operand must first reach
+///       its exact mathematical value without a narrowing cast.
+fn emit_range_operand_widening(
+    function: &mut Function,
+    source: WasmLirLocalId,
+    source_carrier: WasmAbiType,
+    source_signed: bool,
+    dst: WasmLirLocalId,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    function.instruction(&Instruction::LocalGet(local_index(source, context)?));
+    match source_carrier {
+        WasmAbiType::I32 => {
+            function.instruction(if source_signed {
+                &Instruction::I64ExtendI32S
+            } else {
+                &Instruction::I64ExtendI32U
+            });
+        }
+        WasmAbiType::I64 => {}
+        _ => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "integer range operand widening already rejected a non-integer carrier"
+        ),
+    }
+    function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
     Ok(())
 }
 

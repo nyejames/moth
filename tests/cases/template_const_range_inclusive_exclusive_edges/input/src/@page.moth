@@ -1,6 +1,6 @@
 fixed_u8_start #U8 = 1
 fixed_u8_end #U16 = 3
-fixed_u8_step #U8 = 1
+fixed_u8_step #I32 = 1
 fixed_u8_equal #U8 = 2
 fixed_f16_start #F16 = 0.5
 fixed_f16_end #F16 = 1.5

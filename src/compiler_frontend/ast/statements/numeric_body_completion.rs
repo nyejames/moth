@@ -70,6 +70,10 @@ use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_boolean_condition, ensure_loop_condition,
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::HandledFallibleCall;
+use crate::compiler_frontend::ast::statements::loop_headers::{
+    CompletedRangeOperands, range_loop_spec_from_completed_operands,
+    range_step_literal_destination, validate_collection_step, validate_completed_collection_source,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, ensure_pattern_compatible_with_subject, finish_pending_option_pattern,
 };
@@ -209,8 +213,9 @@ struct Completion<'a, 'env> {
 
 /// Complete every numeric-dependent statement of one body root.
 ///
-/// WHAT: the caller is the body root: a function body, the implicit root runtime body, or one
-///       concrete generic/materialised body. Child blocks never call this.
+/// WHAT: the caller is the body root: a function body, the implicit root runtime body, one
+///       concrete generic/materialised body, or a const-required template whose independent root
+///       scope owns its numeric positions. Child blocks never call this.
 /// WHY: completion is the single owner that may release the body's construction tables, so it must
 ///      run exactly once, after the whole body has been parsed.
 pub(crate) fn complete_numeric_body(
@@ -317,21 +322,47 @@ impl Completion<'_, '_> {
         // Dense body-local groups arrive in first-operand registration order. Their store row
         // handles let installation address exactly this header and its at-most-three intake sites.
         let mut range_headers = Vec::new();
+        // A collection header installs once, after its source and optional step complete, so its
+        // operands group by position node in the same authored order.
+        let mut collection_headers: Vec<(TemplateIrNodeId, [Option<ExprId>; 2])> = Vec::new();
 
         for intake in intakes {
             if let Some(slot) = intake.position.range_operand_slot() {
-                // Range slots are registered with their containing header and group.
+                // Range slots are registered with their containing header and group. Bounds
+                // complete before the step, so a retained step takes the literal context their
+                // completed or parse-time-built operands select.
                 let (header, group) = intake.range_header.expect("retained range operand handle");
+                if group == range_headers.len() {
+                    range_headers.push((header, [None, None, None]));
+                }
+                let expected = match slot {
+                    RangeOperandSlot::Start | RangeOperandSlot::End => intake.expected,
+                    RangeOperandSlot::Step => {
+                        let built = {
+                            let store = self.context.template_ir_store.borrow();
+                            store.retained_range_header_built_operands(header)
+                        };
+                        let operands = &range_headers[group].1;
+                        let start = operands[0].or_else(|| built.and_then(|built| built[0]));
+                        let end = operands[1].or_else(|| built.and_then(|built| built[1]));
+                        match end {
+                            Some(end) => range_step_literal_destination(
+                                start,
+                                end,
+                                self.expression_builder,
+                                self.type_interner.environment(),
+                            )?,
+                            None => ExpectedType::Infer,
+                        }
+                    }
+                };
                 let value = self.complete_items_with_suffix(
                     intake.items,
-                    intake.expected,
+                    expected,
                     &intake.value_mode,
                     intake.suffix,
                 )?;
                 validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
-                if group == range_headers.len() {
-                    range_headers.push((header, [None, None, None]));
-                }
                 let operands = &mut range_headers[group].1;
                 let operand = match slot {
                     RangeOperandSlot::Start => &mut operands[0],
@@ -341,6 +372,35 @@ impl Completion<'_, '_> {
                 *operand = Some(value.id());
                 continue;
             }
+            if let Some(group) = intake.collection_header {
+                let node = intake.position.node_id();
+                if group == collection_headers.len() {
+                    collection_headers.push((node, [None, None]));
+                    // The item resolves in the binding pass, before any template intake completes.
+                    self.install_pending_collection_item(node)?;
+                }
+                let value = self.complete_items_with_suffix(
+                    intake.items,
+                    ExpectedType::Infer,
+                    &intake.value_mode,
+                    intake.suffix,
+                )?;
+                validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
+                let slot = match intake.position {
+                    NumericTemplateIntakePosition::LoopCollectionIterable(_) => 0,
+                    NumericTemplateIntakePosition::LoopCollectionStep(_) => 1,
+                    _ => {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "a retained collection header grouped a position that is not one of its operands",
+                        )
+                        .into());
+                    }
+                };
+                collection_headers[group].1[slot] = Some(value.id());
+                continue;
+            }
+
             // A retained collection header's pending item installs before its iterable completes,
             // so the header's bindings are final when the collection completion takes them.
             self.install_pending_collection_item(intake.position.node_id())?;
@@ -403,12 +463,25 @@ impl Completion<'_, '_> {
                 .install_completed_numeric_range_header(
                     header,
                     operands,
-                    self.context,
                     self.type_interner,
                     self.expression_builder,
                     self.const_values,
-                    self.string_table,
-                    self.path_fork,
+                )
+                .map_err(ExpressionParseError::from)?;
+        }
+
+        for (node, [iterable, step]) in collection_headers {
+            let type_environment = self.type_interner.environment();
+            self.context
+                .template_ir_store
+                .borrow_mut()
+                .install_completed_collection_header(
+                    node,
+                    iterable,
+                    step,
+                    self.expression_builder,
+                    type_environment,
+                    self.const_values,
                 )
                 .map_err(ExpressionParseError::from)?;
         }
@@ -575,10 +648,10 @@ impl Completion<'_, '_> {
                     )?
                 }
                 NumericRecipe::RangeCounter { range } => {
-                    // The counter's type is the iteration domain selected by its own completed
-                    // operands. The shared range policy selected it while building the spec, so it
-                    // resolves here in the binding pass, before any later row that reads it, and
-                    // never by resuming the loop construct (its body may read the counter).
+                    // The counter's type is the iteration domain selected by its completed bounds.
+                    // The shared range policy selected it while building the spec, so it resolves
+                    // here in the binding pass, before any later row that reads it, and never by
+                    // resuming the loop construct (its body may read the counter).
                     let recipe_span = range.span.or(row.binding_span);
                     let spec = self.complete_range_spec(*range)?;
                     let computed =
@@ -1613,12 +1686,33 @@ impl Completion<'_, '_> {
             DeferredLoopHeader::Collection {
                 mut bindings,
                 iterable,
+                step,
+                step_marker_span,
                 pending_item,
             } => {
                 let iterable = self.complete_statement_expression(iterable)?;
-                self.expression_builder
-                    .view_owned(iterable)?
-                    .require_single(ValueReceiverContext::General)?;
+                // The source completes before its step, and its finished type decides the source
+                // contract: a bindingless header deferred this classification to the body root.
+                validate_completed_collection_source(
+                    self.expression_builder.view_owned(iterable)?,
+                    self.type_interner.environment(),
+                    step_marker_span,
+                )?;
+                // The step follows the source: complete it after the source and its length, then
+                // validate the independent signed integer type and static-zero rule at the
+                // authored step position.
+                let step = match step {
+                    Some(step) => {
+                        let step = self.complete_statement_expression(step)?;
+                        validate_collection_step(
+                            self.expression_builder.view_owned(step)?,
+                            self.type_interner.environment(),
+                            self.const_values,
+                        )?;
+                        Some(step.id())
+                    }
+                    None => None,
+                };
                 if let Some(item) = pending_item {
                     // The item's row resolved its element descriptor in the binding pass. Its
                     // completed declaration moves into the loop's item binding, as a range counter's
@@ -1635,6 +1729,7 @@ impl Completion<'_, '_> {
                 NodeKind::CollectionLoop {
                     bindings,
                     iterable: iterable.id(),
+                    step,
                     body,
                 }
             }
@@ -1648,12 +1743,15 @@ impl Completion<'_, '_> {
 
     /// Complete one retained range spec and select/check its domain through the shared policy.
     ///
-    /// WHAT: completes each authored operand slot at its natural type, then hands the completed
-    ///       operands to the loop-header owner's shared range constructor.
-    /// WHY: the operands' numeric origins are selected here (root decision), so the shared policy
-    ///      — not this driver — derives the range domain, synthesises the omitted-start zero at
-    ///      that domain and validates start/end/step compatibility. No operand is defaulted early
-    ///      and no witness is registered on the header's behalf.
+    /// WHAT: completes the bounds first, gives a retained step the literal context those bounds
+    ///       alone select, then hands the completed operands to the loop-header owner's shared
+    ///       range constructor.
+    /// WHY: the bounds' numeric origins are selected here (root decision), and the step stays
+    ///      independent of the counter domain. A float counter still gives an untyped float step
+    ///      its exact precision, while an integer counter leaves the step to default to `I32`.
+    ///      The shared policy — not this driver — derives the final counter domain, synthesises
+    ///      the omitted-start zero and validates the step. No operand is defaulted early and no
+    ///      witness is registered on the header's behalf.
     fn complete_range_spec(
         &mut self,
         deferred: DeferredRangeSpec,
@@ -1664,21 +1762,28 @@ impl Completion<'_, '_> {
         };
         let end = self.complete_statement_expression(deferred.end)?;
         let step = match deferred.step {
-            Some(slot) => Some(self.complete_statement_expression(slot)?),
+            Some(slot) => {
+                let destination = range_step_literal_destination(
+                    start.as_ref().map(|start| start.id()),
+                    end.id(),
+                    self.expression_builder,
+                    self.type_interner.environment(),
+                )?;
+                Some(self.complete_range_step(slot, destination)?)
+            }
             None => None,
         };
-        crate::compiler_frontend::ast::statements::loop_headers::range_loop_spec_from_completed_operands(
-            start,
-            end,
-            deferred.end_kind,
-            step,
-            deferred.span,
-            self.context,
+        range_loop_spec_from_completed_operands(
+            CompletedRangeOperands {
+                start,
+                end,
+                end_kind: deferred.end_kind,
+                step,
+                omitted_start_span: deferred.span,
+            },
             self.type_interner,
             self.expression_builder,
             self.const_values,
-            self.string_table,
-            self.path_fork,
         )
     }
 
@@ -1810,6 +1915,31 @@ impl Completion<'_, '_> {
                 Ok(self.expression_builder.own(built))
             }
             StatementExpression::Retained(deferred) => self.complete_deferred_expression(deferred),
+        }
+    }
+
+    /// Complete one retained range step with the literal context its bounds select.
+    ///
+    /// WHAT: a retained fragment takes the caller's destination, while an already-built step keeps
+    ///       its authored type for the shared policy to accept or reject.
+    /// WHY: a lone untyped float step must materialise at the counter precision, but the step never
+    ///      joins the bounds' domain and an untyped integer step must keep its own `I32` default.
+    fn complete_range_step(
+        &mut self,
+        step: StatementExpression,
+        destination: ExpectedType,
+    ) -> Result<OwnedExpr, ExpressionParseError> {
+        match step {
+            StatementExpression::Built(built) => {
+                validate_completed_typed_errors(self.expression_builder.view(built)?)?;
+                Ok(self.expression_builder.own(built))
+            }
+            StatementExpression::Retained(mut deferred) => {
+                if destination != ExpectedType::Infer {
+                    deferred.expected = destination;
+                }
+                self.complete_deferred_expression(deferred)
+            }
         }
     }
 

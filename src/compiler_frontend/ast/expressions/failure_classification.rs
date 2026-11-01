@@ -1616,9 +1616,9 @@ fn classify_nodes(
             }
             NodeKind::LexicalScope { body } => classify_nodes(body, template_ir_store, state)?,
             NodeKind::RangeLoop { range, body, .. } => {
-                if let Some(effect) = classify_range_failure(range.domain, node.span, state) {
-                    return Ok(Some(effect));
-                }
+                // The header operands are evaluated before the zero-step guard. Registering the
+                // synthesized step failures last keeps the first failure witness at the earliest
+                // reachable contributor instead of the later guard.
                 let mut effect = classify_expression(
                     state.expression_builder.view(range.start)?,
                     template_ir_store,
@@ -1641,16 +1641,43 @@ fn classify_nodes(
                     )?;
                 }
                 if effect.is_none() {
+                    effect = classify_range_failure(range.domain, node.span, state);
+                }
+                if effect.is_none() {
                     effect = classify_loop_body(body, template_ir_store, state)?;
                 }
                 effect
             }
-            NodeKind::CollectionLoop { iterable, body, .. } => classify_expression(
-                state.expression_builder.view(*iterable)?,
-                template_ir_store,
-                state,
-            )?
-            .or(classify_loop_body(body, template_ir_store, state)?),
+            NodeKind::CollectionLoop {
+                iterable,
+                step,
+                body,
+                ..
+            } => {
+                let mut effect = classify_expression(
+                    state.expression_builder.view(*iterable)?,
+                    template_ir_store,
+                    state,
+                )?;
+                if effect.is_none()
+                    && let Some(step) = step
+                {
+                    let step_span = state.expression_builder.view(*step)?.span();
+                    effect = classify_expression(
+                        state.expression_builder.view(*step)?,
+                        template_ir_store,
+                        state,
+                    )?;
+                    // The step value is fully evaluated before the loop checks it for zero.
+                    if effect.is_none() {
+                        effect = classify_collection_step_failure(step_span, state);
+                    }
+                }
+                if effect.is_none() {
+                    effect = classify_loop_body(body, template_ir_store, state)?;
+                }
+                effect
+            }
             NodeKind::WhileLoop(condition, body) => classify_expression(
                 state.expression_builder.view(*condition)?,
                 template_ir_store,
@@ -1834,14 +1861,8 @@ fn classify_loop_header(
             state,
         ),
         TemplateLoopHeader::Range { range, .. } => {
-            let span = match range.step {
-                Some(step) => state.expression_builder.view(step)?.span(),
-                None => None,
-            }
-            .or(state.expression_builder.view(range.start)?.span());
-            if let Some(effect) = classify_range_failure(range.domain, span, state) {
-                return Ok(Some(effect));
-            }
+            // The header operands are evaluated before the zero-step guard, so their
+            // contributors keep priority over the synthesized step failures.
             if let Some(effect) = classify_expression(
                 state.expression_builder.view(range.start)?,
                 template_ir_store,
@@ -1856,25 +1877,96 @@ fn classify_loop_header(
             )? {
                 return Ok(Some(effect));
             }
-            match &range.step {
-                Some(step) => classify_expression(
+            if let Some(step) = &range.step
+                && let Some(effect) = classify_expression(
                     state.expression_builder.view(*step)?,
                     template_ir_store,
                     state,
-                ),
-                None => Ok(None),
+                )?
+            {
+                return Ok(Some(effect));
             }
+            let span = match range.step {
+                Some(step) => state.expression_builder.view(step)?.span(),
+                None => None,
+            }
+            .or(state.expression_builder.view(range.start)?.span());
+            Ok(classify_range_failure(range.domain, span, state))
         }
-        TemplateLoopHeader::Collection { iterable, .. } => classify_expression(
-            state.expression_builder.view(*iterable)?,
-            template_ir_store,
-            state,
-        ),
+        TemplateLoopHeader::Collection { iterable, step, .. } => {
+            if let Some(effect) = classify_expression(
+                state.expression_builder.view(*iterable)?,
+                template_ir_store,
+                state,
+            )? {
+                return Ok(Some(effect));
+            }
+            if let Some(step) = step {
+                let step_span = state.expression_builder.view(*step)?.span();
+                if let Some(effect) = classify_expression(
+                    state.expression_builder.view(*step)?,
+                    template_ir_store,
+                    state,
+                )? {
+                    return Ok(Some(effect));
+                }
+                // The step value is fully evaluated before the loop checks it for zero.
+                if let Some(effect) = classify_collection_step_failure(step_span, state) {
+                    return Ok(Some(effect));
+                }
+            }
+            Ok(None)
+        }
     }
 }
 
 fn classify_range_failure(
     domain: NumericScalar,
+    span: Option<SourceSpan>,
+    state: &mut TraversalState<'_>,
+) -> Option<EnclosingExitEffect> {
+    // Range loops fail on overflow plus their step guards: zero step (306) in every domain and
+    // no progress (307) when floating rounding leaves the candidate unchanged. The checked `I32`
+    // ordinal increment overflows in both domains, and a float candidate only ends iteration:
+    // it never raises `FloatNonFinite`.
+    //
+    // Literal and omitted steps keep these contributors because HIR always emits the same guards:
+    // the classifier mirrors emitted work instead of proving operand values, exactly as `value + 1`
+    // stays potentially overflowing. A statically zero literal step never reaches this point
+    // because the header policy rejects it before classification.
+    let codes: &'static [BuiltinErrorCode] = if domain.is_binary_float() {
+        &[
+            BuiltinErrorCode::IntOverflow,
+            BuiltinErrorCode::InvalidLoopStep,
+            BuiltinErrorCode::RangeStepNoProgress,
+        ]
+    } else {
+        &[
+            BuiltinErrorCode::IntOverflow,
+            BuiltinErrorCode::InvalidLoopStep,
+        ]
+    };
+    classify_numeric_step_failure(codes, span, state)
+}
+
+/// A collection loop with an explicit step can raise the recoverable zero-step failure (306).
+///
+/// WHAT: registers the same implicit numeric contributor a range step registers, limited to the
+///       zero-step code the collection CFG can raise.
+/// WHY: a collection step is evaluated once, so a dynamic zero fails before the first source
+///      check even when the collection is empty. The step is independent of item and index
+///      arithmetic, so no overflow or no-progress code belongs to this loop. Every explicit step
+///      keeps the contributor, including a literal `by 2`, because HIR emits the same zero guard
+///      and the classifier mirrors emitted work instead of proving step values.
+fn classify_collection_step_failure(
+    span: Option<SourceSpan>,
+    state: &mut TraversalState<'_>,
+) -> Option<EnclosingExitEffect> {
+    classify_numeric_step_failure(&[BuiltinErrorCode::InvalidLoopStep], span, state)
+}
+
+fn classify_numeric_step_failure(
+    codes: &'static [BuiltinErrorCode],
     span: Option<SourceSpan>,
     state: &mut TraversalState<'_>,
 ) -> Option<EnclosingExitEffect> {
@@ -1891,20 +1983,6 @@ fn classify_range_failure(
         _ => {}
     }
 
-    // Range loops fail on overflow plus their step guards: zero step (306) in every domain and
-    // no progress (307) when floating rounding leaves the candidate unchanged.
-    let codes: &'static [BuiltinErrorCode] = if domain.is_binary_float() {
-        &[
-            BuiltinErrorCode::FloatNonFinite,
-            BuiltinErrorCode::InvalidRangeStep,
-            BuiltinErrorCode::RangeStepNoProgress,
-        ]
-    } else {
-        &[
-            BuiltinErrorCode::IntOverflow,
-            BuiltinErrorCode::InvalidRangeStep,
-        ]
-    };
     let contributor = ImplicitFailureContributor {
         span,
         codes,

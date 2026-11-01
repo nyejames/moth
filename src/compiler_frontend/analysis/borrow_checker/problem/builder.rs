@@ -524,16 +524,15 @@ impl<'a> FunctionProblemBuilder<'a> {
                     binding_destination(*result, self.local_place(result.local(), &source)?);
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
-            HirStatementKind::RangeStepFailure { result, .. } => {
+            HirStatementKind::LoopStepFailure { result, .. } => {
                 let target =
                     binding_destination(*result, self.local_place(result.local(), &source)?);
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
-            HirStatementKind::FloatRangeCandidate {
+            HirStatementKind::RangeCandidate {
                 current,
                 step,
                 end,
-                ascending,
                 candidate_result,
                 in_range_result,
                 ..
@@ -541,7 +540,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.lower_expression(*current, &source, event_ids)?;
                 self.lower_expression(*step, &source, event_ids)?;
                 self.lower_expression(*end, &source, event_ids)?;
-                self.lower_expression(*ascending, &source, event_ids)?;
 
                 let candidate_target = binding_destination(
                     *candidate_result,
@@ -1821,7 +1819,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                     HirFallibleOperation::NumericOp { operands, .. } => {
                         self.lower_numeric_operands(operands, &source, &mut events)?;
                     }
-                    HirFallibleOperation::RangeStepFailure { .. } => {}
+                    HirFallibleOperation::LoopStepFailure { .. } => {}
                     HirFallibleOperation::Call { .. } | HirFallibleOperation::MapOp { .. } => {
                         crate::compiler_bug!(
                             CompilerStage::BorrowChecking,

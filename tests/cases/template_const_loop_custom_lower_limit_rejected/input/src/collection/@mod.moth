@@ -1,0 +1,4 @@
+-- A stepped collection loop is limited by its visited iterations too.
+#[loop {0, 1, 2, 3, 4, 5} by 2 |value, index|:
+    [index]:[value];
+]

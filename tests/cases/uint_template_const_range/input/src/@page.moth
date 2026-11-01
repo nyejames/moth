@@ -1,11 +1,12 @@
 -- Const U64 ranges fold through the unsigned
--- cursor. Both literal and `#U64` constant bounds iterate, the inclusive
--- U64 maximum terminates without a successor, and descending to zero
--- stops without underflowing.
+-- counter cursor with an independent signed step. Both literal and `#U64`
+-- constant bounds iterate, the inclusive U64 maximum terminates without a
+-- successor, and descending to zero stops without underflowing.
 
 uint_start #U64 = 1
 uint_end #U64 = 3
-uint_step #U64 = 1
+step_one #I32 = 1
+step_neg_one #I32 = -1
 uint_two #U64 = 2
 uint_zero #U64 = 0
 uint_near_max #U64 = 18446744073709551613
@@ -19,19 +20,19 @@ mixed_bound_step #F32 = 1.0
     uint-literal-incl-[i];
 ]
 
-#[loop 3 to & 1 by 1 |i|:
+#[loop 3 to & 1 by -1 |i|:
     uint-literal-desc-[i];
 ]
 
-#[loop uint_start to & uint_end by uint_step |i|:
+#[loop uint_start to & uint_end by step_one |i|:
     uint-const-asc-[i];
 ]
 
-#[loop uint_end to & uint_start by uint_step |i|:
+#[loop uint_end to & uint_start by step_neg_one |i|:
     uint-const-desc-[i];
 ]
 
-#[loop uint_two to & uint_zero by uint_step |i|:
+#[loop uint_two to & uint_zero by step_neg_one |i|:
     uint-const-desc-to-zero-[i];
 ]
 

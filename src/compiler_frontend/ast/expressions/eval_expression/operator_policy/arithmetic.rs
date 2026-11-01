@@ -30,7 +30,7 @@ pub(super) fn resolve_arithmetic_operator_type(
         // forms a valid iteration domain, so no separate 32-bit endpoint floor exists here.
         let domain = NumericScalar::from_type_id(lhs, type_environment)
             .zip(NumericScalar::from_type_id(rhs, type_environment))
-            .and_then(|(start, end)| range_iteration_domain(start, end, None));
+            .and_then(|(start, end)| range_iteration_domain(start, end));
         return if domain.is_some() {
             Ok(builtins.range)
         } else {

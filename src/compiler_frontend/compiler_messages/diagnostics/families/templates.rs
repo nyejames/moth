@@ -346,6 +346,9 @@ unit_code! {
         TemplateConditionalLoopConstTrue = 29,
         TemplateLoopBodyNotConst = 30,
         TemplateConstLoopExpansionLimitExceeded = 31,
+        TemplateLoopStepNotConst = 32,
+        TemplateLoopStepIsZero = 33,
+        TemplateLoopStepNoProgress = 34,
     }
 }
 
@@ -457,6 +460,15 @@ impl InvalidTemplateStructureCode {
             InvalidTemplateStructureReason::TemplateLoopSourceNotConst => {
                 (Self::TemplateLoopSourceNotConst, None, None)
             }
+            InvalidTemplateStructureReason::TemplateLoopStepNotConst => {
+                (Self::TemplateLoopStepNotConst, None, None)
+            }
+            InvalidTemplateStructureReason::TemplateLoopStepIsZero => {
+                (Self::TemplateLoopStepIsZero, None, None)
+            }
+            InvalidTemplateStructureReason::TemplateLoopStepNoProgress => {
+                (Self::TemplateLoopStepNoProgress, None, None)
+            }
             InvalidTemplateStructureReason::TemplateLoopConditionNotConst => {
                 (Self::TemplateLoopConditionNotConst, None, None)
             }
@@ -546,6 +558,13 @@ impl InvalidTemplateStructureCode {
             }
             Self::TemplateLoopSourceNotConst => {
                 InvalidTemplateStructureReason::TemplateLoopSourceNotConst
+            }
+            Self::TemplateLoopStepNotConst => {
+                InvalidTemplateStructureReason::TemplateLoopStepNotConst
+            }
+            Self::TemplateLoopStepIsZero => InvalidTemplateStructureReason::TemplateLoopStepIsZero,
+            Self::TemplateLoopStepNoProgress => {
+                InvalidTemplateStructureReason::TemplateLoopStepNoProgress
             }
             Self::TemplateLoopConditionNotConst => {
                 InvalidTemplateStructureReason::TemplateLoopConditionNotConst

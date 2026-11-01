@@ -22,8 +22,8 @@ count_ascending |limit I32| -> I32, Error!:
     return seen
 ;
 
--- Negative `by` is normalised to a magnitude and then negated again for the descending
--- direction. Both of those are generated checked subtractions.
+-- The signed `by` step selects descending direction. The generated candidate guard keeps that
+-- step at its own width and commits only an in-range successor.
 sum_descending || -> I32, Error!:
     total ~= 0
     loop 10 to & 0 by -2 |i|:

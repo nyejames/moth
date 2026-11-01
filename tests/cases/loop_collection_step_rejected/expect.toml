@@ -1,0 +1,94 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-RULE-0059", "MOTH-RULE-0059", "MOTH-RULE-0059", "MOTH-RULE-0059", "MOTH-RULE-0059"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.zero_loop_step"
+occurrence = 5
+path = "input/static_zero/@mod.moth"
+line = 3
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.zero_loop_step"
+occurrence = 6
+path = "input/static_zero_empty/@mod.moth"
+line = 3
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.misplaced_loop_step"
+occurrence = 2
+path = "input/misplaced_by/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.missing_collection_step"
+occurrence = 3
+path = "input/missing_value/@mod.moth"
+line = 3
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.repeated_loop_step"
+occurrence = 4
+path = "input/repeated_by/@mod.moth"
+line = 3
+column = 17
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0029"
+reason = "invalid_loop_header.step_on_conditional_loop"
+occurrence = 1
+path = "input/conditional_by/@mod.moth"
+line = 3
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_loop_operand.step_not_signed_integer"
+occurrence = 1
+path = "input/bool_step/@mod.moth"
+line = 4
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_loop_operand.step_not_signed_integer"
+occurrence = 2
+path = "input/byte_step/@mod.moth"
+line = 4
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_loop_operand.step_not_signed_integer"
+occurrence = 3
+path = "input/dec_step/@mod.moth"
+line = 4
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_loop_operand.step_not_signed_integer"
+occurrence = 4
+path = "input/float_step/@mod.moth"
+line = 4
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_loop_operand.step_not_signed_integer"
+occurrence = 5
+path = "input/unsigned_step/@mod.moth"
+line = 4
+column = 15

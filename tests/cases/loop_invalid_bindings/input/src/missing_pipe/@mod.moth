@@ -1,0 +1,5 @@
+-- The binding list must close its pipe.
+items = {1, 2, 3}
+loop items |item:
+    io.line([: [item]])
+;

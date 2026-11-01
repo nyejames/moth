@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["loop_collection_iteration_with_index weighted=63"]
+rendered_output_exact = "loop_collection_iteration_with_index weighted=63 forward=(10,0)(30,2)(50,4) reverse=(50,4)(30,2)(10,0) overshoot=(10,0)/(50,4) narrow=(10,0)(30,2)(50,4) minimum=(50,4) empty=0/0"

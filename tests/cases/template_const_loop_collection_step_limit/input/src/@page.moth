@@ -1,0 +1,5 @@
+-- The expansion limit counts visited iterations, not source positions: this loop visits
+-- three indices (0, 2, 4) from a six-element source, so the final source index 4 is allowed.
+#[loop {0, 1, 2, 3, 4, 5} by 2 |value, index|:
+    [index]:[value];
+]
